@@ -1,7 +1,113 @@
 "use client";
 
 import { useState } from "react";
+import type { AuthError } from "@supabase/supabase-js";
+import { isAuthError } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+
+function formatUnderlyingError(original: unknown): string {
+  if (original instanceof Error) {
+    const tail =
+      original.cause !== undefined
+        ? ` · cause: ${formatUnderlyingError(original.cause)}`
+        : "";
+    return `${original.name}: ${original.message}${tail}`;
+  }
+  if (
+    typeof original === "object" &&
+    original !== null &&
+    "message" in original &&
+    typeof (original as { message: unknown }).message === "string"
+  ) {
+    return (original as { message: string }).message;
+  }
+  try {
+    return JSON.stringify(original);
+  } catch {
+    return String(original);
+  }
+}
+
+function logFullAuthError(prefix: string, err: AuthError) {
+  console.error(`${prefix} Supabase auth error (raw instance):`, err);
+
+  const plain: Record<string, unknown> = {
+    name: err.name,
+    message: err.message,
+    status: err.status,
+  };
+  if ("code" in err && err.code !== undefined) plain.code = err.code;
+  if (typeof err.stack === "string") plain.stack = err.stack;
+
+  const withReasons = err as AuthError & { reasons?: unknown };
+  if (Array.isArray(withReasons.reasons) && withReasons.reasons.length > 0) {
+    plain.reasons = withReasons.reasons;
+  }
+
+  const withDetails = err as AuthError & { details?: unknown };
+  if (withDetails.details !== undefined && withDetails.details !== null) {
+    plain.details = withDetails.details;
+  }
+
+  const original = (err as { originalError?: unknown }).originalError;
+  if (original !== undefined) {
+    plain.originalError = original;
+    if (original instanceof Error) {
+      plain.originalErrorName = original.name;
+      plain.originalErrorMessage = original.message;
+      plain.originalErrorStack = original.stack;
+      if (original.cause !== undefined) plain.originalErrorCause = original.cause;
+    }
+  }
+
+  console.error(`${prefix} Supabase auth error (serializable fields):`, plain);
+}
+
+function formatAuthErrorForUi(err: AuthError): string {
+  const genericNetwork =
+    err.message === "Load failed" || err.message === "Failed to fetch";
+
+  const parts: string[] = [];
+  if (genericNetwork && err.name !== "AuthError") {
+    parts.push(err.name);
+  }
+  parts.push(err.message);
+
+  if ("code" in err && typeof err.code === "string" && err.code.length > 0) {
+    parts.push(`Code: ${err.code}`);
+  }
+  if (typeof err.status === "number") {
+    parts.push(
+      err.status === 0
+        ? "HTTP status: 0 (no response — network, CORS, blocked request, or wrong Supabase URL)"
+        : `HTTP ${err.status}`
+    );
+  }
+  if (!genericNetwork && err.name && err.name !== "AuthError") {
+    parts.push(`(${err.name})`);
+  }
+
+  const original = (err as { originalError?: unknown }).originalError;
+  if (original !== undefined) {
+    parts.push(`Underlying: ${formatUnderlyingError(original)}`);
+  }
+
+  const withReasons = err as AuthError & { reasons?: unknown };
+  if (Array.isArray(withReasons.reasons) && withReasons.reasons.length > 0) {
+    parts.push(`Reasons: ${withReasons.reasons.join(", ")}`);
+  }
+
+  const withDetails = err as AuthError & { details?: unknown };
+  if (withDetails.details !== undefined && withDetails.details !== null) {
+    try {
+      parts.push(`Details: ${JSON.stringify(withDetails.details)}`);
+    } catch {
+      parts.push(`Details: ${String(withDetails.details)}`);
+    }
+  }
+
+  return parts.join(" · ");
+}
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -17,11 +123,6 @@ export function LoginForm() {
     const submittedEmail = email.trim();
     const submittedPassword = password;
 
-    console.log("[Login] Submitting:", {
-      email: submittedEmail,
-      passwordLength: submittedPassword.length,
-    });
-
     try {
       const supabase = createClient();
       const result = await supabase.auth.signInWithPassword({
@@ -31,32 +132,12 @@ export function LoginForm() {
 
       const { data, error: authError } = result;
 
-      // 3. Log exact auth response and exact error object to browser console
-      console.log("[Login] Exact auth response (full):", result);
-      console.log("[Login] Exact auth data:", data);
-      console.log("[Login] Exact auth error object:", authError);
       if (authError) {
-        console.log("[Login] Error.message:", authError.message);
-        console.log("[Login] Error (stringified):", JSON.stringify(authError, null, 2));
-      }
-
-      // 5. Log whether a session is created after login
-      const sessionExists = !!data?.session;
-      console.log("[Login] Session created after login?", sessionExists);
-      if (data?.session) {
-        console.log("[Login] Session details:", {
-          access_token: data.session.access_token ? "(present)" : "(missing)",
-          expires_at: data.session.expires_at,
-          user_id: data.session.user?.id,
-        });
-      }
-
-      if (authError) {
-        const message = authError.message || "Sign in failed";
-        console.error("[Login] Auth failed — error.message:", message);
-        setError(message); // 4. Show error.message directly in the UI
+        console.error("[Login] signInWithPassword error:", authError);
+        logFullAuthError("[Login]", authError);
+        setError(formatAuthErrorForUi(authError));
         setLoading(false);
-        return; // 8. Do not redirect on failure
+        return;
       }
 
       if (!data.session) {
@@ -67,13 +148,28 @@ export function LoginForm() {
         return;
       }
 
-      // 6. Redirect only after session exists; use full-page navigation so middleware sees cookies
-      console.log("[Login] Session exists. Redirecting to /dashboard (after session exists).");
       window.location.href = "/dashboard";
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[Login] Unexpected error:", err);
-      setError(message);
+      if (isAuthError(err)) {
+        console.error("[Login] signInWithPassword threw AuthError:", err);
+        logFullAuthError("[Login]", err);
+        setError(formatAuthErrorForUi(err));
+      } else {
+        console.error("[Login] Unexpected error (non-AuthError, raw):", err);
+        if (err instanceof Error) {
+          console.error("[Login] Error.name:", err.name);
+          console.error("[Login] Error.message:", err.message);
+          console.error("[Login] Error.stack:", err.stack);
+          console.error("[Login] Error.cause:", err.cause);
+        }
+        const message =
+          err instanceof Error
+            ? [err.message, err.cause != null ? `Cause: ${formatUnderlyingError(err.cause)}` : null]
+                .filter(Boolean)
+                .join(" · ")
+            : String(err);
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
