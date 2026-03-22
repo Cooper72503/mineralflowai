@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DocumentDropZone } from "../../components/DocumentDropZone";
 
@@ -18,8 +18,6 @@ export default function UploadDocumentPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
-  const supabase = useMemo(() => createClient(), []);
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setUploadError(null);
@@ -33,6 +31,7 @@ export default function UploadDocumentPage() {
     const fileName = file.name;
 
     try {
+      const supabase = createClient();
       const {
         data: { user },
         error: userErr,
