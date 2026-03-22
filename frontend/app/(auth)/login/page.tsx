@@ -1,8 +1,10 @@
+"use client";
+
+export const dynamic = "force-dynamic";
+
 import { Suspense } from "react";
 import Link from "next/link";
 import { LoginForm } from "./LoginForm";
-
-export const dynamic = "force-dynamic";
 
 function LoginFallback() {
   return (

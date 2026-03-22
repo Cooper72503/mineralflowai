@@ -17,6 +17,8 @@ const BUCKET_NAME = "documents";
 
 export const runtime = "nodejs";
 
+export const dynamic = "force-dynamic";
+
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
 function getFileExtension(fileName: string | null): string {
