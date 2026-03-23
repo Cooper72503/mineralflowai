@@ -578,6 +578,9 @@ export async function POST(
     let parsed = {
       lessor: null as string | null,
       lessee: null as string | null,
+      grantor: null as string | null,
+      grantee: null as string | null,
+      parties: null as unknown,
       county: doc.county ?? null,
       state: doc.state ?? null,
       legal_description: null as string | null,
@@ -621,6 +624,9 @@ export async function POST(
         parsed = {
           lessor: parsedResult.lessor,
           lessee: parsedResult.lessee,
+          grantor: parsedResult.grantor,
+          grantee: parsedResult.grantee,
+          parties: parsedResult.parties,
           county: parsedResult.county ?? doc.county ?? null,
           state: parsedResult.state ?? doc.state ?? null,
           legal_description: parsedResult.legal_description,
@@ -653,6 +659,9 @@ export async function POST(
         parsed = {
           lessor: parsedResult.lessor,
           lessee: parsedResult.lessee,
+          grantor: parsedResult.grantor,
+          grantee: parsedResult.grantee,
+          parties: parsedResult.parties,
           county: parsedResult.county ?? doc.county ?? null,
           state: parsedResult.state ?? doc.state ?? null,
           legal_description: parsedResult.legal_description,
@@ -716,12 +725,12 @@ export async function POST(
       const dealScoreCalculated = calculateDealScore(dealScoreInput);
       const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
       dealScoreResult = dealScore;
-      console.log("SCORE CALCULATED", dealScore.score);
       console.log(`${LOG_PREFIX} SCORE CALCULATED`, {
         documentId,
         score: dealScore.score,
         grade: dealGradeFullLabelFromScore(dealScore.score),
         grade_letter: getGradeFromScore(dealScore.score),
+        type: dealScore.type,
       });
 
       const rawAcreageForAlerts = dealScoreInput.acreage;
@@ -737,6 +746,9 @@ export async function POST(
       const structuredExtraction = {
         lessor: parsed.lessor,
         lessee: parsed.lessee,
+        grantor: parsed.grantor,
+        grantee: parsed.grantee,
+        parties: parsed.parties,
         county: parsed.county,
         state: parsed.state,
         legal_description: parsed.legal_description,
@@ -1115,6 +1127,9 @@ export async function POST(
     const fallbackStructuredForClient = {
       lessor: parsed.lessor,
       lessee: parsed.lessee,
+      grantor: parsed.grantor,
+      grantee: parsed.grantee,
+      parties: parsed.parties,
       county: parsed.county,
       state: parsed.state,
       legal_description: parsed.legal_description,
@@ -1122,12 +1137,14 @@ export async function POST(
       recording_date: parsed.recording_date,
       royalty_rate: parsed.royalty_rate,
       term_length: parsed.term_length,
+      document_type: parsed.document_type,
       confidence_score: parsed.confidence_score,
       deal_score:
         dealScoreResult ??
         ({
           score: 0,
           grade: dealGradeFullLabelFromScore(0),
+          type: "lead" as const,
           reasons: [] as string[],
         } satisfies DealScoreResult),
     };
@@ -1173,7 +1190,12 @@ export async function POST(
       extraction: extractionResponse,
       deal_score:
         dealScoreResult ??
-        ({ score: 0, grade: dealGradeFullLabelFromScore(0), reasons: [] } satisfies DealScoreResult),
+        ({
+          score: 0,
+          grade: dealGradeFullLabelFromScore(0),
+          type: "lead" as const,
+          reasons: [],
+        } satisfies DealScoreResult),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

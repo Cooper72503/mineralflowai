@@ -13,6 +13,7 @@ import {
   dealScoreDisplayValue,
   dealScoreFromExtractionColumns,
   dealScoreFromStructuredBlobOnly,
+  dealScoreKindLabel,
   mergeStructuredFields,
 } from "@/lib/deals/dashboard-normalize";
 
@@ -72,15 +73,29 @@ function attachDealScoreFromApi(row: ExtractionRow, dealScore: unknown): Extract
   return { ...row, structured_data: { ...merged, deal_score: coerced } };
 }
 
-function dealScoreCardSurface(letter: ReturnType<typeof getGradeFromScore>): {
+function dealScoreCardSurface(
+  letter: ReturnType<typeof getGradeFromScore>,
+  kind: DealScoreResult["type"]
+): {
   background: string;
   borderColor: string;
 } {
+  if (kind === "intel") {
+    switch (letter) {
+      case "A":
+        return { background: "#f3e8ff", borderColor: "#d8b4fe" };
+      case "B":
+        return { background: "#ede9fe", borderColor: "#c4b5fd" };
+      case "C":
+      case "D":
+        return { background: "#fafafa", borderColor: "#e4e4e7" };
+    }
+  }
   switch (letter) {
     case "A":
       return { background: "#dcfce7", borderColor: "#86efac" };
     case "B":
-      return { background: "#fef9c3", borderColor: "#fde047" };
+      return { background: "#dbeafe", borderColor: "#93c5fd" };
     case "C":
       return { background: "#fee2e2", borderColor: "#fecaca" };
     case "D":
@@ -90,7 +105,7 @@ function dealScoreCardSurface(letter: ReturnType<typeof getGradeFromScore>): {
 
 function DealScoreCard({ dealScore }: { dealScore: DealScoreResult }) {
   const letter = getGradeFromScore(dealScore.score);
-  const surface = dealScoreCardSurface(letter);
+  const surface = dealScoreCardSurface(letter, dealScore.type);
   const gradeLabel = dealGradeFullLabelFromScore(dealScore.score);
   return (
     <div
@@ -102,7 +117,12 @@ function DealScoreCard({ dealScore }: { dealScore: DealScoreResult }) {
         borderColor: surface.borderColor,
       }}
     >
-      <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>Deal score</h2>
+      <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+        Deal score
+        <span style={{ fontWeight: 500, color: "#6b7280", marginLeft: "0.35rem" }}>
+          · {dealScoreKindLabel(dealScore.type)}
+        </span>
+      </h2>
       <dl style={{ display: "flex", flexDirection: "column", gap: "0.65rem", marginBottom: "0.75rem" }}>
         <div>
           <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>Grade</dt>

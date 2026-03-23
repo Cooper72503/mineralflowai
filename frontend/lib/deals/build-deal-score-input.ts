@@ -1,3 +1,7 @@
+import {
+  buildNormalizedPartiesForDealScoreInput,
+  normalizeDocumentTypeLabel,
+} from "@/lib/document-processing";
 import { parseAcreageFromLegalDescription } from "@/lib/document-processing/parse-acreage-from-legal";
 
 /** Below this, lease-parse columns and matching structured fields are ignored for deal scoring. */
@@ -49,6 +53,10 @@ export function mineralDeedSignalsForLeaseFallback(args: {
 export type ParsedFieldsForDealScore = {
   lessor: string | null;
   lessee: string | null;
+  grantor: string | null;
+  grantee: string | null;
+  /** Optional; rebuilt in {@link buildDealScoreInput} when missing. */
+  parties?: unknown;
   county: string | null;
   state: string | null;
   legal_description: string | null;
@@ -65,6 +73,8 @@ const EXTRACTION_BACKED_DEAL_INPUT_KEYS = [
   "lessor",
   "lessee",
   "grantor",
+  "grantee",
+  "parties",
   "owner",
   "owner_name",
   "ownerName",
@@ -87,6 +97,9 @@ function parsedFieldsWithReducedTrust(parsed: ParsedFieldsForDealScore): ParsedF
     ...parsed,
     lessor: null,
     lessee: null,
+    grantor: null,
+    grantee: null,
+    parties: undefined,
     county: null,
     state: null,
     legal_description: null,
@@ -135,12 +148,14 @@ export function buildDealScoreInput(args: {
   dealScoreInput.recording_date = dealScoreInput.recording_date ?? parsed.recording_date;
   dealScoreInput.effective_date = dealScoreInput.effective_date ?? parsed.effective_date;
   dealScoreInput.document_type =
-    (typeof dealScoreInput.document_type === "string" && dealScoreInput.document_type.trim()
-      ? dealScoreInput.document_type
-      : null) ??
-    parsed.document_type ??
-    args.doc.document_type ??
-    null;
+    normalizeDocumentTypeLabel(
+      (typeof dealScoreInput.document_type === "string" && dealScoreInput.document_type.trim()
+        ? dealScoreInput.document_type
+        : null) ??
+        parsed.document_type ??
+        args.doc.document_type ??
+        null
+    );
   dealScoreInput.extraction_confidence =
     typeof dealScoreInput.extraction_confidence === "number" && Number.isFinite(dealScoreInput.extraction_confidence)
       ? dealScoreInput.extraction_confidence
@@ -177,6 +192,36 @@ export function buildDealScoreInput(args: {
   const lessorFromParsed = parsed.lessor;
   if (existingLessor == null || (typeof existingLessor === "string" && !existingLessor.trim())) {
     dealScoreInput.lessor = lessorFromParsed;
+  }
+
+  const existingLessee = dealScoreInput.lessee;
+  if (existingLessee == null || (typeof existingLessee === "string" && !existingLessee.trim())) {
+    dealScoreInput.lessee = parsed.lessee;
+  }
+
+  const existingGrantor = dealScoreInput.grantor;
+  if (existingGrantor == null || (typeof existingGrantor === "string" && !existingGrantor.trim())) {
+    dealScoreInput.grantor = parsed.grantor;
+  }
+
+  const existingGrantee = dealScoreInput.grantee;
+  if (existingGrantee == null || (typeof existingGrantee === "string" && !existingGrantee.trim())) {
+    dealScoreInput.grantee = parsed.grantee;
+  }
+
+  const ep = dealScoreInput.parties;
+  const hasPartiesArray = Array.isArray(ep) && ep.length > 0;
+  if (!hasPartiesArray) {
+    const built = buildNormalizedPartiesForDealScoreInput({
+      grantor: typeof dealScoreInput.grantor === "string" ? dealScoreInput.grantor : parsed.grantor,
+      grantee: typeof dealScoreInput.grantee === "string" ? dealScoreInput.grantee : parsed.grantee,
+      lessor: typeof dealScoreInput.lessor === "string" ? dealScoreInput.lessor : parsed.lessor,
+      lessee: typeof dealScoreInput.lessee === "string" ? dealScoreInput.lessee : parsed.lessee,
+      document_type:
+        typeof dealScoreInput.document_type === "string" ? dealScoreInput.document_type : parsed.document_type,
+      extractedText: args.extractedText ?? "",
+    });
+    if (built) dealScoreInput.parties = built;
   }
 
   const trimmedText = (args.extractedText ?? "").trim();

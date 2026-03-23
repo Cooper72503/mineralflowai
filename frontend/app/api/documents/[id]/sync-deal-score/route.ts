@@ -59,6 +59,13 @@ function jsonbSafeClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function stringFieldFromMerged(merged: Record<string, unknown>, key: string): string | null {
+  const v = merged[key];
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t || null;
+}
+
 async function fetchMergedDealScoreFromExtraction(
   supabase: SupabaseClient,
   extractionId: string,
@@ -144,7 +151,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ ok: true, updated: false, skipped: true, reason: "not_completed" });
     }
 
-    const merged = mergeStructuredFields(ext.structured_data, ext.structured_json);
+    const merged = mergeStructuredFields(ext.structured_data, ext.structured_json) as Record<string, unknown>;
     const stored = dealScoreFromExtractionColumns(ext.structured_data, ext.structured_json);
 
     const baseline: Record<string, unknown> = { ...merged };
@@ -153,6 +160,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const parsed = {
       lessor: ext.lessor,
       lessee: ext.lessee,
+      grantor: stringFieldFromMerged(merged, "grantor"),
+      grantee: stringFieldFromMerged(merged, "grantee"),
+      parties: merged.parties,
       county: ext.county,
       state: ext.state,
       legal_description: ext.legal_description,
@@ -181,10 +191,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const oldStoredScore = stored?.score ?? null;
     console.log(`${LOG_PREFIX} OLD STORED SCORE`, oldStoredScore);
-    console.log("SCORE CALCULATED", dealScore.score);
     console.log(`${LOG_PREFIX} RECALCULATED SCORE`, dealScore.score);
 
-    if (stored != null && stored.score === dealScore.score) {
+    if (
+      stored != null &&
+      stored.score === dealScore.score &&
+      stored.type === dealScore.type
+    ) {
       const finalAfter = await fetchMergedDealScoreFromExtraction(supabase, ext.id, user.id);
       console.log("SCORE SAVED", dealScore.score);
       console.log(`${LOG_PREFIX} SAVED SCORE`, "(no write)", dealScore.score);

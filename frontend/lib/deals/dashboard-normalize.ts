@@ -1,6 +1,8 @@
+import type { CSSProperties } from "react";
 import {
   dealGradeFullLabelFromScore,
   getGradeFromScore,
+  type DealScoreKind,
   type DealScoreResult,
 } from "@/lib/document-processing/deal-score";
 
@@ -82,10 +84,13 @@ export function coerceDealScoreResult(value: unknown): DealScoreResult | null {
       ? [...reasonsRaw]
       : [];
   const incomplete = o.incomplete_data === true;
+  const typeRaw = o.type;
+  const type: DealScoreKind = typeRaw === "intel" ? "intel" : "lead";
   return {
     score: clamped,
     grade: dealGradeFullLabelFromScore(clamped),
     reasons,
+    type,
     ...(incomplete ? { incomplete_data: true as const } : {}),
   };
 }
@@ -131,8 +136,8 @@ export function ownerFromStructured(
 ): string {
   const fromStruct =
     readNonEmptyString(merged.owner) ??
-    readNonEmptyString(merged.lessor) ??
     readNonEmptyString(merged.grantor) ??
+    readNonEmptyString(merged.lessor) ??
     readNonEmptyString(merged.owner_name) ??
     readNonEmptyString(merged.ownerName);
   const col = readNonEmptyString(columnLessor);
@@ -170,6 +175,45 @@ export function gradeLetterFromDealScore(
 ): "A" | "B" | "C" | "D" | null {
   if (dealScore == null) return null;
   return getGradeFromScore(dealScore.score);
+}
+
+export function dealScoreKindLabel(kind: DealScoreKind | undefined): "Lead Deal" | "Intel Deal" {
+  return kind === "intel" ? "Intel Deal" : "Lead Deal";
+}
+
+/** Grade pill colors: lead track uses green/blue tones; intel uses purple/gray. */
+export function gradeBadgeStyleForDeal(
+  letter: "A" | "B" | "C" | "D" | null,
+  kind: DealScoreKind | undefined
+): CSSProperties {
+  if (kind === "intel") {
+    if (letter === "A") {
+      return { background: "#f3e8ff", color: "#6b21a8", border: "1px solid #d8b4fe" };
+    }
+    if (letter === "B") {
+      return { background: "#ede9fe", color: "#5b21b6", border: "1px solid #c4b5fd" };
+    }
+    if (letter === "C") {
+      return { background: "#f4f4f5", color: "#52525b", border: "1px solid #d4d4d8" };
+    }
+    if (letter === "D") {
+      return { background: "#fafafa", color: "#71717a", border: "1px solid #e4e4e7" };
+    }
+    return { background: "#fafafa", color: "#71717a", border: "1px solid #e4e4e7" };
+  }
+  if (letter === "A") {
+    return { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" };
+  }
+  if (letter === "B") {
+    return { background: "#dbeafe", color: "#1e40af", border: "1px solid #93c5fd" };
+  }
+  if (letter === "C") {
+    return { background: "#fee2e2", color: "#b91c1c", border: "1px solid #fecaca" };
+  }
+  if (letter === "D") {
+    return { background: "#f3f4f6", color: "#4b5563", border: "1px solid #e5e7eb" };
+  }
+  return { background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" };
 }
 
 export function completedTimestampMs(

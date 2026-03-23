@@ -46,6 +46,13 @@ function singleDoc(d: DocJoin | DocJoin[]): DocJoin | null {
   return d && typeof d === "object" ? d : null;
 }
 
+function stringFieldFromMerged(merged: Record<string, unknown>, key: string): string | null {
+  const v = merged[key];
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t || null;
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createSupabaseFromRouteRequest(request);
@@ -106,7 +113,7 @@ export async function POST(request: Request) {
       const doc = singleDoc(row.documents);
       if (!doc) continue;
 
-      const merged = mergeStructuredFields(row.structured_data, row.structured_json);
+      const merged = mergeStructuredFields(row.structured_data, row.structured_json) as Record<string, unknown>;
       const existing = dealScoreFromMerged(merged);
       if (existing != null && existing.score !== 0) continue;
 
@@ -116,6 +123,9 @@ export async function POST(request: Request) {
       const parsed = {
         lessor: row.lessor,
         lessee: row.lessee,
+        grantor: stringFieldFromMerged(merged, "grantor"),
+        grantee: stringFieldFromMerged(merged, "grantee"),
+        parties: merged.parties,
         county: row.county,
         state: row.state,
         legal_description: row.legal_description,
@@ -142,13 +152,19 @@ export async function POST(request: Request) {
 
       const dealScoreCalculated = calculateDealScore(dealScoreInput);
       const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
-      if (existing != null && dealScore.score === existing.score) continue;
+      if (
+        existing != null &&
+        dealScore.score === existing.score &&
+        dealScore.type === existing.type
+      ) {
+        continue;
+      }
 
-      console.log("SCORE CALCULATED", dealScore.score);
       console.log(`[rescore-deal-scores] SCORE CALCULATED`, {
         document_id: row.document_id,
         score: dealScore.score,
         grade: dealScore.grade,
+        type: dealScore.type,
       });
 
       const nextStructured = { ...merged, deal_score: dealScore };

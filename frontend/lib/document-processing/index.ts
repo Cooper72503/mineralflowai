@@ -20,13 +20,17 @@ const MIN_OCR_CHARS_WHEN_PRIMARY_EMPTY = 8;
 
 export {
   calculateDealScore,
+  calculateIntelScore,
+  calculateLeadScore,
   calendarMonthsSince,
+  classifyDealScoreType,
   dealGradeFullLabelFromScore,
   dealLetterGradeFromScore,
   getGradeFromScore,
   isTexasDealContext,
   monthsSinceDate,
   parseDocumentDate,
+  type DealScoreKind,
   type DealScoreResult,
   type DealScoreInput,
 } from "./deal-score";
@@ -325,10 +329,17 @@ function extractTextFromTxt(buffer: Buffer): DocumentProcessingResult {
   }
 }
 
+/** Single normalized party for scoring / structured storage. */
+export type NormalizedPartyEntry = { role: string; name: string };
+
 /** Result of AI parsing: structured lease fields and a confidence score (0–1). */
 export type ParsedLeaseResult = {
   lessor: string | null;
   lessee: string | null;
+  grantor: string | null;
+  grantee: string | null;
+  /** Deduped roles + names derived from instrument parties (see {@link normalizeParsedLeaseResult}). */
+  parties: NormalizedPartyEntry[] | null;
   county: string | null;
   state: string | null;
   legal_description: string | null;
@@ -341,9 +352,162 @@ export type ParsedLeaseResult = {
   confidence_score: number;
 };
 
+function isConveyanceInstrumentHint(documentType: string | null, extractedText: string): boolean {
+  const dt = (documentType ?? "").trim();
+  if (/\b(deed|assignment|conveyance|mineral\s+deed|warranty\s+deed|quitclaim)\b/i.test(dt)) return true;
+  const head = extractedText.slice(0, 6000);
+  return /\bMINERAL\s+DEED\b/i.test(head) || /\b(WARRANTY|QUIT\s*CLAIM)\s+DEED\b/i.test(head);
+}
+
+/** Collapses whitespace; title-cases obvious ALL-CAPS instrument lines. */
+export function normalizeDocumentTypeLabel(value: string | null | undefined): string | null {
+  if (value == null || typeof value !== "string") return null;
+  const t = value.trim().replace(/\s+/g, " ");
+  if (!t) return null;
+  if (t.length > 3 && t === t.toUpperCase()) {
+    return t.toLowerCase().replace(/\b\w/g, (ch) => ch.toUpperCase());
+  }
+  return t;
+}
+
+function appendPartyUnique(out: NormalizedPartyEntry[], role: string, name: string | null | undefined): void {
+  if (name == null || typeof name !== "string") return;
+  const n = name.trim();
+  if (!n) return;
+  if (out.some((p) => p.role === role && p.name === n)) return;
+  out.push({ role, name: n });
+}
+
+/** Builds a deduped role/name list for deal scoring when `parties` is not already persisted. */
+export function buildNormalizedPartiesForDealScoreInput(args: {
+  grantor: string | null;
+  grantee: string | null;
+  lessor: string | null;
+  lessee: string | null;
+  document_type: string | null;
+  extractedText: string;
+}): NormalizedPartyEntry[] | null {
+  const deedLike = isConveyanceInstrumentHint(args.document_type, args.extractedText);
+  let g = args.grantor?.trim() ? args.grantor.trim() : null;
+  let r = args.grantee?.trim() ? args.grantee.trim() : null;
+  const lessor = args.lessor?.trim() ? args.lessor.trim() : null;
+  const lessee = args.lessee?.trim() ? args.lessee.trim() : null;
+
+  if (deedLike) {
+    if (!g && lessor) g = lessor;
+    if (!r && lessee) r = lessee;
+  }
+
+  const out: NormalizedPartyEntry[] = [];
+  if (g) appendPartyUnique(out, "grantor", g);
+  if (r) appendPartyUnique(out, "grantee", r);
+  if (lessor && lessor !== g) appendPartyUnique(out, "lessor", lessor);
+  if (lessee && lessee !== r) appendPartyUnique(out, "lessee", lessee);
+
+  if (out.length === 0 && (lessor || lessee)) {
+    if (lessor) appendPartyUnique(out, "lessor", lessor);
+    if (lessee) appendPartyUnique(out, "lessee", lessee);
+  }
+
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Best-effort recovery when the model omitted grantor/grantee but the page uses labeled headings.
+ */
+function extractGrantorGranteeFromHeadings(extractedText: string): { grantor: string | null; grantee: string | null } {
+  const slice = extractedText.slice(0, 8000);
+  const pick = (label: "grantor" | "grantee"): string | null => {
+    const re = new RegExp(
+      `(?:^|[\\n\\r])\\s*(?:\\*\\s*)?${label}\\s*[:#\\.\\-–—]+\\s*(.+)`,
+      "gim"
+    );
+    let last: string | null = null;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(slice)) !== null) {
+      let line = m[1]?.trim() ?? "";
+      line = line.replace(/\s{2,}/g, " ").replace(/[,;]+$/g, "").trim();
+      if (line.length < 2 || line.length > 220) continue;
+      if (/^(the|a|an)\s+(state|county|united)\b/i.test(line)) continue;
+      last = line;
+    }
+    return last;
+  };
+  return {
+    grantor: pick("grantor"),
+    grantee: pick("grantee"),
+  };
+}
+
+/**
+ * Fills grantor/grantee from headings when missing, aligns lessor/lessee for conveyances, normalizes
+ * `document_type`, and builds `parties`.
+ */
+export function normalizeParsedLeaseResult(
+  parsed: {
+    lessor: string | null;
+    lessee: string | null;
+    grantor: string | null;
+    grantee: string | null;
+    county: string | null;
+    state: string | null;
+    legal_description: string | null;
+    effective_date: string | null;
+    recording_date: string | null;
+    royalty_rate: string | null;
+    term_length: string | null;
+    document_type: string | null;
+    confidence_score: number;
+    parties?: NormalizedPartyEntry[] | null;
+  },
+  extractedText: string
+): ParsedLeaseResult {
+  let grantor = parsed.grantor ?? null;
+  let grantee = parsed.grantee ?? null;
+  let lessor = parsed.lessor ?? null;
+  let lessee = parsed.lessee ?? null;
+  let document_type = parsed.document_type ?? null;
+
+  const fromHeadings = extractGrantorGranteeFromHeadings(extractedText);
+  if (!grantor && fromHeadings.grantor) grantor = fromHeadings.grantor;
+  if (!grantee && fromHeadings.grantee) grantee = fromHeadings.grantee;
+
+  document_type = normalizeDocumentTypeLabel(document_type);
+
+  const deedLike = isConveyanceInstrumentHint(document_type, extractedText);
+  if (deedLike) {
+    if (!lessor && grantor) lessor = grantor;
+    if (!lessee && grantee) lessee = grantee;
+  }
+
+  const parties =
+    Array.isArray(parsed.parties) && parsed.parties.length > 0
+      ? parsed.parties
+      : buildNormalizedPartiesForDealScoreInput({
+          grantor,
+          grantee,
+          lessor,
+          lessee,
+          document_type,
+          extractedText,
+        });
+
+  return {
+    ...parsed,
+    lessor,
+    lessee,
+    grantor,
+    grantee,
+    parties,
+    document_type,
+  };
+}
+
 const LEASE_PARSE_SYSTEM = `You are a parser for mineral lease and deed documents. Given extracted text from a document, output a JSON object with exactly these keys (use null for any value you cannot find):
-- lessor (string or null): party granting the lease/mineral rights
-- lessee (string or null): party receiving the lease/mineral rights
+- grantor (string or null): party granting / conveying (use when the instrument says Grantor or is a deed; for a lease you may use the lessor here too, or null if only Lessor is labeled)
+- grantee (string or null): party receiving the interest (Grantee on deeds/assignments; may match Lessee on leases)
+- lessor (string or null): party granting the lease / mineral rights (Lessor in a lease)
+- lessee (string or null): party receiving the lease / mineral rights (Lessee in a lease)
 - county (string or null): county name
 - state (string or null): state name or abbreviation
 - legal_description (string or null): legal land description
@@ -351,8 +515,10 @@ const LEASE_PARSE_SYSTEM = `You are a parser for mineral lease and deed document
 - recording_date (string or null): date recorded
 - royalty_rate (string or null): royalty percentage or fraction, e.g. "1/8" or "12.5%"
 - term_length (string or null): primary term or duration
-- document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Warranty Deed", "Oil and Gas Lease" — use null if unclear
+- document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Assignment of Oil and Gas Lease", "Oil and Gas Lease" — use null if unclear
 - confidence_score (number): your confidence in the overall extraction, between 0 and 1 (e.g. 0.85).
+
+When the text has explicit headings such as "Grantor", "GRANTOR:", "Grantee", or "GRANTEE:", copy those names into grantor and grantee (not into lessor/lessee unless the document is clearly a lease using Lessor/Lessee labels).
 
 The text may be from OCR or a weak PDF text layer: skip isolated garbage lines, infer words split across line breaks, and handle common OCR confusions (0 vs O, 1 vs l vs I, rn vs m) when resolving names, counties, states, and legal descriptions.
 
@@ -410,19 +576,24 @@ export async function parseLeaseFieldsFromText(
 
   if (normalizedForModel === "") {
     console.warn("[parseLeaseFieldsFromText] Empty extracted text; returning nulls with confidence 0.");
-    return {
-      lessor: null,
-      lessee: null,
-      county: null,
-      state: null,
-      legal_description: null,
-      effective_date: null,
-      recording_date: null,
-      royalty_rate: null,
-      term_length: null,
-      document_type: null,
-      confidence_score: 0,
-    };
+    return normalizeParsedLeaseResult(
+      {
+        lessor: null,
+        lessee: null,
+        grantor: null,
+        grantee: null,
+        county: null,
+        state: null,
+        legal_description: null,
+        effective_date: null,
+        recording_date: null,
+        royalty_rate: null,
+        term_length: null,
+        document_type: null,
+        confidence_score: 0,
+      },
+      ""
+    );
   }
 
   const client = new OpenAI({ apiKey });
@@ -495,17 +666,22 @@ export async function parseLeaseFieldsFromText(
   const str = (v: unknown): string | null =>
     v != null && typeof v === "string" && v.trim() !== "" ? v.trim() : null;
 
-  return {
-    lessor: str(parsed.lessor),
-    lessee: str(parsed.lessee),
-    county: str(parsed.county),
-    state: str(parsed.state),
-    legal_description: str(parsed.legal_description),
-    effective_date: str(parsed.effective_date),
-    recording_date: str(parsed.recording_date),
-    royalty_rate: str(parsed.royalty_rate),
-    term_length: str(parsed.term_length),
-    document_type: str(parsed.document_type),
-    confidence_score: num(parsed.confidence_score),
-  };
+  return normalizeParsedLeaseResult(
+    {
+      lessor: str(parsed.lessor),
+      lessee: str(parsed.lessee),
+      grantor: str(parsed.grantor),
+      grantee: str(parsed.grantee),
+      county: str(parsed.county),
+      state: str(parsed.state),
+      legal_description: str(parsed.legal_description),
+      effective_date: str(parsed.effective_date),
+      recording_date: str(parsed.recording_date),
+      royalty_rate: str(parsed.royalty_rate),
+      term_length: str(parsed.term_length),
+      document_type: str(parsed.document_type),
+      confidence_score: num(parsed.confidence_score),
+    },
+    normalizedForModel
+  );
 }

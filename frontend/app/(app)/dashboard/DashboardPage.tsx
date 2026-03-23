@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/with-timeout";
 
 const SESSION_CHECK_TIMEOUT_MS = 10_000;
 import {
   dealScoreDisplayValue,
+  dealScoreKindLabel,
   EM_DASH,
   getGradeFromScore,
+  gradeBadgeStyleForDeal,
   gradeLetterFromDealScore,
 } from "@/lib/deals/dashboard-normalize";
 import {
@@ -32,22 +34,6 @@ function formatDate(iso: string | null | undefined): string {
   } catch {
     return iso;
   }
-}
-
-function gradeBadgeStyle(letter: "A" | "B" | "C" | "D" | null): CSSProperties {
-  if (letter === "A") {
-    return { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" };
-  }
-  if (letter === "B") {
-    return { background: "#fef9c3", color: "#854d0e", border: "1px solid #fde047" };
-  }
-  if (letter === "C") {
-    return { background: "#fee2e2", color: "#b91c1c", border: "1px solid #fecaca" };
-  }
-  if (letter === "D") {
-    return { background: "#f3f4f6", color: "#4b5563", border: "1px solid #e5e7eb" };
-  }
-  return { background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" };
 }
 
 export default function DashboardPage() {
@@ -316,7 +302,7 @@ export default function DashboardPage() {
                             <span
                               className="badge"
                               style={{
-                                ...gradeBadgeStyle(letter),
+                                ...gradeBadgeStyleForDeal(letter, r.dealScore?.type),
                                 fontWeight: 600,
                                 minWidth: "1.75rem",
                                 textAlign: "center",
@@ -341,6 +327,9 @@ export default function DashboardPage() {
                               <DealScoreHotBadge
                                 score={r.dealScore?.incomplete_data ? undefined : r.dealScore?.score}
                               />
+                              <span style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 500 }}>
+                                {dealScoreKindLabel(r.dealScore?.type)}
+                              </span>
                             </span>
                           </td>
                           <td>

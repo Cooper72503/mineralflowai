@@ -1,7 +1,10 @@
 /**
- * Mineral lead deal scoring (100-point model): ownership, location, opportunity,
- * contactability, size, and operator/buyer interest; confidence adjustment; caps and floors.
+ * Deal scoring V2: lead vs intel tracks. Lead = 100-point owner/acquisition model; intel =
+ * corporate conveyance instrument model. {@link calculateDealScore} classifies, then routes.
  */
+
+/** Persisted on `deal_score.type`: corporate conveyance intel vs owner-facing lead. */
+export type DealScoreKind = "lead" | "intel";
 
 export type DealScoreResult = {
   score: number;
@@ -9,6 +12,7 @@ export type DealScoreResult = {
   reasons: string[];
   /** When true, numeric score is not assigned (e.g. intel-only — not a deal lead). */
   incomplete_data?: boolean;
+  type?: DealScoreKind;
 };
 
 /** Permian / top-target Texas counties (+20 location). */
@@ -100,6 +104,8 @@ export type DealScoreInput = {
   operator?: string | null;
   ownership?: string | null;
   lessor?: string | null;
+  lessee?: string | null;
+  grantee?: string | null;
   owner?: string | null;
   grantor?: string | null;
   owner_name?: string | null;
@@ -113,6 +119,8 @@ export type DealScoreInput = {
   confidence_score?: number | null;
   confidence?: number | null;
   document_type?: string | null;
+  /** Optional structured party list (objects with name/type or plain strings). */
+  parties?: unknown;
   /** Explicit flag from enrichment / baseline. */
   intel_only?: boolean | null;
   phone?: string | null;
@@ -270,7 +278,7 @@ function incompleteIntelOnly(): DealScoreResult {
 }
 
 function hasIdentifiedOwner(src: Record<string, unknown>): boolean {
-  const keys = ["lessor", "owner", "grantor", "owner_name", "ownerName"] as const;
+  const keys = ["grantor", "lessor", "owner", "owner_name", "ownerName"] as const;
   for (const k of keys) {
     if (readNonEmptyString(src[k])) return true;
   }
@@ -575,6 +583,98 @@ function isIntelOnlyDocument(src: Record<string, unknown>): boolean {
   );
 }
 
+const COMPANY_ENTITY_RE =
+  /\b(llc|l\.l\.c\.?|inc\.?|corp\.?|corporation|ltd\.?|limited|lp\b|l\.p\.?|p\.l\.c\.|plc\b|co\.|company|trust|partners|partnership|holdings|operating|energy|resources|petroleum|ventures|group)\b/i;
+
+function companyNameLooksLikeEntity(name: string): boolean {
+  return COMPANY_ENTITY_RE.test(name.trim());
+}
+
+function documentTypeHasConveyanceIntelKeywords(documentType: string): boolean {
+  const l = documentType.toLowerCase();
+  return l.includes("deed") || l.includes("assignment") || l.includes("conveyance");
+}
+
+function partyEntryIsCompany(p: unknown): boolean {
+  if (typeof p === "string") return companyNameLooksLikeEntity(p);
+  if (!p || typeof p !== "object" || Array.isArray(p)) return false;
+  const o = p as Record<string, unknown>;
+  const t = o.type ?? o.party_type ?? o.entity_type ?? o.kind;
+  if (typeof t === "string") {
+    const tl = t.trim().toLowerCase();
+    if (/\b(company|corporation|corp|llc|entity|organization|organisation)\b/.test(tl)) return true;
+    if (/\b(individual|person|natural)\b/.test(tl)) return false;
+  }
+  const n = o.name ?? o.party_name ?? o.legal_name;
+  if (typeof n === "string" && n.trim()) return companyNameLooksLikeEntity(n);
+  return false;
+}
+
+/** Prefer explicit deed labels, then lease labels, for conveyance / classification. */
+function grantorConveyanceSide(src: Record<string, unknown>): string | undefined {
+  return readNonEmptyString(src.grantor) ?? readNonEmptyString(src.lessor);
+}
+
+function granteeConveyanceSide(src: Record<string, unknown>): string | undefined {
+  return readNonEmptyString(src.grantee) ?? readNonEmptyString(src.lessee);
+}
+
+function partiesContainIndividualParty(src: Record<string, unknown>): boolean {
+  const parties = src.parties;
+  if (!Array.isArray(parties)) return false;
+  for (const p of parties) {
+    if (typeof p === "string") {
+      const t = p.trim();
+      if (t && !companyNameLooksLikeEntity(t)) return true;
+      continue;
+    }
+    if (!p || typeof p !== "object" || Array.isArray(p)) continue;
+    const o = p as Record<string, unknown>;
+    const t = readNonEmptyString(o.type ?? o.party_type ?? o.entity_type ?? o.kind);
+    if (t && /\b(individual|person|natural|sole\s+proprietor)\b/i.test(t)) return true;
+    const n = readNonEmptyString(o.name ?? o.party_name ?? o.legal_name);
+    if (n && !companyNameLooksLikeEntity(n)) return true;
+  }
+  return false;
+}
+
+/**
+ * When both conveyance sides look like companies, treat as intel unless the record clearly supports
+ * outbound contact to a seller (phone/email or an individual party in structured `parties`).
+ */
+function hasStrongCallableSellerLeadEvidence(src: Record<string, unknown>): boolean {
+  if (hasPhone(src) || hasEmail(src)) return true;
+  if (mailingUsable(src) && partiesContainIndividualParty(src)) return true;
+  return false;
+}
+
+/** True when structured `parties` are all company-like, or both grantor/grantee-style names look corporate. */
+export function partiesAreCompanies(src: Record<string, unknown>): boolean {
+  const parties = src.parties;
+  if (Array.isArray(parties) && parties.length >= 2) {
+    return parties.every((p) => partyEntryIsCompany(p));
+  }
+  const grantorSide = grantorConveyanceSide(src);
+  const granteeSide = granteeConveyanceSide(src);
+  if (!grantorSide || !granteeSide) return false;
+  return companyNameLooksLikeEntity(grantorSide) && companyNameLooksLikeEntity(granteeSide);
+}
+
+/**
+ * Classifies scoring V2 track: corporate deed / assignment / conveyance → intel; otherwise lead.
+ */
+export function classifyDealScoreType(
+  data: DealScoreInput | Record<string, unknown> | null | undefined
+): DealScoreKind {
+  const src = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const rec = src as Record<string, unknown>;
+  const dt = readNonEmptyString(rec.document_type);
+  if (!dt || !documentTypeHasConveyanceIntelKeywords(dt)) return "lead";
+  if (!partiesAreCompanies(rec)) return "lead";
+  if (hasStrongCallableSellerLeadEvidence(rec)) return "lead";
+  return "intel";
+}
+
 /**
  * When deal scoring credits hot operator / drilling proximity, returns a short phrase for UI summaries.
  */
@@ -597,9 +697,9 @@ export function shortDrillingProximityPhrase(
 }
 
 /**
- * Computes a 0–100 deal score, letter-style grade, and human-readable reasons (2–4 items).
+ * Lead-track scoring: 0–100 mineral lead model (ownership, location, opportunity, contact, size, buyers).
  */
-export function calculateDealScore(
+export function calculateLeadScore(
   data: DealScoreInput | Record<string, unknown> | null | undefined
 ): DealScoreResult {
   const src = data && typeof data === "object" && !Array.isArray(data) ? data : {};
@@ -743,6 +843,142 @@ export function calculateDealScore(
     grade,
     reasons,
   };
+}
+
+/**
+ * Intel-track scoring for corporate deed / assignment / conveyance: emphasizes parties, legal text, location, recency, and play context.
+ */
+export function calculateIntelScore(
+  data: DealScoreInput | Record<string, unknown> | null | undefined
+): DealScoreResult {
+  const src = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const rec = src as Record<string, unknown>;
+
+  const countyRaw = readNonEmptyString(rec.county);
+  const stateRaw = readNonEmptyString(rec.state);
+  const loc = locationPoints(countyRaw, stateRaw);
+
+  const grantorSide = grantorConveyanceSide(rec);
+  const granteeSide = granteeConveyanceSide(rec);
+  const partyNotes: string[] = [];
+  let partyPts = 0;
+  if (grantorSide && granteeSide) {
+    partyPts = 25;
+    partyNotes.push("Grantor and grantee identified on instrument (+25)");
+  } else if (grantorSide || granteeSide) {
+    partyPts = 12;
+    partyNotes.push("One conveyance party identified (+12)");
+  }
+
+  const legalDesc = readNonEmptyString(rec.legal_description);
+  let legalNote = "No legal description signal";
+  let legalPts = 0;
+  if (legalDesc && legalDesc.length >= 60) {
+    legalPts = 20;
+    legalNote = "Strong legal description for title intel (+20)";
+  } else if (legalDesc && legalDesc.length >= 25) {
+    legalPts = 12;
+    legalNote = "Usable legal description (+12)";
+  } else if (legalDesc) {
+    legalPts = 5;
+    legalNote = "Minimal legal description (+5)";
+  }
+
+  const recordingDateStr = readNonEmptyString(rec.recording_date);
+  const effectiveDateStr = readNonEmptyString(rec.effective_date);
+  const refDate =
+    (recordingDateStr && parseDocumentDate(recordingDateStr)) ??
+    (effectiveDateStr && parseDocumentDate(effectiveDateStr)) ??
+    null;
+  let recencyPts = 0;
+  let recencyNote = "No recording / effective date for recency";
+  if (refDate) {
+    const months = calendarMonthsSince(refDate, new Date());
+    if (months <= 36) {
+      recencyPts = 18;
+      recencyNote = "Recent instrument — fresher intel (+18)";
+    } else if (months <= 120) {
+      recencyPts = 10;
+      recencyNote = "Moderate record age — still useful (+10)";
+    } else {
+      recencyPts = 4;
+      recencyNote = "Older record — lower timeliness (+4)";
+    }
+  }
+
+  const miles = readFiniteNumber(
+    rec.drilling_distance_miles ?? rec.drillingActivityMiles ?? rec.drilling_miles
+  );
+  const opBuy = operatorBuyerPoints(miles, countyRaw);
+
+  const conf = readExtractionConfidence(rec);
+  const mult = confidenceMultiplier(conf);
+  const confNote = confidenceReason(conf);
+
+  let raw = loc.pts + partyPts + legalPts + recencyPts + opBuy.pts;
+  raw = Math.min(100, raw);
+  let score = clampScore(raw * mult);
+
+  if (grantorSide && granteeSide && countyRaw && isTopTargetCounty(countyRaw)) {
+    score = Math.max(score, 52);
+  }
+
+  if (conf !== null && conf < 0.45) {
+    const g0 = dealGradeFullLabelFromScore(score);
+    const g2 = downgradeFullGrade(g0);
+    score = Math.min(score, maxScoreForGrade(g2));
+  }
+
+  if (score <= 0) {
+    score = 1;
+  }
+
+  score = clampScore(score);
+  const grade = dealGradeFullLabelFromScore(score);
+
+  const reasonPool: string[] = [loc.note, ...partyNotes, legalNote, recencyNote, opBuy.note];
+  if (confNote) reasonPool.push(confNote);
+  reasonPool.push("Corporate conveyance — intel scoring track");
+
+  const reasons = pickReasons(reasonPool, 2, 4);
+
+  return {
+    score,
+    grade,
+    reasons,
+  };
+}
+
+/**
+ * Dual scoring V2: classifies lead vs intel, then runs the appropriate model. Adds `type` on the result.
+ */
+export function calculateDealScore(
+  data: DealScoreInput | Record<string, unknown> | null | undefined
+): DealScoreResult {
+  const src = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const rec = src as Record<string, unknown>;
+  const docTypeNorm = readNonEmptyString(rec.document_type) ?? null;
+  const corpCorp = partiesAreCompanies(rec);
+  const callableSeller = hasStrongCallableSellerLeadEvidence(rec);
+  console.log("[deal-score] CLASSIFICATION INPUTS", {
+    document_type: docTypeNorm,
+    grantor: grantorConveyanceSide(rec) ?? null,
+    grantee: granteeConveyanceSide(rec) ?? null,
+    lessor: readNonEmptyString(rec.lessor) ?? null,
+    lessee: readNonEmptyString(rec.lessee) ?? null,
+    parties: rec.parties ?? null,
+    parties_are_companies: corpCorp,
+    conveyance_keywords: docTypeNorm ? documentTypeHasConveyanceIntelKeywords(docTypeNorm) : false,
+    callable_seller_evidence: callableSeller,
+  });
+  console.log("[deal-score] PARTIES NORMALIZED", rec.parties ?? null);
+  console.log("[deal-score] DOCUMENT TYPE NORMALIZED", docTypeNorm);
+  const type = classifyDealScoreType(rec);
+  console.log("[deal-score] TYPE", type);
+  const inner = type === "lead" ? calculateLeadScore(rec) : calculateIntelScore(rec);
+  const result: DealScoreResult = { ...inner, type };
+  console.log("[deal-score] SCORE CALCULATED", result.score);
+  return result;
 }
 
 /** Whole calendar months from `earlier` to `later` (non-negative). */
