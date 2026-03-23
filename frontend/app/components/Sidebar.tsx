@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SignOutButton } from "./SignOutButton";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
@@ -37,9 +38,7 @@ export function Sidebar() {
         })}
       </nav>
       <div className="sidebar-footer">
-        <Link href="/login" className="btn btnSecondary" style={{ width: "100%", justifyContent: "center" }}>
-          Sign out
-        </Link>
+        <SignOutButton />
       </div>
     </aside>
   );
