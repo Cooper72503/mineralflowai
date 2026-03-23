@@ -1,35 +1,63 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { getSupabasePublicConfig } from "@/lib/supabase/env";
 
-const PROTECTED_PREFIXES = ["/dashboard", "/documents", "/leads", "/alerts"];
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/documents",
+  "/leads",
+  "/alerts",
+  "/upload",
+  "/settings",
+  "/billing",
+];
+
+const AUTH_PATHS_EXACT = new Set(["/login", "/signup"]);
 
 function isProtected(pathname: string) {
-  return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  return PROTECTED_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`)
+  );
 }
 
-/** Copy cookies from the response we wrote to (e.g. token refresh) onto a redirect response. */
-function redirectWithCookies(
+function isAuthPage(pathname: string) {
+  return AUTH_PATHS_EXACT.has(pathname);
+}
+
+/** Preserve full Set-Cookie headers (httpOnly, max-age, SameSite, etc.) on redirects. */
+function redirectPreservingSetCookies(
   url: URL,
   sourceResponse: NextResponse
 ): NextResponse {
   const redirectResponse = NextResponse.redirect(url);
-  sourceResponse.cookies.getAll().forEach((cookie) => {
-    redirectResponse.cookies.set(cookie.name, cookie.value, { path: "/" });
-  });
+  const list =
+    typeof sourceResponse.headers.getSetCookie === "function"
+      ? sourceResponse.headers.getSetCookie()
+      : [];
+  for (const cookieHeader of list) {
+    redirectResponse.headers.append("Set-Cookie", cookieHeader);
+  }
   return redirectResponse;
 }
 
 export async function middleware(request: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseKey) {
+  const pathname = request.nextUrl.pathname;
+
+  const cfg = getSupabasePublicConfig();
+  if (!cfg.ok) {
     console.error(
-      "[Supabase middleware] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Auth will not work."
+      "[Supabase middleware] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
     );
+    if (isProtected(pathname)) {
+      console.log("MIDDLEWARE REDIRECT TO LOGIN", pathname);
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
     return NextResponse.next({ request });
   }
 
-  const response = NextResponse.next({ request });
+  const { url: supabaseUrl, anonKey: supabaseKey } = cfg;
+
+  let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
@@ -37,9 +65,14 @@ export async function middleware(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, { path: "/", ...options })
-        );
+        // NextRequest cookies accept name/value only; full attributes go on the response.
+        cookiesToSet.forEach(({ name, value }) => {
+          request.cookies.set(name, value);
+        });
+        supabaseResponse = NextResponse.next({ request });
+        cookiesToSet.forEach(({ name, value, options }) => {
+          supabaseResponse.cookies.set(name, value, options);
+        });
       },
     },
   });
@@ -48,18 +81,26 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const pathname = request.nextUrl.pathname;
+  if (user) {
+    console.log("MIDDLEWARE SESSION FOUND", pathname);
+  }
 
   if (user && pathname === "/login") {
-    return redirectWithCookies(new URL("/dashboard", request.url), response);
+    console.log("MIDDLEWARE REDIRECT TO DASHBOARD", pathname);
+    return redirectPreservingSetCookies(
+      new URL("/dashboard", request.url),
+      supabaseResponse
+    );
   }
+
   if (!user && isProtected(pathname)) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);
-    return redirectWithCookies(loginUrl, response);
+    console.log("MIDDLEWARE REDIRECT TO LOGIN", pathname);
+    return redirectPreservingSetCookies(loginUrl, supabaseResponse);
   }
 
-  return response;
+  return supabaseResponse;
 }
 
 export const config = {

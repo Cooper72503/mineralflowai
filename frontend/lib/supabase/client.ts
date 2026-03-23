@@ -1,8 +1,9 @@
-import { createClient as createSupabaseClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { requireSupabasePublicConfig } from "./env";
 
+/** Browser client uses @supabase/ssr so auth is stored in cookies; middleware/server use the same cookie contract. */
 export function createClient(): SupabaseClient {
-  return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:0",
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "missing-anon-key"
-  );
+  const { url, anonKey } = requireSupabasePublicConfig();
+  return createBrowserClient(url, anonKey);
 }

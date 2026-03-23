@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { withTimeout } from "@/lib/with-timeout";
+
+const SESSION_CHECK_TIMEOUT_MS = 10_000;
 import {
   EM_DASH,
   gradeLetter,
@@ -72,8 +75,33 @@ export default function DashboardPage() {
   }, [supabase]);
 
   useEffect(() => {
-    loadDeals();
-  }, [loadDeals]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { data, error: sessionError } = await withTimeout(
+          supabase.auth.getSession(),
+          SESSION_CHECK_TIMEOUT_MS,
+          "Session check timed out"
+        );
+        if (cancelled) return;
+        if (sessionError || !data.session) {
+          setLoading(false);
+          router.replace("/login");
+          return;
+        }
+        await loadDeals();
+      } catch {
+        if (cancelled) return;
+        setLoading(false);
+        router.replace("/login");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, router, loadDeals]);
 
   const minScoreThreshold = useMemo(() => {
     const t = minScoreInput.trim();

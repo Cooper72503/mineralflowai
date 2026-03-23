@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import type { AuthError } from "@supabase/supabase-js";
 import { isAuthError } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { withTimeout } from "@/lib/with-timeout";
+
+const LOGIN_REQUEST_TIMEOUT_MS = 10_000;
 
 function formatUnderlyingError(original: unknown): string {
   if (original instanceof Error) {
@@ -110,10 +114,28 @@ function formatAuthErrorForUi(err: AuthError): string {
 }
 
 export function LoginForm() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session) {
+        void (async () => {
+          console.log("SIGNED_IN EVENT");
+          await supabase.auth.getSession();
+          router.replace("/dashboard");
+          router.refresh();
+        })();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -124,44 +146,65 @@ export function LoginForm() {
     const submittedPassword = password;
 
     try {
+      console.log("LOGIN START");
       const supabase = createClient();
-      const result = await supabase.auth.signInWithPassword({
-        email: submittedEmail,
-        password: submittedPassword,
-      });
+      const result = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email: submittedEmail,
+          password: submittedPassword,
+        }),
+        LOGIN_REQUEST_TIMEOUT_MS,
+        "Login timeout, please try again"
+      );
 
       const { data, error: authError } = result;
+      console.log("LOGIN RESPONSE", {
+        error: authError,
+        userId: data?.user?.id ?? null,
+        hasSession: !!data?.session,
+      });
 
       if (authError) {
-        console.error("[Login] signInWithPassword error:", authError);
+        console.log("LOGIN ERROR", authError);
         logFullAuthError("[Login]", authError);
         setError(formatAuthErrorForUi(authError));
-        setLoading(false);
         return;
       }
 
       if (!data.session) {
         const message = "Sign in succeeded but no session was returned.";
-        console.error("[Login]", message);
+        console.log("LOGIN ERROR", message);
         setError(message);
-        setLoading(false);
         return;
       }
 
-      window.location.href = "/dashboard";
+      const { data: sessionData, error: sessionError } = await withTimeout(
+        supabase.auth.getSession(),
+        LOGIN_REQUEST_TIMEOUT_MS,
+        "Login timeout, please try again"
+      );
+
+      if (sessionError) {
+        console.log("LOGIN ERROR", sessionError);
+        setError(sessionError.message);
+        return;
+      }
+      if (!sessionData.session) {
+        const message =
+          "Session was not persisted after sign-in. Check Supabase cookie configuration.";
+        console.log("LOGIN ERROR", message);
+        setError(message);
+        return;
+      }
+
+      router.replace("/dashboard");
+      router.refresh();
     } catch (err) {
+      console.log("LOGIN ERROR", err);
       if (isAuthError(err)) {
-        console.error("[Login] signInWithPassword threw AuthError:", err);
         logFullAuthError("[Login]", err);
         setError(formatAuthErrorForUi(err));
       } else {
-        console.error("[Login] Unexpected error (non-AuthError, raw):", err);
-        if (err instanceof Error) {
-          console.error("[Login] Error.name:", err.name);
-          console.error("[Login] Error.message:", err.message);
-          console.error("[Login] Error.stack:", err.stack);
-          console.error("[Login] Error.cause:", err.cause);
-        }
         const message =
           err instanceof Error
             ? [err.message, err.cause != null ? `Cause: ${formatUnderlyingError(err.cause)}` : null]
