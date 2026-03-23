@@ -108,7 +108,7 @@ export async function middleware(request: NextRequest) {
     console.log("MIDDLEWARE SESSION FOUND", pathname);
   }
 
-  if (user && pathname === "/login") {
+  if (user && isAuthPage(pathname)) {
     console.log("MIDDLEWARE REDIRECT TO DASHBOARD", pathname);
     return redirectWithCookies(
       new URL("/dashboard", request.url),
