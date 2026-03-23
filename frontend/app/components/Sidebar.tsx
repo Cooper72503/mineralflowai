@@ -20,7 +20,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <Link href="/dashboard">Mineral Intelligence AI</Link>
+        <Link href="/dashboard">Mineral Flow AI</Link>
       </div>
       <nav className="sidebar-nav">
         {navItems.map(({ href, label }) => {

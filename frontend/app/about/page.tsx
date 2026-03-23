@@ -7,7 +7,7 @@ export default function AboutPage() {
       <main className="public-main">
         <h1>About</h1>
         <p className="public-tagline">
-          Mineral Intelligence AI helps mineral buyers, landmen, and acquisition teams find opportunities near drilling activity.
+          Mineral Flow AI helps mineral buyers, landmen, and acquisition teams find opportunities near drilling activity.
         </p>
         <div className="card" style={{ maxWidth: 560, marginTop: "1.5rem", textAlign: "left" }}>
           <h2 style={{ fontSize: "1.1rem", fontWeight: 600, marginBottom: "0.75rem" }}>

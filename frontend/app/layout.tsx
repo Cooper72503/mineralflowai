@@ -5,7 +5,7 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Mineral Intelligence AI",
+  title: "Mineral Flow AI",
   description: "Find mineral ownership opportunities near drilling activity",
 };
 

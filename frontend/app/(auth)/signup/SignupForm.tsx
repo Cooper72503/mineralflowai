@@ -188,7 +188,7 @@ export function SignupForm() {
     <div className="auth-card">
       <div className="auth-card-header">
         <h1>Create an account</h1>
-        <p>Mineral Intelligence AI</p>
+        <p>Mineral Flow AI</p>
       </div>
       {successMessage && (
         <div

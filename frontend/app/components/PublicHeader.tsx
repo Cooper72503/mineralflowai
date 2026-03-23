@@ -4,7 +4,7 @@ export function PublicHeader() {
   return (
     <header className="public-header">
       <Link href="/" className="public-brand">
-        Mineral Intelligence AI
+        Mineral Flow AI
       </Link>
       <nav className="public-nav">
         <Link href="/pricing">Pricing</Link>

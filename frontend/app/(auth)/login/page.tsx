@@ -8,7 +8,7 @@ function LoginFallback() {
   return (
     <div className="auth-card">
       <div className="auth-card-header">
-        <h1>Mineral Intelligence AI</h1>
+        <h1>Mineral Flow AI</h1>
         <p>Sign in to your account</p>
       </div>
       <p className="auth-muted">Loading…</p>
