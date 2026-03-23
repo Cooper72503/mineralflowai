@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import {
   processDocumentContent,
   parseLeaseFieldsFromText,
@@ -18,6 +18,9 @@ const BUCKET_NAME = "documents";
 export const runtime = "nodejs";
 
 export const dynamic = "force-dynamic";
+
+/** Allow PDF extract + OCR + OpenAI to finish on hosts that honor this (e.g. Vercel). */
+export const maxDuration = 300;
 
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
@@ -207,7 +210,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   let documentId: string | null = null;
-  let supabase: Awaited<ReturnType<typeof createClient>> | null = null;
+  let supabase: SupabaseClient | null = null;
   let failureStep = "PROCESS_START";
   let fileNameForLogs: string | null = null;
   let fileExtensionForLogs: string | null = null;
@@ -297,7 +300,7 @@ export async function POST(
       failureStep = "create_supabase_client";
       debug.failureStep = failureStep;
       log("CREATE_SUPABASE_CLIENT_START");
-      supabase = await createClient();
+      supabase = await createSupabaseFromRouteRequest(request);
       log("CREATE_SUPABASE_CLIENT_SUCCESS");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

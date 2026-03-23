@@ -299,9 +299,16 @@ export default function DocumentDetailPage() {
     if (!id) return;
     setProcessing(true);
     try {
-      const res = await fetch(`/api/documents/${id}/process`, { method: "POST" });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const res = await fetch(`/api/documents/${id}/process`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       const body = await res.json().catch(() => ({}));
-      const apiOk = res.ok && body?.ok !== false;
+      const apiOk = res.ok && body?.ok === true;
       if (!apiOk) {
         const step = body?.step_failed || body?.step ? ` (step: ${body.step_failed ?? body.step})` : "";
         setActionError(body.error_message || body.error || `Request failed (${res.status}).${step}`);
