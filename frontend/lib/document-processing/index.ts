@@ -5,6 +5,7 @@
  */
 
 import OpenAI from "openai";
+import { ocrPdfWithPopplerAndTesseract } from "./pdf-ocr";
 
 export {
   calculateDealScore,
@@ -18,8 +19,8 @@ export {
 export { parseAcreageFromLegalDescription } from "./parse-acreage-from-legal";
 
 export type DocumentProcessingResult =
-  | { success: true; extractedText: string }
-  | { success: false; error: string };
+  | { success: true; extractedText: string; extractionMeta?: Record<string, unknown> }
+  | { success: false; error: string; extractionMeta?: Record<string, unknown> };
 
 function describeValue(value: unknown): string {
   if (value === null) return "null";
@@ -80,7 +81,7 @@ function getExtension(fileName: string | null): string {
 
 /**
  * Extracts text from the file buffer.
- * - PDF: uses pdf-parse (server-side, Buffer input).
+ * - PDF: pdf-parse v1 (embedded pdf.js 1.x, Node-safe) then OCR fallback (Poppler + tesseract.js).
  * - CSV: reads buffer as UTF-8 text.
  * - Other types: returns error.
  */
@@ -121,7 +122,6 @@ export async function processDocumentContent(
 async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingResult> {
   assertBuffer(buffer, "PDF_TEXT_EXTRACT_START");
 
-  // Validate PDF magic bytes up front to avoid PDF parser crashes on non-PDF bytes.
   const header4Ascii = buffer.slice(0, 4).toString("ascii");
   const first10Hex = buffer.slice(0, 10).toString("hex");
   const sizeBytes = buffer.length;
@@ -138,11 +138,9 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
     };
   }
 
-  // Required diagnostics for debugging parser input issues.
-  // (Even though we pass a Buffer, log exactly what's being handed to the PDF parser.)
   const input: unknown = buffer;
-  const inputByteLength = Buffer.isBuffer(input) ? input.byteLength : (input as any)?.byteLength;
-  const inputLength = Buffer.isBuffer(input) ? undefined : (input as any)?.length;
+  const inputByteLength = Buffer.isBuffer(input) ? input.byteLength : (input as { byteLength?: number })?.byteLength;
+  const inputLength = Buffer.isBuffer(input) ? undefined : (input as { length?: number })?.length;
   console.log("[extractTextFromPdf] PDF_PARSE_INPUT", {
     typeofInput: typeof input,
     Buffer_isBuffer: Buffer.isBuffer(input),
@@ -150,97 +148,85 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
     length: inputLength,
   });
 
-  const tryPdfParse = async (): Promise<string> => {
-    // Load PDF parsing dependency lazily so CSV/TXT requests don't initialize PDF parser logic.
-    const pdfParseModule: any = await import("pdf-parse");
-    const PDFParseCtor = pdfParseModule?.PDFParse ?? pdfParseModule?.default;
-    if (typeof PDFParseCtor !== "function") {
-      throw new Error("pdf-parse: PDFParse constructor not found.");
-    }
-
-    const parser = new PDFParseCtor({ data: buffer });
-    let parsedTextResult: any;
-    try {
-      parsedTextResult = await parser.getText();
-    } finally {
-      // best-effort cleanup
-      try {
-        await parser.destroy();
-      } catch {
-        // ignore destroy errors
-      }
-    }
-
-    return typeof parsedTextResult?.text === "string" ? parsedTextResult.text : "";
-  };
-
-  const tryPdfJsDist = async (): Promise<string> => {
-    // pdfjs-dist legacy build works in Node (API routes) without DOM globals.
-    const pdfjs: any = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const getDocument = pdfjs?.getDocument;
-    if (typeof getDocument !== "function") {
-      throw new Error("pdfjs-dist: getDocument not found.");
-    }
-
-    const loadingTask = getDocument({ data: new Uint8Array(buffer) });
-    const pdfDoc = await loadingTask.promise;
-    const numPages: number = typeof pdfDoc?.numPages === "number" ? pdfDoc.numPages : 0;
-    if (!numPages) return "";
-
-    const pageTexts: string[] = [];
-    for (let i = 1; i <= numPages; i++) {
-      const page = await pdfDoc.getPage(i);
-      const content = await page.getTextContent();
-      const items: any[] = Array.isArray(content?.items) ? content.items : [];
-      const strings = items
-        .map((it) => (typeof it?.str === "string" ? it.str : ""))
-        .filter((s) => s !== "");
-      pageTexts.push(strings.join(" "));
-    }
-    try {
-      await pdfDoc.destroy();
-    } catch {
-      // ignore destroy errors
-    }
-    return pageTexts.join("\n").trim();
-  };
+  let primaryText = "";
+  let primaryParseError: string | null = null;
 
   try {
-    let text = "";
-    let parserUsed: "pdf-parse" | "pdfjs-dist" | "none" = "none";
-    try {
-      text = (await tryPdfParse()).trim();
-      parserUsed = "pdf-parse";
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn("[extractTextFromPdf] pdf-parse failed; trying pdfjs-dist", { message: msg });
-      text = (await tryPdfJsDist()).trim();
-      parserUsed = "pdfjs-dist";
+    const pdfParseModule = await import("pdf-parse");
+    const pdfParseUnknown: unknown =
+      (pdfParseModule as { default?: unknown }).default ?? pdfParseModule;
+    if (typeof pdfParseUnknown !== "function") {
+      throw new Error("pdf-parse: expected a function export (v1 API).");
     }
-
-    console.log("[extractTextFromPdf] PDF_TEXT_EXTRACT_SUCCESS", {
-      parserUsed,
-      sizeBytes,
-      textLength: text.length,
-    });
-
-    return { success: true, extractedText: text || "" };
+    const pdfParse = pdfParseUnknown as (data: Buffer, options?: { max?: number }) => Promise<{ text?: string }>;
+    const data = await pdfParse(buffer, { max: 0 });
+    primaryText = typeof data?.text === "string" ? data.text.trim() : "";
   } catch (err) {
-    const message = err instanceof Error ? err.message : "PDF extraction failed.";
-    console.error("[extractTextFromPdf] pdf-parse failed", { message, sizeBytes, first10Hex });
+    primaryParseError = err instanceof Error ? err.message : String(err);
+    console.warn("[extractTextFromPdf] pdf-parse (v1) failed; will try OCR if applicable", {
+      message: primaryParseError,
+      sizeBytes,
+    });
+  }
 
-    if (isPdfHeaderValid) {
-      return {
-        success: false,
-        error: `PDF_TEXT_EXTRACT_START: valid PDF detected, but parser failed: ${message} sizeBytes=${sizeBytes} first10Hex=${first10Hex}`,
-      };
+  let finalText = primaryText;
+  let ocrUsed = false;
+  let ocrMeta: Awaited<ReturnType<typeof ocrPdfWithPopplerAndTesseract>> | null = null;
+
+  if (!finalText) {
+    console.log("[extractTextFromPdf] Primary text empty or parse failed; starting OCR fallback", { sizeBytes });
+    ocrMeta = await ocrPdfWithPopplerAndTesseract(buffer);
+    const ocrText = (ocrMeta.text ?? "").trim();
+    if (ocrText) {
+      finalText = ocrText;
+      ocrUsed = true;
     }
+    console.log("[extractTextFromPdf] OCR_FALLBACK_RESULT", {
+      ocrUsed,
+      ocrPageCount: ocrMeta.pageCountRasterized,
+      ocrSkippedReason: ocrMeta.skippedReason,
+      ocrErrorMessage: ocrMeta.errorMessage,
+      textLength: ocrText.length,
+    });
+  }
 
+  const extractionMeta: Record<string, unknown> = {
+    pdfParser: "pdf-parse-v1",
+    primaryTextLength: primaryText.length,
+    primaryParseError,
+    ocrUsed,
+    ocrEngine: ocrMeta?.engine ?? null,
+    ocrPageCount: ocrMeta?.pageCountRasterized ?? 0,
+    ocrSkippedReason: ocrMeta?.skippedReason ?? null,
+    ocrErrorMessage: ocrMeta?.errorMessage ?? null,
+  };
+
+  console.log("[extractTextFromPdf] RAW_EXTRACTED_TEXT", {
+    sizeBytes,
+    finalTextLength: finalText.length,
+    preview: finalText.slice(0, 500),
+    ocrUsed,
+    primaryParseError,
+  });
+
+  if (!finalText && primaryParseError) {
     return {
       success: false,
-      error: `PDF_TEXT_EXTRACT_START: ${message} sizeBytes=${sizeBytes} first10Hex=${first10Hex}`,
+      error: `PDF_TEXT_EXTRACT_START: text extraction failed and OCR did not yield text. primaryError=${primaryParseError}${
+        ocrMeta?.skippedReason ? ` ocrSkipped=${ocrMeta.skippedReason}` : ""
+      }${ocrMeta?.errorMessage ? ` ocrError=${ocrMeta.errorMessage}` : ""} sizeBytes=${sizeBytes} first10Hex=${first10Hex}`,
+      extractionMeta,
     };
   }
+
+  console.log("[extractTextFromPdf] PDF_TEXT_EXTRACT_SUCCESS", {
+    sizeBytes,
+    textLength: finalText.length,
+    ocrUsed,
+    isPdfHeaderValid,
+  });
+
+  return { success: true, extractedText: finalText, extractionMeta };
 }
 
 function extractTextFromCsv(buffer: Buffer): DocumentProcessingResult {

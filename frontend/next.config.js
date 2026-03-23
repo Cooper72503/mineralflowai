@@ -5,7 +5,7 @@ const nextConfig = {
     // Prevent Next from bundling these packages into the route handler.
     // Bundling the ESM `.mjs` builds can crash at runtime inside the app route
     // (e.g. `Object.defineProperty called on non-object` from webpack interop).
-    serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist"],
+    serverComponentsExternalPackages: ["pdf-parse", "tesseract.js"],
   },
 };
 

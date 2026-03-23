@@ -579,6 +579,10 @@ export async function POST(
         fileName: doc.file_name ?? null,
       });
 
+      if (result.extractionMeta && typeof result.extractionMeta === "object") {
+        debug.extractionMeta = result.extractionMeta;
+      }
+
       if (!result.success) {
         const extractionError = result.error ?? "Text extraction failed.";
         console.error(`${LOG_PREFIX} extract_text failed:`, { documentId, error: extractionError });
@@ -634,10 +638,30 @@ export async function POST(
         openAiError = String(debug.error);
         log("PROCESS_FAILED", { step_failed: "OPENAI_CALL_START", error_message: openAiError });
       } else if (!hasUsableText) {
-        const msg = "No extracted text available to parse.";
-        openAiError = msg;
-        await markDocumentFailed(supabase, documentId, msg);
-        log("PROCESS_FAILED", { step_failed: "OPENAI_CALL_START", error_message: msg });
+        log("OPENAI_EMPTY_TEXT", {
+          note: "No usable text after PDF extract and OCR fallback; running parseLeaseFieldsFromText without API (null fields, confidence 0).",
+        });
+        const parsedResult = await parseLeaseFieldsFromText(extractedText ?? "");
+        assertPlainObject(parsedResult as unknown, "OPENAI_CALL_START");
+        if (typeof (parsedResult as { confidence_score?: unknown }).confidence_score !== "number") {
+          throw new Error(
+            `OPENAI_CALL_START: expected confidence_score number but got ${describeValue((parsedResult as { confidence_score?: unknown }).confidence_score)}.`
+          );
+        }
+        parsed = {
+          lessor: parsedResult.lessor,
+          lessee: parsedResult.lessee,
+          county: parsedResult.county ?? doc.county ?? null,
+          state: parsedResult.state ?? doc.state ?? null,
+          legal_description: parsedResult.legal_description,
+          effective_date: parsedResult.effective_date,
+          recording_date: parsedResult.recording_date,
+          royalty_rate: parsedResult.royalty_rate,
+          term_length: parsedResult.term_length,
+          document_type: parsedResult.document_type,
+          confidence_score: parsedResult.confidence_score,
+        };
+        debug.parsed = parsed;
       } else if (!process.env.OPENAI_API_KEY) {
         const msg = "OPENAI_API_KEY is not set; cannot parse lease fields.";
         openAiError = msg;
