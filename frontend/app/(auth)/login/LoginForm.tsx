@@ -128,7 +128,33 @@ export function LoginForm() {
       if (event === "SIGNED_IN" && session) {
         void (async () => {
           console.log("SIGNED_IN EVENT");
-          await supabase.auth.getSession();
+          try {
+            const { data: sessionData, error: sessionError } = await withTimeout(
+              supabase.auth.getSession(),
+              LOGIN_REQUEST_TIMEOUT_MS,
+              "Session could not be loaded after sign-in. Please try again."
+            );
+            if (sessionError) {
+              console.log("LOGIN ERROR", sessionError);
+              setError(sessionError.message);
+              return;
+            }
+            if (!sessionData.session) {
+              const message =
+                "Session was not available after sign-in. Check Supabase cookie configuration.";
+              console.log("LOGIN ERROR", message);
+              setError(message);
+              return;
+            }
+          } catch (err) {
+            console.log("LOGIN ERROR", err);
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Session could not be loaded after sign-in. Please try again."
+            );
+            return;
+          }
           router.replace("/dashboard");
           router.refresh();
         })();

@@ -1,4 +1,4 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, serializeCookieHeader } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabasePublicConfig } from "@/lib/supabase/env";
 
@@ -24,18 +24,40 @@ function isAuthPage(pathname: string) {
   return AUTH_PATHS_EXACT.has(pathname);
 }
 
-/** Preserve full Set-Cookie headers (httpOnly, max-age, SameSite, etc.) on redirects. */
-function redirectPreservingSetCookies(
+type CookieWrite = {
+  name: string;
+  value: string;
+  options?: Parameters<typeof serializeCookieHeader>[2];
+};
+
+/**
+ * Forwards Supabase auth cookies onto a redirect without dropping attributes.
+ * Prefer raw Set-Cookie lines from the source response; if none are exposed,
+ * rebuild from the same name/value/options Supabase passed to setAll.
+ */
+function redirectWithCookies(
   url: URL,
-  sourceResponse: NextResponse
+  sourceResponse: NextResponse,
+  cookieWritesFallback: Map<string, CookieWrite>
 ): NextResponse {
   const redirectResponse = NextResponse.redirect(url);
   const list =
     typeof sourceResponse.headers.getSetCookie === "function"
       ? sourceResponse.headers.getSetCookie()
       : [];
-  for (const cookieHeader of list) {
-    redirectResponse.headers.append("Set-Cookie", cookieHeader);
+  if (list.length > 0) {
+    for (const cookieHeader of list) {
+      redirectResponse.headers.append("Set-Cookie", cookieHeader);
+    }
+    return redirectResponse;
+  }
+  for (const { name, value, options } of Array.from(
+    cookieWritesFallback.values()
+  )) {
+    redirectResponse.headers.append(
+      "Set-Cookie",
+      serializeCookieHeader(name, value, options ?? {})
+    );
   }
   return redirectResponse;
 }
@@ -58,6 +80,7 @@ export async function middleware(request: NextRequest) {
   const { url: supabaseUrl, anonKey: supabaseKey } = cfg;
 
   let supabaseResponse = NextResponse.next({ request });
+  const cookieWritesForRedirect = new Map<string, CookieWrite>();
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
@@ -65,13 +88,13 @@ export async function middleware(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        // NextRequest cookies accept name/value only; full attributes go on the response.
         cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value);
         });
         supabaseResponse = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) => {
           supabaseResponse.cookies.set(name, value, options);
+          cookieWritesForRedirect.set(name, { name, value, options });
         });
       },
     },
@@ -87,9 +110,10 @@ export async function middleware(request: NextRequest) {
 
   if (user && pathname === "/login") {
     console.log("MIDDLEWARE REDIRECT TO DASHBOARD", pathname);
-    return redirectPreservingSetCookies(
+    return redirectWithCookies(
       new URL("/dashboard", request.url),
-      supabaseResponse
+      supabaseResponse,
+      cookieWritesForRedirect
     );
   }
 
@@ -97,7 +121,11 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);
     console.log("MIDDLEWARE REDIRECT TO LOGIN", pathname);
-    return redirectPreservingSetCookies(loginUrl, supabaseResponse);
+    return redirectWithCookies(
+      loginUrl,
+      supabaseResponse,
+      cookieWritesForRedirect
+    );
   }
 
   return supabaseResponse;
