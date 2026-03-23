@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import {
   processDocumentContent,
-  parseLeaseFieldsFromText,
+  runStructuredExtraction,
   calculateDealScore,
   calendarMonthsSince,
   dealGradeFullLabelFromScore,
@@ -590,6 +590,10 @@ export async function POST(
       term_length: null as string | null,
       document_type: null as string | null,
       confidence_score: null as number | null,
+      owner: null as string | null,
+      buyer: null as string | null,
+      acreage: null as number | null,
+      extraction_status: null as string | null,
     };
 
     const hasUsableText = (() => {
@@ -604,83 +608,77 @@ export async function POST(
     let openAiError: string | null = null;
 
     try {
-      failureStep = "OPENAI_CALL_START";
+      failureStep = "STRUCTURED_EXTRACTION";
       debug.failureStep = failureStep;
-      // If extraction already failed, keep the original failure reason and skip AI entirely.
+
+      const meta = (debug.extractionMeta as Record<string, unknown> | undefined) ?? {};
+      const rawPdfText = typeof meta.raw_pdf_text === "string" ? meta.raw_pdf_text : "";
+      const ocrText =
+        typeof meta.ocr_text === "string" && (meta.ocr_text as string).length > 0
+          ? (meta.ocr_text as string)
+          : null;
+      const pdfNumPages = typeof meta.numpages === "number" ? meta.numpages : 0;
+      const ocrMeanConfidence0to100 =
+        typeof meta.ocrMeanConfidence === "number" ? meta.ocrMeanConfidence : null;
+
       if (debug.error) {
-        openAiError = String(debug.error);
-        log("PROCESS_FAILED", { step_failed: "OPENAI_CALL_START", error_message: openAiError });
-      } else if (!hasUsableText) {
-        log("OPENAI_EMPTY_TEXT", {
-          note: "No usable text after PDF extract and OCR fallback; running parseLeaseFieldsFromText without API (null fields, confidence 0).",
-        });
-        const parsedResult = await parseLeaseFieldsFromText(extractedText ?? "");
-        assertPlainObject(parsedResult as unknown, "OPENAI_CALL_START");
-        if (typeof (parsedResult as { confidence_score?: unknown }).confidence_score !== "number") {
-          throw new Error(
-            `OPENAI_CALL_START: expected confidence_score number but got ${describeValue((parsedResult as { confidence_score?: unknown }).confidence_score)}.`
-          );
-        }
-        parsed = {
-          lessor: parsedResult.lessor,
-          lessee: parsedResult.lessee,
-          grantor: parsedResult.grantor,
-          grantee: parsedResult.grantee,
-          parties: parsedResult.parties,
-          county: parsedResult.county ?? doc.county ?? null,
-          state: parsedResult.state ?? doc.state ?? null,
-          legal_description: parsedResult.legal_description,
-          effective_date: parsedResult.effective_date,
-          recording_date: parsedResult.recording_date,
-          royalty_rate: parsedResult.royalty_rate,
-          term_length: parsedResult.term_length,
-          document_type: parsedResult.document_type,
-          confidence_score: parsedResult.confidence_score,
-        };
-        debug.parsed = parsed;
-      } else if (!process.env.OPENAI_API_KEY) {
-        const msg = "OPENAI_API_KEY is not set; cannot parse lease fields.";
-        openAiError = msg;
-        await markDocumentFailed(supabase, documentId, msg);
-        log("PROCESS_FAILED", { step_failed: "OPENAI_CALL_START", error_message: msg });
-      } else {
-        log("OPENAI_CALL_START", { textLength: extractedText.length, model: DEFAULT_OPENAI_MODEL });
+        log("STRUCTURED_EXTRACTION_SKIP_TEXT", { error_message: String(debug.error) });
+      }
+
+      const skipOpenAi = !process.env.OPENAI_API_KEY || !hasUsableText || !!debug.error;
+      if (!skipOpenAi) {
         openAiModelUsed = DEFAULT_OPENAI_MODEL;
+      }
 
-        const parsedResult = await parseLeaseFieldsFromText(extractedText);
-        assertPlainObject(parsedResult as unknown, "OPENAI_CALL_START");
-        if (typeof (parsedResult as any).confidence_score !== "number") {
-          throw new Error(
-            `OPENAI_CALL_START: expected confidence_score number but got ${describeValue((parsedResult as any).confidence_score)}.`
-          );
-        }
-        log("OPENAI_CALL_SUCCESS", { confidence_score: parsedResult.confidence_score, model: DEFAULT_OPENAI_MODEL });
+      const { parsed: pipelineParsed, artifacts } = await runStructuredExtraction({
+        normalizedText: extractedText ?? "",
+        rawPdfText,
+        ocrText,
+        pdfNumPages,
+        ocrMeanConfidence0to100,
+        docCounty: doc.county,
+        docState: doc.state,
+        openAiModel: DEFAULT_OPENAI_MODEL,
+        skipOpenAi,
+      });
 
-        parsed = {
-          lessor: parsedResult.lessor,
-          lessee: parsedResult.lessee,
-          grantor: parsedResult.grantor,
-          grantee: parsedResult.grantee,
-          parties: parsedResult.parties,
-          county: parsedResult.county ?? doc.county ?? null,
-          state: parsedResult.state ?? doc.state ?? null,
-          legal_description: parsedResult.legal_description,
-          effective_date: parsedResult.effective_date,
-          recording_date: parsedResult.recording_date,
-          royalty_rate: parsedResult.royalty_rate,
-          term_length: parsedResult.term_length,
-          document_type: parsedResult.document_type,
-          confidence_score: parsedResult.confidence_score,
-        };
-        debug.parsed = parsed;
+      debug.extraction_artifacts = artifacts;
+      debug.parsed = pipelineParsed;
+
+      if (artifacts.extraction_errors.length > 0) {
+        openAiError = artifacts.extraction_errors.join("; ");
+      }
+
+      parsed = {
+        lessor: pipelineParsed.lessor,
+        lessee: pipelineParsed.lessee,
+        grantor: pipelineParsed.grantor,
+        grantee: pipelineParsed.grantee,
+        parties: pipelineParsed.parties,
+        county: pipelineParsed.county ?? doc.county ?? null,
+        state: pipelineParsed.state ?? doc.state ?? null,
+        legal_description: pipelineParsed.legal_description,
+        effective_date: pipelineParsed.effective_date,
+        recording_date: pipelineParsed.recording_date,
+        royalty_rate: pipelineParsed.royalty_rate,
+        term_length: pipelineParsed.term_length,
+        document_type: pipelineParsed.document_type,
+        confidence_score: pipelineParsed.confidence_score,
+        owner: pipelineParsed.owner ?? null,
+        buyer: pipelineParsed.buyer ?? null,
+        acreage: pipelineParsed.acreage ?? null,
+        extraction_status: pipelineParsed.extraction_status ?? artifacts.extraction_status,
+      };
+
+      if (typeof parsed.confidence_score !== "number" || !Number.isFinite(parsed.confidence_score)) {
+        parsed.confidence_score = 0;
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logCatchBlock(err, failureStep);
       openAiError = msg;
-      await markDocumentFailed(supabase, documentId, msg);
-      debug.error = msg;
-      log("PROCESS_FAILED", { step_failed: "OPENAI_CALL_START", error_message: msg });
+      debug.structured_extraction_throw = msg;
+      log("STRUCTURED_EXTRACTION_ERROR", { error_message: msg });
     }
 
     try {
@@ -743,6 +741,7 @@ export async function POST(
         dealAcreageForAlerts = undefined;
       }
 
+      const extractionArtifacts = debug.extraction_artifacts as Record<string, unknown> | undefined;
       const structuredExtraction = {
         lessor: parsed.lessor,
         lessee: parsed.lessee,
@@ -758,6 +757,19 @@ export async function POST(
         term_length: parsed.term_length,
         document_type: parsed.document_type,
         confidence_score: parsed.confidence_score,
+        owner: parsed.owner,
+        buyer: parsed.buyer,
+        acreage: parsed.acreage,
+        extraction_status: parsed.extraction_status,
+        extraction_confidence: extractionArtifacts?.extraction_confidence,
+        confidence_by_field: extractionArtifacts?.confidence_by_field,
+        text_quality_confidence: extractionArtifacts?.text_quality_confidence,
+        ocr_confidence: extractionArtifacts?.ocr_confidence,
+        party_confidence: extractionArtifacts?.party_confidence,
+        county_confidence: extractionArtifacts?.county_confidence,
+        acreage_confidence: extractionArtifacts?.acreage_confidence,
+        document_type_confidence: extractionArtifacts?.document_type_confidence,
+        extraction_artifacts: extractionArtifacts ?? null,
         deal_score: dealScore,
       };
 
@@ -776,8 +788,8 @@ export async function POST(
         recording_date: parsed.recording_date,
         royalty_rate: parsed.royalty_rate,
         term_length: parsed.term_length,
-        confidence_score: parsed.confidence_score,
-        confidence: parsed.confidence_score,
+        confidence_score: parsed.confidence_score ?? 0,
+        confidence: parsed.confidence_score ?? 0,
         model: openAiModelUsed ?? DEFAULT_OPENAI_MODEL,
         error_message: openAiError ?? debug.error ?? null,
       };
@@ -795,7 +807,7 @@ export async function POST(
         recording_date: parsed.recording_date,
         royalty_rate: parsed.royalty_rate,
         term_length: parsed.term_length,
-        confidence_score: parsed.confidence_score,
+        confidence_score: parsed.confidence_score ?? 0,
       };
 
       assertPlainObject(basePayloadFull, "DB_INSERT_START");
@@ -1138,7 +1150,11 @@ export async function POST(
       royalty_rate: parsed.royalty_rate,
       term_length: parsed.term_length,
       document_type: parsed.document_type,
-      confidence_score: parsed.confidence_score,
+      confidence_score: parsed.confidence_score ?? 0,
+      owner: parsed.owner,
+      buyer: parsed.buyer,
+      acreage: parsed.acreage,
+      extraction_status: parsed.extraction_status,
       deal_score:
         dealScoreResult ??
         ({

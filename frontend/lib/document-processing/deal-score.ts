@@ -201,6 +201,7 @@ function allowsDealScoreZero(
   countyUnknown: boolean,
   conf: number | null
 ): boolean {
+  if (extractionNeedsReview(rec)) return false;
   if (!ownerPresent && countyUnknown) return true;
   if (uselessExtractedText(rec) && extremelyLowExtractionConfidence(conf)) return true;
   return false;
@@ -492,6 +493,11 @@ function operatorBuyerPoints(
   return { pts: 0, note: "Limited operator / buyer signal (+0)" };
 }
 
+function extractionNeedsReview(rec: Record<string, unknown>): boolean {
+  const s = readNonEmptyString(rec.extraction_status)?.toLowerCase();
+  return s === "low_confidence" || s === "partial" || s === "failed";
+}
+
 function readExtractionConfidence(src: Record<string, unknown>): number | null {
   const candidates = [src.extraction_confidence, src.confidence_score, src.confidence];
   for (const c of candidates) {
@@ -578,6 +584,13 @@ function isIntelOnlyDocument(src: Record<string, unknown>): boolean {
   if (src.intel_only === true) return true;
   const dt = readNonEmptyString(src.document_type);
   if (!dt) return false;
+  if (
+    /\b(operator\s*\/\s*intel|operator\s+intel|intel\s+report|well\s*completion|scout\s*ticket|drilling\s+report|wellbore\s+report)\b/i.test(
+      dt
+    )
+  ) {
+    return true;
+  }
   return /\b(intel|intelligence|research|market\s*(?:study|report)|industry\s*report|comp(?:any)?\s*stak|data\s*room|broker\s*(?:opinion|report)|appraisal\s*report|reserve\s*report|teaser|confidential\s*information\s*memorandum|cim)\b/i.test(
     dt
   );
@@ -792,8 +805,9 @@ export function calculateLeadScore(
     score = Math.max(score, 70);
   }
 
+  const reviewWeakExtraction = extractionNeedsReview(rec);
   if (!ownerPresent || countyUnknown) {
-    score = Math.min(score, 59);
+    score = Math.min(score, reviewWeakExtraction ? 69 : 59);
   }
 
   if (realDealMinimumScoreFloorApplies(rec, ownerPresent, countyUnknown, countyRaw, stateRaw, leaseRaw)) {
@@ -830,8 +844,23 @@ export function calculateLeadScore(
     opBuy.note,
   ];
   if (confNote) reasonPool.push(confNote);
-  if (!ownerPresent) reasonPool.push("No owner name — capped at grade C");
-  if (countyUnknown) reasonPool.push("County unknown — capped at grade C");
+  if (!ownerPresent) {
+    reasonPool.push(
+      reviewWeakExtraction
+        ? "Owner not extracted — low-confidence document; needs review"
+        : "No owner name — capped at grade C"
+    );
+  }
+  if (countyUnknown) {
+    reasonPool.push(
+      reviewWeakExtraction
+        ? "County unclear from extraction — needs review before using location score"
+        : "County unknown — capped at grade C"
+    );
+  }
+  if (reviewWeakExtraction) {
+    reasonPool.push("Low-confidence extraction — distinguish from weak deal quality");
+  }
   if (conf !== null && conf < 0.45) {
     reasonPool.push("Low extraction confidence — downgraded one full grade");
   }

@@ -66,6 +66,10 @@ export type ParsedFieldsForDealScore = {
   term_length: string | null;
   document_type: string | null;
   confidence_score: number | null;
+  owner?: string | null;
+  buyer?: string | null;
+  acreage?: number | null;
+  extraction_status?: string | null;
 };
 
 /** Structured / column fields produced by the lease extraction pass (same scope as ParsedFieldsForDealScore). */
@@ -90,6 +94,9 @@ const EXTRACTION_BACKED_DEAL_INPUT_KEYS = [
   "net_mineral_acres",
   "term_length",
   "document_type",
+  "owner",
+  "owner_name",
+  "buyer",
 ] as const;
 
 function parsedFieldsWithReducedTrust(parsed: ParsedFieldsForDealScore): ParsedFieldsForDealScore {
@@ -108,6 +115,10 @@ function parsedFieldsWithReducedTrust(parsed: ParsedFieldsForDealScore): ParsedF
     royalty_rate: null,
     term_length: null,
     document_type: null,
+    owner: null,
+    buyer: null,
+    acreage: null,
+    extraction_status: parsed.extraction_status ?? null,
   };
 }
 
@@ -138,7 +149,11 @@ export function buildDealScoreInput(args: {
   const dealScoreInput: Record<string, unknown> = { ...(args.optionalBaseline ?? {}) };
   delete dealScoreInput.deal_score;
 
-  const lowTrust = isLowLeaseParseConfidence(args.parsed.confidence_score);
+  const extractionNeedsReview =
+    args.parsed.extraction_status === "partial" ||
+    args.parsed.extraction_status === "low_confidence";
+  const lowTrust =
+    isLowLeaseParseConfidence(args.parsed.confidence_score) && !extractionNeedsReview;
   if (lowTrust) {
     stripExtractionBackedKeysFromDealInput(dealScoreInput);
   }
@@ -163,10 +178,16 @@ export function buildDealScoreInput(args: {
         ? dealScoreInput.confidence_score
         : parsed.confidence_score;
 
+  if (parsed.extraction_status != null) {
+    dealScoreInput.extraction_status = parsed.extraction_status;
+  }
+
   if (dealScoreInput.acreage === undefined || dealScoreInput.acreage === null) {
     const fromLegal = parseAcreageFromLegalDescription(parsed.legal_description);
     if (fromLegal !== undefined) {
       dealScoreInput.acreage = fromLegal;
+    } else if (typeof parsed.acreage === "number" && Number.isFinite(parsed.acreage)) {
+      dealScoreInput.acreage = parsed.acreage;
     }
   }
 
@@ -207,6 +228,14 @@ export function buildDealScoreInput(args: {
   const existingGrantee = dealScoreInput.grantee;
   if (existingGrantee == null || (typeof existingGrantee === "string" && !existingGrantee.trim())) {
     dealScoreInput.grantee = parsed.grantee;
+  }
+
+  const own = dealScoreInput.owner ?? dealScoreInput.owner_name;
+  if (own == null || (typeof own === "string" && !own.trim())) {
+    if (parsed.owner?.trim()) {
+      dealScoreInput.owner = parsed.owner.trim();
+      dealScoreInput.owner_name = parsed.owner.trim();
+    }
   }
 
   const ep = dealScoreInput.parties;
