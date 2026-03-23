@@ -18,6 +18,8 @@ export type PdfOcrResult = {
   text: string;
   pageCountRasterized: number;
   engine: "poppler+tesseract.js";
+  /** Mean page-level confidence from Tesseract (0–100), when available. */
+  meanConfidence?: number;
   skippedReason?: string;
   errorMessage?: string;
 };
@@ -83,6 +85,7 @@ export async function ocrPdfWithPopplerAndTesseract(pdfBuffer: Buffer): Promise<
     const { createWorker } = await import("tesseract.js");
     const worker = await createWorker("eng");
     const parts: string[] = [];
+    const pageConfidences: number[] = [];
 
     try {
       for (const name of pngs) {
@@ -90,16 +93,24 @@ export async function ocrPdfWithPopplerAndTesseract(pdfBuffer: Buffer): Promise<
         const buf = await readFile(fp);
         const { data } = await worker.recognize(buf);
         parts.push(typeof data?.text === "string" ? data.text : "");
+        if (typeof data?.confidence === "number" && Number.isFinite(data.confidence)) {
+          pageConfidences.push(data.confidence);
+        }
       }
     } finally {
       await worker.terminate().catch(() => undefined);
     }
 
     const text = parts.join("\n\n--- page break ---\n\n").trim();
+    const meanConfidence =
+      pageConfidences.length > 0
+        ? pageConfidences.reduce((a, b) => a + b, 0) / pageConfidences.length
+        : undefined;
     return {
       text,
       pageCountRasterized: pngs.length,
       engine: "poppler+tesseract.js",
+      meanConfidence,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

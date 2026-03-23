@@ -4,7 +4,7 @@ import {
   EM_DASH,
   acreageDisplayFromStructured,
   completedTimestampMs,
-  dealScoreFromMerged,
+  dealScoreFromExtractionColumns,
   documentTypeDisplay,
   leaseStatusFromStructured,
   mergeStructuredFields,
@@ -42,11 +42,38 @@ export type ExtractionWithCompletedDoc = {
   id: string;
   document_id: string;
   structured_data?: unknown;
+  /** Legacy JSON blob; merged with structured_data when both exist. */
   structured_json?: unknown;
   created_at: string;
   /** Supabase types may use an array for embedded FK rows; runtime is a single object. */
   documents: CompletedDocumentJoin | CompletedDocumentJoin[];
 };
+
+/** One-shot refresh of persisted scores that are still 0 after pipeline/scoring fixes (no new UI). */
+export async function triggerRescoreZeroDealScores(supabase: SupabaseClient): Promise<{
+  ok: boolean;
+  updated: number;
+}> {
+  if (typeof window === "undefined") {
+    return { ok: false, updated: 0 };
+  }
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    const res = await fetch("/api/documents/rescore-deal-scores", {
+      method: "POST",
+      credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; updated?: number };
+    return {
+      ok: res.ok && body.ok === true,
+      updated: typeof body.updated === "number" ? body.updated : 0,
+    };
+  } catch {
+    return { ok: false, updated: 0 };
+  }
+}
 
 export type ProcessedDealRow = {
   id: string;
@@ -82,9 +109,8 @@ function singleJoinedDocument(
 
 /** Maps extraction + completed document to UI row; location fields come from structured_data. */
 export function buildProcessedDealRowFromExtractionJoin(row: ExtractionWithCompletedDoc): ProcessedDealRow {
-  const data = row.structured_data || row.structured_json || {};
-  const merged = mergeStructuredFields(data);
-  const dealScore = dealScoreFromMerged(merged);
+  const merged = mergeStructuredFields(row.structured_data, row.structured_json);
+  const dealScore = dealScoreFromExtractionColumns(row.structured_data, row.structured_json);
   const doc = singleJoinedDocument(row.documents);
   const drillingProximityPhrase = shortDrillingProximityPhrase(merged);
   if (!doc) {
@@ -125,10 +151,12 @@ export function buildProcessedDealRow(
   doc: DocumentDealListRow,
   extraction: ExtractionListRow | undefined
 ): ProcessedDealRow {
-  const data =
-    extraction != null ? extraction.structured_data || extraction.structured_json || {} : {};
-  const merged = extraction != null ? mergeStructuredFields(data) : {};
-  const dealScore = dealScoreFromMerged(merged);
+  const merged =
+    extraction != null ? mergeStructuredFields(extraction.structured_data, extraction.structured_json) : {};
+  const dealScore =
+    extraction != null
+      ? dealScoreFromExtractionColumns(extraction.structured_data, extraction.structured_json)
+      : null;
   return {
     id: doc.id,
     file_name: doc.file_name,
@@ -169,6 +197,7 @@ const EXTRACTION_WITH_DOC_SELECT = `
   id,
   document_id,
   structured_data,
+  structured_json,
   created_at,
   documents!inner (
     status,
@@ -186,7 +215,9 @@ export async function fetchProcessedDeals(
     .from("document_extractions")
     .select(EXTRACTION_WITH_DOC_SELECT)
     .eq("documents.status", "completed")
-    .not("structured_data->deal_score", "is", null);
+    .or(
+      "structured_data->deal_score.not.is.null,structured_json->deal_score.not.is.null"
+    );
 
   if (extErr) {
     return {
@@ -212,7 +243,9 @@ export async function fetchProcessedDealById(
     .select(EXTRACTION_WITH_DOC_SELECT)
     .eq("document_id", id)
     .eq("documents.status", "completed")
-    .not("structured_data->deal_score", "is", null)
+    .or(
+      "structured_data->deal_score.not.is.null,structured_json->deal_score.not.is.null"
+    )
     .maybeSingle();
 
   if (extErr) {

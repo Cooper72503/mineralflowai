@@ -2,13 +2,20 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { gradeLetter } from "@/lib/deals/dashboard-normalize";
+import {
+  dealGradeFullLabelFromScore,
+  dealScoreDisplayValue,
+  dealScoreFromExtractionColumns,
+  dealScoreFromStructuredBlobOnly,
+  getGradeFromScore,
+  gradeLetterFromDealScore,
+} from "@/lib/deals/dashboard-normalize";
 import { EM_DASH, fetchProcessedDealById, type ProcessedDealRow } from "@/lib/deals/processed-deals-query";
 import { DealScoreHotBadge } from "@/app/components/DealScoreHotBadge";
 
-function gradeBadgeStyle(letter: "A" | "B" | "C" | null): CSSProperties {
+function gradeBadgeStyle(letter: "A" | "B" | "C" | "D" | null): CSSProperties {
   if (letter === "A") {
     return { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" };
   }
@@ -18,7 +25,27 @@ function gradeBadgeStyle(letter: "A" | "B" | "C" | null): CSSProperties {
   if (letter === "C") {
     return { background: "#fee2e2", color: "#b91c1c", border: "1px solid #fecaca" };
   }
+  if (letter === "D") {
+    return { background: "#f3f4f6", color: "#4b5563", border: "1px solid #e5e7eb" };
+  }
   return { background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" };
+}
+
+function logLeadDetailDealScores(
+  label: string,
+  structured_data: unknown,
+  structured_json: unknown,
+  scoreDisplayed: number | null
+) {
+  const fromData = dealScoreFromStructuredBlobOnly(structured_data)?.score ?? null;
+  const fromJson = dealScoreFromStructuredBlobOnly(structured_json)?.score ?? null;
+  const fromMerge = dealScoreFromExtractionColumns(structured_data, structured_json)?.score ?? null;
+  console.log(`[lead-detail] ${label}`, {
+    "SCORE FROM STRUCTURED_DATA": fromData,
+    "SCORE FROM STRUCTURED_JSON": fromJson,
+    "SCORE FROM MERGE": fromMerge,
+    "SCORE DISPLAYED": scoreDisplayed,
+  });
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -41,6 +68,7 @@ export default function LeadDetailPage() {
   const [row, setRow] = useState<ProcessedDealRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const syncOncePerLoadRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -49,6 +77,7 @@ export default function LeadDetailPage() {
       setError("Missing lead id.");
       return;
     }
+    syncOncePerLoadRef.current = false;
     setLoading(true);
     setError(null);
     try {
@@ -61,6 +90,54 @@ export default function LeadDetailPage() {
       setRow(next);
       if (!next) {
         setError(null);
+        return;
+      }
+
+      const { data: extBlob } = await supabase
+        .from("document_extractions")
+        .select("structured_data, structured_json")
+        .eq("document_id", id)
+        .maybeSingle();
+      const blob = extBlob as { structured_data: unknown; structured_json: unknown } | null;
+      logLeadDetailDealScores(
+        "on load",
+        blob?.structured_data,
+        blob?.structured_json,
+        next.dealScore?.score ?? null
+      );
+
+      if (!syncOncePerLoadRef.current) {
+        syncOncePerLoadRef.current = true;
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData.session?.access_token;
+          const res = await fetch(`/api/documents/${id}/sync-deal-score`, {
+            method: "POST",
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          });
+          const body = (await res.json().catch(() => ({}))) as { ok?: boolean; updated?: boolean };
+          if (res.ok && body.ok === true) {
+            const { row: refreshed } = await fetchProcessedDealById(supabase, id);
+            if (refreshed) {
+              setRow(refreshed);
+              const { data: extAfter } = await supabase
+                .from("document_extractions")
+                .select("structured_data, structured_json")
+                .eq("document_id", id)
+                .maybeSingle();
+              const b = extAfter as { structured_data: unknown; structured_json: unknown } | null;
+              logLeadDetailDealScores(
+                "after sync-deal-score",
+                b?.structured_data,
+                b?.structured_json,
+                refreshed.dealScore?.score ?? null
+              );
+            }
+          }
+        } catch {
+          syncOncePerLoadRef.current = false;
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load lead.");
@@ -74,7 +151,16 @@ export default function LeadDetailPage() {
     load();
   }, [load]);
 
-  const letter = row ? gradeLetter(row.dealScore?.grade ?? null) : null;
+  useEffect(() => {
+    if (!row?.dealScore) return;
+    console.log("SCORE LOADED", row.dealScore.score);
+    console.log("GRADE LOADED", row.dealScore.grade);
+    console.log("GRADE FROM SCORE", getGradeFromScore(row.dealScore.score));
+    console.log("[score-debug] score =", row.dealScore.score);
+    console.log("[score-debug] grade =", getGradeFromScore(row.dealScore.score));
+  }, [row]);
+
+  const letter = row ? gradeLetterFromDealScore(row.dealScore) : null;
 
   return (
     <div className="container">
@@ -130,10 +216,14 @@ export default function LeadDetailPage() {
             <p style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "0.35rem" }}>
               <span>Score</span>
               <span style={{ fontWeight: 600 }}>
-                {row.dealScore != null ? row.dealScore.score : EM_DASH}
+                {dealScoreDisplayValue(row.dealScore)}
               </span>
-              <DealScoreHotBadge score={row.dealScore?.score} />
-              {row.dealScore && <span>· {row.dealScore.grade}</span>}
+              <DealScoreHotBadge
+                score={row.dealScore?.incomplete_data ? undefined : row.dealScore?.score}
+              />
+              {row.dealScore && (
+                <span>· {dealGradeFullLabelFromScore(row.dealScore.score)}</span>
+              )}
             </p>
           </div>
 

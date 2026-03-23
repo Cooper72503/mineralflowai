@@ -5,11 +5,26 @@
  */
 
 import OpenAI from "openai";
+import {
+  cleanExtractedDocumentText,
+  estimateExtractedTextConfidence,
+} from "./extracted-text-quality";
 import { ocrPdfWithPopplerAndTesseract } from "./pdf-ocr";
+
+/** Below this text-layer heuristic, run Poppler + Tesseract and prefer OCR output when substantial. */
+const TEXT_LAYER_CONFIDENCE_OCR_THRESHOLD = 0.7;
+/** When replacing low-confidence text layer, require at least this many OCR chars. */
+const MIN_OCR_CHARS_TO_ADOPT = 25;
+/** When the PDF text layer is empty, accept shorter OCR output as the only source. */
+const MIN_OCR_CHARS_WHEN_PRIMARY_EMPTY = 8;
 
 export {
   calculateDealScore,
   calendarMonthsSince,
+  dealGradeFullLabelFromScore,
+  dealLetterGradeFromScore,
+  getGradeFromScore,
+  isTexasDealContext,
   monthsSinceDate,
   parseDocumentDate,
   type DealScoreResult,
@@ -150,6 +165,7 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
 
   let primaryText = "";
   let primaryParseError: string | null = null;
+  let numpages = 0;
 
   try {
     const pdfParseModule = await import("pdf-parse");
@@ -158,9 +174,13 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
     if (typeof pdfParseUnknown !== "function") {
       throw new Error("pdf-parse: expected a function export (v1 API).");
     }
-    const pdfParse = pdfParseUnknown as (data: Buffer, options?: { max?: number }) => Promise<{ text?: string }>;
+    const pdfParse = pdfParseUnknown as (
+      data: Buffer,
+      options?: { max?: number }
+    ) => Promise<{ text?: string; numpages?: number }>;
     const data = await pdfParse(buffer, { max: 0 });
     primaryText = typeof data?.text === "string" ? data.text.trim() : "";
+    numpages = typeof data?.numpages === "number" && data.numpages >= 0 ? data.numpages : 0;
   } catch (err) {
     primaryParseError = err instanceof Error ? err.message : String(err);
     console.warn("[extractTextFromPdf] pdf-parse (v1) failed; will try OCR if applicable", {
@@ -169,34 +189,90 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
     });
   }
 
-  let finalText = primaryText;
+  const textLayerConfidence = estimateExtractedTextConfidence(primaryText, { numpages });
+  const lowTextLayerQuality =
+    primaryText.length > 0 && textLayerConfidence < TEXT_LAYER_CONFIDENCE_OCR_THRESHOLD;
+  const primaryEmpty = !primaryText;
+  const shouldRunOcr = primaryEmpty || lowTextLayerQuality;
+
+  let finalText = "";
   let ocrUsed = false;
   let ocrMeta: Awaited<ReturnType<typeof ocrPdfWithPopplerAndTesseract>> | null = null;
+  let ocrAdopted = false;
+  /** Why OCR ran: empty embedded text or low heuristic text-layer confidence. */
+  let ocrTriggerReason: "none" | "empty_primary" | "low_text_layer_confidence" = "none";
+  if (primaryEmpty) ocrTriggerReason = "empty_primary";
+  else if (lowTextLayerQuality) ocrTriggerReason = "low_text_layer_confidence";
 
-  if (!finalText) {
-    console.log("[extractTextFromPdf] Primary text empty or parse failed; starting OCR fallback", { sizeBytes });
+  if (shouldRunOcr) {
+    console.log("[extractTextFromPdf] Starting OCR (empty or low text-layer confidence)", {
+      sizeBytes,
+      primaryEmpty,
+      textLayerConfidence,
+      numpages,
+      threshold: TEXT_LAYER_CONFIDENCE_OCR_THRESHOLD,
+    });
     ocrMeta = await ocrPdfWithPopplerAndTesseract(buffer);
-    const ocrText = (ocrMeta.text ?? "").trim();
-    if (ocrText) {
-      finalText = ocrText;
-      ocrUsed = true;
+    const ocrRaw = (ocrMeta.text ?? "").trim();
+    const ocrMean = ocrMeta.meanConfidence;
+    const preferOcrOverLowQualityPrimary =
+      ocrRaw.length >= MIN_OCR_CHARS_TO_ADOPT &&
+      !(
+        ocrMean != null &&
+        ocrMean < 12 &&
+        primaryText.length > ocrRaw.length * 2.5
+      );
+
+    if (ocrRaw.length > 0) {
+      if (primaryEmpty) {
+        if (ocrRaw.length >= MIN_OCR_CHARS_WHEN_PRIMARY_EMPTY) {
+          finalText = cleanExtractedDocumentText(ocrRaw);
+          ocrUsed = true;
+          ocrAdopted = true;
+        } else {
+          finalText = "";
+        }
+      } else if (preferOcrOverLowQualityPrimary) {
+        finalText = cleanExtractedDocumentText(ocrRaw);
+        ocrUsed = true;
+        ocrAdopted = true;
+      } else {
+        finalText = cleanExtractedDocumentText(primaryText);
+      }
+    } else if (primaryText) {
+      finalText = cleanExtractedDocumentText(primaryText);
+    } else {
+      finalText = "";
     }
+
     console.log("[extractTextFromPdf] OCR_FALLBACK_RESULT", {
       ocrUsed,
+      ocrAdopted,
+      ocrTriggerReason,
       ocrPageCount: ocrMeta.pageCountRasterized,
+      ocrMeanConfidence: ocrMeta.meanConfidence ?? null,
       ocrSkippedReason: ocrMeta.skippedReason,
       ocrErrorMessage: ocrMeta.errorMessage,
-      textLength: ocrText.length,
+      ocrRawLength: ocrRaw.length,
+      finalTextLength: finalText.length,
     });
+  } else {
+    finalText = cleanExtractedDocumentText(primaryText);
   }
 
   const extractionMeta: Record<string, unknown> = {
     pdfParser: "pdf-parse-v1",
+    numpages,
     primaryTextLength: primaryText.length,
+    textLayerConfidence,
+    textLayerConfidenceOcrThreshold: TEXT_LAYER_CONFIDENCE_OCR_THRESHOLD,
     primaryParseError,
     ocrUsed,
+    ocrAdopted,
+    ocrTriggerReason: shouldRunOcr ? ocrTriggerReason : "none",
     ocrEngine: ocrMeta?.engine ?? null,
     ocrPageCount: ocrMeta?.pageCountRasterized ?? 0,
+    ocrMeanConfidence: ocrMeta?.meanConfidence ?? null,
     ocrSkippedReason: ocrMeta?.skippedReason ?? null,
     ocrErrorMessage: ocrMeta?.errorMessage ?? null,
   };
@@ -277,6 +353,9 @@ const LEASE_PARSE_SYSTEM = `You are a parser for mineral lease and deed document
 - term_length (string or null): primary term or duration
 - document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Warranty Deed", "Oil and Gas Lease" — use null if unclear
 - confidence_score (number): your confidence in the overall extraction, between 0 and 1 (e.g. 0.85).
+
+The text may be from OCR or a weak PDF text layer: skip isolated garbage lines, infer words split across line breaks, and handle common OCR confusions (0 vs O, 1 vs l vs I, rn vs m) when resolving names, counties, states, and legal descriptions.
+
 Return only valid JSON, no markdown or extra text.`;
 
 function safeParseJsonObject(content: string, stepName: string): Record<string, unknown> {
@@ -320,7 +399,16 @@ export async function parseLeaseFieldsFromText(
     console.error("[parseLeaseFieldsFromText]", msg);
     throw new Error(`OPENAI_CALL_START: ${msg}`);
   }
-  if (extractedText.trim() === "") {
+  const trimmedInput = extractedText.trim();
+  const normalizedForModel =
+    trimmedInput.length === 0
+      ? ""
+      : (() => {
+          const cleaned = cleanExtractedDocumentText(extractedText);
+          return cleaned.length > 0 ? cleaned : trimmedInput;
+        })();
+
+  if (normalizedForModel === "") {
     console.warn("[parseLeaseFieldsFromText] Empty extracted text; returning nulls with confidence 0.");
     return {
       lessor: null,
@@ -345,7 +433,10 @@ export async function parseLeaseFieldsFromText(
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: LEASE_PARSE_SYSTEM },
-        { role: "user", content: `Extract lease fields from this document text:\n\n${extractedText.slice(0, 12000)}` },
+        {
+          role: "user",
+          content: `Extract lease fields from this document text:\n\n${normalizedForModel.slice(0, 12000)}`,
+        },
       ],
       response_format: { type: "json_object" },
     });

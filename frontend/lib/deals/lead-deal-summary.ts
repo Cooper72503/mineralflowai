@@ -1,5 +1,7 @@
-import { EM_DASH } from "@/lib/deals/dashboard-normalize";
-import type { ProcessedDealRow } from "@/lib/deals/processed-deals-query";
+import type { DealScoreResult } from "@/lib/document-processing/deal-score";
+
+/** Same sentinel as dashboard-normalize; kept local so this module stays importable from deal-score without cycles. */
+const EM_DASH = "—";
 
 const CLOSING_LONG = "— strong acquisition opportunity";
 const CLOSING_SHORT = "— strong opportunity";
@@ -163,10 +165,20 @@ function drillingClause(reasons: string[]): string | null {
   return null;
 }
 
+/** Fields used to render the one-line Leads summary (subset of {@link ProcessedDealRow}). */
+export type LeadDealSummaryInput = {
+  acres: string;
+  county: string | null;
+  state: string | null;
+  dealScore: DealScoreResult | null;
+  leaseStatus: string;
+  drillingProximityPhrase: string | null;
+};
+
 /**
  * One-line investment-style summary for Leads cards; target ≤20 words.
  */
-export function buildLeadDealSummary(row: ProcessedDealRow): string {
+export function buildLeadDealSummary(row: LeadDealSummaryInput): string {
   const acre = acreagePhrase(row.acres);
   const locFull = locationPhrase(row.county, row.state);
   const locCountyOnly = row.county?.trim()

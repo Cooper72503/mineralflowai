@@ -2,18 +2,21 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/with-timeout";
 
 const SESSION_CHECK_TIMEOUT_MS = 10_000;
 import {
+  dealScoreDisplayValue,
   EM_DASH,
-  gradeLetter,
+  getGradeFromScore,
+  gradeLetterFromDealScore,
 } from "@/lib/deals/dashboard-normalize";
 import {
   fetchProcessedDeals,
   sortProcessedDealsByScore,
+  triggerRescoreZeroDealScores,
   type ProcessedDealRow,
 } from "@/lib/deals/processed-deals-query";
 import { DealScoreHotBadge } from "@/app/components/DealScoreHotBadge";
@@ -31,7 +34,7 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-function gradeBadgeStyle(letter: "A" | "B" | "C" | null): CSSProperties {
+function gradeBadgeStyle(letter: "A" | "B" | "C" | "D" | null): CSSProperties {
   if (letter === "A") {
     return { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" };
   }
@@ -40,6 +43,9 @@ function gradeBadgeStyle(letter: "A" | "B" | "C" | null): CSSProperties {
   }
   if (letter === "C") {
     return { background: "#fee2e2", color: "#b91c1c", border: "1px solid #fecaca" };
+  }
+  if (letter === "D") {
+    return { background: "#f3f4f6", color: "#4b5563", border: "1px solid #e5e7eb" };
   }
   return { background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" };
 }
@@ -54,6 +60,7 @@ export default function DashboardPage() {
   const [gradeFilter, setGradeFilter] = useState<"all" | "A" | "B" | "C">("all");
   /** Empty = no minimum; otherwise show deals with score >= this value (inclusive). */
   const [minScoreInput, setMinScoreInput] = useState("");
+  const rescoreOnceRef = useRef(false);
 
   const loadDeals = useCallback(async () => {
     setLoading(true);
@@ -66,6 +73,27 @@ export default function DashboardPage() {
         return;
       }
       setRows(next);
+      for (const r of next) {
+        if (!r.dealScore) continue;
+        console.log("SCORE LOADED", r.id, r.dealScore.score);
+        console.log("GRADE LOADED", r.id, r.dealScore.grade);
+        console.log("GRADE FROM SCORE", r.id, getGradeFromScore(r.dealScore.score));
+        console.log("[score-debug] score =", r.dealScore.score);
+        console.log("[score-debug] grade =", getGradeFromScore(r.dealScore.score));
+      }
+      if (
+        next.some(
+          (r) => (r.dealScore?.score ?? -1) === 0 && !r.dealScore?.incomplete_data
+        ) &&
+        !rescoreOnceRef.current
+      ) {
+        rescoreOnceRef.current = true;
+        const { ok, updated } = await triggerRescoreZeroDealScores(supabase);
+        if (ok && updated > 0) {
+          const { rows: refreshed, error: refreshErr } = await fetchProcessedDeals(supabase);
+          if (!refreshErr) setRows(refreshed);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load deals.");
       setRows([]);
@@ -114,7 +142,7 @@ export default function DashboardPage() {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (gradeFilter !== "all") {
-        const letter = gradeLetter(r.dealScore?.grade ?? null);
+        const letter = gradeLetterFromDealScore(r.dealScore);
         if (letter !== gradeFilter) return false;
       }
       if (minScoreThreshold !== null) {
@@ -134,7 +162,7 @@ export default function DashboardPage() {
     let b = 0;
     let c = 0;
     filtered.forEach((r) => {
-      const letter = gradeLetter(r.dealScore?.grade ?? null);
+      const letter = gradeLetterFromDealScore(r.dealScore);
       if (letter === "A") a += 1;
       else if (letter === "B") b += 1;
       else if (letter === "C") c += 1;
@@ -274,7 +302,7 @@ export default function DashboardPage() {
                   </thead>
                   <tbody>
                     {displayRows.map((r) => {
-                      const letter = gradeLetter(r.dealScore?.grade ?? null);
+                      const letter = gradeLetterFromDealScore(r.dealScore);
                       const reasons = r.dealScore?.reasons?.slice(0, 2) ?? [];
                       const completedLabel = formatDate(r.completed_at ?? r.processed_at);
                       return (
@@ -309,8 +337,10 @@ export default function DashboardPage() {
                                 gap: "0.15rem",
                               }}
                             >
-                              {r.dealScore ? r.dealScore.score : EM_DASH}
-                              <DealScoreHotBadge score={r.dealScore?.score} />
+                              {dealScoreDisplayValue(r.dealScore)}
+                              <DealScoreHotBadge
+                                score={r.dealScore?.incomplete_data ? undefined : r.dealScore?.score}
+                              />
                             </span>
                           </td>
                           <td>

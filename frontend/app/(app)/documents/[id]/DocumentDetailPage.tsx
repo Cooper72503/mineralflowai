@@ -2,10 +2,31 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { DealScoreResult } from "@/lib/document-processing/deal-score";
+import { getGradeFromScore } from "@/lib/document-processing/deal-score";
 import { DealScoreHotBadge } from "@/app/components/DealScoreHotBadge";
+import {
+  coerceDealScoreResult,
+  dealGradeFullLabelFromScore,
+  dealScoreDisplayValue,
+  dealScoreFromExtractionColumns,
+  dealScoreFromStructuredBlobOnly,
+  mergeStructuredFields,
+} from "@/lib/deals/dashboard-normalize";
+
+function logDocumentDetailDealScores(ext: ExtractionRow, scoreDisplayed: number | null, label: string) {
+  const fromData = dealScoreFromStructuredBlobOnly(ext.structured_data)?.score ?? null;
+  const fromJson = dealScoreFromStructuredBlobOnly(ext.structured_json)?.score ?? null;
+  const fromMerge = dealScoreFromExtractionColumns(ext.structured_data, ext.structured_json)?.score ?? null;
+  console.log(`[document-detail] ${label}`, {
+    "SCORE FROM STRUCTURED_DATA": fromData,
+    "SCORE FROM STRUCTURED_JSON": fromJson,
+    "SCORE FROM MERGE": fromMerge,
+    "SCORE DISPLAYED": scoreDisplayed,
+  });
+}
 
 const EXTRACTION_SELECT =
   "id, document_id, extracted_text, lessor, lessee, county, state, legal_description, effective_date, recording_date, royalty_rate, term_length, confidence_score, created_at, structured_data, structured_json";
@@ -43,53 +64,34 @@ type ExtractionRow = {
   structured_json?: unknown;
 };
 
-function isDealScoreResult(value: unknown): value is DealScoreResult {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
-  const o = value as Record<string, unknown>;
-  if (typeof o.score !== "number" || !Number.isFinite(o.score)) return false;
-  const g = o.grade;
-  if (g !== "A Deal" && g !== "B Deal" && g !== "C Deal") return false;
-  if (!Array.isArray(o.reasons) || !o.reasons.every((r) => typeof r === "string")) return false;
-  return true;
-}
-
-function dealScoreFromStructuredBlob(blob: unknown): DealScoreResult | null {
-  if (blob == null || typeof blob !== "object" || Array.isArray(blob)) return null;
-  const ds = (blob as Record<string, unknown>).deal_score;
-  return isDealScoreResult(ds) ? ds : null;
-}
-
-function extractDealScoreFromExtraction(row: ExtractionRow | null): DealScoreResult | null {
-  if (!row) return null;
-  return (
-    dealScoreFromStructuredBlob(row.structured_data) ?? dealScoreFromStructuredBlob(row.structured_json) ?? null
-  );
-}
-
-/** Ensures API `deal_score` is represented on the row so the card renders without waiting for another fetch. */
+/** Merges legacy + primary JSON (same as dashboard) and applies API `deal_score` for immediate UI. */
 function attachDealScoreFromApi(row: ExtractionRow, dealScore: unknown): ExtractionRow {
-  if (!isDealScoreResult(dealScore)) return row;
-  if (extractDealScoreFromExtraction(row)) return row;
-  const existing =
-    row.structured_data != null && typeof row.structured_data === "object" && !Array.isArray(row.structured_data)
-      ? { ...(row.structured_data as Record<string, unknown>) }
-      : {};
-  return { ...row, structured_data: { ...existing, deal_score: dealScore } };
+  const coerced = coerceDealScoreResult(dealScore);
+  if (!coerced) return row;
+  const merged = mergeStructuredFields(row.structured_data, row.structured_json);
+  return { ...row, structured_data: { ...merged, deal_score: coerced } };
 }
 
-function dealScoreCardSurface(grade: DealScoreResult["grade"]): { background: string; borderColor: string } {
-  switch (grade) {
-    case "A Deal":
+function dealScoreCardSurface(letter: ReturnType<typeof getGradeFromScore>): {
+  background: string;
+  borderColor: string;
+} {
+  switch (letter) {
+    case "A":
       return { background: "#dcfce7", borderColor: "#86efac" };
-    case "B Deal":
+    case "B":
       return { background: "#fef9c3", borderColor: "#fde047" };
-    case "C Deal":
+    case "C":
       return { background: "#fee2e2", borderColor: "#fecaca" };
+    case "D":
+      return { background: "#f3f4f6", borderColor: "#e5e7eb" };
   }
 }
 
 function DealScoreCard({ dealScore }: { dealScore: DealScoreResult }) {
-  const surface = dealScoreCardSurface(dealScore.grade);
+  const letter = getGradeFromScore(dealScore.score);
+  const surface = dealScoreCardSurface(letter);
+  const gradeLabel = dealGradeFullLabelFromScore(dealScore.score);
   return (
     <div
       className="card"
@@ -104,7 +106,7 @@ function DealScoreCard({ dealScore }: { dealScore: DealScoreResult }) {
       <dl style={{ display: "flex", flexDirection: "column", gap: "0.65rem", marginBottom: "0.75rem" }}>
         <div>
           <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>Grade</dt>
-          <dd style={{ fontSize: "0.95rem", margin: 0 }}>{dealScore.grade}</dd>
+          <dd style={{ fontSize: "0.95rem", margin: 0 }}>{gradeLabel}</dd>
         </div>
         <div>
           <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>Score</dt>
@@ -118,8 +120,10 @@ function DealScoreCard({ dealScore }: { dealScore: DealScoreResult }) {
               gap: "0.15rem",
             }}
           >
-            {dealScore.score}
-            <DealScoreHotBadge score={dealScore.score} />
+            {dealScoreDisplayValue(dealScore)}
+            <DealScoreHotBadge
+              score={dealScore.incomplete_data ? undefined : dealScore.score}
+            />
           </dd>
         </div>
         <div>
@@ -187,17 +191,44 @@ export default function DocumentDetailPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [dealScoreOverride, setDealScoreOverride] = useState<DealScoreResult | null>(null);
+  const dealScoreOverrideRef = useRef<DealScoreResult | null>(null);
+  const syncRequestedRef = useRef(false);
+  const [syncDebugBusy, setSyncDebugBusy] = useState(false);
+
+  useEffect(() => {
+    dealScoreOverrideRef.current = dealScoreOverride;
+  }, [dealScoreOverride]);
 
   const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     setDealScoreOverride(null);
+    syncRequestedRef.current = false;
   }, [id]);
 
-  const displayDealScore = useMemo(
-    () => extractDealScoreFromExtraction(extraction) ?? dealScoreOverride,
-    [extraction, dealScoreOverride]
-  );
+  const displayDealScore = useMemo(() => {
+    if (dealScoreOverride) return dealScoreOverride;
+    if (!extraction) return null;
+    return dealScoreFromExtractionColumns(extraction.structured_data, extraction.structured_json);
+  }, [extraction, dealScoreOverride]);
+
+  useEffect(() => {
+    if (!displayDealScore) return;
+    console.log("SCORE LOADED", displayDealScore.score);
+    console.log("GRADE LOADED", displayDealScore.grade);
+    console.log("GRADE FROM SCORE", getGradeFromScore(displayDealScore.score));
+    console.log("[score-debug] score =", displayDealScore.score);
+    console.log("[score-debug] grade =", getGradeFromScore(displayDealScore.score));
+  }, [displayDealScore]);
+
+  useEffect(() => {
+    if (!extraction) return;
+    logDocumentDetailDealScores(
+      extraction,
+      displayDealScore?.score ?? null,
+      "on load"
+    );
+  }, [extraction, displayDealScore]);
 
   useEffect(() => {
     if (!id) {
@@ -245,7 +276,10 @@ export default function DocumentDetailPage() {
           .select(EXTRACTION_SELECT)
           .eq("document_id", id)
           .maybeSingle();
-        if (!cancelled) setExtraction((extData as ExtractionRow) ?? null);
+        if (!cancelled) {
+          const ext = (extData as ExtractionRow) ?? null;
+          setExtraction(ext);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load document.");
@@ -261,6 +295,55 @@ export default function DocumentDetailPage() {
       cancelled = true;
     };
   }, [id, supabase]);
+
+  useEffect(() => {
+    if (processing) {
+      syncRequestedRef.current = false;
+    }
+  }, [processing]);
+
+  useEffect(() => {
+    if (processing) return;
+    if (!id || !doc || doc.status !== "completed" || !extraction?.id) return;
+    if (syncRequestedRef.current) return;
+    syncRequestedRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        const res = await fetch(`/api/documents/${id}/sync-deal-score`, {
+          method: "POST",
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        const body = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          updated?: boolean;
+        };
+        if (cancelled || !res.ok || body.ok !== true) {
+          if (!cancelled) syncRequestedRef.current = false;
+          return;
+        }
+
+        const { data: extData } = await supabase
+          .from("document_extractions")
+          .select(EXTRACTION_SELECT)
+          .eq("document_id", id)
+          .maybeSingle();
+        if (cancelled || !extData) return;
+        const extRow = extData as ExtractionRow;
+        setExtraction(extRow);
+      } catch {
+        syncRequestedRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, doc?.status, extraction?.id, processing, supabase]);
 
   async function handleOpenDownload() {
     setActionError(null);
@@ -290,6 +373,39 @@ export default function DocumentDetailPage() {
       }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Download failed.");
+    }
+  }
+
+  async function handleDebugResyncDealScore() {
+    if (!id) return;
+    setSyncDebugBusy(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const res = await fetch(`/api/documents/${id}/sync-deal-score`, {
+        method: "POST",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      await res.json().catch(() => ({}));
+      const { data: extData } = await supabase
+        .from("document_extractions")
+        .select(EXTRACTION_SELECT)
+        .eq("document_id", id)
+        .maybeSingle();
+      if (extData) {
+        const extRow = extData as ExtractionRow;
+        setExtraction(extRow);
+        const mergedScore =
+          dealScoreFromExtractionColumns(extRow.structured_data, extRow.structured_json)?.score ?? null;
+        logDocumentDetailDealScores(
+          extRow,
+          dealScoreOverrideRef.current?.score ?? mergedScore,
+          "after debug re-sync"
+        );
+      }
+    } finally {
+      setSyncDebugBusy(false);
     }
   }
 
@@ -341,8 +457,9 @@ export default function DocumentDetailPage() {
         return;
       }
 
-      if (isDealScoreResult(body?.deal_score)) {
-        setDealScoreOverride(body.deal_score);
+      const coercedScore = coerceDealScoreResult(body?.deal_score);
+      if (coercedScore) {
+        setDealScoreOverride(coercedScore);
       }
 
       // Prefer the structured extraction returned by the API.
@@ -638,6 +755,16 @@ export default function DocumentDetailPage() {
         >
           {processing || doc.status === "processing" || doc.status === "queued" ? "Processing…" : "Process Document"}
         </button>
+        {doc.status === "completed" && extraction?.id ? (
+          <button
+            type="button"
+            className="btn btnSecondary"
+            onClick={handleDebugResyncDealScore}
+            disabled={syncDebugBusy}
+          >
+            {syncDebugBusy ? "Re-syncing…" : "Re-sync deal score (debug)"}
+          </button>
+        ) : null}
       </div>
     </div>
   );

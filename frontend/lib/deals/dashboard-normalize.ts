@@ -1,7 +1,20 @@
-import type { DealScoreResult } from "@/lib/document-processing/deal-score";
+import {
+  dealGradeFullLabelFromScore,
+  getGradeFromScore,
+  type DealScoreResult,
+} from "@/lib/document-processing/deal-score";
+
+export { getGradeFromScore, dealGradeFullLabelFromScore };
 import { parseAcreageFromLegalDescription } from "@/lib/document-processing/parse-acreage-from-legal";
 
 export const EM_DASH = "—";
+
+/** Numeric score, or a fixed label when scoring was skipped for incomplete extraction. */
+export function dealScoreDisplayValue(dealScore: DealScoreResult | null | undefined): string {
+  if (dealScore == null) return EM_DASH;
+  if (dealScore.incomplete_data) return "Incomplete data";
+  return String(dealScore.score);
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -34,19 +47,68 @@ export function mergeStructuredFields(
   return { ...fromLegacy, ...fromPrimary };
 }
 
+function normalizedNumericScore(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = parseFloat(value.trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
 export function isDealScoreResult(value: unknown): value is DealScoreResult {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
   const o = value as Record<string, unknown>;
-  if (typeof o.score !== "number" || !Number.isFinite(o.score)) return false;
-  const g = o.grade;
-  if (g !== "A Deal" && g !== "B Deal" && g !== "C Deal") return false;
-  if (!Array.isArray(o.reasons) || !o.reasons.every((r) => typeof r === "string")) return false;
+  if (normalizedNumericScore(o.score) == null) return false;
+  const reasons = o.reasons;
+  if (reasons != null && (!Array.isArray(reasons) || !reasons.every((r) => typeof r === "string"))) {
+    return false;
+  }
   return true;
+}
+
+/**
+ * Coerces any persisted/API `deal_score` blob: numeric score is canonical; grade is always recomputed.
+ */
+export function coerceDealScoreResult(value: unknown): DealScoreResult | null {
+  if (!isDealScoreResult(value)) return null;
+  const o = value as Record<string, unknown>;
+  const n = normalizedNumericScore(o.score);
+  if (n == null) return null;
+  const clamped = Math.round(Math.max(0, Math.min(100, n)));
+  const reasonsRaw = o.reasons;
+  const reasons =
+    Array.isArray(reasonsRaw) && reasonsRaw.every((r) => typeof r === "string")
+      ? [...reasonsRaw]
+      : [];
+  const incomplete = o.incomplete_data === true;
+  return {
+    score: clamped,
+    grade: dealGradeFullLabelFromScore(clamped),
+    reasons,
+    ...(incomplete ? { incomplete_data: true as const } : {}),
+  };
 }
 
 export function dealScoreFromMerged(merged: Record<string, unknown>): DealScoreResult | null {
   const ds = merged.deal_score;
-  return isDealScoreResult(ds) ? ds : null;
+  if (ds == null || typeof ds !== "object" || Array.isArray(ds)) return null;
+  return coerceDealScoreResult(ds);
+}
+
+/** `deal_score` from one JSON column only (no merge with the other column). */
+export function dealScoreFromStructuredBlobOnly(blob: unknown): DealScoreResult | null {
+  const r = coerceStructuredRecord(blob);
+  if (!r) return null;
+  return dealScoreFromMerged(r);
+}
+
+/** Same merge as dashboard / leads: `structured_json` then `structured_data` overwrites (including `deal_score`). */
+export function dealScoreFromExtractionColumns(
+  structured_data: unknown,
+  structured_json: unknown
+): DealScoreResult | null {
+  return dealScoreFromMerged(mergeStructuredFields(structured_data, structured_json));
 }
 
 function readNonEmptyString(value: unknown): string | undefined {
@@ -102,12 +164,12 @@ export function documentTypeDisplay(
   return readNonEmptyString(merged.document_type) ?? readNonEmptyString(fallback) ?? EM_DASH;
 }
 
-export function gradeLetter(grade: DealScoreResult["grade"] | null | undefined): "A" | "B" | "C" | null {
-  if (!grade) return null;
-  if (grade === "A Deal") return "A";
-  if (grade === "B Deal") return "B";
-  if (grade === "C Deal") return "C";
-  return null;
+/** Badge/filter letter — always from numeric score, never from stored grade text. */
+export function gradeLetterFromDealScore(
+  dealScore: DealScoreResult | null | undefined
+): "A" | "B" | "C" | "D" | null {
+  if (dealScore == null) return null;
+  return getGradeFromScore(dealScore.score);
 }
 
 export function completedTimestampMs(

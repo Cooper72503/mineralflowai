@@ -4,13 +4,19 @@ import {
   processDocumentContent,
   parseLeaseFieldsFromText,
   calculateDealScore,
-  parseAcreageFromLegalDescription,
   calendarMonthsSince,
+  dealGradeFullLabelFromScore,
+  getGradeFromScore,
   parseDocumentDate,
   type DealScoreResult,
 } from "@/lib/document-processing";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logAlertIfDealMatches } from "@/lib/alerts/check-on-deal-processed";
+import {
+  buildDealScoreInput,
+  mineralDeedSignalsForLeaseFallback,
+} from "@/lib/deals/build-deal-score-input";
+import { coerceDealScoreResult, dealScoreFromExtractionColumns } from "@/lib/deals/dashboard-normalize";
 
 const LOG_PREFIX = "[process-document]";
 const BUCKET_NAME = "documents";
@@ -59,25 +65,6 @@ function assertBuffer(value: unknown, stepName: string): asserts value is Buffer
   }
 }
 
-/** Matches deal-score `readNonEmptyString` for lease_status — values the scorer will actually use. */
-function hasUsableLeaseStatusForDealScore(input: Record<string, unknown>): boolean {
-  const v = input.lease_status;
-  if (v == null) return false;
-  if (typeof v === "string" && v.trim() !== "") return true;
-  return false;
-}
-
-/** True when the label clearly refers to a mineral deed (substring, case-insensitive). */
-function documentTypeIncludesMineralDeed(documentType: string | null | undefined): boolean {
-  if (typeof documentType !== "string") return false;
-  return documentType.toLowerCase().includes("mineral deed");
-}
-
-/** Phrase search on raw extracted text as specified for scoring fallback. */
-function extractedTextContainsMineralDeedPhrase(extractedText: string): boolean {
-  return extractedText.includes("MINERAL DEED");
-}
-
 function readNonEmptyStringForRecencyPreview(value: unknown): string | undefined {
   if (value == null) return undefined;
   if (typeof value === "string") {
@@ -110,26 +97,6 @@ function previewRecencyMonthsForDealScoreInput(input: Record<string, unknown>): 
   }
   if (recencyMonths === undefined) return null;
   return recencyMonths;
-}
-
-function mineralDeedSignalsForLeaseFallback(args: {
-  metadataDocumentType: string | null | undefined;
-  extractedText: string;
-  parsedDocumentType: string | null | undefined;
-}): string[] {
-  const signals: string[] = [];
-  if (documentTypeIncludesMineralDeed(args.metadataDocumentType)) {
-    const raw = typeof args.metadataDocumentType === "string" ? args.metadataDocumentType.trim() : "";
-    signals.push(raw ? `metadata_document_type:${raw}` : "metadata_document_type");
-  }
-  if (extractedTextContainsMineralDeedPhrase(args.extractedText)) {
-    signals.push("extracted_text:MINERAL DEED");
-  }
-  if (documentTypeIncludesMineralDeed(args.parsedDocumentType)) {
-    const raw = typeof args.parsedDocumentType === "string" ? args.parsedDocumentType.trim() : "";
-    signals.push(raw ? `parsed_document_type:${raw}` : "parsed_document_type");
-  }
-  return signals;
 }
 
 function isMissingColumnError(message: string, columnName: string): boolean {
@@ -713,24 +680,22 @@ export async function POST(
       assertString(extractedText, "DB_INSERT_START");
       log("EXTRACTION_INSERT_START");
 
-      const dealScoreInput: Record<string, unknown> = { ...optionalDealScoreInput };
-      dealScoreInput.recording_date = dealScoreInput.recording_date ?? parsed.recording_date;
-      dealScoreInput.effective_date = dealScoreInput.effective_date ?? parsed.effective_date;
-      if (dealScoreInput.acreage === undefined || dealScoreInput.acreage === null) {
-        const fromLegal = parseAcreageFromLegalDescription(parsed.legal_description);
-        if (fromLegal !== undefined) {
-          dealScoreInput.acreage = fromLegal;
-        }
-      }
       const mineralDeedSignals = mineralDeedSignalsForLeaseFallback({
         metadataDocumentType: doc.document_type,
         extractedText,
         parsedDocumentType: parsed.document_type,
       });
-      if (!hasUsableLeaseStatusForDealScore(dealScoreInput) && mineralDeedSignals.length > 0) {
-        dealScoreInput.lease_status = "none";
-      }
-      dealScoreInput.county = dealScoreInput.county ?? parsed.county ?? doc.county ?? null;
+      const dealScoreInput = buildDealScoreInput({
+        optionalBaseline: optionalDealScoreInput,
+        parsed,
+        doc: {
+          county: doc.county,
+          state: doc.state,
+          document_type: doc.document_type,
+        },
+        extractedText,
+        documentProcessedAtIso: new Date().toISOString(),
+      });
 
       const detectedDocumentTypeForLog =
         mineralDeedSignals.length > 0
@@ -748,8 +713,16 @@ export async function POST(
         final_deal_score_input: { ...dealScoreInput },
       });
 
-      const dealScore = calculateDealScore(dealScoreInput);
+      const dealScoreCalculated = calculateDealScore(dealScoreInput);
+      const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
       dealScoreResult = dealScore;
+      console.log("SCORE CALCULATED", dealScore.score);
+      console.log(`${LOG_PREFIX} SCORE CALCULATED`, {
+        documentId,
+        score: dealScore.score,
+        grade: dealGradeFullLabelFromScore(dealScore.score),
+        grade_letter: getGradeFromScore(dealScore.score),
+      });
 
       const rawAcreageForAlerts = dealScoreInput.acreage;
       if (typeof rawAcreageForAlerts === "number" && Number.isFinite(rawAcreageForAlerts)) {
@@ -984,6 +957,35 @@ export async function POST(
 
       if (saveSucceeded) {
         log("EXTRACTION_INSERT_SUCCESS", { attempt: successfulAttempt });
+        if (dealScoreResult && successfulAttempt && successfulAttempt !== "none") {
+          console.log("SCORE SAVED", dealScoreResult.score);
+          console.log(`${LOG_PREFIX} SCORE SAVED`, {
+            documentId,
+            score: dealScoreResult.score,
+            grade: dealGradeFullLabelFromScore(dealScoreResult.score),
+            structured_column: successfulAttempt,
+          });
+          const mirrorPayload =
+            successfulAttempt === "structured_data"
+              ? { structured_json: structuredExtraction }
+              : { structured_data: structuredExtraction };
+          const { error: mirrorErr } = await supabase
+            .from("document_extractions")
+            .update(mirrorPayload)
+            .eq("document_id", documentId);
+          if (mirrorErr) {
+            const m = mirrorErr.message ?? String(mirrorErr);
+            if (
+              !isMissingColumnError(m, "structured_data") &&
+              !isMissingColumnError(m, "structured_json")
+            ) {
+              console.warn(`${LOG_PREFIX} mirror structured sibling column failed`, {
+                documentId,
+                error: m,
+              });
+            }
+          }
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1030,6 +1032,24 @@ export async function POST(
         debug.fetch_saved_extraction_error = error.message;
       } else {
         savedExtraction = data as SavedExtraction;
+      }
+      if (savedExtraction) {
+        const loaded = dealScoreFromExtractionColumns(
+          savedExtraction.structured_data,
+          savedExtraction.structured_json
+        );
+        console.log("SCORE LOADED", loaded?.score ?? null);
+        console.log("GRADE LOADED", loaded?.grade ?? null);
+        console.log(
+          "GRADE FROM SCORE",
+          loaded != null ? getGradeFromScore(loaded.score) : null
+        );
+        console.log(`${LOG_PREFIX} SCORE LOADED`, {
+          documentId,
+          score: loaded?.score ?? null,
+          grade: loaded != null ? dealGradeFullLabelFromScore(loaded.score) : null,
+          source: "document_extractions after save",
+        });
       }
       log("FETCH_SAVED_EXTRACTION_SUCCESS", { found: !!savedExtraction });
     } catch (err) {
@@ -1103,7 +1123,13 @@ export async function POST(
       royalty_rate: parsed.royalty_rate,
       term_length: parsed.term_length,
       confidence_score: parsed.confidence_score,
-      deal_score: dealScoreResult ?? { score: 0, grade: "C Deal" as const, reasons: [] as string[] },
+      deal_score:
+        dealScoreResult ??
+        ({
+          score: 0,
+          grade: dealGradeFullLabelFromScore(0),
+          reasons: [] as string[],
+        } satisfies DealScoreResult),
     };
     const fallbackExtractionResponse: SavedExtraction = {
       id: documentId as string,
@@ -1145,7 +1171,9 @@ export async function POST(
       status: "completed",
       document: { id: documentId as string, status: "completed", completed_at: completedAt, processed_at: completedAt },
       extraction: extractionResponse,
-      deal_score: dealScoreResult ?? { score: 0, grade: "C Deal", reasons: [] },
+      deal_score:
+        dealScoreResult ??
+        ({ score: 0, grade: dealGradeFullLabelFromScore(0), reasons: [] } satisfies DealScoreResult),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

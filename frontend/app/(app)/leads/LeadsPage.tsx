@@ -1,19 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { gradeLetter } from "@/lib/deals/dashboard-normalize";
+import {
+  dealScoreDisplayValue,
+  getGradeFromScore,
+  gradeLetterFromDealScore,
+} from "@/lib/deals/dashboard-normalize";
 import { buildLeadDealSummary } from "@/lib/deals/lead-deal-summary";
 import {
   EM_DASH,
   fetchProcessedDeals,
   sortProcessedDealsByScore,
+  triggerRescoreZeroDealScores,
   type ProcessedDealRow,
 } from "@/lib/deals/processed-deals-query";
 import { DealScoreHotBadge } from "@/app/components/DealScoreHotBadge";
 
-function gradeBadgeStyle(letter: "A" | "B" | "C" | null): CSSProperties {
+function gradeBadgeStyle(letter: "A" | "B" | "C" | "D" | null): CSSProperties {
   if (letter === "A") {
     return { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" };
   }
@@ -22,6 +27,9 @@ function gradeBadgeStyle(letter: "A" | "B" | "C" | null): CSSProperties {
   }
   if (letter === "C") {
     return { background: "#fee2e2", color: "#b91c1c", border: "1px solid #fecaca" };
+  }
+  if (letter === "D") {
+    return { background: "#f3f4f6", color: "#4b5563", border: "1px solid #e5e7eb" };
   }
   return { background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" };
 }
@@ -42,7 +50,7 @@ function formatDate(iso: string | null | undefined): string {
 type MinScoreFilter = 0 | 50 | 70 | 85;
 
 function ProcessedDealListItem({ r }: { r: ProcessedDealRow }) {
-  const letter = gradeLetter(r.dealScore?.grade ?? null);
+  const letter = gradeLetterFromDealScore(r.dealScore);
   const reasons = r.dealScore?.reasons ?? [];
   const completedLabel = formatDate(r.completed_at ?? r.processed_at);
   return (
@@ -88,8 +96,10 @@ function ProcessedDealListItem({ r }: { r: ProcessedDealRow }) {
                 gap: "0.25rem",
               }}
             >
-              {r.dealScore != null ? r.dealScore.score : EM_DASH}
-              <DealScoreHotBadge score={r.dealScore?.score} />
+              {dealScoreDisplayValue(r.dealScore)}
+              <DealScoreHotBadge
+                score={r.dealScore?.incomplete_data ? undefined : r.dealScore?.score}
+              />
               <span style={{ fontSize: "0.85rem", fontWeight: 500, color: "#6b7280" }}>deal score</span>
             </div>
             <p
@@ -185,6 +195,7 @@ export default function LeadsPage() {
   const [error, setError] = useState<string | null>(null);
   const [gradeFilter, setGradeFilter] = useState<"all" | "A" | "B" | "C">("all");
   const [minScoreFilter, setMinScoreFilter] = useState<MinScoreFilter>(0);
+  const rescoreOnceRef = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -197,6 +208,27 @@ export default function LeadsPage() {
         return;
       }
       setRows(next);
+      for (const r of next) {
+        if (!r.dealScore) continue;
+        console.log("SCORE LOADED", r.id, r.dealScore.score);
+        console.log("GRADE LOADED", r.id, r.dealScore.grade);
+        console.log("GRADE FROM SCORE", r.id, getGradeFromScore(r.dealScore.score));
+        console.log("[score-debug] score =", r.dealScore.score);
+        console.log("[score-debug] grade =", getGradeFromScore(r.dealScore.score));
+      }
+      if (
+        next.some(
+          (r) => (r.dealScore?.score ?? -1) === 0 && !r.dealScore?.incomplete_data
+        ) &&
+        !rescoreOnceRef.current
+      ) {
+        rescoreOnceRef.current = true;
+        const { ok, updated } = await triggerRescoreZeroDealScores(supabase);
+        if (ok && updated > 0) {
+          const { rows: refreshed, error: refreshErr } = await fetchProcessedDeals(supabase);
+          if (!refreshErr) setRows(refreshed);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load leads.");
       setRows([]);
@@ -212,7 +244,7 @@ export default function LeadsPage() {
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
       if (gradeFilter !== "all") {
-        const letter = gradeLetter(r.dealScore?.grade ?? null);
+        const letter = gradeLetterFromDealScore(r.dealScore);
         if (letter !== gradeFilter) return false;
       }
       if (minScoreFilter > 0) {
@@ -225,7 +257,10 @@ export default function LeadsPage() {
 
   const topOpportunitiesThisWeek = useMemo(() => {
     const qualifying = rows.filter(
-      (r) => r.dealScore != null && r.dealScore.score >= 60
+      (r) =>
+        r.dealScore != null &&
+        !r.dealScore.incomplete_data &&
+        r.dealScore.score >= 60
     );
     return sortProcessedDealsByScore(qualifying).slice(0, 5);
   }, [rows]);
