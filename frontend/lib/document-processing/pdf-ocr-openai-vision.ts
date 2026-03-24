@@ -35,13 +35,29 @@ function resolvePdfjsDistRoot(): string {
   return join(process.cwd(), "node_modules", "pdfjs-dist");
 }
 
-function resolvePdfAssetUrls(): { workerSrc: string; standardFontDataUrl: string; cMapUrl: string } {
+function resolvePdfFontAndCmapUrls(): { standardFontDataUrl: string; cMapUrl: string } {
   const distRoot = resolvePdfjsDistRoot();
   return {
-    workerSrc: pathToFileURL(join(distRoot, "legacy", "build", "pdf.worker.mjs")).href,
     standardFontDataUrl: pathToFileURL(join(distRoot, "standard_fonts")).href + "/",
     cMapUrl: pathToFileURL(join(distRoot, "cmaps")).href + "/",
   };
+}
+
+/**
+ * On Node, pdf.js disables real Web Workers and uses a fake worker, but it still loads
+ * `WorkerMessageHandler` via `import(GlobalWorkerOptions.workerSrc)`. The library default is
+ * `./pdf.worker.mjs`, which is not next to the deployed bundle on Vercel. Supplying the handler
+ * from the package entry uses Node module resolution (no workerSrc file path).
+ */
+async function ensurePdfjsWorkerMainThreadForNode(): Promise<void> {
+  const g = globalThis as typeof globalThis & {
+    pdfjsWorker?: { WorkerMessageHandler: unknown };
+  };
+  if (g.pdfjsWorker?.WorkerMessageHandler) {
+    return;
+  }
+  const worker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  g.pdfjsWorker = { WorkerMessageHandler: worker.WorkerMessageHandler };
 }
 
 const VISION_OCR_SYSTEM = `You transcribe scanned or photographed document pages. Output ONLY the visible text, preserving reading order and line breaks where reasonable. Do not add labels like "Page 1". Do not describe the document. If a page has no readable text, output a single line: (no text)`;
@@ -91,15 +107,19 @@ export async function ocrPdfWithOpenAiVision(
 
   const model = options?.model?.trim() || process.env.OPENAI_OCR_MODEL?.trim() || "gpt-4o-mini";
 
+  let step: VisionStep = "worker_setup";
+
   try {
     logVision("OCR_VISION_START", { model, renderDpi: VISION_RENDER_DPI, maxPages: MAX_OCR_PAGES });
 
-    const { workerSrc, standardFontDataUrl, cMapUrl } = resolvePdfAssetUrls();
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const { getDocument, GlobalWorkerOptions } = pdfjs;
-    GlobalWorkerOptions.workerSrc = workerSrc;
-    logVisionStep("worker_setup");
+    await ensurePdfjsWorkerMainThreadForNode();
+    logVisionStep("worker_setup", { mode: "no_worker_server" });
 
+    const { standardFontDataUrl, cMapUrl } = resolvePdfFontAndCmapUrls();
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const { getDocument } = pdfjs;
+
+    step = "pdf_load";
     const data = new Uint8Array(pdfBuffer.byteLength);
     data.set(pdfBuffer);
 
@@ -118,7 +138,7 @@ export async function ocrPdfWithOpenAiVision(
     const numPages = Math.min(doc.numPages, MAX_OCR_PAGES);
     if (numPages === 0) {
       await doc.destroy().catch(() => undefined);
-      logVision("OCR_VISION_FAILED", { reason: "zero_pages" });
+      logVision("OCR_VISION_FAILED", { reason: "zero_pages", step: "pdf_load" });
       return {
         text: "",
         pageCountRasterized: 0,
@@ -131,6 +151,7 @@ export async function ocrPdfWithOpenAiVision(
     const pageImages: { pageIndex: number; jpeg: Buffer }[] = [];
 
     for (let i = 1; i <= numPages; i++) {
+      step = "page_render";
       const page = await doc.getPage(i);
       const viewport = page.getViewport({ scale });
       const w = Math.max(1, Math.ceil(viewport.width));
@@ -142,11 +163,32 @@ export async function ocrPdfWithOpenAiVision(
         await page.cleanup();
         throw new Error("canvas getContext('2d') returned null");
       }
-      logVisionStep("page_render", { pageIndex: i });
-      await page.render({
-        canvasContext: ctx as unknown as CanvasRenderingContext2D,
-        viewport,
-      }).promise;
+      logVisionStep("page_render", { page: i });
+      try {
+        await page.render({
+          canvasContext: ctx as unknown as CanvasRenderingContext2D,
+          viewport,
+        }).promise;
+      } catch (renderErr: unknown) {
+        const e = renderErr instanceof Error ? renderErr : new Error(String(renderErr));
+        logVision("OCR_VISION_FAILED", {
+          reason: "page_render",
+          step: "page_render",
+          page: i,
+          errorMessage: e.message,
+          errorStack: e.stack,
+        });
+        await page.cleanup().catch(() => undefined);
+        await doc.destroy().catch(() => undefined);
+        return {
+          text: "",
+          pageCountRasterized: 0,
+          engine: "openai-vision",
+          skippedReason: "OpenAI vision OCR pipeline error",
+          errorMessage: e.message,
+        };
+      }
+      step = "image_encode";
       logVisionStep("image_encode", { pageIndex: i });
       const jpegBuf = await canvas.encode("jpeg", JPEG_QUALITY);
       pageImages.push({ pageIndex: i, jpeg: Buffer.from(jpegBuf) });
@@ -161,6 +203,7 @@ export async function ocrPdfWithOpenAiVision(
     const parts: string[] = [];
 
     for (let b = 0; b < batchCount; b++) {
+      step = "openai_request";
       const slice = pageImages.slice(b * VISION_BATCH_SIZE, (b + 1) * VISION_BATCH_SIZE);
       const startPage = slice[0]?.pageIndex ?? 1;
       const endPage = slice[slice.length - 1]?.pageIndex ?? startPage;
@@ -203,6 +246,7 @@ export async function ocrPdfWithOpenAiVision(
       if (!chunk) {
         logVision("OCR_VISION_FAILED", {
           reason: "empty_completion",
+          step: "openai_request",
           batchIndex: b,
           startPage,
           endPage,
@@ -233,14 +277,19 @@ export async function ocrPdfWithOpenAiVision(
       engine: "openai-vision",
     };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logVision("OCR_VISION_FAILED", { reason: "exception", errorMessage: msg });
+    const e = err instanceof Error ? err : new Error(String(err));
+    logVision("OCR_VISION_FAILED", {
+      reason: "exception",
+      step,
+      errorMessage: e.message,
+      errorStack: e.stack,
+    });
     return {
       text: "",
       pageCountRasterized: 0,
       engine: "openai-vision",
       skippedReason: "OpenAI vision OCR pipeline error",
-      errorMessage: msg,
+      errorMessage: e.message,
     };
   }
 }
