@@ -41,6 +41,7 @@ const LEASE_PARSE_SYSTEM = `You are a parser for mineral lease and deed document
 - recording_date (string or null): date recorded
 - royalty_rate (string or null): royalty percentage or fraction, e.g. "1/8" or "12.5%"
 - term_length (string or null): primary term or duration
+- mailing_address (string or null): owner or notice mailing block when clearly present
 - document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Assignment of Oil and Gas Lease", "Oil and Gas Lease" — use null if unclear
 - confidence_score (number): your confidence in the overall extraction, between 0 and 1 (e.g. 0.85).
 
@@ -117,6 +118,7 @@ export async function parseLeaseFieldsWithOpenAi(
         recording_date: null,
         royalty_rate: null,
         term_length: null,
+        mailing_address: null,
         document_type: null,
         confidence_score: 0,
       },
@@ -188,6 +190,9 @@ export async function parseLeaseFieldsWithOpenAi(
     }
     return 0;
   };
+  const llmConf = num(parsed.confidence_score);
+  const confFloored =
+    normalizedForModel.trim().length >= 15 ? Math.max(0.25, llmConf) : llmConf;
   const str = (v: unknown): string | null =>
     v != null && typeof v === "string" && v.trim() !== "" ? v.trim() : null;
 
@@ -204,8 +209,9 @@ export async function parseLeaseFieldsWithOpenAi(
       recording_date: str(parsed.recording_date),
       royalty_rate: str(parsed.royalty_rate),
       term_length: str(parsed.term_length),
+      mailing_address: str(parsed.mailing_address),
       document_type: str(parsed.document_type),
-      confidence_score: num(parsed.confidence_score),
+      confidence_score: confFloored,
     },
     normalizedForModel
   );

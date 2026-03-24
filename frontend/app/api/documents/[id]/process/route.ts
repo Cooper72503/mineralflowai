@@ -593,15 +593,17 @@ export async function POST(
       owner: null as string | null,
       buyer: null as string | null,
       acreage: null as number | null,
+      mailing_address: null as string | null,
       extraction_status: null as string | null,
     };
 
     const hasUsableText = (() => {
       const trimmed = (extractedText ?? "").trim();
-      if (!trimmed) return false;
-      // Treat placeholder strings from the extractor as "no usable text" for AI.
-      if (/^\(empty (csv|txt)\.\)$/i.test(trimmed)) return false;
-      return true;
+      if (trimmed && !/^\(empty (csv|txt)\.\)$/i.test(trimmed)) return true;
+      const meta = (debug.extractionMeta as Record<string, unknown> | undefined) ?? {};
+      const raw = typeof meta.raw_pdf_text === "string" ? meta.raw_pdf_text.trim() : "";
+      const ocr = typeof meta.ocr_text === "string" ? meta.ocr_text.trim() : "";
+      return raw.length >= 15 || ocr.length >= 15;
     })();
 
     let openAiModelUsed: string | null = null;
@@ -625,7 +627,7 @@ export async function POST(
         log("STRUCTURED_EXTRACTION_SKIP_TEXT", { error_message: String(debug.error) });
       }
 
-      const skipOpenAi = !process.env.OPENAI_API_KEY || !hasUsableText || !!debug.error;
+      const skipOpenAi = !process.env.OPENAI_API_KEY || !hasUsableText;
       if (!skipOpenAi) {
         openAiModelUsed = DEFAULT_OPENAI_MODEL;
       }
@@ -667,11 +669,14 @@ export async function POST(
         owner: pipelineParsed.owner ?? null,
         buyer: pipelineParsed.buyer ?? null,
         acreage: pipelineParsed.acreage ?? null,
+        mailing_address: pipelineParsed.mailing_address ?? null,
         extraction_status: pipelineParsed.extraction_status ?? artifacts.extraction_status,
       };
 
       if (typeof parsed.confidence_score !== "number" || !Number.isFinite(parsed.confidence_score)) {
-        parsed.confidence_score = 0;
+        parsed.confidence_score = hasUsableText ? 0.25 : 0;
+      } else if (hasUsableText && parsed.confidence_score < 0.25) {
+        parsed.confidence_score = 0.25;
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -760,6 +765,7 @@ export async function POST(
         owner: parsed.owner,
         buyer: parsed.buyer,
         acreage: parsed.acreage,
+        mailing_address: parsed.mailing_address,
         extraction_status: parsed.extraction_status,
         extraction_confidence: extractionArtifacts?.extraction_confidence,
         confidence_by_field: extractionArtifacts?.confidence_by_field,
@@ -1154,6 +1160,7 @@ export async function POST(
       owner: parsed.owner,
       buyer: parsed.buyer,
       acreage: parsed.acreage,
+      mailing_address: parsed.mailing_address,
       extraction_status: parsed.extraction_status,
       deal_score:
         dealScoreResult ??

@@ -498,6 +498,11 @@ function extractionNeedsReview(rec: Record<string, unknown>): boolean {
   return s === "low_confidence" || s === "partial" || s === "failed";
 }
 
+/** Extraction flagged as low_confidence only (not partial/failed) — scoring should not punish sparse fields. */
+function isLowConfidenceExtractionOnly(rec: Record<string, unknown>): boolean {
+  return readNonEmptyString(rec.extraction_status)?.toLowerCase() === "low_confidence";
+}
+
 function readExtractionConfidence(src: Record<string, unknown>): number | null {
   const candidates = [src.extraction_confidence, src.confidence_score, src.confidence];
   for (const c of candidates) {
@@ -806,7 +811,8 @@ export function calculateLeadScore(
   }
 
   const reviewWeakExtraction = extractionNeedsReview(rec);
-  if (!ownerPresent || countyUnknown) {
+  const lowConfOnly = isLowConfidenceExtractionOnly(rec);
+  if (!lowConfOnly && (!ownerPresent || countyUnknown)) {
     score = Math.min(score, reviewWeakExtraction ? 69 : 59);
   }
 
@@ -844,22 +850,25 @@ export function calculateLeadScore(
     opBuy.note,
   ];
   if (confNote) reasonPool.push(confNote);
-  if (!ownerPresent) {
+  if (reviewWeakExtraction && !lowConfOnly) {
+    reasonPool.push("Low-confidence extraction — distinguish from weak deal quality");
+  }
+  if (lowConfOnly) {
+    reasonPool.push("Low-confidence extraction — limited data available");
+  }
+  if (!ownerPresent && !lowConfOnly) {
     reasonPool.push(
       reviewWeakExtraction
         ? "Owner not extracted — low-confidence document; needs review"
         : "No owner name — capped at grade C"
     );
   }
-  if (countyUnknown) {
+  if (countyUnknown && !lowConfOnly) {
     reasonPool.push(
       reviewWeakExtraction
         ? "County unclear from extraction — needs review before using location score"
         : "County unknown — capped at grade C"
     );
-  }
-  if (reviewWeakExtraction) {
-    reasonPool.push("Low-confidence extraction — distinguish from weak deal quality");
   }
   if (conf !== null && conf < 0.45) {
     reasonPool.push("Low extraction confidence — downgraded one full grade");

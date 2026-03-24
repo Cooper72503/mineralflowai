@@ -69,6 +69,7 @@ export type ParsedFieldsForDealScore = {
   owner?: string | null;
   buyer?: string | null;
   acreage?: number | null;
+  mailing_address?: string | null;
   extraction_status?: string | null;
 };
 
@@ -122,6 +123,22 @@ function parsedFieldsWithReducedTrust(parsed: ParsedFieldsForDealScore): ParsedF
   };
 }
 
+function hasAnyParsedExtractionContent(parsed: ParsedFieldsForDealScore): boolean {
+  const s = (v: string | null | undefined) => typeof v === "string" && v.trim() !== "";
+  return (
+    s(parsed.grantor) ||
+    s(parsed.grantee) ||
+    s(parsed.lessor) ||
+    s(parsed.lessee) ||
+    s(parsed.owner) ||
+    s(parsed.buyer) ||
+    s(parsed.county) ||
+    s(parsed.state) ||
+    s(parsed.legal_description) ||
+    s(parsed.document_type)
+  );
+}
+
 function stripExtractionBackedKeysFromDealInput(input: Record<string, unknown>): void {
   for (const k of EXTRACTION_BACKED_DEAL_INPUT_KEYS) {
     delete input[k];
@@ -153,7 +170,9 @@ export function buildDealScoreInput(args: {
     args.parsed.extraction_status === "partial" ||
     args.parsed.extraction_status === "low_confidence";
   const lowTrust =
-    isLowLeaseParseConfidence(args.parsed.confidence_score) && !extractionNeedsReview;
+    isLowLeaseParseConfidence(args.parsed.confidence_score) &&
+    !extractionNeedsReview &&
+    !hasAnyParsedExtractionContent(args.parsed);
   if (lowTrust) {
     stripExtractionBackedKeysFromDealInput(dealScoreInput);
   }
@@ -235,6 +254,13 @@ export function buildDealScoreInput(args: {
     if (parsed.owner?.trim()) {
       dealScoreInput.owner = parsed.owner.trim();
       dealScoreInput.owner_name = parsed.owner.trim();
+    }
+  }
+
+  const mail = dealScoreInput.mailing_address;
+  if (mail == null || (typeof mail === "string" && !mail.trim())) {
+    if (parsed.mailing_address?.trim()) {
+      dealScoreInput.mailing_address = parsed.mailing_address.trim();
     }
   }
 

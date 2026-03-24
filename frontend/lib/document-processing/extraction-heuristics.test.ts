@@ -9,6 +9,9 @@ describe("classifyDocumentFromKeywords", () => {
   it("detects mineral deed", () => {
     expect(classifyDocumentFromKeywords("STATE OF TEXAS\nMINERAL DEED\n")).toBe("mineral_deed");
   });
+  it("classifies Mineral and Royalty Deed as mineral deed", () => {
+    expect(classifyDocumentFromKeywords("MINERAL AND ROYALTY DEED\n")).toBe("mineral_deed");
+  });
   it("detects oil and gas lease", () => {
     expect(classifyDocumentFromKeywords("PAID-UP OIL AND GAS LEASE\nLessor:")).toBe("oil_and_gas_lease");
   });
@@ -75,6 +78,14 @@ Midland, TX 79701`;
     const ocr = "MINERAL DEED\nGrantor: X\nGrantee: Y\n";
     const h = extractHeuristicFields("x", { ocrText: ocr });
     expect(h.detected_class).toBe("mineral_deed");
+  });
+
+  it("pulls grantor and grantee from OCR when normalized text lacks headings", () => {
+    const ocr = "Grantor: Alpha LLC\nGrantee: Beta Inc\nWARD COUNTY, TX";
+    const h = extractHeuristicFields("", { ocrText: ocr });
+    expect(h.grantor).toMatch(/Alpha/i);
+    expect(h.grantee).toMatch(/Beta/i);
+    expect(h.state).toBe("TX");
   });
 
   it("infers county from city line when county phrase missing", () => {

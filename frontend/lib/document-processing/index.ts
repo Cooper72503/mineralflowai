@@ -49,6 +49,8 @@ export {
   type ParsedLeaseResult,
   normalizeParsedLeaseResult,
   buildNormalizedPartiesForDealScoreInput,
+  inferPartyKind,
+  withPartyKinds,
 } from "./parsed-lease-result";
 
 import { parseLeaseFieldsWithOpenAi, safeParseJsonObject } from "./lease-fields-openai";

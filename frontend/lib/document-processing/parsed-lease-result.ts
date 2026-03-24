@@ -9,7 +9,7 @@ import {
 } from "./heuristic-field-extraction";
 
 /** Single normalized party for scoring / structured storage. */
-export type NormalizedPartyEntry = { role: string; name: string };
+export type NormalizedPartyEntry = { role: string; name: string; kind?: string };
 
 /** Result of AI + heuristic parsing: structured lease fields and a confidence score (0–1). */
 export type ParsedLeaseResult = {
@@ -35,6 +35,8 @@ export type ParsedLeaseResult = {
   buyer?: string | null;
   /** Net mineral acres when extracted or inferred. */
   acreage?: number | null;
+  /** Mailing / postal block when present (tax rolls, notices). */
+  mailing_address?: string | null;
   /** Set by structured extraction pipeline: complete | partial | low_confidence | failed */
   extraction_status?: string | null;
 };
@@ -46,12 +48,28 @@ export function isConveyanceInstrumentHint(documentType: string | null, extracte
   return /\bMINERAL\s+DEED\b/i.test(head) || /\b(WARRANTY|QUIT\s*CLAIM)\s+DEED\b/i.test(head);
 }
 
+export function inferPartyKind(name: string): string {
+  if (/\b(LLC|L\.L\.C\.|L\.P\.|LP|Inc\.?|Corp\.?|Corporation|Company|Co\.|Trust|Partners|Ltd\.?|PLC)\b/i.test(name)) {
+    return "entity";
+  }
+  return "person";
+}
+
+/** Adds `kind` to LLM-supplied party rows when missing. */
+export function withPartyKinds(parties: NormalizedPartyEntry[] | null | undefined): NormalizedPartyEntry[] | null {
+  if (!parties?.length) return null;
+  return parties.map((p) => ({
+    ...p,
+    kind: p.kind ?? inferPartyKind(p.name),
+  }));
+}
+
 function appendPartyUnique(out: NormalizedPartyEntry[], role: string, name: string | null | undefined): void {
   if (name == null || typeof name !== "string") return;
   const n = name.trim();
   if (!n) return;
   if (out.some((p) => p.role === role && p.name === n)) return;
-  out.push({ role, name: n });
+  out.push({ role, name: n, kind: inferPartyKind(n) });
 }
 
 /** Builds a deduped role/name list for deal scoring when `parties` is not already persisted. */
@@ -91,6 +109,8 @@ export function buildNormalizedPartiesForDealScoreInput(args: {
 /**
  * Fills grantor/grantee/lessor/lessee from headings when missing, aligns lessor/lessee for conveyances,
  * normalizes `document_type`, and builds `parties`.
+ *
+ * @param fullTextForHeadingRecovery Native + OCR + raw combined when available so labels on any layer apply.
  */
 export function normalizeParsedLeaseResult(
   parsed: {
@@ -111,8 +131,9 @@ export function normalizeParsedLeaseResult(
     owner?: string | null;
     buyer?: string | null;
     acreage?: number | null;
+    mailing_address?: string | null;
   },
-  extractedText: string
+  fullTextForHeadingRecovery: string
 ): ParsedLeaseResult {
   let grantor = parsed.grantor ?? null;
   let grantee = parsed.grantee ?? null;
@@ -120,17 +141,18 @@ export function normalizeParsedLeaseResult(
   let lessee = parsed.lessee ?? null;
   let document_type = parsed.document_type ?? null;
 
-  const fromGg = extractGrantorGranteeFromHeadings(extractedText);
+  const scan = fullTextForHeadingRecovery?.trim() ? fullTextForHeadingRecovery : "";
+  const fromGg = extractGrantorGranteeFromHeadings(scan);
   if (!grantor && fromGg.grantor) grantor = fromGg.grantor;
   if (!grantee && fromGg.grantee) grantee = fromGg.grantee;
 
-  const fromLl = extractLessorLesseeFromHeadings(extractedText);
+  const fromLl = extractLessorLesseeFromHeadings(scan);
   if (!lessor && fromLl.lessor) lessor = fromLl.lessor;
   if (!lessee && fromLl.lessee) lessee = fromLl.lessee;
 
   document_type = normalizeDocumentTypeLabel(document_type);
 
-  const deedLike = isConveyanceInstrumentHint(document_type, extractedText);
+  const deedLike = isConveyanceInstrumentHint(document_type, scan);
   if (deedLike) {
     if (!lessor && grantor) lessor = grantor;
     if (!lessee && grantee) lessee = grantee;
@@ -145,7 +167,7 @@ export function normalizeParsedLeaseResult(
           lessor,
           lessee,
           document_type,
-          extractedText,
+          extractedText: scan,
         });
 
   return {
@@ -159,5 +181,6 @@ export function normalizeParsedLeaseResult(
     owner: parsed.owner ?? null,
     buyer: parsed.buyer ?? null,
     acreage: parsed.acreage ?? null,
+    mailing_address: parsed.mailing_address ?? null,
   };
 }
