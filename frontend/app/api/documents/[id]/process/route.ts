@@ -768,6 +768,28 @@ export async function POST(
         const pipelineParsed = extractionOutcome?.parsed;
         const artifacts = extractionOutcome?.artifacts;
 
+        if (artifacts) {
+          const dbgRawPdf =
+            typeof artifacts.raw_pdf_text === "string" ? artifacts.raw_pdf_text : "";
+          const dbgOcr =
+            artifacts.ocr_text != null && typeof artifacts.ocr_text === "string"
+              ? artifacts.ocr_text
+              : "";
+          const dbgCombined =
+            typeof artifacts.combined_text === "string" ? artifacts.combined_text : "";
+          console.log(`${LOG_PREFIX} [doc-pipeline-debug] STAGE_SNAPSHOT process_route`, {
+            documentId,
+            RAW_PDF_TEXT_LENGTH: dbgRawPdf.length,
+            OCR_TEXT_LENGTH: dbgOcr.length,
+            COMBINED_TEXT_LENGTH: dbgCombined.length,
+            FINAL_EXTRACTED_FIELDS: artifacts.final_extracted_fields,
+            FINAL_EXTRACTION_STATUS: artifacts.extraction_status,
+            RAW_PDF_TEXT_FIRST_500: dbgRawPdf.slice(0, 500),
+            OCR_TEXT_FIRST_500: dbgOcr.slice(0, 500),
+            COMBINED_TEXT_FIRST_500: dbgCombined.slice(0, 500),
+          });
+        }
+
         debug.extraction_artifacts = artifacts;
         debug.parsed = pipelineParsed;
 

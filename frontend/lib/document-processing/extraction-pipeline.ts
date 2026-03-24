@@ -38,6 +38,7 @@ import {
 } from "./parsed-lease-result";
 
 const EXTRACT_LOG = "[extract]";
+const DOC_PIPELINE_DEBUG_PREVIEW_CHARS = 500;
 
 export type ExtractionStatus = "complete" | "partial" | "low_confidence" | "failed";
 
@@ -442,16 +443,6 @@ function finalCriticalOwnerSideBlank(p: ParsedLeaseResult): boolean {
   return !p.owner?.trim() && !p.grantor?.trim() && !p.lessor?.trim();
 }
 
-/** Document-type / geo / owner-side all blank — triggers terminal failsafe (stricter than emergency `allCriticalStructuredBlank`). */
-function finalCriticalQuadrupleBlank(p: ParsedLeaseResult): boolean {
-  return (
-    finalCriticalOwnerSideBlank(p) &&
-    !p.county?.trim() &&
-    !p.state?.trim() &&
-    !p.document_type?.trim()
-  );
-}
-
 /**
  * 2–3 ALL CAPS word name line + address + CITY, TX ZIP (terminal failsafe; stricter than heuristic name/address).
  */
@@ -515,7 +506,13 @@ function applyFinalStructuredFailsafe(
   const textLength = safeText.trim().length;
   const trimmedCombined = safeText.trim();
   const hasText = textLength > 0;
-  if (!hasText || trimmedCombined.length < 20 || !finalCriticalQuadrupleBlank(p)) {
+  const missingCoreFields =
+    !p.owner?.trim() &&
+    !p.grantor?.trim() &&
+    !p.lessor?.trim() &&
+    !p.county?.trim() &&
+    !p.state?.trim();
+  if (!hasText || textLength < 20 || !missingCoreFields) {
     return { next: p, flags };
   }
 
@@ -731,6 +728,19 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   }
   parsed = afterFinalFailsafe;
 
+  const safeText = typeof safeCombinedText === "string" ? safeCombinedText : "";
+  if (!parsed.owner?.trim() && safeText.length > 20) {
+    parsed.owner = inferOwnerFromCapitalizedNameBlock(safeText);
+    console.log("[extract] FORCE_OWNER_FALLBACK");
+  }
+  if (!parsed.state?.trim() && /texas|\btx\b/i.test(safeText)) {
+    parsed.state = "TX";
+    console.log("[extract] FORCE_STATE_TX");
+  }
+  if (!parsed.document_type?.trim()) {
+    parsed.document_type = "Unknown Document";
+  }
+
   const inferred_fields: Record<string, unknown> = { ...inferred };
   if (Object.keys(failsafeFlags).length > 0) {
     inferred_fields.failsafe = failsafeFlags;
@@ -924,12 +934,38 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
 
   const safeCombinedForFloor = typeof safeCombinedText === "string" ? safeCombinedText : "";
   const combinedLenForFloor = safeCombinedForFloor.trim().length;
-  const extraction_confidence_reported =
+  let extraction_confidence_reported =
     combinedLenForFloor >= 20 ? Math.max(extraction_confidence, 0.25) : extraction_confidence;
   parsed.confidence_score = extraction_confidence_reported;
+  if (safeCombinedForFloor.length > 20) {
+    parsed.confidence_score = Math.max(parsed.confidence_score ?? 0, 0.3);
+  }
+  extraction_confidence_reported = parsed.confidence_score;
+
+  const finalMissingCore =
+    !parsed.owner?.trim() &&
+    !parsed.grantor?.trim() &&
+    !parsed.lessor?.trim() &&
+    !parsed.county?.trim() &&
+    !parsed.state?.trim();
+  if (finalMissingCore && textLen >= 20 && extraction_status !== "failed") {
+    extraction_status = "low_confidence";
+  }
+
   parsed.extraction_status = extraction_status;
 
   const final_extracted_fields = snapshotFinalFields(parsed);
+
+  console.log("[doc-pipeline-debug] STAGE_SNAPSHOT extraction_pipeline", {
+    RAW_PDF_TEXT_LENGTH: rawPdfText.length,
+    OCR_TEXT_LENGTH: (ocrText ?? "").length,
+    COMBINED_TEXT_LENGTH: safeCombinedText.length,
+    FINAL_EXTRACTED_FIELDS: final_extracted_fields,
+    FINAL_EXTRACTION_STATUS: extraction_status,
+    RAW_PDF_TEXT_FIRST_500: rawPdfText.slice(0, DOC_PIPELINE_DEBUG_PREVIEW_CHARS),
+    OCR_TEXT_FIRST_500: (ocrText ?? "").slice(0, DOC_PIPELINE_DEBUG_PREVIEW_CHARS),
+    COMBINED_TEXT_FIRST_500: safeCombinedText.slice(0, DOC_PIPELINE_DEBUG_PREVIEW_CHARS),
+  });
 
   logExtract("FINAL_EXTRACTED_FIELDS", {
     owner: parsed.owner,
@@ -951,6 +987,13 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     document_type_confidence,
     legal_description_confidence,
     extraction_confidence: extraction_confidence_reported,
+  });
+
+  console.log("[extract] FINAL_CORE_FIELDS", {
+    owner: parsed.owner,
+    county: parsed.county,
+    state: parsed.state,
+    document_type: parsed.document_type,
   });
 
   const artifacts: ExtractionArtifacts = {
