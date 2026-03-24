@@ -10,7 +10,11 @@ import {
   cleanExtractedDocumentText,
   estimateExtractedTextConfidence,
 } from "./extracted-text-quality";
-import { type ExtractionDocumentClass, documentClassToDisplayLabel } from "./extraction-normalize";
+import {
+  type ExtractionDocumentClass,
+  documentClassToDisplayLabel,
+  normalizePartyName,
+} from "./extraction-normalize";
 import {
   classifyDocumentFromKeywords,
   detectTexasContext,
@@ -430,6 +434,134 @@ function applyEmergencyStructuredFallback(
   return { next, emergency };
 }
 
+/** Owner-side critical empty: no owner, grantor, or lessor. */
+function finalCriticalOwnerSideBlank(p: ParsedLeaseResult): boolean {
+  return !p.owner?.trim() && !p.grantor?.trim() && !p.lessor?.trim();
+}
+
+/** Document-type / geo / owner-side all blank — triggers terminal failsafe (stricter than emergency `allCriticalStructuredBlank`). */
+function finalCriticalQuadrupleBlank(p: ParsedLeaseResult): boolean {
+  return (
+    finalCriticalOwnerSideBlank(p) &&
+    !p.county?.trim() &&
+    !p.state?.trim() &&
+    !p.document_type?.trim()
+  );
+}
+
+/**
+ * 2–3 ALL CAPS word name line + address + CITY, TX ZIP (terminal failsafe; stricter than heuristic name/address).
+ */
+function extractFinalFallbackOwnerAllCapsBlock(text: string): string | null {
+  const slice = text.slice(0, 24_000);
+  const lines = slice.split(/\r?\n/).map((l) => l.replace(/\u00A0/g, " ").trim());
+  const allCapsNameRe = /^[A-Z][A-Z.'-]+(?:\s+[A-Z][A-Z.'-]+){1,2}$/;
+  for (let i = 0; i < lines.length - 2; i++) {
+    const nameLine = lines[i];
+    const addrLine = lines[i + 1];
+    const cityLine = lines[i + 2];
+    if (!nameLine || !addrLine || !cityLine) continue;
+    if (!allCapsNameRe.test(nameLine)) continue;
+    const addrOk = /\d/.test(addrLine) || /\bp\.?\s*o\.?\s*box\b/i.test(addrLine);
+    if (!addrOk || addrLine.length > 200) continue;
+    const cityOk =
+      /^[A-Za-z][A-Za-z\s.'-]{1,42},\s*(?:TX|Texas)\s+\d{5}(?:-\d{4})?\s*$/i.test(cityLine) ||
+      /^[A-Za-z][A-Za-z\s.'-]{1,42}\s+(?:TX|Texas)\s+\d{5}(?:-\d{4})?\s*$/i.test(cityLine);
+    if (!cityOk) continue;
+    const n = normalizePartyName(nameLine);
+    if (n && !/^(unknown|owner|name)\b/i.test(n)) return n;
+  }
+  return null;
+}
+
+function extractCountyFinalFailsafeRegex(text: string): string | null {
+  const m1 = text.match(/([A-Za-z]+)\s+County/i);
+  if (m1?.[1]?.trim()) {
+    const w = m1[1].trim();
+    return w[0].toUpperCase() + w.slice(1).toLowerCase();
+  }
+  const m2 = text.match(/County of\s+([A-Za-z]+)/i);
+  if (m2?.[1]?.trim()) {
+    const w = m2[1].trim();
+    return w[0].toUpperCase() + w.slice(1).toLowerCase();
+  }
+  return null;
+}
+
+function inferFinalFallbackDocumentType(text: string): string {
+  const t = text.toLowerCase();
+  if (/\btax\b/.test(t) || /\bproperty\b/.test(t) || /\brecord\b/.test(t) || /\bassessment\b/.test(t)) {
+    return "Tax / Mineral Ownership";
+  }
+  if (/\bdeed\b/.test(t) || /\bgrantor\b/.test(t) || /\bgrantee\b/.test(t)) {
+    return "Mineral / Royalty Deed";
+  }
+  return "Unknown Document";
+}
+
+/**
+ * Last-resort structured fill after heuristics, LLM, inference, merging, and earlier failsafes.
+ * Does not run `normalizeParsedLeaseResult` afterward so values cannot be cleared by later normalization.
+ */
+function applyFinalStructuredFailsafe(
+  p: ParsedLeaseResult,
+  combinedText: string
+): { next: ParsedLeaseResult; flags: Record<string, boolean> } {
+  const flags: Record<string, boolean> = {};
+  const trimmedCombined = combinedText.trim();
+  if (trimmedCombined.length < 20 || !finalCriticalQuadrupleBlank(p)) {
+    return { next: p, flags };
+  }
+
+  const next = { ...p };
+  const scan = trimmedCombined;
+
+  if (finalCriticalOwnerSideBlank(next)) {
+    const o =
+      extractFinalFallbackOwnerAllCapsBlock(scan) ??
+      inferOwnerFromNameAddressBlock(scan) ??
+      inferOwnerFromCapitalizedNameBlock(scan);
+    if (o) {
+      next.owner = o;
+      flags.owner = true;
+      logExtract("FALLBACK_OWNER_USED", { source: "final_failsafe_all_caps_or_address" });
+    }
+  }
+
+  if (!next.county?.trim()) {
+    const fromRe = extractCountyFinalFailsafeRegex(scan);
+    if (fromRe) {
+      next.county = fromRe;
+      flags.county = true;
+      logExtract("FALLBACK_COUNTY_USED", { source: "final_failsafe_regex" });
+    } else {
+      const fromCity = inferCountyFromTxCityLine(scan);
+      if (fromCity) {
+        next.county = fromCity;
+        flags.county = true;
+        logExtract("FALLBACK_COUNTY_USED", { source: "final_failsafe_tx_city" });
+      }
+    }
+  }
+
+  if (!next.state?.trim() && (/\bTX\b/.test(scan) || /\bTexas\b/i.test(scan))) {
+    next.state = "TX";
+    flags.state = true;
+    logExtract("FALLBACK_STATE_USED", { source: "final_failsafe_tx_texas" });
+  }
+
+  if (!next.document_type?.trim()) {
+    next.document_type = inferFinalFallbackDocumentType(scan);
+    flags.document_type = true;
+  }
+
+  if (Object.keys(flags).length > 0) {
+    flags.final_failsafe_applied = true;
+  }
+
+  return { next, flags };
+}
+
 function snapshotFinalFields(p: ParsedLeaseResult): Record<string, unknown> {
   return {
     document_type: p.document_type,
@@ -571,6 +703,12 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
 
   parsed.parties = withPartyKinds(parsed.parties);
 
+  const { next: afterFinalFailsafe, flags: finalFailsafeFlags } = applyFinalStructuredFailsafe(
+    parsed,
+    combinedText
+  );
+  parsed = afterFinalFailsafe;
+
   const inferred_fields: Record<string, unknown> = { ...inferred };
   if (Object.keys(failsafeFlags).length > 0) {
     inferred_fields.failsafe = failsafeFlags;
@@ -578,6 +716,9 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   }
   if (Object.keys(emergencyFlags).length > 0) {
     inferred_fields.emergency = emergencyFlags;
+  }
+  if (Object.keys(finalFailsafeFlags).length > 0) {
+    inferred_fields.final_failsafe = finalFailsafeFlags;
   }
 
   const extracted_fields: Record<string, unknown> = {
@@ -588,6 +729,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   const fallback_extracted_fields: Record<string, unknown> = {
     failsafe: failsafeFlags,
     emergency: emergencyFlags,
+    final: finalFailsafeFlags,
   };
 
   const confidence_by_field: Record<string, number> = {
@@ -597,7 +739,13 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     grantee: fieldConfidence(parsed.grantee, llm?.grantee ? "llm" : parsed.grantee ? "heuristic" : "none"),
     county: fieldConfidence(
       parsed.county,
-      llm?.county ? "llm" : heur.county ? "heuristic" : inferred.county ? "inferred" : "none"
+      llm?.county
+        ? "llm"
+        : heur.county
+          ? "heuristic"
+          : inferred.county || finalFailsafeFlags.county
+            ? "inferred"
+            : "none"
     ),
     state: fieldConfidence(
       parsed.state,
@@ -605,7 +753,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
         ? "llm"
         : heur.state
           ? "heuristic"
-          : inferred.state || failsafeFlags.state || emergencyFlags.state
+          : inferred.state || failsafeFlags.state || emergencyFlags.state || finalFailsafeFlags.state
             ? "inferred"
             : "none"
     ),
@@ -619,7 +767,10 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
         ? "llm"
         : heur.document_type || detected_class === "tax_mineral_ownership_record"
           ? "heuristic"
-          : inferred.document_type || failsafeFlags.document_type || emergencyFlags.document_type
+          : inferred.document_type ||
+              failsafeFlags.document_type ||
+              emergencyFlags.document_type ||
+              finalFailsafeFlags.document_type
             ? "inferred"
             : "none"
     ),
@@ -627,7 +778,10 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
       parsed.owner,
       !parsed.owner?.trim()
         ? "none"
-        : failsafeFlags.owner || inferred.owner || emergencyFlags.owner
+        : failsafeFlags.owner ||
+            inferred.owner ||
+            emergencyFlags.owner ||
+            finalFailsafeFlags.owner
           ? "inferred"
           : "heuristic"
     ),
@@ -716,7 +870,8 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   const inferredSignalCount =
     Object.keys(inferred).length +
     Object.values(failsafeFlags).filter(Boolean).length +
-    Object.values(emergencyFlags).filter(Boolean).length;
+    Object.values(emergencyFlags).filter(Boolean).length +
+    Object.entries(finalFailsafeFlags).filter(([k, v]) => k !== "final_failsafe_applied" && v === true).length;
 
   let extraction_status = deriveExtractionStatus({
     textLen,
@@ -738,15 +893,32 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     });
   }
 
+  if (finalFailsafeFlags.final_failsafe_applied) {
+    extraction_status = "low_confidence";
+    logExtract("LOW_CONFIDENCE_INFERENCE", { reason: "final_structured_failsafe" });
+  }
+
   logExtract("INFERENCE_APPLIED", { inferred_keys: Object.keys(inferred_fields), extraction_status });
 
-  parsed.confidence_score = extraction_confidence;
+  const combinedLenForFloor = combinedText.trim().length;
+  const extraction_confidence_reported =
+    combinedLenForFloor >= 20 ? Math.max(extraction_confidence, 0.25) : extraction_confidence;
+  parsed.confidence_score = extraction_confidence_reported;
   parsed.extraction_status = extraction_status;
 
   const final_extracted_fields = snapshotFinalFields(parsed);
 
-  logExtract("FINAL_EXTRACTED_FIELDS", { keys: Object.keys(final_extracted_fields) });
-  logExtract("FINAL_EXTRACTION_STATUS", { extraction_status, extraction_confidence, criticalFilled });
+  logExtract("FINAL_EXTRACTED_FIELDS", {
+    owner: parsed.owner,
+    county: parsed.county,
+    state: parsed.state,
+    document_type: parsed.document_type,
+  });
+  logExtract("FINAL_EXTRACTION_STATUS", {
+    extraction_status,
+    extraction_confidence: extraction_confidence_reported,
+    criticalFilled,
+  });
   logExtract("CONFIDENCE_SUMMARY", {
     text_quality_confidence,
     ocr_quality_confidence: ocr_confidence,
@@ -755,7 +927,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     acreage_confidence,
     document_type_confidence,
     legal_description_confidence,
-    extraction_confidence,
+    extraction_confidence: extraction_confidence_reported,
   });
 
   const artifacts: ExtractionArtifacts = {
@@ -780,7 +952,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     acreage_confidence,
     document_type_confidence,
     legal_description_confidence,
-    extraction_confidence,
+    extraction_confidence: extraction_confidence_reported,
   };
 
   return { parsed, artifacts };

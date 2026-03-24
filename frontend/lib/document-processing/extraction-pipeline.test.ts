@@ -66,6 +66,21 @@ Permian Basin`;
     expect(artifacts.extraction_confidence).toBeGreaterThan(0);
   });
 
+  it("final failsafe runs when emergency is skipped but owner/geo/type stayed empty", async () => {
+    const t = `Grantee: Random Holdco LLC
+
+Section 5, Block 22, H&GN RR Co Survey, abstract tract narrative with no two-letter state tokens or city comma state zip lines
+additional filler so combined text clearly exceeds the minimum length threshold`;
+    const { parsed, artifacts } = await runStructuredExtraction({
+      normalizedText: t,
+      skipOpenAi: true,
+    });
+    expect(artifacts.inferred_fields.final_failsafe).toBeDefined();
+    expect(artifacts.fallback_extracted_fields.final).toBeDefined();
+    expect(parsed.document_type).toBeTruthy();
+    expect(parsed.extraction_status).toBe("low_confidence");
+  });
+
   it("runs emergency pass when no headings match but text is long enough", async () => {
     const t =
       "abcdefghijklmnopqrstuvwxyz unlabeled narrative filler text repeated for minimum length " +
