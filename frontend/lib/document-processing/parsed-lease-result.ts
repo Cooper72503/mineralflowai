@@ -37,7 +37,7 @@ export type ParsedLeaseResult = {
   acreage?: number | null;
   /** Mailing / postal block when present (tax rolls, notices). */
   mailing_address?: string | null;
-  /** Set by structured extraction pipeline: complete | partial | low_confidence | failed */
+  /** Set by structured extraction pipeline: complete | partial | low_confidence | failed | failed_no_ocr */
   extraction_status?: string | null;
 };
 

@@ -1,6 +1,6 @@
 /**
  * Multi-stage structured extraction:
- * A/B: native PDF + OCR text provided by caller ({@link processDocumentContent})
+ * A/B: native PDF + OCR text provided by caller ({@link processDocumentContent}; vision OCR when needed)
  * C: deterministic heuristics
  * D: LLM normalization (optional)
  * E: inference, failsafes, confidence, debug artifacts
@@ -40,7 +40,12 @@ import {
 const EXTRACT_LOG = "[extract]";
 const DOC_PIPELINE_DEBUG_PREVIEW_CHARS = 500;
 
-export type ExtractionStatus = "complete" | "partial" | "low_confidence" | "failed";
+export type ExtractionStatus =
+  | "complete"
+  | "partial"
+  | "low_confidence"
+  | "failed"
+  | "failed_no_ocr";
 
 export type ExtractionArtifacts = {
   /** @deprecated use raw_pdf_text — kept for existing readers */
@@ -84,6 +89,8 @@ export type RunStructuredExtractionArgs = {
   openAiModel?: string;
   /** When true, skip OpenAI (no key / caller choice). */
   skipOpenAi?: boolean;
+  /** Vision OCR did not yield usable text while the PDF text layer was unusably short. */
+  failedNoOcr?: boolean;
 };
 
 function logExtract(event: string, payload?: Record<string, unknown>): void {
@@ -950,6 +957,10 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     !parsed.state?.trim();
   if (finalMissingCore && textLen >= 20 && extraction_status !== "failed") {
     extraction_status = "low_confidence";
+  }
+
+  if (args.failedNoOcr && textLen < 15) {
+    extraction_status = "failed_no_ocr";
   }
 
   parsed.extraction_status = extraction_status;

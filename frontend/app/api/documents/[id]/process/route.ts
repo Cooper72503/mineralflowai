@@ -741,6 +741,7 @@ export async function POST(
           typeof meta.ocrMeanConfidence === "number"
             ? meta.ocrMeanConfidence
             : null;
+        const failedNoOcr = meta.failed_no_ocr === true;
 
         if (debug.error) {
           log("STRUCTURED_EXTRACTION_SKIP_TEXT", {
@@ -763,6 +764,7 @@ export async function POST(
           docState: doc.state,
           openAiModel: DEFAULT_OPENAI_MODEL,
           skipOpenAi,
+          failedNoOcr,
         });
 
         const pipelineParsed = extractionOutcome?.parsed;

@@ -14,10 +14,12 @@ const execFileAsync = promisify(execFile);
 const MAX_OCR_PAGES = 25;
 const OCR_DPI = 200;
 
+export type PdfOcrEngineId = "poppler+tesseract.js" | "pdf.js+tesseract.js" | "openai-vision";
+
 export type PdfOcrResult = {
   text: string;
   pageCountRasterized: number;
-  engine: "poppler+tesseract.js";
+  engine: PdfOcrEngineId;
   /** Mean page-level confidence from Tesseract (0–100), when available. */
   meanConfidence?: number;
   skippedReason?: string;

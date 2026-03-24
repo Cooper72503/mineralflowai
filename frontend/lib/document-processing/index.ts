@@ -8,7 +8,8 @@ import {
   cleanExtractedDocumentText,
   estimateExtractedTextConfidence,
 } from "./extracted-text-quality";
-import { ocrPdfWithPopplerAndTesseract } from "./pdf-ocr";
+import type { PdfOcrResult } from "./pdf-ocr";
+import { ocrPdfWithOpenAiVision } from "./pdf-ocr-openai-vision";
 
 /** Below this text-layer heuristic, run Poppler + Tesseract and prefer OCR output when substantial. */
 const TEXT_LAYER_CONFIDENCE_OCR_THRESHOLD = 0.7;
@@ -135,7 +136,8 @@ function getExtension(fileName: string | null): string {
 
 /**
  * Extracts text from the file buffer.
- * - PDF: pdf-parse v1 (embedded pdf.js 1.x, Node-safe) then OCR fallback (Poppler + tesseract.js).
+ * - PDF: pdf-parse v1 (embedded pdf.js 1.x, Node-safe), then OpenAI vision OCR when the text layer is
+ *   empty or low-confidence (renders with pdf.js + @napi-rs/canvas; no Poppler).
  * - CSV: reads buffer as UTF-8 text.
  * - Other types: returns error.
  */
@@ -238,9 +240,13 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
 
   let finalText = "";
   let ocrUsed = false;
-  let ocrMeta: Awaited<ReturnType<typeof ocrPdfWithPopplerAndTesseract>> | null = null;
+  let ocrMeta: PdfOcrResult | null = null;
   let ocrAdopted = false;
   let ocrRawFull = "";
+  let ocrPrimarySkippedReason: string | null = null;
+  let ocrFallbackRan = false;
+  let ocrFallbackSkippedReason: string | null = null;
+  let failedNoOcr = false;
   /** Why OCR ran: empty embedded text, low text-layer confidence, or PDF parse error. */
   let ocrTriggerReason: "none" | "empty_primary" | "low_text_layer_confidence" | "primary_parse_error" =
     "none";
@@ -256,15 +262,28 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
       textLayerConfidence,
       numpages,
       threshold: TEXT_LAYER_CONFIDENCE_OCR_THRESHOLD,
+      path: "openai-vision",
     });
-    ocrMeta = await ocrPdfWithPopplerAndTesseract(buffer);
-    const ocrRaw = (ocrMeta.text ?? "").trim();
+    const visionOcr = await ocrPdfWithOpenAiVision(buffer);
+    ocrMeta = visionOcr;
+    ocrPrimarySkippedReason = visionOcr.skippedReason ?? null;
+    ocrFallbackRan = false;
+    ocrFallbackSkippedReason = null;
+
+    const visionTrim = (visionOcr.text ?? "").trim();
+    const primaryUnusable = primaryText.trim().length < 15;
+    failedNoOcr =
+      visionTrim.length < MIN_OCR_CHARS_WHEN_PRIMARY_EMPTY && primaryUnusable;
+
+    const ocrRaw = visionTrim;
     ocrRawFull = ocrRaw;
     console.log("[extract] OCR_SUCCESS", {
       ocrRawLength: ocrRaw.length,
       ocrPageCount: ocrMeta.pageCountRasterized,
       ocrMeanConfidence: ocrMeta.meanConfidence ?? null,
       ocrSkippedReason: ocrMeta.skippedReason ?? null,
+      ocrEngine: ocrMeta.engine,
+      ocrFallbackRan,
     });
     const ocrMean = ocrMeta.meanConfidence;
     const preferOcrOverLowQualityPrimary =
@@ -329,6 +348,10 @@ async function extractTextFromPdf(buffer: Buffer): Promise<DocumentProcessingRes
     ocrMeanConfidence: ocrMeta?.meanConfidence ?? null,
     ocrSkippedReason: ocrMeta?.skippedReason ?? null,
     ocrErrorMessage: ocrMeta?.errorMessage ?? null,
+    ocrFallbackRan,
+    ocrPrimarySkippedReason,
+    ocrFallbackSkippedReason,
+    failed_no_ocr: failedNoOcr,
   };
 
   console.log("[extractTextFromPdf] RAW_EXTRACTED_TEXT", {

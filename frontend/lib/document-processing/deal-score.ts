@@ -495,7 +495,9 @@ function operatorBuyerPoints(
 
 function extractionNeedsReview(rec: Record<string, unknown>): boolean {
   const s = readNonEmptyString(rec.extraction_status)?.toLowerCase();
-  return s === "low_confidence" || s === "partial" || s === "failed";
+  return (
+    s === "low_confidence" || s === "partial" || s === "failed" || s === "failed_no_ocr"
+  );
 }
 
 /** Extraction flagged as low_confidence only (not partial/failed) — scoring should not punish sparse fields. */
