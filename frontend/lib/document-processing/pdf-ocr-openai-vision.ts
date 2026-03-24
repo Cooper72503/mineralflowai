@@ -3,9 +3,8 @@
  * no Poppler or Tesseract. Suitable for serverless (e.g. Vercel) when OPENAI_API_KEY is set.
  */
 
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import OpenAI from "openai";
 
@@ -19,10 +18,25 @@ const VISION_RENDER_DPI = 120;
 const VISION_BATCH_SIZE = 4;
 const JPEG_QUALITY = 82;
 
+/**
+ * Resolve pdfjs-dist root on disk. Do not use `require.resolve("pdfjs-dist/package.json")` here:
+ * Next.js/webpack can replace that call with a numeric module id, so `path.dirname` / `path.join`
+ * then throw ERR_INVALID_ARG_TYPE (e.g. "path must be string, received number (4273)").
+ */
+function resolvePdfjsDistRoot(): string {
+  if (typeof import.meta.resolve === "function") {
+    try {
+      const resolved = import.meta.resolve("pdfjs-dist/package.json");
+      return dirname(fileURLToPath(resolved));
+    } catch {
+      /* fall through */
+    }
+  }
+  return join(process.cwd(), "node_modules", "pdfjs-dist");
+}
+
 function resolvePdfAssetUrls(): { workerSrc: string; standardFontDataUrl: string; cMapUrl: string } {
-  const require = createRequire(import.meta.url);
-  const pkgJson = require.resolve("pdfjs-dist/package.json");
-  const distRoot = dirname(pkgJson);
+  const distRoot = resolvePdfjsDistRoot();
   return {
     workerSrc: pathToFileURL(join(distRoot, "legacy", "build", "pdf.worker.mjs")).href,
     standardFontDataUrl: pathToFileURL(join(distRoot, "standard_fonts")).href + "/",
@@ -32,8 +46,14 @@ function resolvePdfAssetUrls(): { workerSrc: string; standardFontDataUrl: string
 
 const VISION_OCR_SYSTEM = `You transcribe scanned or photographed document pages. Output ONLY the visible text, preserving reading order and line breaks where reasonable. Do not add labels like "Page 1". Do not describe the document. If a page has no readable text, output a single line: (no text)`;
 
+type VisionStep = "pdf_load" | "worker_setup" | "canvas_create" | "page_render" | "image_encode" | "openai_request";
+
 function logVision(event: "OCR_VISION_START" | "OCR_VISION_SUCCESS" | "OCR_VISION_FAILED", payload: Record<string, unknown>): void {
   console.log(`${EXTRACT_LOG} ${event}`, payload);
+}
+
+function logVisionStep(step: VisionStep, payload?: Record<string, unknown>): void {
+  console.log(`${EXTRACT_LOG} OCR_VISION_STEP`, { step, ...payload });
 }
 
 /**
@@ -72,10 +92,13 @@ export async function ocrPdfWithOpenAiVision(
   const model = options?.model?.trim() || process.env.OPENAI_OCR_MODEL?.trim() || "gpt-4o-mini";
 
   try {
+    logVision("OCR_VISION_START", { model, renderDpi: VISION_RENDER_DPI, maxPages: MAX_OCR_PAGES });
+
     const { workerSrc, standardFontDataUrl, cMapUrl } = resolvePdfAssetUrls();
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const { getDocument, GlobalWorkerOptions } = pdfjs;
     GlobalWorkerOptions.workerSrc = workerSrc;
+    logVisionStep("worker_setup");
 
     const data = new Uint8Array(pdfBuffer.byteLength);
     data.set(pdfBuffer);
@@ -91,6 +114,7 @@ export async function ocrPdfWithOpenAiVision(
     });
 
     const doc = await loadingTask.promise;
+    logVisionStep("pdf_load", { byteLength: pdfBuffer.byteLength, numPages: doc.numPages });
     const numPages = Math.min(doc.numPages, MAX_OCR_PAGES);
     if (numPages === 0) {
       await doc.destroy().catch(() => undefined);
@@ -111,16 +135,19 @@ export async function ocrPdfWithOpenAiVision(
       const viewport = page.getViewport({ scale });
       const w = Math.max(1, Math.ceil(viewport.width));
       const h = Math.max(1, Math.ceil(viewport.height));
+      logVisionStep("canvas_create", { pageIndex: i, width: w, height: h });
       const canvas = createCanvas(w, h);
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         await page.cleanup();
         throw new Error("canvas getContext('2d') returned null");
       }
+      logVisionStep("page_render", { pageIndex: i });
       await page.render({
         canvasContext: ctx as unknown as CanvasRenderingContext2D,
         viewport,
       }).promise;
+      logVisionStep("image_encode", { pageIndex: i });
       const jpegBuf = await canvas.encode("jpeg", JPEG_QUALITY);
       pageImages.push({ pageIndex: i, jpeg: Buffer.from(jpegBuf) });
       await page.cleanup();
@@ -129,12 +156,6 @@ export async function ocrPdfWithOpenAiVision(
     await doc.destroy().catch(() => undefined);
 
     const batchCount = Math.ceil(pageImages.length / VISION_BATCH_SIZE);
-    logVision("OCR_VISION_START", {
-      pageCount: pageImages.length,
-      batchCount,
-      model,
-      renderDpi: VISION_RENDER_DPI,
-    });
 
     const client = new OpenAI({ apiKey });
     const parts: string[] = [];
@@ -159,6 +180,13 @@ export async function ocrPdfWithOpenAiVision(
         });
       }
 
+      logVisionStep("openai_request", {
+        batchIndex: b,
+        startPage,
+        endPage,
+        imageCount: slice.length,
+        model,
+      });
       const completion = await client.chat.completions.create({
         model,
         max_tokens: 8192,
@@ -196,6 +224,7 @@ export async function ocrPdfWithOpenAiVision(
       pageCount: pageImages.length,
       batchCount,
       model,
+      renderDpi: VISION_RENDER_DPI,
     });
 
     return {
