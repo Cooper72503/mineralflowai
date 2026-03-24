@@ -174,7 +174,10 @@ function applyInference(
 ): { next: ParsedLeaseResult; inferred: Record<string, unknown> } {
   const inferred: Record<string, unknown> = {};
   const next = { ...p };
-  const scan = combinedText.trim().length >= normalizedText.trim().length ? combinedText : normalizedText;
+  const safeText = typeof combinedText === "string" ? combinedText : "";
+  const textLength = safeText.trim().length;
+  const normTrim = typeof normalizedText === "string" ? normalizedText.trim() : "";
+  const scan = textLength >= normTrim.length ? safeText : normalizedText;
 
   if (!next.owner?.trim() && next.grantor?.trim()) {
     next.owner = next.grantor;
@@ -508,8 +511,11 @@ function applyFinalStructuredFailsafe(
   combinedText: string
 ): { next: ParsedLeaseResult; flags: Record<string, boolean> } {
   const flags: Record<string, boolean> = {};
-  const trimmedCombined = combinedText.trim();
-  if (trimmedCombined.length < 20 || !finalCriticalQuadrupleBlank(p)) {
+  const safeText = typeof combinedText === "string" ? combinedText : "";
+  const textLength = safeText.trim().length;
+  const trimmedCombined = safeText.trim();
+  const hasText = textLength > 0;
+  if (!hasText || trimmedCombined.length < 20 || !finalCriticalQuadrupleBlank(p)) {
     return { next: p, flags };
   }
 
@@ -595,13 +601,14 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   const rawPdfText = args.rawPdfText?.trim() ?? "";
   const ocrText = args.ocrText?.trim() ? args.ocrText.trim() : null;
   const combinedText = buildCombinedText(normalizedText, ocrText, rawPdfText);
+  const safeCombinedText = combinedText || rawPdfText || (ocrText ?? "") || "";
   const usableTextLen = computeUsableTextLength(normalizedText, ocrText, rawPdfText);
 
   logExtract("RAW_TEXT_LENGTH", {
     normalizedLen: normalizedText.trim().length,
     rawPdfLen: rawPdfText.length,
     ocrLen: (ocrText ?? "").length,
-    combinedLen: combinedText.length,
+    combinedLen: safeCombinedText.length,
     usableTextLen,
   });
   if (rawPdfText.length > 0) logExtract("PDF_TEXT_SUCCESS", { stage: "pipeline_meta", rawPdfLen: rawPdfText.length });
@@ -617,7 +624,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
         ? 0.35
         : null;
 
-  logExtract("HEURISTIC_FIELDS", { textLen: normalizedText.length, combinedLen: combinedText.length });
+  logExtract("HEURISTIC_FIELDS", { textLen: normalizedText.length, combinedLen: safeCombinedText.length });
   const heur = extractHeuristicFields(normalizedText, { ocrText, rawPdfText: rawPdfText || null });
   const detected_class: ExtractionDocumentClass = heur.detected_class;
 
@@ -636,9 +643,11 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     try {
       llm = await parseLeaseFieldsWithOpenAi(llmInput, { model: args.openAiModel });
       logExtract("LLM_NORMALIZATION_SUCCESS", { model: args.openAiModel ?? "gpt-4o-mini" });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+    } catch (err) {
+      console.error("[extract] OPENAI_FAILED", err);
+      const msg = err instanceof Error ? err.message : String(err);
       extraction_errors.push(msg);
+      llm = null;
       logExtract("LLM_NORMALIZATION_START", { error: msg });
     }
   } else if (!args.skipOpenAi) {
@@ -646,7 +655,9 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   }
 
   const hBase = heuristicToPartialParsed(heur);
-  const headingScan = combinedText.trim().length > 0 ? combinedText : normalizedText;
+  const hasCombinedText =
+    typeof safeCombinedText === "string" && safeCombinedText.trim().length > 0;
+  const headingScan = hasCombinedText ? safeCombinedText : normalizedText;
 
   const docTypeMerged =
     detected_class === "tax_mineral_ownership_record"
@@ -680,7 +691,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   const { next: afterInference, inferred } = applyInference(
     mergedPre,
     normalizedText,
-    combinedText,
+    safeCombinedText,
     args.docCounty,
     args.docState
   );
@@ -688,7 +699,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
 
   const { next: afterFailsafe, fallback: failsafeFlags } = applyStructuredFailsafe(
     parsed,
-    combinedText,
+    safeCombinedText,
     usableTextLen,
     detected_class
   );
@@ -696,17 +707,28 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
 
   const { next: afterEmergency, emergency: emergencyFlags } = applyEmergencyStructuredFallback(
     parsed,
-    combinedText,
+    safeCombinedText,
     usableTextLen
   );
   parsed = normalizeParsedLeaseResult(afterEmergency, headingScan);
 
   parsed.parties = withPartyKinds(parsed.parties);
 
-  const { next: afterFinalFailsafe, flags: finalFailsafeFlags } = applyFinalStructuredFailsafe(
-    parsed,
-    combinedText
-  );
+  console.log("[extract] FAILSAFE_INPUT_CHECK", {
+    combinedTextLength: safeCombinedText.length,
+    hasParsed: !!parsed,
+  });
+  let afterFinalFailsafe: ParsedLeaseResult;
+  let finalFailsafeFlags: Record<string, boolean>;
+  try {
+    const result = applyFinalStructuredFailsafe(parsed, safeCombinedText);
+    afterFinalFailsafe = result.next;
+    finalFailsafeFlags = result.flags;
+  } catch (err) {
+    console.error("[extract] FINAL_FAILSAFE_ERROR", err);
+    afterFinalFailsafe = parsed;
+    finalFailsafeFlags = {};
+  }
   parsed = afterFinalFailsafe;
 
   const inferred_fields: Record<string, unknown> = { ...inferred };
@@ -811,7 +833,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
 
   const party_confidence = computePartyConfidence(parsed);
   let county_confidence = confidence_by_field.county ?? 0;
-  if (!parsed.county?.trim() && detectTexasContext(combinedText)) {
+  if (!parsed.county?.trim() && detectTexasContext(safeCombinedText)) {
     county_confidence = Math.min(county_confidence, 0.15);
     logExtract("FALLBACK_COUNTY_USED", { source: "texas_strong_no_county", county_confidence });
   }
@@ -900,7 +922,8 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
 
   logExtract("INFERENCE_APPLIED", { inferred_keys: Object.keys(inferred_fields), extraction_status });
 
-  const combinedLenForFloor = combinedText.trim().length;
+  const safeCombinedForFloor = typeof safeCombinedText === "string" ? safeCombinedText : "";
+  const combinedLenForFloor = safeCombinedForFloor.trim().length;
   const extraction_confidence_reported =
     combinedLenForFloor >= 20 ? Math.max(extraction_confidence, 0.25) : extraction_confidence;
   parsed.confidence_score = extraction_confidence_reported;
@@ -934,7 +957,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     raw_text: rawPdfText,
     raw_pdf_text: rawPdfText,
     ocr_text: ocrText,
-    combined_text: combinedText,
+    combined_text: safeCombinedText,
     normalized_text: normalizedText,
     detected_document_type: detected_class,
     extracted_fields,

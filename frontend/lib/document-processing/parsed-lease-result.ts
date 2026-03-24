@@ -113,35 +113,61 @@ export function buildNormalizedPartiesForDealScoreInput(args: {
  * @param fullTextForHeadingRecovery Native + OCR + raw combined when available so labels on any layer apply.
  */
 export function normalizeParsedLeaseResult(
-  parsed: {
-    lessor: string | null;
-    lessee: string | null;
-    grantor: string | null;
-    grantee: string | null;
-    county: string | null;
-    state: string | null;
-    legal_description: string | null;
-    effective_date: string | null;
-    recording_date: string | null;
-    royalty_rate: string | null;
-    term_length: string | null;
-    document_type: string | null;
-    confidence_score: number;
-    parties?: NormalizedPartyEntry[] | null;
-    owner?: string | null;
-    buyer?: string | null;
-    acreage?: number | null;
-    mailing_address?: string | null;
-  },
+  parsed:
+    | {
+        lessor: string | null;
+        lessee: string | null;
+        grantor: string | null;
+        grantee: string | null;
+        county: string | null;
+        state: string | null;
+        legal_description: string | null;
+        effective_date: string | null;
+        recording_date: string | null;
+        royalty_rate: string | null;
+        term_length: string | null;
+        document_type: string | null;
+        confidence_score: number;
+        parties?: NormalizedPartyEntry[] | null;
+        owner?: string | null;
+        buyer?: string | null;
+        acreage?: number | null;
+        mailing_address?: string | null;
+      }
+    | null
+    | undefined,
   fullTextForHeadingRecovery: string
 ): ParsedLeaseResult {
-  let grantor = parsed.grantor ?? null;
-  let grantee = parsed.grantee ?? null;
-  let lessor = parsed.lessor ?? null;
-  let lessee = parsed.lessee ?? null;
-  let document_type = parsed.document_type ?? null;
+  const p = parsed ?? {
+    lessor: null,
+    lessee: null,
+    grantor: null,
+    grantee: null,
+    county: null,
+    state: null,
+    legal_description: null,
+    effective_date: null,
+    recording_date: null,
+    royalty_rate: null,
+    term_length: null,
+    document_type: null,
+    confidence_score: 0,
+    parties: null,
+    owner: null,
+    buyer: null,
+    acreage: null,
+    mailing_address: null,
+  };
+  let grantor = p.grantor ?? null;
+  let grantee = p.grantee ?? null;
+  let lessor = p.lessor ?? null;
+  let lessee = p.lessee ?? null;
+  let document_type = p.document_type ?? null;
 
-  const scan = fullTextForHeadingRecovery?.trim() ? fullTextForHeadingRecovery : "";
+  const scan =
+    typeof fullTextForHeadingRecovery === "string" && fullTextForHeadingRecovery.trim()
+      ? fullTextForHeadingRecovery
+      : "";
   const fromGg = extractGrantorGranteeFromHeadings(scan);
   if (!grantor && fromGg.grantor) grantor = fromGg.grantor;
   if (!grantee && fromGg.grantee) grantee = fromGg.grantee;
@@ -159,8 +185,8 @@ export function normalizeParsedLeaseResult(
   }
 
   const parties =
-    Array.isArray(parsed.parties) && parsed.parties.length > 0
-      ? parsed.parties
+    Array.isArray(p.parties) && p.parties.length > 0
+      ? p.parties
       : buildNormalizedPartiesForDealScoreInput({
           grantor,
           grantee,
@@ -171,16 +197,16 @@ export function normalizeParsedLeaseResult(
         });
 
   return {
-    ...parsed,
+    ...p,
     lessor,
     lessee,
     grantor,
     grantee,
     parties,
     document_type,
-    owner: parsed.owner ?? null,
-    buyer: parsed.buyer ?? null,
-    acreage: parsed.acreage ?? null,
-    mailing_address: parsed.mailing_address ?? null,
+    owner: p.owner ?? null,
+    buyer: p.buyer ?? null,
+    acreage: p.acreage ?? null,
+    mailing_address: p.mailing_address ?? null,
   };
 }

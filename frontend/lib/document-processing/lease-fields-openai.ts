@@ -4,7 +4,10 @@
 
 import OpenAI from "openai";
 import { cleanExtractedDocumentText } from "./extracted-text-quality";
-import { normalizeParsedLeaseResult, type ParsedLeaseResult } from "./parsed-lease-result";
+import {
+  normalizeParsedLeaseResult,
+  type ParsedLeaseResult,
+} from "./parsed-lease-result";
 
 function describeValue(value: unknown): string {
   if (value === null) return "null";
@@ -17,15 +20,25 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function assertString(value: unknown, stepName: string): asserts value is string {
+function assertString(
+  value: unknown,
+  stepName: string,
+): asserts value is string {
   if (typeof value !== "string") {
-    throw new Error(`${stepName}: expected a string but got ${describeValue(value)}.`);
+    throw new Error(
+      `${stepName}: expected a string but got ${describeValue(value)}.`,
+    );
   }
 }
 
-function assertPlainObject(value: unknown, stepName: string): asserts value is Record<string, unknown> {
+function assertPlainObject(
+  value: unknown,
+  stepName: string,
+): asserts value is Record<string, unknown> {
   if (!isPlainObject(value)) {
-    throw new Error(`${stepName}: expected a plain object but got ${describeValue(value)}.`);
+    throw new Error(
+      `${stepName}: expected a plain object but got ${describeValue(value)}.`,
+    );
   }
 }
 
@@ -51,7 +64,10 @@ The text may be from OCR or a weak PDF text layer: skip isolated garbage lines, 
 
 Return only valid JSON, no markdown or extra text.`;
 
-export function safeParseJsonObject(content: string, stepName: string): Record<string, unknown> {
+export function safeParseJsonObject(
+  content: string,
+  stepName: string,
+): Record<string, unknown> {
   assertString(content, stepName);
   try {
     const parsed = JSON.parse(content) as unknown;
@@ -65,13 +81,19 @@ export function safeParseJsonObject(content: string, stepName: string): Record<s
     if (start >= 0 && end > start) {
       const sliced = content.slice(start, end + 1);
       const parsed2 = JSON.parse(sliced) as unknown;
-      if (parsed2 == null || typeof parsed2 !== "object" || Array.isArray(parsed2)) {
+      if (
+        parsed2 == null ||
+        typeof parsed2 !== "object" ||
+        Array.isArray(parsed2)
+      ) {
         throw new Error("Sliced JSON was not an object.");
       }
       return parsed2 as Record<string, unknown>;
     }
     const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`${stepName}: OpenAI response was not valid JSON: ${message}`);
+    throw new Error(
+      `${stepName}: OpenAI response was not valid JSON: ${message}`,
+    );
   }
 }
 
@@ -82,29 +104,155 @@ export type OpenAiLeaseParseOptions = {
 
 /**
  * Calls OpenAI and returns structured fields (before merge with heuristics).
- * Throws on missing key, transport errors, or malformed JSON.
+ * On failure (missing key, transport errors, malformed JSON, etc.), logs and returns an empty-normalized result.
  */
 export async function parseLeaseFieldsWithOpenAi(
   extractedText: string,
-  options?: OpenAiLeaseParseOptions
+  options?: OpenAiLeaseParseOptions,
 ): Promise<ParsedLeaseResult> {
-  assertString(extractedText, "OPENAI_CALL_START");
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    const msg = "OPENAI_API_KEY is not set; cannot parse lease fields.";
-    console.error("[parseLeaseFieldsWithOpenAi]", msg);
-    throw new Error(`OPENAI_CALL_START: ${msg}`);
-  }
-  const trimmedInput = extractedText.trim();
-  const normalizedForModel =
-    trimmedInput.length === 0
-      ? ""
-      : (() => {
-          const cleaned = cleanExtractedDocumentText(extractedText);
-          return cleaned.length > 0 ? cleaned : trimmedInput;
-        })();
+  try {
+    assertString(extractedText, "OPENAI_CALL_START");
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      const msg = "OPENAI_API_KEY is not set; cannot parse lease fields.";
+      console.error("[parseLeaseFieldsWithOpenAi]", msg);
+      throw new Error(`OPENAI_CALL_START: ${msg}`);
+    }
+    const trimmedInput = extractedText.trim();
+    const normalizedForModel =
+      trimmedInput.length === 0
+        ? ""
+        : (() => {
+            const cleaned = cleanExtractedDocumentText(extractedText);
+            return cleaned.length > 0 ? cleaned : trimmedInput;
+          })();
 
-  if (normalizedForModel === "") {
+    if (normalizedForModel === "") {
+      return normalizeParsedLeaseResult(
+        {
+          lessor: null,
+          lessee: null,
+          grantor: null,
+          grantee: null,
+          county: null,
+          state: null,
+          legal_description: null,
+          effective_date: null,
+          recording_date: null,
+          royalty_rate: null,
+          term_length: null,
+          mailing_address: null,
+          document_type: null,
+          confidence_score: 0,
+        },
+        "",
+      );
+    }
+
+    const model = options?.model ?? "gpt-4o-mini";
+    const maxChars = options?.maxChars ?? 12000;
+    const client = new OpenAI({ apiKey });
+
+    let completion: unknown;
+    try {
+      completion = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: LEASE_PARSE_SYSTEM },
+          {
+            role: "user",
+            content: `Extract lease fields from this document text:\n\n${normalizedForModel.slice(0, maxChars)}`,
+          },
+        ],
+        response_format: { type: "json_object" },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`OPENAI_CALL_START: OpenAI request failed: ${msg}`);
+    }
+
+    assertPlainObject(completion, "OPENAI_CALL_START");
+
+    const choices: unknown = (completion as { choices?: unknown }).choices;
+    if (!Array.isArray(choices) || choices.length === 0) {
+      throw new Error(
+        `OPENAI_CALL_START: OpenAI returned no choices (got ${describeValue(choices)}).`,
+      );
+    }
+
+    const firstChoice = choices[0] as unknown;
+    assertPlainObject(firstChoice, "OPENAI_CALL_START");
+
+    const message = (firstChoice as { message?: unknown }).message;
+    const contentValue = isPlainObject(message)
+      ? (message as { content?: unknown }).content
+      : undefined;
+    const content =
+      typeof contentValue === "string" ? contentValue.trim() : undefined;
+    if (!content) {
+      const msg = "OpenAI returned no content in completion choices.";
+      console.error("[parseLeaseFieldsWithOpenAi]", msg, {
+        choicesLength: Array.isArray(choices) ? choices.length : 0,
+        finishReason: isPlainObject(firstChoice)
+          ? (firstChoice as { finish_reason?: unknown }).finish_reason
+          : undefined,
+      });
+      throw new Error(msg);
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = safeParseJsonObject(content, "OPENAI_CALL_START");
+    } catch (parseErr) {
+      const msg =
+        parseErr instanceof Error ? parseErr.message : String(parseErr);
+      console.error(
+        "[parseLeaseFieldsWithOpenAi] Invalid/malformed JSON in OpenAI response",
+        {
+          error: msg,
+          contentPreview: content.slice(0, 300),
+        },
+      );
+      throw parseErr instanceof Error ? parseErr : new Error(String(parseErr));
+    }
+
+    const num = (v: unknown): number => {
+      if (typeof v === "number" && v >= 0 && v <= 1) return v;
+      if (typeof v === "string") {
+        const n = parseFloat(v);
+        if (!Number.isNaN(n) && n >= 0 && n <= 1) return n;
+      }
+      return 0;
+    };
+    const llmConf = num(parsed.confidence_score);
+    const confFloored =
+      normalizedForModel.trim().length >= 15
+        ? Math.max(0.25, llmConf)
+        : llmConf;
+    const str = (v: unknown): string | null =>
+      v != null && typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+
+    return normalizeParsedLeaseResult(
+      {
+        lessor: str(parsed.lessor),
+        lessee: str(parsed.lessee),
+        grantor: str(parsed.grantor),
+        grantee: str(parsed.grantee),
+        county: str(parsed.county),
+        state: str(parsed.state),
+        legal_description: str(parsed.legal_description),
+        effective_date: str(parsed.effective_date),
+        recording_date: str(parsed.recording_date),
+        royalty_rate: str(parsed.royalty_rate),
+        term_length: str(parsed.term_length),
+        mailing_address: str(parsed.mailing_address),
+        document_type: str(parsed.document_type),
+        confidence_score: confFloored,
+      },
+      normalizedForModel,
+    );
+  } catch (err) {
+    console.error("[extract] OPENAI_FAILED", err);
     return normalizeParsedLeaseResult(
       {
         lessor: null,
@@ -122,97 +270,7 @@ export async function parseLeaseFieldsWithOpenAi(
         document_type: null,
         confidence_score: 0,
       },
-      ""
+      typeof extractedText === "string" ? extractedText : "",
     );
   }
-
-  const model = options?.model ?? "gpt-4o-mini";
-  const maxChars = options?.maxChars ?? 12000;
-  const client = new OpenAI({ apiKey });
-
-  let completion: unknown;
-  try {
-    completion = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: LEASE_PARSE_SYSTEM },
-        {
-          role: "user",
-          content: `Extract lease fields from this document text:\n\n${normalizedForModel.slice(0, maxChars)}`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`OPENAI_CALL_START: OpenAI request failed: ${msg}`);
-  }
-
-  assertPlainObject(completion, "OPENAI_CALL_START");
-
-  const choices: unknown = (completion as { choices?: unknown }).choices;
-  if (!Array.isArray(choices) || choices.length === 0) {
-    throw new Error(`OPENAI_CALL_START: OpenAI returned no choices (got ${describeValue(choices)}).`);
-  }
-
-  const firstChoice = choices[0] as unknown;
-  assertPlainObject(firstChoice, "OPENAI_CALL_START");
-
-  const message = (firstChoice as { message?: unknown }).message;
-  const contentValue = isPlainObject(message) ? (message as { content?: unknown }).content : undefined;
-  const content = typeof contentValue === "string" ? contentValue.trim() : undefined;
-  if (!content) {
-    const msg = "OpenAI returned no content in completion choices.";
-    console.error("[parseLeaseFieldsWithOpenAi]", msg, {
-      choicesLength: Array.isArray(choices) ? choices.length : 0,
-      finishReason: isPlainObject(firstChoice) ? (firstChoice as { finish_reason?: unknown }).finish_reason : undefined,
-    });
-    throw new Error(msg);
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = safeParseJsonObject(content, "OPENAI_CALL_START");
-  } catch (parseErr) {
-    const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-    console.error("[parseLeaseFieldsWithOpenAi] Invalid/malformed JSON in OpenAI response", {
-      error: msg,
-      contentPreview: content.slice(0, 300),
-    });
-    throw parseErr instanceof Error ? parseErr : new Error(String(parseErr));
-  }
-
-  const num = (v: unknown): number => {
-    if (typeof v === "number" && v >= 0 && v <= 1) return v;
-    if (typeof v === "string") {
-      const n = parseFloat(v);
-      if (!Number.isNaN(n) && n >= 0 && n <= 1) return n;
-    }
-    return 0;
-  };
-  const llmConf = num(parsed.confidence_score);
-  const confFloored =
-    normalizedForModel.trim().length >= 15 ? Math.max(0.25, llmConf) : llmConf;
-  const str = (v: unknown): string | null =>
-    v != null && typeof v === "string" && v.trim() !== "" ? v.trim() : null;
-
-  return normalizeParsedLeaseResult(
-    {
-      lessor: str(parsed.lessor),
-      lessee: str(parsed.lessee),
-      grantor: str(parsed.grantor),
-      grantee: str(parsed.grantee),
-      county: str(parsed.county),
-      state: str(parsed.state),
-      legal_description: str(parsed.legal_description),
-      effective_date: str(parsed.effective_date),
-      recording_date: str(parsed.recording_date),
-      royalty_rate: str(parsed.royalty_rate),
-      term_length: str(parsed.term_length),
-      mailing_address: str(parsed.mailing_address),
-      document_type: str(parsed.document_type),
-      confidence_score: confFloored,
-    },
-    normalizedForModel
-  );
 }
