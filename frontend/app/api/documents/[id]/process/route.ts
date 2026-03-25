@@ -20,6 +20,10 @@ import {
   coerceDealScoreResult,
   dealScoreFromExtractionColumns,
 } from "@/lib/deals/dashboard-normalize";
+import {
+  drillSnapshotFromDealInput,
+  enrichDealScoreInputWithDrillDifficulty,
+} from "@/lib/scoring/drillDifficultyEngine";
 
 const LOG_PREFIX = "[process-document]";
 const BUCKET_NAME = "documents";
@@ -294,6 +298,8 @@ export async function POST(
       log("PROCESS_START");
 
       let optionalDealScoreInput: Record<string, unknown> = {};
+      /** Set after enrichment; used for client fallback payload drill snapshot. */
+      let dealScoreInputForPipeline: Record<string, unknown> | null = null;
       let dealScoreResult: DealScoreResult | null = null;
       let dealAcreageForAlerts: number | null | undefined = undefined;
       try {
@@ -864,6 +870,13 @@ export async function POST(
           documentProcessedAtIso: new Date().toISOString(),
         });
 
+        try {
+          enrichDealScoreInputWithDrillDifficulty(dealScoreInput);
+        } catch {
+          // Non-fatal: enrichment uses safe defaults internally; this is defense in depth.
+        }
+        dealScoreInputForPipeline = dealScoreInput;
+
         const detectedDocumentTypeForLog =
           mineralDeedSignals.length > 0
             ? `mineral_deed (${mineralDeedSignals.join(" | ")})`
@@ -909,6 +922,7 @@ export async function POST(
         const extractionArtifacts = debug.extraction_artifacts as
           | Record<string, unknown>
           | undefined;
+        const drillSnap = drillSnapshotFromDealInput(dealScoreInput);
         const structuredExtraction = {
           lessor: parsed.lessor,
           lessee: parsed.lessee,
@@ -939,6 +953,12 @@ export async function POST(
           document_type_confidence:
             extractionArtifacts?.document_type_confidence,
           extraction_artifacts: extractionArtifacts ?? null,
+          estimated_formation: drillSnap.estimated_formation,
+          estimated_depth_min: drillSnap.estimated_depth_min,
+          estimated_depth_max: drillSnap.estimated_depth_max,
+          drill_difficulty: drillSnap.drill_difficulty,
+          drill_difficulty_score: drillSnap.drill_difficulty_score,
+          drill_difficulty_reason: drillSnap.drill_difficulty_reason,
           deal_score: dealScore,
         };
 
@@ -961,6 +981,12 @@ export async function POST(
           confidence: parsed.confidence_score ?? 0,
           model: openAiModelUsed ?? DEFAULT_OPENAI_MODEL,
           error_message: openAiError ?? debug.error ?? null,
+          estimated_formation: drillSnap.estimated_formation,
+          estimated_depth_min: drillSnap.estimated_depth_min,
+          estimated_depth_max: drillSnap.estimated_depth_max,
+          drill_difficulty: drillSnap.drill_difficulty,
+          drill_difficulty_score: drillSnap.drill_difficulty_score,
+          drill_difficulty_reason: drillSnap.drill_difficulty_reason,
         };
 
         const basePayloadNoMeta = {
@@ -977,10 +1003,18 @@ export async function POST(
           royalty_rate: parsed.royalty_rate,
           term_length: parsed.term_length,
           confidence_score: parsed.confidence_score ?? 0,
+          estimated_formation: drillSnap.estimated_formation,
+          estimated_depth_min: drillSnap.estimated_depth_min,
+          estimated_depth_max: drillSnap.estimated_depth_max,
+          drill_difficulty: drillSnap.drill_difficulty,
+          drill_difficulty_score: drillSnap.drill_difficulty_score,
+          drill_difficulty_reason: drillSnap.drill_difficulty_reason,
         };
 
         assertPlainObject(basePayloadFull, "DB_INSERT_START");
         assertPlainObject(basePayloadNoMeta, "DB_INSERT_START");
+
+        console.log("DRILL OUTPUT:", drillSnap);
 
         const isMissingColumnError = (message: string, columnName: string) => {
           const escaped = columnName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1262,6 +1296,12 @@ export async function POST(
         created_at: string;
         structured_data?: unknown;
         structured_json?: unknown;
+        estimated_formation?: string | null;
+        estimated_depth_min?: number | null;
+        estimated_depth_max?: number | null;
+        drill_difficulty?: string | null;
+        drill_difficulty_score?: number | null;
+        drill_difficulty_reason?: string | null;
       };
       let savedExtraction: SavedExtraction | null = null;
 
@@ -1272,7 +1312,7 @@ export async function POST(
         const { data, error } = await supabase
           .from("document_extractions")
           .select(
-            "id, document_id, extracted_text, lessor, lessee, county, state, legal_description, effective_date, recording_date, royalty_rate, term_length, confidence_score, created_at, structured_data, structured_json",
+            "id, document_id, extracted_text, lessor, lessee, county, state, legal_description, effective_date, recording_date, royalty_rate, term_length, confidence_score, created_at, structured_data, structured_json, estimated_formation, estimated_depth_min, estimated_depth_max, drill_difficulty, drill_difficulty_score, drill_difficulty_reason",
           )
           .eq("document_id", documentId)
           .maybeSingle();
@@ -1393,6 +1433,9 @@ export async function POST(
       }
 
       log("PROCESS_COMPLETE");
+      const drillForClient = drillSnapshotFromDealInput(
+        dealScoreInputForPipeline ?? {},
+      );
       const fallbackStructuredForClient = {
         lessor: parsed.lessor,
         lessee: parsed.lessee,
@@ -1413,6 +1456,12 @@ export async function POST(
         acreage: parsed.acreage,
         mailing_address: parsed.mailing_address,
         extraction_status: parsed.extraction_status,
+        estimated_formation: drillForClient.estimated_formation,
+        estimated_depth_min: drillForClient.estimated_depth_min,
+        estimated_depth_max: drillForClient.estimated_depth_max,
+        drill_difficulty: drillForClient.drill_difficulty,
+        drill_difficulty_score: drillForClient.drill_difficulty_score,
+        drill_difficulty_reason: drillForClient.drill_difficulty_reason,
         deal_score:
           dealScoreResult ??
           ({

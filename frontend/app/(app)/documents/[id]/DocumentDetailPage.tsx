@@ -30,7 +30,7 @@ function logDocumentDetailDealScores(ext: ExtractionRow, scoreDisplayed: number 
 }
 
 const EXTRACTION_SELECT =
-  "id, document_id, extracted_text, lessor, lessee, county, state, legal_description, effective_date, recording_date, royalty_rate, term_length, confidence_score, created_at, structured_data, structured_json";
+  "id, document_id, extracted_text, lessor, lessee, county, state, legal_description, effective_date, recording_date, royalty_rate, term_length, confidence_score, created_at, structured_data, structured_json, estimated_formation, estimated_depth_min, estimated_depth_max, drill_difficulty, drill_difficulty_score, drill_difficulty_reason";
 
 type DocumentRow = {
   id: string;
@@ -63,6 +63,12 @@ type ExtractionRow = {
   created_at: string;
   structured_data?: unknown;
   structured_json?: unknown;
+  estimated_formation?: string | null;
+  estimated_depth_min?: number | null;
+  estimated_depth_max?: number | null;
+  drill_difficulty?: string | null;
+  drill_difficulty_score?: number | null;
+  drill_difficulty_reason?: string | null;
 };
 
 /** Merges legacy + primary JSON (same as dashboard) and applies API `deal_score` for immediate UI. */
@@ -192,6 +198,86 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatEstimatedDepthRange(min: unknown, max: unknown): string {
+  const a = typeof min === "number" && Number.isFinite(min) ? Math.round(min) : null;
+  const b = typeof max === "number" && Number.isFinite(max) ? Math.round(max) : null;
+  if (a === null || b === null) return "Unknown";
+  const fmt = (n: number) => n.toLocaleString("en-US");
+  return `${fmt(a)}–${fmt(b)} ft`;
+}
+
+function formatDrillScoreImpact(score: unknown): string {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "0";
+  if (score === 0) return "0";
+  return score > 0 ? `+${score}` : `${score}`;
+}
+
+function pickDrillString(merged: Record<string, unknown>, snake: string, camel: string): string | undefined {
+  const a = merged[snake];
+  const b = merged[camel];
+  if (typeof a === "string" && a.trim()) return a.trim();
+  if (typeof b === "string" && b.trim()) return b.trim();
+  return undefined;
+}
+
+function pickDrillNumber(merged: Record<string, unknown>, snake: string, camel: string): number | null {
+  for (const v of [merged[snake], merged[camel]]) {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      const n = parseFloat(v.trim());
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
+function overlayDrillColumnsFromRow(
+  merged: Record<string, unknown>,
+  extraction: ExtractionRow | null
+): Record<string, unknown> {
+  if (!extraction) return merged;
+  const out: Record<string, unknown> = { ...merged };
+  const ef = extraction.estimated_formation;
+  if (typeof ef === "string" && ef.trim()) out.estimated_formation = ef.trim();
+  if (typeof extraction.estimated_depth_min === "number" && Number.isFinite(extraction.estimated_depth_min)) {
+    out.estimated_depth_min = extraction.estimated_depth_min;
+  }
+  if (typeof extraction.estimated_depth_max === "number" && Number.isFinite(extraction.estimated_depth_max)) {
+    out.estimated_depth_max = extraction.estimated_depth_max;
+  }
+  const dd = extraction.drill_difficulty;
+  if (typeof dd === "string" && dd.trim()) out.drill_difficulty = dd.trim();
+  if (typeof extraction.drill_difficulty_score === "number" && Number.isFinite(extraction.drill_difficulty_score)) {
+    out.drill_difficulty_score = extraction.drill_difficulty_score;
+  }
+  const dr = extraction.drill_difficulty_reason;
+  if (typeof dr === "string" && dr.trim()) out.drill_difficulty_reason = dr.trim();
+  return out;
+}
+
+function developmentSnapshotRows(merged: Record<string, unknown>) {
+  const formation =
+    pickDrillString(merged, "estimated_formation", "estimatedFormation") ?? "Unknown";
+  const depthMin = pickDrillNumber(merged, "estimated_depth_min", "estimatedDepthMin");
+  const depthMax = pickDrillNumber(merged, "estimated_depth_max", "estimatedDepthMax");
+  const depth = formatEstimatedDepthRange(depthMin, depthMax);
+  const difficulty =
+    pickDrillString(merged, "drill_difficulty", "drillDifficulty") ?? "Unknown";
+  const scoreRaw = merged.drill_difficulty_score ?? merged.drillDifficultyScore;
+  const impact =
+    typeof scoreRaw === "number" && Number.isFinite(scoreRaw)
+      ? formatDrillScoreImpact(scoreRaw)
+      : typeof scoreRaw === "string" && scoreRaw.trim()
+        ? formatDrillScoreImpact(parseFloat(scoreRaw.trim()))
+        : "0";
+  return [
+    { label: "Formation", value: formation },
+    { label: "Depth", value: depth },
+    { label: "Drill Difficulty", value: difficulty },
+    { label: "Score Impact", value: impact },
+  ];
+}
+
 function statusBadgeClass(status: string | null): string {
   const s = (status ?? "").toLowerCase();
   if (s === "completed" || s === "processed") return "badge badgeActive";
@@ -232,6 +318,17 @@ export default function DocumentDetailPage() {
     return dealScoreFromExtractionColumns(extraction.structured_data, extraction.structured_json);
   }, [extraction, dealScoreOverride]);
 
+  const mergedStructured = useMemo(() => {
+    if (!extraction) return null;
+    return mergeStructuredFields(extraction.structured_data, extraction.structured_json);
+  }, [extraction]);
+
+  /** Merged structured JSON + top-level drill columns from `document_extractions` (when selected). */
+  const snapshotMerged = useMemo(() => {
+    const base = mergedStructured ?? {};
+    return overlayDrillColumnsFromRow(base, extraction);
+  }, [mergedStructured, extraction]);
+
   useEffect(() => {
     if (!displayDealScore) return;
     console.log("SCORE LOADED", displayDealScore.score);
@@ -249,6 +346,10 @@ export default function DocumentDetailPage() {
       "on load"
     );
   }, [extraction, displayDealScore]);
+
+  useEffect(() => {
+    console.log("UI DRILL DATA:", snapshotMerged);
+  }, [snapshotMerged]);
 
   useEffect(() => {
     if (!id) {
@@ -594,6 +695,10 @@ export default function DocumentDetailPage() {
     );
   }
 
+  const isDocProcessed =
+    (doc.status ?? "").toLowerCase() === "completed" ||
+    (doc.status ?? "").toLowerCase() === "processed";
+
   const meta = [
     { label: "File name", value: doc.file_name ?? "—" },
     { label: "County", value: doc.county ?? "—" },
@@ -682,6 +787,62 @@ export default function DocumentDetailPage() {
       </div>
 
       {displayDealScore ? <DealScoreCard dealScore={displayDealScore} /> : null}
+
+      {isDocProcessed ? (
+        <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
+          <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+            Development Snapshot
+          </h2>
+          <dl style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "0.75rem" }}>
+            {developmentSnapshotRows(snapshotMerged).map(({ label, value }) => (
+              <div key={label}>
+                <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>{label}</dt>
+                <dd style={{ fontSize: "0.95rem", margin: 0 }}>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <div
+            style={{
+              marginBottom: "0.75rem",
+              padding: "0.5rem 0.65rem",
+              background: "#f4f4f5",
+              borderRadius: 6,
+              fontSize: "0.75rem",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              lineHeight: 1.5,
+              color: "#3f3f46",
+              overflowX: "auto",
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>Debug (raw)</div>
+            <div>
+              estimated_formation / estimatedFormation:{" "}
+              {JSON.stringify(snapshotMerged.estimated_formation ?? snapshotMerged.estimatedFormation)}
+            </div>
+            <div>
+              estimated_depth_min / estimatedDepthMin:{" "}
+              {JSON.stringify(snapshotMerged.estimated_depth_min ?? snapshotMerged.estimatedDepthMin)}
+            </div>
+            <div>
+              estimated_depth_max / estimatedDepthMax:{" "}
+              {JSON.stringify(snapshotMerged.estimated_depth_max ?? snapshotMerged.estimatedDepthMax)}
+            </div>
+            <div>
+              drill_difficulty / drillDifficulty:{" "}
+              {JSON.stringify(snapshotMerged.drill_difficulty ?? snapshotMerged.drillDifficulty)}
+            </div>
+            <div>
+              drill_difficulty_score / drillDifficultyScore:{" "}
+              {JSON.stringify(snapshotMerged.drill_difficulty_score ?? snapshotMerged.drillDifficultyScore)}
+            </div>
+            <div>county: {JSON.stringify(extraction?.county ?? doc.county)}</div>
+          </div>
+          <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: 0, lineHeight: 1.45 }}>
+            Regional estimate — may be unavailable for some locations. Based on county-level geology mapping.
+            Not tract-level subsurface analysis.
+          </p>
+        </div>
+      ) : null}
 
       <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
         <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>

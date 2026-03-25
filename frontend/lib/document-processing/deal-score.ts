@@ -135,6 +135,13 @@ export type DealScoreInput = {
   owner_entity_type?: string | null;
   entity_type?: string | null;
   ownership_entity_type?: string | null;
+  /** County-level drill / geology MVP (set by drill difficulty enrichment). */
+  drill_difficulty_score?: number | null;
+  estimated_formation?: string | null;
+  estimated_depth_min?: number | null;
+  estimated_depth_max?: number | null;
+  drill_difficulty?: string | null;
+  drill_difficulty_reason?: string | null;
 };
 
 function clampScore(n: number): number {
@@ -561,6 +568,16 @@ function maxScoreForGrade(g: DealScoreResult["grade"]): number {
     default:
       return 39;
   }
+}
+
+function buildDrillDifficultyReasonLine(rec: Record<string, unknown>): string | null {
+  const pts = readFiniteNumber(rec.drill_difficulty_score);
+  if (pts === undefined) return null;
+  const diffRaw = readNonEmptyString(rec.drill_difficulty);
+  if (pts === 0 && (!diffRaw || diffRaw === "Unknown")) return null;
+  const label = diffRaw && diffRaw !== "Unknown" ? diffRaw : "Unknown";
+  const sign = pts >= 0 ? `+${pts}` : `${pts}`;
+  return `Regional drilling difficulty: ${label} (${sign})`;
 }
 
 function pickReasons(pool: string[], minN: number, maxN: number): string[] {
@@ -1016,7 +1033,18 @@ export function calculateDealScore(
   const type = classifyDealScoreType(rec);
   console.log("[deal-score] TYPE", type);
   const inner = type === "lead" ? calculateLeadScore(rec) : calculateIntelScore(rec);
-  const result: DealScoreResult = { ...inner, type };
+  const drillPts = readFiniteNumber(rec.drill_difficulty_score) ?? 0;
+  const adjustedScore = clampScore(inner.score + drillPts);
+  const drillLine = buildDrillDifficultyReasonLine(rec);
+  const nextReasons =
+    drillLine != null ? [...(inner.reasons ?? []), drillLine] : [...(inner.reasons ?? [])];
+  const result: DealScoreResult = {
+    ...inner,
+    score: adjustedScore,
+    grade: dealGradeFullLabelFromScore(adjustedScore),
+    reasons: nextReasons,
+    type,
+  };
   console.log("[deal-score] SCORE CALCULATED", result.score);
   return result;
 }

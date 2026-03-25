@@ -3,6 +3,10 @@ import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-reques
 import { calculateDealScore } from "@/lib/document-processing";
 import { buildDealScoreInput } from "@/lib/deals/build-deal-score-input";
 import { coerceDealScoreResult, dealScoreFromMerged, mergeStructuredFields } from "@/lib/deals/dashboard-normalize";
+import {
+  drillSnapshotFromDealInput,
+  enrichDealScoreInputWithDrillDifficulty,
+} from "@/lib/scoring/drillDifficultyEngine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +41,17 @@ type ExtractionRescoreRow = {
   created_at: string;
   documents: DocJoin | DocJoin[];
 };
+
+function drillTopLevelPayload(snap: ReturnType<typeof drillSnapshotFromDealInput>) {
+  return {
+    estimated_formation: snap.estimated_formation,
+    estimated_depth_min: snap.estimated_depth_min,
+    estimated_depth_max: snap.estimated_depth_max,
+    drill_difficulty: snap.drill_difficulty,
+    drill_difficulty_score: snap.drill_difficulty_score,
+    drill_difficulty_reason: snap.drill_difficulty_reason,
+  };
+}
 
 function singleDoc(d: DocJoin | DocJoin[]): DocJoin | null {
   if (Array.isArray(d)) {
@@ -148,7 +163,13 @@ export async function POST(request: Request) {
         extractedText: row.extracted_text ?? "",
         documentProcessedAtIso:
           doc.processed_at ?? doc.completed_at ?? row.created_at ?? null,
-      });
+      }) as Record<string, unknown>;
+
+      try {
+        enrichDealScoreInputWithDrillDifficulty(dealScoreInput);
+      } catch {
+        // Non-fatal
+      }
 
       const dealScoreCalculated = calculateDealScore(dealScoreInput);
       const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
@@ -167,11 +188,13 @@ export async function POST(request: Request) {
         type: dealScore.type,
       });
 
-      const nextStructured = { ...merged, deal_score: dealScore };
+      const drillSnap = drillSnapshotFromDealInput(dealScoreInput);
+      const nextStructured = { ...merged, ...drillSnap, deal_score: dealScore };
+      const drillCols = drillTopLevelPayload(drillSnap);
 
       const { error: updateBothErr } = await supabase
         .from("document_extractions")
-        .update({ structured_data: nextStructured, structured_json: nextStructured })
+        .update({ structured_data: nextStructured, structured_json: nextStructured, ...drillCols })
         .eq("id", row.id)
         .eq("user_id", user.id);
 
@@ -181,7 +204,7 @@ export async function POST(request: Request) {
           document_id: row.document_id,
           score: dealScore.score,
           grade: dealScore.grade,
-          columns: "structured_data+structured_json",
+          columns: "structured_data+structured_json+drill_columns",
         });
         updated += 1;
         continue;
@@ -189,7 +212,7 @@ export async function POST(request: Request) {
 
       const { error: updateError } = await supabase
         .from("document_extractions")
-        .update({ structured_data: nextStructured })
+        .update({ structured_data: nextStructured, ...drillCols })
         .eq("id", row.id)
         .eq("user_id", user.id);
 
@@ -199,7 +222,7 @@ export async function POST(request: Request) {
           document_id: row.document_id,
           score: dealScore.score,
           grade: dealScore.grade,
-          columns: "structured_data",
+          columns: "structured_data+drill_columns",
         });
         updated += 1;
       }
