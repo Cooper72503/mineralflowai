@@ -348,10 +348,6 @@ export default function DocumentDetailPage() {
   }, [extraction, displayDealScore]);
 
   useEffect(() => {
-    console.log("UI DRILL DATA:", snapshotMerged);
-  }, [snapshotMerged]);
-
-  useEffect(() => {
     if (!id) {
       setError("Invalid document ID.");
       setLoading(false);
@@ -801,42 +797,44 @@ export default function DocumentDetailPage() {
               </div>
             ))}
           </dl>
-          <div
-            style={{
-              marginBottom: "0.75rem",
-              padding: "0.5rem 0.65rem",
-              background: "#f4f4f5",
-              borderRadius: 6,
-              fontSize: "0.75rem",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              lineHeight: 1.5,
-              color: "#3f3f46",
-              overflowX: "auto",
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>Debug (raw)</div>
-            <div>
-              estimated_formation / estimatedFormation:{" "}
-              {JSON.stringify(snapshotMerged.estimated_formation ?? snapshotMerged.estimatedFormation)}
+          {process.env.NODE_ENV === "development" ? (
+            <div
+              style={{
+                marginBottom: "0.75rem",
+                padding: "0.5rem 0.65rem",
+                background: "#f4f4f5",
+                borderRadius: 6,
+                fontSize: "0.75rem",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                lineHeight: 1.5,
+                color: "#3f3f46",
+                overflowX: "auto",
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>Debug (raw)</div>
+              <div>
+                estimated_formation / estimatedFormation:{" "}
+                {JSON.stringify(snapshotMerged.estimated_formation ?? snapshotMerged.estimatedFormation)}
+              </div>
+              <div>
+                estimated_depth_min / estimatedDepthMin:{" "}
+                {JSON.stringify(snapshotMerged.estimated_depth_min ?? snapshotMerged.estimatedDepthMin)}
+              </div>
+              <div>
+                estimated_depth_max / estimatedDepthMax:{" "}
+                {JSON.stringify(snapshotMerged.estimated_depth_max ?? snapshotMerged.estimatedDepthMax)}
+              </div>
+              <div>
+                drill_difficulty / drillDifficulty:{" "}
+                {JSON.stringify(snapshotMerged.drill_difficulty ?? snapshotMerged.drillDifficulty)}
+              </div>
+              <div>
+                drill_difficulty_score / drillDifficultyScore:{" "}
+                {JSON.stringify(snapshotMerged.drill_difficulty_score ?? snapshotMerged.drillDifficultyScore)}
+              </div>
+              <div>county: {JSON.stringify(extraction?.county ?? doc.county)}</div>
             </div>
-            <div>
-              estimated_depth_min / estimatedDepthMin:{" "}
-              {JSON.stringify(snapshotMerged.estimated_depth_min ?? snapshotMerged.estimatedDepthMin)}
-            </div>
-            <div>
-              estimated_depth_max / estimatedDepthMax:{" "}
-              {JSON.stringify(snapshotMerged.estimated_depth_max ?? snapshotMerged.estimatedDepthMax)}
-            </div>
-            <div>
-              drill_difficulty / drillDifficulty:{" "}
-              {JSON.stringify(snapshotMerged.drill_difficulty ?? snapshotMerged.drillDifficulty)}
-            </div>
-            <div>
-              drill_difficulty_score / drillDifficultyScore:{" "}
-              {JSON.stringify(snapshotMerged.drill_difficulty_score ?? snapshotMerged.drillDifficultyScore)}
-            </div>
-            <div>county: {JSON.stringify(extraction?.county ?? doc.county)}</div>
-          </div>
+          ) : null}
           <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: 0, lineHeight: 1.45 }}>
             Regional estimate — may be unavailable for some locations. Based on county-level geology mapping.
             Not tract-level subsurface analysis.
