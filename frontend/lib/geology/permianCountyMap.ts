@@ -41,6 +41,12 @@ export const PERMIAN_COUNTY_MAP: Record<string, PermianCountyEntry> = {
     depthMin: 7000,
     depthMax: 9500,
   },
+  dawson: {
+    primaryFormation: "Spraberry",
+    formations: ["Spraberry", "Wolfcamp"],
+    depthMin: 7000,
+    depthMax: 9500,
+  },
 };
 
 /**

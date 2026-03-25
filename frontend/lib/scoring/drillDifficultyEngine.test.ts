@@ -52,6 +52,24 @@ describe("estimateDrillDifficulty", () => {
     expect(normalizeCountyKey("reeves")).toBe("reeves");
   });
 
+  it("normalizeCountyKey maps Dawson variants to dawson", () => {
+    expect(normalizeCountyKey("Dawson")).toBe("dawson");
+    expect(normalizeCountyKey("Dawson County")).toBe("dawson");
+    expect(normalizeCountyKey("dawson")).toBe("dawson");
+  });
+
+  it("maps Dawson County to Spraberry regional snapshot (Moderate)", () => {
+    for (const county of ["Dawson County", "Dawson", "dawson"]) {
+      const r = estimateDrillDifficulty({ county });
+      expect(r.estimatedFormation).toBe("Spraberry");
+      expect(r.estimatedDepthMin).toBe(7000);
+      expect(r.estimatedDepthMax).toBe(9500);
+      expect(r.drillDifficulty).toBe("Moderate");
+      expect(r.drillDifficultyScore).toBe(5);
+      expect(r.drillDifficultyReason).toContain("Dawson");
+    }
+  });
+
   it("returns Unknown for unmapped county", () => {
     const r = estimateDrillDifficulty({ county: "Dallas" });
     expect(r.drillDifficulty).toBe("Unknown");
