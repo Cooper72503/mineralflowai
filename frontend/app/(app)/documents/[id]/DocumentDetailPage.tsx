@@ -17,7 +17,11 @@ import {
   mergeStructuredFields,
 } from "@/lib/deals/dashboard-normalize";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
-import { hasRegionalDrillFromDealInput } from "@/lib/development/detect-development-signals";
+import {
+  buildDevelopmentSignalsSnapshot,
+  hasRegionalDrillFromDealInput,
+} from "@/lib/development/detect-development-signals";
+import { extractionFieldsRecordForSignals } from "@/lib/development/apply-development-snapshot";
 
 function logDocumentDetailDealScores(ext: ExtractionRow, scoreDisplayed: number | null, label: string) {
   const fromData = dealScoreFromStructuredBlobOnly(ext.structured_data)?.score ?? null;
@@ -275,37 +279,67 @@ function buildWellsInfrastructureLine(ds: DevelopmentSignalsSnapshot | null): st
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-function shouldShowDevelopmentSnapshot(isDocProcessed: boolean, merged: Record<string, unknown>): boolean {
+function shouldShowDevelopmentSnapshot(
+  isDocProcessed: boolean,
+  merged: Record<string, unknown>,
+  resolvedSignals: DevelopmentSignalsSnapshot | null
+): boolean {
   if (!isDocProcessed) return false;
-  const ds = merged.development_signals;
-  if (ds == null || typeof ds !== "object") {
-    return true;
+  const ds = resolvedSignals ?? readDevelopmentSignals(merged);
+  if (ds == null) {
+    const raw = merged.development_signals;
+    if (raw == null || typeof raw !== "object") {
+      return true;
+    }
+    const hasSig = (raw as { has_development_signals?: boolean }).has_development_signals === true;
+    if (hasSig) return true;
+    return hasRegionalDrillFromDealInput(merged);
   }
-  const hasSig = (ds as { has_development_signals?: boolean }).has_development_signals === true;
-  if (hasSig) return true;
+  if (ds.has_development_signals) return true;
   return hasRegionalDrillFromDealInput(merged);
 }
 
-function developmentSnapshotRows(merged: Record<string, unknown>) {
-  const ds = readDevelopmentSignals(merged);
+function formatDocDepthFromFeet(feet: number): string {
+  return `~${feet.toLocaleString("en-US")} ft (from document)`;
+}
+
+function developmentSnapshotRows(
+  merged: Record<string, unknown>,
+  ds: DevelopmentSignalsSnapshot | null
+) {
   const formationFromDrill =
     pickDrillString(merged, "estimated_formation", "estimatedFormation") ?? "Unknown";
-  const formation =
-    formationFromDrill !== "Unknown"
-      ? formationFromDrill
-      : ds?.formation_text_mention
-        ? `${ds.formation_text_mention} (from text)`
-        : "Unknown";
+  let formation: string;
+  if (formationFromDrill !== "Unknown") {
+    formation = formationFromDrill;
+  } else if (ds?.formation_text_mention) {
+    formation = `${ds.formation_text_mention} (from text)`;
+  } else if (ds?.has_development_signals) {
+    formation = "Unknown (document-based signals detected)";
+  } else {
+    formation = "Unknown";
+  }
 
   const depthMin = pickDrillNumber(merged, "estimated_depth_min", "estimatedDepthMin");
   const depthMax = pickDrillNumber(merged, "estimated_depth_max", "estimatedDepthMax");
   const hasRegionalDepth = depthMin !== null && depthMax !== null;
-  const depth =
+  const docDepthLabel =
     ds?.display_depth_label != null && String(ds.display_depth_label).trim()
       ? String(ds.display_depth_label).trim()
-      : hasRegionalDepth
-        ? formatEstimatedDepthRange(depthMin, depthMax)
-        : "Unknown";
+      : null;
+  const extractedFeet = ds?.extracted_depth_limit_feet;
+  let depth: string;
+  if (docDepthLabel) {
+    depth = docDepthLabel;
+  } else if (hasRegionalDepth) {
+    depth = formatEstimatedDepthRange(depthMin, depthMax);
+  } else if (typeof extractedFeet === "number" && Number.isFinite(extractedFeet)) {
+    depth = formatDocDepthFromFeet(extractedFeet);
+  } else if (ds?.has_development_signals) {
+    depth = "Shallow/Document-derived";
+  } else {
+    depth = "Unknown";
+  }
 
   const difficulty =
     pickDrillString(merged, "drill_difficulty", "drillDifficulty") ?? "Unknown";
@@ -380,6 +414,27 @@ export default function DocumentDetailPage() {
     const base = mergedStructured ?? {};
     return overlayDrillColumnsFromRow(base, extraction);
   }, [mergedStructured, extraction]);
+
+  /** Prefer persisted `development_signals`; otherwise derive from extracted text for display. */
+  const resolvedDevelopmentSignals = useMemo((): DevelopmentSignalsSnapshot | null => {
+    const fromMerged = readDevelopmentSignals(snapshotMerged as Record<string, unknown>);
+    if (fromMerged) return fromMerged;
+    if (!extraction?.extracted_text?.trim()) return null;
+    return buildDevelopmentSignalsSnapshot(
+      extraction.extracted_text,
+      extractionFieldsRecordForSignals({
+        legal_description: extraction.legal_description,
+        document_type: null,
+        county: extraction.county,
+        state: extraction.state,
+        lessor: extraction.lessor,
+        lessee: extraction.lessee,
+        grantor: null,
+        grantee: null,
+      }),
+      snapshotMerged as Record<string, unknown>
+    );
+  }, [snapshotMerged, extraction]);
 
   useEffect(() => {
     if (!displayDealScore) return;
@@ -749,9 +804,10 @@ export default function DocumentDetailPage() {
 
   const showDevelopmentSnapshot = shouldShowDevelopmentSnapshot(
     isDocProcessed,
-    snapshotMerged as Record<string, unknown>
+    snapshotMerged as Record<string, unknown>,
+    resolvedDevelopmentSignals
   );
-  const developmentSignals = readDevelopmentSignals(snapshotMerged as Record<string, unknown>);
+  const developmentSignals = resolvedDevelopmentSignals;
 
   const meta = [
     { label: "File name", value: doc.file_name ?? "—" },
@@ -848,7 +904,8 @@ export default function DocumentDetailPage() {
             Development Snapshot
           </h2>
           <dl style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "0.75rem" }}>
-            {developmentSnapshotRows(snapshotMerged).map(({ label, value }) => (
+            {developmentSnapshotRows(snapshotMerged as Record<string, unknown>, developmentSignals).map(
+              ({ label, value }) => (
               <div key={label}>
                 <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>{label}</dt>
                 <dd style={{ fontSize: "0.95rem", margin: 0 }}>{value}</dd>

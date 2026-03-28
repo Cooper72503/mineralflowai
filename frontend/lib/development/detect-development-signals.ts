@@ -92,12 +92,29 @@ export function extractDepthLimitFeetFromText(text: string): number | null {
   const patterns: RegExp[] = [
     /\b(?:below|down\s+to|depth\s+limitation|depth\s+of|below\s+the\s+depth\s+of)\b[^.\n]{0,160}?(\d{3,5})\s*(?:feet|ft\.?)\b/gi,
     /\b(\d{3,5})\s*(?:feet|ft\.?)\b[^.\n]{0,80}?\b(?:below|depth|limitation)\b/gi,
+    // "depth ... 3200 ft", "limitation of 3200 feet", "3200 ft depth limit"
+    /\b(?:depth|limit|limitation|below|deepest|shallow)\b[^.\n]{0,150}?(\d{3,5})\s*(?:feet|ft\.?)\b/gi,
+    /\b(\d{3,5})\s*(?:feet|ft\.?)\b[^.\n]{0,150}?\b(?:depth|limit|limitation|below|deepest|surface)\b/gi,
   ];
   const candidates: number[] = [];
   for (const re of patterns) {
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(s)) !== null) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n >= 200 && n <= 35_000) candidates.push(n);
+    }
+  }
+  if (candidates.length > 0) return Math.min(...candidates);
+
+  // Line-based: "3200 ft" / "3200 feet" on a line that also mentions depth/limit/below/shallow
+  const lines = s.split(/\n/);
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (!/\b(?:depth|limit|limitation|below|deepest|shallow)\b/.test(lower)) continue;
+    const reLine = /\b(\d{3,5})\s*(?:feet|ft\.?)\b/gi;
+    let m: RegExpExecArray | null;
+    while ((m = reLine.exec(line)) !== null) {
       const n = parseInt(m[1], 10);
       if (Number.isFinite(n) && n >= 200 && n <= 35_000) candidates.push(n);
     }
@@ -281,9 +298,7 @@ export function detectDevelopmentSignals(
     opCtx;
 
   const displayDepth =
-    depthLimit != null
-      ? `Shallow rights only (~${depthLimit.toLocaleString("en-US")} ft limit)`
-      : null;
+    depthLimit != null ? `~${depthLimit.toLocaleString("en-US")} ft (from document)` : null;
 
   return {
     has_development_signals: hasDevelopmentSignals,

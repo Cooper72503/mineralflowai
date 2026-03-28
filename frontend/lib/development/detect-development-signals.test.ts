@@ -16,6 +16,11 @@ describe("extractDepthLimitFeetFromText", () => {
   it("returns null when no depth limit", () => {
     expect(extractDepthLimitFeetFromText("This is a generic conveyance with no depth language.")).toBeNull();
   });
+
+  it("parses depth + feet on the same line (e.g. depth limit … 3200 ft)", () => {
+    expect(extractDepthLimitFeetFromText("Depth limitation shall not exceed 3200 ft.")).toBe(3200);
+    expect(extractDepthLimitFeetFromText("3200 feet below the depth of the Wolfcamp")).toBe(3200);
+  });
 });
 
 describe("detectDevelopmentSignals", () => {
@@ -35,7 +40,7 @@ describe("detectDevelopmentSignals", () => {
     expect(r.referenced_wells.length).toBeGreaterThan(0);
     expect(r.has_infrastructure_language).toBe(true);
     expect(r.has_legal_development_context).toBe(true);
-    expect(r.display_depth_label).toMatch(/3,200/);
+    expect(r.display_depth_label).toBe("~3,200 ft (from document)");
   });
 
   it("returns no signals for plain non-mineral text", () => {
