@@ -34,6 +34,25 @@ export function extractionFieldsRecordForSignals(parsed: {
  * Attaches `development_signals` to the deal input after county drill enrichment.
  * Safe to call on any plain object; never throws.
  */
+/**
+ * True when `merged` JSON is missing `development_signals` or it is stale vs the freshly computed snapshot.
+ * Used so sync/rescore still persist `development_signals` when deal score and drill columns are unchanged.
+ */
+export function developmentSignalsNeedsPersistInMerged(
+  merged: Record<string, unknown>,
+  next: unknown
+): boolean {
+  if (next == null || typeof next !== "object") return false;
+  const m = merged.development_signals;
+  if (m == null || typeof m !== "object") return true;
+  const ma = m as Record<string, unknown>;
+  const na = next as Record<string, unknown>;
+  if (Boolean(na.has_development_signals) && !Boolean(ma.has_development_signals)) return true;
+  if (na.extracted_depth_limit_feet !== ma.extracted_depth_limit_feet) return true;
+  if (na.display_depth_label !== ma.display_depth_label) return true;
+  return false;
+}
+
 export function mergeDevelopmentIntoDealInput(
   dealInput: Record<string, unknown>,
   extractedText: string,

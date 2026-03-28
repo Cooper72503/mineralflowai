@@ -336,7 +336,7 @@ function developmentSnapshotRows(
   } else if (typeof extractedFeet === "number" && Number.isFinite(extractedFeet)) {
     depth = formatDocDepthFromFeet(extractedFeet);
   } else if (ds?.has_development_signals) {
-    depth = "Shallow/Document-derived";
+    depth = "Document-derived";
   } else {
     depth = "Unknown";
   }

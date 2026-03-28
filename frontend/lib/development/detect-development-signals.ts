@@ -90,6 +90,8 @@ export function extractDepthLimitFeetFromText(text: string): number | null {
   const s = text.slice(0, 500_000);
   // Phrases like "below the depth of 3200 feet", "down to ... 3200 ft"
   const patterns: RegExp[] = [
+    // "depth of 3200", "depth of 3200 feet" (ft optional)
+    /\bdepth\s+of\b[^.\n]{0,200}?(\d{3,5})(?:\s*(?:feet|ft\.?))?\b/gi,
     /\b(?:below|down\s+to|depth\s+limitation|depth\s+of|below\s+the\s+depth\s+of)\b[^.\n]{0,160}?(\d{3,5})\s*(?:feet|ft\.?)\b/gi,
     /\b(\d{3,5})\s*(?:feet|ft\.?)\b[^.\n]{0,80}?\b(?:below|depth|limitation)\b/gi,
     // "depth ... 3200 ft", "limitation of 3200 feet", "3200 ft depth limit"
@@ -119,8 +121,22 @@ export function extractDepthLimitFeetFromText(text: string): number | null {
       if (Number.isFinite(n) && n >= 200 && n <= 35_000) candidates.push(n);
     }
   }
-  if (candidates.length === 0) return null;
-  return Math.min(...candidates);
+  if (candidates.length > 0) return Math.min(...candidates);
+  return extractDepthFeetDocumentFallback(s);
+}
+
+function extractDepthFeetDocumentFallback(text: string): number | null {
+  const s = text.slice(0, 500_000);
+  if (!/\bdepth\b/i.test(s) || !/\b\d{3,5}\s*(?:feet|ft\.?)\b/i.test(s)) return null;
+  const reAll = /\b(\d{3,5})\s*(?:feet|ft\.?)\b/gi;
+  const nums: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = reAll.exec(s)) !== null) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n) && n >= 200 && n <= 35_000) nums.push(n);
+  }
+  if (nums.length === 0) return null;
+  return Math.min(...nums);
 }
 
 function extractFormationMention(text: string): string | null {

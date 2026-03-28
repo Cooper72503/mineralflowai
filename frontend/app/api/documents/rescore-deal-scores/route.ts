@@ -4,6 +4,7 @@ import { calculateDealScore } from "@/lib/document-processing";
 import { buildDealScoreInput } from "@/lib/deals/build-deal-score-input";
 import { coerceDealScoreResult, dealScoreFromMerged, mergeStructuredFields } from "@/lib/deals/dashboard-normalize";
 import {
+  developmentSignalsNeedsPersistInMerged,
   extractionFieldsRecordForSignals,
   mergeDevelopmentIntoDealInput,
 } from "@/lib/development/apply-development-snapshot";
@@ -196,7 +197,8 @@ export async function POST(request: Request) {
       if (
         existing != null &&
         dealScore.score === existing.score &&
-        dealScore.type === existing.type
+        dealScore.type === existing.type &&
+        !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals)
       ) {
         continue;
       }

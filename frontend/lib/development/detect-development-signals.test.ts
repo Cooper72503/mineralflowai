@@ -21,6 +21,19 @@ describe("extractDepthLimitFeetFromText", () => {
     expect(extractDepthLimitFeetFromText("Depth limitation shall not exceed 3200 ft.")).toBe(3200);
     expect(extractDepthLimitFeetFromText("3200 feet below the depth of the Wolfcamp")).toBe(3200);
   });
+
+  it('parses "depth of 3200" with or without feet', () => {
+    expect(extractDepthLimitFeetFromText("limited to the depth of 3200.")).toBe(3200);
+    expect(extractDepthLimitFeetFromText("depth of 3200 feet")).toBe(3200);
+  });
+
+  it("document fallback: depth word + feet value elsewhere in text", () => {
+    expect(
+      extractDepthLimitFeetFromText(
+        "Discussion of depth. Lessee may drill. The cap is 3200 feet for shallow rights."
+      )
+    ).toBe(3200);
+  });
 });
 
 describe("detectDevelopmentSignals", () => {

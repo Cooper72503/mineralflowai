@@ -10,6 +10,7 @@ import {
 } from "@/lib/deals/dashboard-normalize";
 import { dealGradeFullLabelFromScore, getGradeFromScore } from "@/lib/document-processing";
 import {
+  developmentSignalsNeedsPersistInMerged,
   extractionFieldsRecordForSignals,
   mergeDevelopmentIntoDealInput,
 } from "@/lib/development/apply-development-snapshot";
@@ -278,7 +279,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       stored.score === dealScore.score &&
       stored.type === dealScore.type &&
       !drillDataMissingInMerged &&
-      drillColumnsAligned
+      drillColumnsAligned &&
+      !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals)
     ) {
       const finalAfter = await fetchMergedDealScoreFromExtraction(supabase, ext.id, user.id);
       console.log("SCORE SAVED", dealScore.score);
