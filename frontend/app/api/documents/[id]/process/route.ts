@@ -21,6 +21,10 @@ import {
   dealScoreFromExtractionColumns,
 } from "@/lib/deals/dashboard-normalize";
 import {
+  extractionFieldsRecordForSignals,
+  mergeDevelopmentIntoDealInput,
+} from "@/lib/development/apply-development-snapshot";
+import {
   drillSnapshotFromDealInput,
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
@@ -875,6 +879,11 @@ export async function POST(
         } catch {
           // Non-fatal: enrichment uses safe defaults internally; this is defense in depth.
         }
+        mergeDevelopmentIntoDealInput(
+          dealScoreInput,
+          extractedText,
+          extractionFieldsRecordForSignals(parsed),
+        );
         dealScoreInputForPipeline = dealScoreInput;
 
         const detectedDocumentTypeForLog =
@@ -953,6 +962,7 @@ export async function POST(
           document_type_confidence:
             extractionArtifacts?.document_type_confidence,
           extraction_artifacts: extractionArtifacts ?? null,
+          development_signals: dealScoreInput.development_signals ?? null,
           estimated_formation: drillSnap.estimated_formation,
           estimated_depth_min: drillSnap.estimated_depth_min,
           estimated_depth_max: drillSnap.estimated_depth_max,
@@ -1360,10 +1370,10 @@ export async function POST(
       try {
         failureStep = "update_status_completed";
         debug.failureStep = failureStep;
-        if (debug.error || openAiError) {
-          const msg = String(
-            openAiError ?? debug.error ?? "Processing failed.",
-          );
+        // OpenAI / extraction warnings are stored on the extraction row but do not fail a run
+        // that successfully persisted text + structured fields (heuristics still apply).
+        if (debug.error) {
+          const msg = String(debug.error ?? "Processing failed.");
           await markDocumentFailed(supabase, documentId, msg);
           log("DOCUMENT_STATUS_UPDATED", {
             status: "failed",
@@ -1456,6 +1466,9 @@ export async function POST(
         acreage: parsed.acreage,
         mailing_address: parsed.mailing_address,
         extraction_status: parsed.extraction_status,
+        development_signals:
+          (dealScoreInputForPipeline?.development_signals as Record<string, unknown> | undefined) ??
+          null,
         estimated_formation: drillForClient.estimated_formation,
         estimated_depth_min: drillForClient.estimated_depth_min,
         estimated_depth_max: drillForClient.estimated_depth_max,

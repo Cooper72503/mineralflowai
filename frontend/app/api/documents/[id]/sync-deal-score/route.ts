@@ -10,6 +10,10 @@ import {
 } from "@/lib/deals/dashboard-normalize";
 import { dealGradeFullLabelFromScore, getGradeFromScore } from "@/lib/document-processing";
 import {
+  extractionFieldsRecordForSignals,
+  mergeDevelopmentIntoDealInput,
+} from "@/lib/development/apply-development-snapshot";
+import {
   drillSnapshotFromDealInput,
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
@@ -240,6 +244,22 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     } catch {
       // Safe defaults applied inside enrichment when possible.
     }
+    mergeDevelopmentIntoDealInput(
+      dealScoreInput,
+      ext.extracted_text ?? "",
+      extractionFieldsRecordForSignals({
+        legal_description: ext.legal_description,
+        document_type: ext.document_type,
+        county: ext.county,
+        state: ext.state,
+        lessor: ext.lessor,
+        lessee: ext.lessee,
+        grantor: stringFieldFromMerged(merged, "grantor"),
+        grantee: stringFieldFromMerged(merged, "grantee"),
+        owner: stringFieldFromMerged(merged, "owner"),
+        buyer: stringFieldFromMerged(merged, "buyer"),
+      }),
+    );
 
     const dealScoreCalculated = calculateDealScore(dealScoreInput);
     const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
@@ -273,6 +293,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const nextStructured = jsonbSafeClone({
       ...merged,
       ...drillSnap,
+      development_signals: dealScoreInput.development_signals ?? merged.development_signals,
       deal_score: dealScore,
     });
     console.log("SCORE SAVED", dealScore.score);
@@ -315,7 +336,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     let finalDb = await fetchMergedDealScoreFromExtraction(supabase, ext.id, user.id);
     if (dealScore.score > 0 && (finalDb === 0 || finalDb === null)) {
-      const retryPayload = jsonbSafeClone({ ...merged, ...drillSnap, deal_score: dealScore });
+      const retryPayload = jsonbSafeClone(nextStructured);
       await supabase
         .from("document_extractions")
         .update({

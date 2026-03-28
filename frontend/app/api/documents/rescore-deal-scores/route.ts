@@ -4,6 +4,10 @@ import { calculateDealScore } from "@/lib/document-processing";
 import { buildDealScoreInput } from "@/lib/deals/build-deal-score-input";
 import { coerceDealScoreResult, dealScoreFromMerged, mergeStructuredFields } from "@/lib/deals/dashboard-normalize";
 import {
+  extractionFieldsRecordForSignals,
+  mergeDevelopmentIntoDealInput,
+} from "@/lib/development/apply-development-snapshot";
+import {
   drillSnapshotFromDealInput,
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
@@ -170,6 +174,22 @@ export async function POST(request: Request) {
       } catch {
         // Non-fatal
       }
+      mergeDevelopmentIntoDealInput(
+        dealScoreInput,
+        row.extracted_text ?? "",
+        extractionFieldsRecordForSignals({
+          legal_description: row.legal_description,
+          document_type: row.document_type,
+          county: row.county,
+          state: row.state,
+          lessor: row.lessor,
+          lessee: row.lessee,
+          grantor: stringFieldFromMerged(merged, "grantor"),
+          grantee: stringFieldFromMerged(merged, "grantee"),
+          owner: stringFieldFromMerged(merged, "owner"),
+          buyer: stringFieldFromMerged(merged, "buyer"),
+        }),
+      );
 
       const dealScoreCalculated = calculateDealScore(dealScoreInput);
       const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
@@ -189,7 +209,12 @@ export async function POST(request: Request) {
       });
 
       const drillSnap = drillSnapshotFromDealInput(dealScoreInput);
-      const nextStructured = { ...merged, ...drillSnap, deal_score: dealScore };
+      const nextStructured = {
+        ...merged,
+        ...drillSnap,
+        development_signals: dealScoreInput.development_signals ?? merged.development_signals,
+        deal_score: dealScore,
+      };
       const drillCols = drillTopLevelPayload(drillSnap);
 
       const { error: updateBothErr } = await supabase

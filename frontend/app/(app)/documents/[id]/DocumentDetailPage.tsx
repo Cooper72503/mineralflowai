@@ -16,6 +16,8 @@ import {
   dealScoreKindLabel,
   mergeStructuredFields,
 } from "@/lib/deals/dashboard-normalize";
+import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
+import { hasRegionalDrillFromDealInput } from "@/lib/development/detect-development-signals";
 
 function logDocumentDetailDealScores(ext: ExtractionRow, scoreDisplayed: number | null, label: string) {
   const fromData = dealScoreFromStructuredBlobOnly(ext.structured_data)?.score ?? null;
@@ -255,12 +257,56 @@ function overlayDrillColumnsFromRow(
   return out;
 }
 
+function readDevelopmentSignals(merged: Record<string, unknown>): DevelopmentSignalsSnapshot | null {
+  const raw = merged.development_signals;
+  if (!raw || typeof raw !== "object") return null;
+  return raw as DevelopmentSignalsSnapshot;
+}
+
+function buildWellsInfrastructureLine(ds: DevelopmentSignalsSnapshot | null): string | null {
+  if (!ds) return null;
+  const parts: string[] = [];
+  if (ds.display_wells_note) parts.push(ds.display_wells_note);
+  if (ds.display_infrastructure_note) {
+    const t = ds.display_infrastructure_note;
+    if (!parts.includes(t)) parts.push(t);
+  }
+  if (ds.display_context_note) parts.push(ds.display_context_note);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function shouldShowDevelopmentSnapshot(isDocProcessed: boolean, merged: Record<string, unknown>): boolean {
+  if (!isDocProcessed) return false;
+  const ds = merged.development_signals;
+  if (ds == null || typeof ds !== "object") {
+    return true;
+  }
+  const hasSig = (ds as { has_development_signals?: boolean }).has_development_signals === true;
+  if (hasSig) return true;
+  return hasRegionalDrillFromDealInput(merged);
+}
+
 function developmentSnapshotRows(merged: Record<string, unknown>) {
-  const formation =
+  const ds = readDevelopmentSignals(merged);
+  const formationFromDrill =
     pickDrillString(merged, "estimated_formation", "estimatedFormation") ?? "Unknown";
+  const formation =
+    formationFromDrill !== "Unknown"
+      ? formationFromDrill
+      : ds?.formation_text_mention
+        ? `${ds.formation_text_mention} (from text)`
+        : "Unknown";
+
   const depthMin = pickDrillNumber(merged, "estimated_depth_min", "estimatedDepthMin");
   const depthMax = pickDrillNumber(merged, "estimated_depth_max", "estimatedDepthMax");
-  const depth = formatEstimatedDepthRange(depthMin, depthMax);
+  const hasRegionalDepth = depthMin !== null && depthMax !== null;
+  const depth =
+    ds?.display_depth_label != null && String(ds.display_depth_label).trim()
+      ? String(ds.display_depth_label).trim()
+      : hasRegionalDepth
+        ? formatEstimatedDepthRange(depthMin, depthMax)
+        : "Unknown";
+
   const difficulty =
     pickDrillString(merged, "drill_difficulty", "drillDifficulty") ?? "Unknown";
   const scoreRaw = merged.drill_difficulty_score ?? merged.drillDifficultyScore;
@@ -270,12 +316,18 @@ function developmentSnapshotRows(merged: Record<string, unknown>) {
       : typeof scoreRaw === "string" && scoreRaw.trim()
         ? formatDrillScoreImpact(parseFloat(scoreRaw.trim()))
         : "0";
-  return [
+
+  const rows = [
     { label: "Formation", value: formation },
     { label: "Depth", value: depth },
     { label: "Drill Difficulty", value: difficulty },
     { label: "Score Impact", value: impact },
   ];
+  const facilities = buildWellsInfrastructureLine(ds);
+  if (facilities) {
+    rows.push({ label: "Wells / infrastructure", value: facilities });
+  }
+  return rows;
 }
 
 function statusBadgeClass(status: string | null): string {
@@ -695,6 +747,12 @@ export default function DocumentDetailPage() {
     (doc.status ?? "").toLowerCase() === "completed" ||
     (doc.status ?? "").toLowerCase() === "processed";
 
+  const showDevelopmentSnapshot = shouldShowDevelopmentSnapshot(
+    isDocProcessed,
+    snapshotMerged as Record<string, unknown>
+  );
+  const developmentSignals = readDevelopmentSignals(snapshotMerged as Record<string, unknown>);
+
   const meta = [
     { label: "File name", value: doc.file_name ?? "—" },
     { label: "County", value: doc.county ?? "—" },
@@ -784,7 +842,7 @@ export default function DocumentDetailPage() {
 
       {displayDealScore ? <DealScoreCard dealScore={displayDealScore} /> : null}
 
-      {isDocProcessed ? (
+      {showDevelopmentSnapshot ? (
         <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
           <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
             Development Snapshot
@@ -797,6 +855,11 @@ export default function DocumentDetailPage() {
               </div>
             ))}
           </dl>
+          {developmentSignals?.partial_snapshot ? (
+            <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: "0 0 0.75rem", lineHeight: 1.45 }}>
+              Partial development snapshot generated from document signals.
+            </p>
+          ) : null}
           {process.env.NODE_ENV === "development" ? (
             <div
               style={{
