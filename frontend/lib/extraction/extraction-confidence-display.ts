@@ -28,7 +28,34 @@ function fieldLabel(key: string): string {
 
 function readFiniteNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = parseFloat(value.trim());
+    if (Number.isFinite(n)) return n;
+  }
   return undefined;
+}
+
+function readStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const out = value.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((s) => s.trim());
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Optional pipeline-provided lists (snake_case or camelCase). When present, the document UI prefers these over heuristics.
+ */
+export function readStructuredConfidenceLists(merged: Record<string, unknown> | null | undefined): {
+  reasons: string[] | null;
+  warnings: string[] | null;
+} {
+  const m = merged ?? {};
+  const reasons = readStringArray(
+    m.confidence_reasons ?? m.confidenceReasons ?? m.extraction_confidence_reasons
+  );
+  const warnings = readStringArray(
+    m.confidence_warnings ?? m.confidenceWarnings ?? m.extraction_confidence_warnings
+  );
+  return { reasons, warnings };
 }
 
 function asPlainRecord(value: unknown): Record<string, unknown> | null {

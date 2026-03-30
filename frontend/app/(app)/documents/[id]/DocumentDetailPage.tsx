@@ -27,6 +27,7 @@ import {
   buildConfidenceWhyBullets,
   confidenceLevelFromPercent,
   confidenceLevelTitle,
+  readStructuredConfidenceLists,
   resolveExtractionConfidencePercent,
 } from "@/lib/extraction/extraction-confidence-display";
 
@@ -1012,23 +1013,28 @@ export default function DocumentDetailPage() {
             });
             const confidenceLevel =
               confidencePct != null ? confidenceLevelFromPercent(confidencePct) : null;
+            const structuredConfidence = readStructuredConfidenceLists(mergedStructured);
             const confidenceWhy =
               confidencePct != null
-                ? buildConfidenceWhyBullets(mergedForConfidence ?? null, confidencePct)
+                ? structuredConfidence.reasons != null
+                  ? structuredConfidence.reasons
+                  : buildConfidenceWhyBullets(mergedForConfidence ?? null, confidencePct)
                 : [];
             const confidenceWarnings =
               confidencePct != null
-                ? buildConfidenceWarnings(mergedForConfidence ?? null, {
-                    lessor: extraction.lessor,
-                    lessee: extraction.lessee,
-                    county: extraction.county,
-                    state: extraction.state,
-                    legal_description: extraction.legal_description,
-                    effective_date: extraction.effective_date,
-                    recording_date: extraction.recording_date,
-                    royalty_rate: extraction.royalty_rate,
-                    term_length: extraction.term_length,
-                  })
+                ? structuredConfidence.warnings != null
+                  ? structuredConfidence.warnings
+                  : buildConfidenceWarnings(mergedForConfidence ?? null, {
+                      lessor: extraction.lessor,
+                      lessee: extraction.lessee,
+                      county: extraction.county,
+                      state: extraction.state,
+                      legal_description: extraction.legal_description,
+                      effective_date: extraction.effective_date,
+                      recording_date: extraction.recording_date,
+                      royalty_rate: extraction.royalty_rate,
+                      term_length: extraction.term_length,
+                    })
                 : [];
             const levelSurface =
               confidenceLevel === "high"
@@ -1058,39 +1064,15 @@ export default function DocumentDetailPage() {
                   >
                     <div
                       style={{
-                        fontSize: "0.8rem",
+                        fontSize: "0.95rem",
                         fontWeight: 600,
-                        color: "#374151",
-                        marginBottom: "0.5rem",
+                        color: levelSurface.color,
+                        marginBottom: "0.65rem",
                       }}
                     >
-                      Extraction confidence
+                      Confidence: {confidenceLevelTitle(confidenceLevel)} ({confidencePct}%)
                     </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem", marginBottom: "0.65rem" }}>
-                      <span
-                        style={{
-                          fontSize: "1.15rem",
-                          fontWeight: 700,
-                          color: levelSurface.color,
-                        }}
-                      >
-                        {confidencePct}%
-                      </span>
-                      <span
-                        style={{
-                          display: "inline-block",
-                          padding: "0.15rem 0.5rem",
-                          borderRadius: 4,
-                          fontSize: "0.8rem",
-                          fontWeight: 600,
-                          color: levelSurface.color,
-                          background: "rgba(255,255,255,0.55)",
-                        }}
-                      >
-                        {confidenceLevelTitle(confidenceLevel)}
-                      </span>
-                    </div>
-                    <div style={{ marginBottom: confidenceWarnings.length > 0 ? "0.75rem" : 0 }}>
+                    <div style={{ marginBottom: "0.75rem" }}>
                       <div
                         style={{
                           fontSize: "0.75rem",
@@ -1099,7 +1081,7 @@ export default function DocumentDetailPage() {
                           marginBottom: "0.35rem",
                         }}
                       >
-                        Why this confidence
+                        Why:
                       </div>
                       <ul
                         style={{
@@ -1110,38 +1092,39 @@ export default function DocumentDetailPage() {
                           color: "#1f2937",
                         }}
                       >
-                        {confidenceWhy.map((line, i) => (
+                        {(confidenceWhy.length > 0 ? confidenceWhy : ["—"]).map((line, i) => (
                           <li key={i}>{line}</li>
                         ))}
                       </ul>
                     </div>
-                    {confidenceWarnings.length > 0 ? (
-                      <div>
-                        <div
-                          style={{
-                            fontSize: "0.75rem",
-                            fontWeight: 600,
-                            color: "#9a3412",
-                            marginBottom: "0.35rem",
-                          }}
-                        >
-                          Warnings
-                        </div>
-                        <ul
-                          style={{
-                            margin: 0,
-                            paddingLeft: "1.2rem",
-                            fontSize: "0.88rem",
-                            lineHeight: 1.5,
-                            color: "#431407",
-                          }}
-                        >
-                          {confidenceWarnings.map((line, i) => (
-                            <li key={i}>{line}</li>
-                          ))}
-                        </ul>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          color: "#9a3412",
+                          marginBottom: "0.35rem",
+                        }}
+                      >
+                        Warnings:
                       </div>
-                    ) : null}
+                      <ul
+                        style={{
+                          margin: 0,
+                          paddingLeft: "1.2rem",
+                          fontSize: "0.88rem",
+                          lineHeight: 1.5,
+                          color: "#431407",
+                        }}
+                      >
+                        {(confidenceWarnings.length > 0
+                          ? confidenceWarnings
+                          : ["No warnings."]
+                        ).map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
                 ) : null}
                 <dl style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
