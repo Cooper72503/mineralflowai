@@ -22,6 +22,13 @@ import {
   hasRegionalDrillFromDealInput,
 } from "@/lib/development/detect-development-signals";
 import { extractionFieldsRecordForSignals } from "@/lib/development/apply-development-snapshot";
+import {
+  buildConfidenceWarnings,
+  buildConfidenceWhyBullets,
+  confidenceLevelFromPercent,
+  confidenceLevelTitle,
+  resolveExtractionConfidencePercent,
+} from "@/lib/extraction/extraction-confidence-display";
 
 function logDocumentDetailDealScores(ext: ExtractionRow, scoreDisplayed: number | null, label: string) {
   const fromData = dealScoreFromStructuredBlobOnly(ext.structured_data)?.score ?? null;
@@ -997,8 +1004,40 @@ export default function DocumentDetailPage() {
               { label: "Recording date", value: extraction.recording_date ?? "—" },
               { label: "Royalty rate", value: extraction.royalty_rate ?? "—" },
               { label: "Term length", value: extraction.term_length ?? "—" },
-              { label: "Confidence score", value: extraction.confidence_score != null ? String(extraction.confidence_score) : "—" },
             ];
+            const mergedForConfidence = mergedStructured ?? undefined;
+            const confidencePct = resolveExtractionConfidencePercent({
+              columnScore: extraction.confidence_score,
+              merged: mergedForConfidence,
+            });
+            const confidenceLevel =
+              confidencePct != null ? confidenceLevelFromPercent(confidencePct) : null;
+            const confidenceWhy =
+              confidencePct != null
+                ? buildConfidenceWhyBullets(mergedForConfidence ?? null, confidencePct)
+                : [];
+            const confidenceWarnings =
+              confidencePct != null
+                ? buildConfidenceWarnings(mergedForConfidence ?? null, {
+                    lessor: extraction.lessor,
+                    lessee: extraction.lessee,
+                    county: extraction.county,
+                    state: extraction.state,
+                    legal_description: extraction.legal_description,
+                    effective_date: extraction.effective_date,
+                    recording_date: extraction.recording_date,
+                    royalty_rate: extraction.royalty_rate,
+                    term_length: extraction.term_length,
+                  })
+                : [];
+            const levelSurface =
+              confidenceLevel === "high"
+                ? { bg: "#d1fae5", color: "#065f46", border: "#86efac" }
+                : confidenceLevel === "medium"
+                  ? { bg: "#fef3c7", color: "#92400e", border: "#fcd34d" }
+                  : confidenceLevel === "low"
+                    ? { bg: "#fee2e2", color: "#b91c1c", border: "#fecaca" }
+                    : null;
             return (
               <>
                 {extraction.extracted_text != null && extraction.extracted_text !== "" && (
@@ -1007,6 +1046,104 @@ export default function DocumentDetailPage() {
                     <dd style={{ fontSize: "0.9rem", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto", padding: "0.5rem", background: "#f9f9f9", borderRadius: 6 }}>{extraction.extracted_text}</dd>
                   </div>
                 )}
+                {confidencePct != null && levelSurface != null && confidenceLevel != null ? (
+                  <div
+                    style={{
+                      marginBottom: "1rem",
+                      padding: "0.85rem 1rem",
+                      borderRadius: 8,
+                      border: `1px solid ${levelSurface.border}`,
+                      background: levelSurface.bg,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                        color: "#374151",
+                        marginBottom: "0.5rem",
+                      }}
+                    >
+                      Extraction confidence
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem", marginBottom: "0.65rem" }}>
+                      <span
+                        style={{
+                          fontSize: "1.15rem",
+                          fontWeight: 700,
+                          color: levelSurface.color,
+                        }}
+                      >
+                        {confidencePct}%
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "0.15rem 0.5rem",
+                          borderRadius: 4,
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          color: levelSurface.color,
+                          background: "rgba(255,255,255,0.55)",
+                        }}
+                      >
+                        {confidenceLevelTitle(confidenceLevel)}
+                      </span>
+                    </div>
+                    <div style={{ marginBottom: confidenceWarnings.length > 0 ? "0.75rem" : 0 }}>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          color: "#4b5563",
+                          marginBottom: "0.35rem",
+                        }}
+                      >
+                        Why this confidence
+                      </div>
+                      <ul
+                        style={{
+                          margin: 0,
+                          paddingLeft: "1.2rem",
+                          fontSize: "0.88rem",
+                          lineHeight: 1.5,
+                          color: "#1f2937",
+                        }}
+                      >
+                        {confidenceWhy.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    {confidenceWarnings.length > 0 ? (
+                      <div>
+                        <div
+                          style={{
+                            fontSize: "0.75rem",
+                            fontWeight: 600,
+                            color: "#9a3412",
+                            marginBottom: "0.35rem",
+                          }}
+                        >
+                          Warnings
+                        </div>
+                        <ul
+                          style={{
+                            margin: 0,
+                            paddingLeft: "1.2rem",
+                            fontSize: "0.88rem",
+                            lineHeight: 1.5,
+                            color: "#431407",
+                          }}
+                        >
+                          {confidenceWarnings.map((line, i) => (
+                            <li key={i}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <dl style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                   {extMeta.map(({ label, value }) => (
                     <div key={label}>
