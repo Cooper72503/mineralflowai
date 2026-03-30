@@ -316,16 +316,97 @@ function deriveExtractionStatus(args: {
   overallConf: number;
   criticalFilled: number;
   inferredSignalCount: number;
+  /** Strong deed/lease pattern: parties + county + legal + date — allows "complete" despite multiple inferred fields. */
+  strongDocumentBaseline: boolean;
+  /** Clear parties + county + strong legal and no major ambiguity — same relax as baseline when score is high. */
+  relaxInferredForComplete: boolean;
 }): ExtractionStatus {
   if (args.textLen < 15) return "failed";
   if (args.overallConf < 0.22 && args.criticalFilled < 2) return "failed";
   if (args.overallConf < 0.38) return "low_confidence";
   const wouldComplete = args.criticalFilled >= 5 && args.overallConf >= 0.55;
   if (wouldComplete) {
-    if (args.inferredSignalCount >= 2) return "low_confidence";
+    const relaxInferred =
+      (args.strongDocumentBaseline && args.overallConf >= 0.82) ||
+      (args.relaxInferredForComplete && args.overallConf >= 0.82);
+    if (args.inferredSignalCount >= 2 && !relaxInferred) return "low_confidence";
     return "complete";
   }
   return "partial";
+}
+
+function hasOwnerSideRole(p: ParsedLeaseResult): boolean {
+  return !!(p.grantor?.trim() || p.lessor?.trim() || p.owner?.trim());
+}
+
+function hasCounterpartyRole(p: ParsedLeaseResult): boolean {
+  return !!(p.grantee?.trim() || p.lessee?.trim() || p.buyer?.trim());
+}
+
+function hasAnyStructuredDate(p: ParsedLeaseResult): boolean {
+  return !!(p.effective_date?.trim() || p.recording_date?.trim());
+}
+
+/** All core structural fields present: both party roles, county, legal, and at least one date. */
+function hasStrongDocumentBaseline(p: ParsedLeaseResult): boolean {
+  return (
+    hasOwnerSideRole(p) &&
+    hasCounterpartyRole(p) &&
+    !!p.county?.trim() &&
+    !!p.legal_description?.trim() &&
+    hasAnyStructuredDate(p)
+  );
+}
+
+/** Strong legal description: substantive survey / tract language (not a single short line). */
+function isStrongLegalDescription(legal: string | null | undefined): boolean {
+  const s = legal?.trim() ?? "";
+  if (s.length >= 120) return true;
+  if (s.length < 50) return false;
+  return /(survey|abstract|section|tract|block|lot|acres?\b|mineral|parcel|NMA|H\(\s*&\s*G|\bG\.?P\.?\b)/i.test(s);
+}
+
+function bothPartiesClearlyIdentified(p: ParsedLeaseResult): boolean {
+  return hasOwnerSideRole(p) && hasCounterpartyRole(p);
+}
+
+function countInferredPenaltyKeys(inferred: Record<string, unknown>): number {
+  return Object.keys(inferred).filter((k) => {
+    if (k === "acreage_status") return false;
+    const v = inferred[k];
+    return v != null && v !== "";
+  }).length;
+}
+
+/**
+ * Full OCR blend only when text is effectively unreadable or OCR is very poor; otherwise cap drop vs pre-OCR score at 5 percentage points.
+ */
+function applyOcrConfidenceBlend(
+  preOcrScore: number,
+  ocrConfidence: number | null,
+  textQualityConfidence: number,
+  ocrMean0to100: number | null | undefined
+): number {
+  if (ocrConfidence == null) return preOcrScore;
+  const blended = preOcrScore * 0.85 + ocrConfidence * 0.15;
+  const severeOcr =
+    textQualityConfidence < 0.35 ||
+    ocrConfidence < 0.38 ||
+    (ocrMean0to100 != null && Number.isFinite(ocrMean0to100) && ocrMean0to100 < 38);
+  if (severeOcr) return blended;
+  return Math.max(blended, preOcrScore - 0.05);
+}
+
+function hasClearOwnershipLocationStrongLegal(p: ParsedLeaseResult): boolean {
+  return (
+    bothPartiesClearlyIdentified(p) &&
+    !!p.county?.trim() &&
+    isStrongLegalDescription(p.legal_description)
+  );
+}
+
+function hasMajorAmbiguity(textQualityConfidence: number, failedNoOcr: boolean | undefined, textLen: number): boolean {
+  return textQualityConfidence < 0.22 || (!!failedNoOcr && textLen < 15);
 }
 
 function applyStructuredFailsafe(
@@ -878,7 +959,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     text: 0.2,
   };
   const legalC = legal_description_confidence;
-  let extraction_confidence =
+  const weightedBase =
     party_confidence * weights.party +
     county_confidence * weights.county +
     (confidence_by_field.state ?? 0) * weights.state +
@@ -887,13 +968,34 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     acreage_confidence * weights.acreage +
     text_quality_confidence * weights.text;
 
-  if (ocr_confidence != null) {
-    extraction_confidence = extraction_confidence * 0.85 + ocr_confidence * 0.15;
-  }
+  const strongBaseline = hasStrongDocumentBaseline(parsed);
+  let preCalibrated = strongBaseline ? 0.85 : weightedBase;
+  preCalibrated = applyOcrConfidenceBlend(
+    preCalibrated,
+    ocr_confidence,
+    text_quality_confidence,
+    args.ocrMeanConfidence0to100
+  );
+
+  let extraction_confidence = preCalibrated;
+  if (!parsed.term_length?.trim()) extraction_confidence -= 0.03;
+  if (parsed.acreage == null || parsed.acreage <= 0) extraction_confidence -= 0.03;
+  if (countInferredPenaltyKeys(inferred) > 0) extraction_confidence -= 0.03;
+
+  if (isStrongLegalDescription(parsed.legal_description)) extraction_confidence += 0.1;
+  if (bothPartiesClearlyIdentified(parsed)) extraction_confidence += 0.1;
 
   extraction_confidence = Math.max(0, Math.min(1, extraction_confidence));
+  extraction_confidence = Math.min(0.95, extraction_confidence);
 
   const textLen = usableTextLen;
+  if (
+    hasClearOwnershipLocationStrongLegal(parsed) &&
+    !hasMajorAmbiguity(text_quality_confidence, args.failedNoOcr, textLen)
+  ) {
+    extraction_confidence = Math.max(extraction_confidence, 0.85);
+  }
+
   if (textLen >= 15) {
     extraction_confidence = Math.max(0.08, extraction_confidence);
   }
@@ -912,11 +1014,17 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     Object.values(emergencyFlags).filter(Boolean).length +
     Object.entries(finalFailsafeFlags).filter(([k, v]) => k !== "final_failsafe_applied" && v === true).length;
 
+  const relaxInferredForComplete =
+    hasClearOwnershipLocationStrongLegal(parsed) &&
+    !hasMajorAmbiguity(text_quality_confidence, args.failedNoOcr, textLen);
+
   let extraction_status = deriveExtractionStatus({
     textLen,
     overallConf: extraction_confidence,
     criticalFilled,
     inferredSignalCount,
+    strongDocumentBaseline: strongBaseline,
+    relaxInferredForComplete,
   });
 
   if (emergencyFlags.forced_low_confidence_status) {
@@ -924,7 +1032,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     if (extraction_status === "complete") extraction_status = "low_confidence";
   }
 
-  if (extraction_status === "partial" && inferredSignalCount >= 5) {
+  if (extraction_status === "partial" && inferredSignalCount >= 5 && !(strongBaseline && extraction_confidence >= 0.82)) {
     extraction_status = "low_confidence";
     logExtract("LOW_CONFIDENCE_INFERENCE", {
       reason: "mostly_inferred_partial_upgrade",
@@ -933,8 +1041,14 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   }
 
   if (finalFailsafeFlags.final_failsafe_applied) {
-    extraction_status = "low_confidence";
-    logExtract("LOW_CONFIDENCE_INFERENCE", { reason: "final_structured_failsafe" });
+    const skipFailsafeDowngrade =
+      strongBaseline &&
+      extraction_confidence >= 0.85 &&
+      !hasMajorAmbiguity(text_quality_confidence, args.failedNoOcr, textLen);
+    if (!skipFailsafeDowngrade) {
+      extraction_status = "low_confidence";
+      logExtract("LOW_CONFIDENCE_INFERENCE", { reason: "final_structured_failsafe" });
+    }
   }
 
   logExtract("INFERENCE_APPLIED", { inferred_keys: Object.keys(inferred_fields), extraction_status });

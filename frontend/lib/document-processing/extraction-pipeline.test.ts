@@ -127,4 +127,31 @@ Grantee: Buyer LLC`;
     expect(parsed.owner).toMatch(/Seller/i);
     expect(parsed.buyer).toMatch(/Buyer/i);
   });
+
+  it("calibrates strong Reeves deed with parties, legal, dates, royalty toward 90–95% confidence", async () => {
+    const t = `MINERAL DEED
+
+Grantor: Liberty Mineral Partners LP
+Grantee: Example Operator LLC
+
+Effective Date: March 1, 2024
+Recorded: March 15, 2024
+
+REEVES COUNTY, TEXAS
+
+Section 12, Block 42, H&GN RR Co Survey, Abstract No. 1234, containing 160 acres more or less, in Reeves County, Texas.
+
+Royalty: 1/8th
+Primary Term: three (3) years`;
+    const { parsed, artifacts } = await runStructuredExtraction({
+      normalizedText: t,
+      skipOpenAi: true,
+    });
+    expect(parsed.county).toMatch(/Reeves/i);
+    expect(parsed.grantor || parsed.lessor || parsed.owner).toBeTruthy();
+    expect(parsed.grantee || parsed.lessee || parsed.buyer).toBeTruthy();
+    expect(artifacts.extraction_confidence).toBeGreaterThanOrEqual(0.9);
+    expect(artifacts.extraction_confidence).toBeLessThanOrEqual(0.95);
+    expect(parsed.extraction_status).toBe("complete");
+  });
 });
