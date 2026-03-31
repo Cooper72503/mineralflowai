@@ -8,9 +8,16 @@ export type FinancialConfidenceLabel = "High" | "Medium" | "Low";
 /** Whether dollar figures come from explicit document text vs modeled inference. */
 export type FinancialSignalsEvidence = "direct_document_evidence" | "approximate" | "qualitative";
 
+/** How monthly revenue was derived — direct $ from document vs production modeling. */
+export type FinancialSource = "direct_document_value" | "production_estimate" | "none";
+
 export type FinancialSummary = {
   has_financials: boolean;
   confidence: FinancialConfidenceLabel;
+  /** Document-grounded revenue estimate confidence as a percent (90–98 when using direct $). */
+  confidence_percent?: number;
+  /** Primary derivation path for revenue figures. */
+  financial_source?: FinancialSource;
   /** Set when revenue or payment figures are grounded in explicit document text vs wide-band modeling. */
   financial_signals_evidence?: FinancialSignalsEvidence;
   monthly_revenue_estimate_min?: number;
@@ -58,25 +65,39 @@ export function parseMoneyToken(numRaw: string, suffixRaw?: string): number | nu
   return n;
 }
 
-const MONTHLY_HINT =
-  /(?:per\s*month|\/\s*mo(?:nth)?\b|\bmonthly\b|\bmonth\s+payment\b|\bowner\s+payment\b|\bcheck\s+detail\b)/i;
+/** Phrases that tie a dollar figure to monthly / remittance revenue (scan window before & after $). */
+const REVENUE_DIRECT_MONTHLY_HINT =
+  /(?:average\s+monthly\s+check\s+amount|monthly\s+revenue|owner\s+payment|check\s+detail|check\s+amount|(?:net\s+)?amount\s+of\s+(?:the\s+)?check|month\s+payment|per\s*month|\/\s*mo(?:nth)?\b|\bmonthly\b|(?:owner|royalty|net)\s+payment\b)/i;
 const ANNUAL_HINT = /(?:per\s*year|\/\s*yr\b|\bannually\b|\bannual\b(?!\s+report))/i;
+
+function windowHasMonthlyRevenueContext(t: string, dollarIndex: number): boolean {
+  const start = Math.max(0, dollarIndex - 100);
+  const end = Math.min(t.length, dollarIndex + 120);
+  return REVENUE_DIRECT_MONTHLY_HINT.test(t.slice(start, end));
+}
 
 /**
  * Extract explicit monthly revenue range or single from text (highest-priority financial signal).
+ * Prioritizes direct $ near revenue/remittance language over any later production-based inference.
  */
 export function extractExplicitMonthlyRevenueRange(text: string): { min: number; max: number } | null {
   if (!text || !text.trim()) return null;
   const t = text.replace(/\r\n/g, "\n");
 
+  /** Label-first lines: "Average Monthly Check Amount: $X", "Monthly Revenue $X", etc. */
+  const labelLineRe =
+    /(?:average\s+monthly\s+check\s+amount|monthly\s+revenue|owner\s+payment|check\s+detail)\s*[:\s#–—-]+\s*\$?\s*([\d,]+(?:\.\d+)?)\s*(k|K|thousand|m|M|million)?\b/gi;
+  let lm: RegExpExecArray | null;
+  while ((lm = labelLineRe.exec(t)) !== null) {
+    const n = parseMoneyToken(lm[1], lm[2]);
+    if (n != null && n > 0) return { min: n, max: n };
+  }
+
   const rangeRe =
     /\$\s*([\d,]+(?:\.\d+)?)\s*(k|K|thousand|m|M|million)?\s*(?:-|to|through|–|—)\s*\$?\s*([\d,]+(?:\.\d+)?)\s*(k|K|thousand|m|M|million)?/gi;
   let m: RegExpExecArray | null;
   while ((m = rangeRe.exec(t)) !== null) {
-    const tail = t.slice(m.index, Math.min(t.length, m.index + 120));
-    if (!MONTHLY_HINT.test(tail) && !MONTHLY_HINT.test(t.slice(Math.max(0, m.index - 40), m.index + 120))) {
-      continue;
-    }
+    if (!windowHasMonthlyRevenueContext(t, m.index)) continue;
     const a = parseMoneyToken(m[1], m[2]);
     const b = parseMoneyToken(m[3], m[4]);
     if (a == null || b == null) continue;
@@ -90,6 +111,24 @@ export function extractExplicitMonthlyRevenueRange(text: string): { min: number;
   let s: RegExpExecArray | null;
   while ((s = singleRe.exec(t)) !== null) {
     const n = parseMoneyToken(s[1], s[2]);
+    if (n != null && n > 0) return { min: n, max: n };
+  }
+
+  /** $X with "monthly" or revenue cue before the amount (e.g. "monthly revenue of $5,000"). */
+  const monthlyBeforeDollar =
+    /(?:average\s+monthly\s+check\s+amount|monthly\s+revenue|owner\s+payment|check\s+detail|check\s+amount)\b[\s\S]{0,55}\$\s*([\d,]+(?:\.\d+)?)\s*(k|K|thousand|m|M|million)?/gi;
+  let mb: RegExpExecArray | null;
+  while ((mb = monthlyBeforeDollar.exec(t)) !== null) {
+    const n = parseMoneyToken(mb[1], mb[2]);
+    if (n != null && n > 0) return { min: n, max: n };
+  }
+
+  /** Any $ amount with check / payment / monthly context in the same window (OCR-friendly). */
+  const dollarRe = /\$\s*([\d,]+(?:\.\d+)?)\s*(k|K|thousand|m|M|million)?/g;
+  let d: RegExpExecArray | null;
+  while ((d = dollarRe.exec(t)) !== null) {
+    if (!windowHasMonthlyRevenueContext(t, d.index)) continue;
+    const n = parseMoneyToken(d[1], d[2]);
     if (n != null && n > 0) return { min: n, max: n };
   }
 
@@ -343,6 +382,15 @@ function valuationFromMonthlyRange(min: number, max: number): { vmin: number; vm
   };
 }
 
+/** Narrow band 90–98% for document-sourced dollar amounts (single vs range). */
+function directDocumentConfidencePercent(min: number, max: number): number {
+  if (min === max) return 96;
+  const spread = (max - min) / Math.max(min, 1);
+  if (spread < 0.08) return 95;
+  if (spread < 0.2) return 93;
+  return 91;
+}
+
 function readFiniteNumberLoose(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -397,16 +445,18 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
     sources.financial_signals = "direct document evidence";
   };
 
-  /** CASE 1: explicit monthly revenue */
+  /** CASE 1: explicit monthly revenue (direct $ in document — skip production modeling) */
   if (signals.explicitMonthlyRange != null) {
     const { min, max } = signals.explicitMonthlyRange;
     const { vmin, vmax } = valuationFromMonthlyRange(min, max);
-    const conf: FinancialConfidenceLabel = min === max ? "High" : "Medium";
-    sources.revenue_basis = "Explicit monthly revenue language in document text.";
+    const pct = directDocumentConfidencePercent(min, max);
+    sources.revenue_basis = "Direct monthly revenue figure from document text (not production-derived).";
     markDirectFinancialSignals();
     return {
       has_financials: true,
-      confidence: conf,
+      confidence: "High",
+      confidence_percent: pct,
+      financial_source: "direct_document_value",
       financial_signals_evidence: "direct_document_evidence",
       monthly_revenue_estimate_min: min,
       monthly_revenue_estimate_max: max,
@@ -417,7 +467,7 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
       payback_context:
         "At this revenue level, a buyer may recover capital in roughly 24–48 months depending on decline and operating costs.",
       methodology: uniqStrings([
-        "Based on explicit monthly revenue language found in the document (preliminary).",
+        "Based on explicit monthly revenue or remittance language and dollar amounts in the document (preliminary).",
         "Annual revenue shown as monthly × 12 (directional).",
         "Rough market valuation range: 24× to 48× monthly cash flow — directional only, not a formal appraisal.",
         "Document-based snapshot — not reserve engineering.",
@@ -427,17 +477,20 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
     };
   }
 
-  /** Explicit annual → monthly */
+  /** Explicit annual → monthly (still direct document $; production modeling not used) */
   if (signals.explicitAnnualRange != null) {
     const { min, max } = signals.explicitAnnualRange;
     const moMin = min / 12;
     const moMax = max / 12;
     const { vmin, vmax } = valuationFromMonthlyRange(moMin, moMax);
-    sources.revenue_basis = "Explicit annual revenue language in document text.";
+    const pct = directDocumentConfidencePercent(min, max);
+    sources.revenue_basis = "Direct annual revenue figure from document text (monthly range derived by ÷12).";
     markDirectFinancialSignals();
     return {
       has_financials: true,
-      confidence: "Medium",
+      confidence: "High",
+      confidence_percent: pct,
+      financial_source: "direct_document_value",
       financial_signals_evidence: "direct_document_evidence",
       monthly_revenue_estimate_min: moMin,
       monthly_revenue_estimate_max: moMax,
@@ -457,7 +510,7 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
     };
   }
 
-  /** CASE 2: production + royalty / ownership */
+  /** CASE 2: production × commodity × royalty — only when no direct document $ revenue was found above */
   const rf = signals.royaltyFraction;
   const hasVol =
     (signals.oilBblMonthlyApprox != null && signals.oilBblMonthlyApprox > 0) ||
@@ -486,6 +539,7 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
       return {
         has_financials: true,
         confidence: "Low",
+        financial_source: "production_estimate",
         financial_signals_evidence: "approximate",
         monthly_revenue_estimate_min: moMin,
         monthly_revenue_estimate_max: moMax,

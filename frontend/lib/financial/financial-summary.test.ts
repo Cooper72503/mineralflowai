@@ -35,6 +35,16 @@ describe("extractExplicitMonthlyRevenueRange", () => {
     const r = extractExplicitMonthlyRevenueRange("Net revenue about $30K monthly.");
     expect(r).toEqual({ min: 30_000, max: 30_000 });
   });
+
+  it("parses Average Monthly Check Amount label", () => {
+    const r = extractExplicitMonthlyRevenueRange("Average Monthly Check Amount: $1,250.00");
+    expect(r).toEqual({ min: 1_250, max: 1_250 });
+  });
+
+  it("parses Monthly Revenue before dollar amount", () => {
+    const r = extractExplicitMonthlyRevenueRange("Monthly Revenue    $3,200");
+    expect(r).toEqual({ min: 3_200, max: 3_200 });
+  });
 });
 
 describe("extractExplicitAnnualRevenueRange", () => {
@@ -69,6 +79,9 @@ describe("buildFinancialSummary", () => {
     expect(s.valuation_estimate_min).toBe(30_000 * 24);
     expect(s.valuation_estimate_max).toBe(30_000 * 48);
     expect(s.confidence).toBe("High");
+    expect(s.confidence_percent).toBeGreaterThanOrEqual(90);
+    expect(s.confidence_percent).toBeLessThanOrEqual(98);
+    expect(s.financial_source).toBe("direct_document_value");
     expect(s.financial_signals_evidence).toBe("direct_document_evidence");
     expect(s.sources?.financial_signals).toBe("direct document evidence");
   });
@@ -83,7 +96,9 @@ describe("buildFinancialSummary", () => {
     expect(s.has_financials).toBe(true);
     expect(s.monthly_revenue_estimate_min).toBe(30_000);
     expect(s.monthly_revenue_estimate_max).toBe(40_000);
-    expect(s.confidence).toBe("Medium");
+    expect(s.confidence).toBe("High");
+    expect(s.financial_source).toBe("direct_document_value");
+    expect(s.confidence_percent).toBeGreaterThanOrEqual(90);
   });
 
   it("explicit annual revenue converts to monthly and valuation bands", () => {
@@ -99,6 +114,24 @@ describe("buildFinancialSummary", () => {
     expect(s.annual_revenue_estimate_min).toBe(360_000);
     expect(s.valuation_estimate_min).toBe(30_000 * 24);
     expect(s.valuation_estimate_max).toBe(30_000 * 48);
+    expect(s.confidence).toBe("High");
+    expect(s.financial_source).toBe("direct_document_value");
+    expect(s.confidence_percent).toBeGreaterThanOrEqual(90);
+  });
+
+  it("prefers direct monthly $ over production × royalty when both appear", () => {
+    const s = buildFinancialSummary({
+      extractedText:
+        "Average Monthly Check Amount: $4,500. Production approximately 200 bbl oil per month. Royalty 1/8.",
+      dealScoreInput: { acreage: 40, county: "Midland" },
+      royaltyRateStr: "1/8",
+      county: "Midland",
+    });
+    expect(s.has_financials).toBe(true);
+    expect(s.monthly_revenue_estimate_min).toBe(4_500);
+    expect(s.monthly_revenue_estimate_max).toBe(4_500);
+    expect(s.financial_source).toBe("direct_document_value");
+    expect(s.methodology?.join(" ")).not.toMatch(/illustrative pricing/i);
   });
 
   it("does not invent dollars when text lacks financial signals", () => {
@@ -157,7 +190,7 @@ describe("direct document financial evidence", () => {
     ).toBeCloseTo(0.18);
     expect(
       getDirectFinancialEvidenceBoost("CHECK DETAIL $2,500.00 net amount of check.", null)
-    ).toBeCloseTo(0.15);
+    ).toBeCloseTo(0.18);
     expect(
       getDirectFinancialEvidenceBoost("MINERAL DEED only, no dollars.", null)
     ).toBe(0);
