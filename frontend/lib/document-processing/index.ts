@@ -73,6 +73,17 @@ export {
   classifyDocumentFromKeywords,
 } from "./heuristic-field-extraction";
 
+export {
+  blendConfidenceWeights,
+  categoryConfidenceProfile,
+  classifyDocumentCategory,
+  mapExtractionClassToCategory,
+  resolveDocumentCategory,
+  type DocumentCategory,
+  type DocumentCategoryResult,
+  type CategoryConfidenceProfile,
+} from "./document-classification";
+
 export type DocumentProcessingResult =
   | { success: true; extractedText: string; extractionMeta?: Record<string, unknown> }
   | { success: false; error: string; extractionMeta?: Record<string, unknown> };

@@ -4,6 +4,7 @@
 
 import OpenAI from "openai";
 import { cleanExtractedDocumentText } from "./extracted-text-quality";
+import type { DocumentCategory } from "./document-classification";
 import {
   normalizeParsedLeaseResult,
   type ParsedLeaseResult,
@@ -64,6 +65,23 @@ The text may be from OCR or a weak PDF text layer: skip isolated garbage lines, 
 
 Return only valid JSON, no markdown or extra text.`;
 
+function systemPromptForCategory(category: DocumentCategory | undefined): string {
+  if (!category) return LEASE_PARSE_SYSTEM;
+  const hints: Record<DocumentCategory, string> = {
+    mineral_deed:
+      "Classifier: mineral_deed — prioritize Grantor/Grantee, legal description, and recording/effective dates; royalty only if clearly stated.",
+    oil_gas_lease:
+      "Classifier: oil_gas_lease — prioritize Lessor/Lessee, royalty rate, primary term, and lease dates.",
+    assignment:
+      "Classifier: assignment — prioritize assignor/assignee (or grantor/grantee), subject lease references, and effective date.",
+    division_order:
+      "Classifier: division_order — prioritize interest owners, decimals/NRI, payee lines, and well/unit references; lease-style term fields may be absent.",
+    other:
+      "Classifier: other — extract whatever parties and land references exist; document_type may be nonstandard.",
+  };
+  return `${LEASE_PARSE_SYSTEM}\n\n${hints[category]}`;
+}
+
 export function safeParseJsonObject(
   content: string,
   stepName: string,
@@ -100,6 +118,8 @@ export function safeParseJsonObject(
 export type OpenAiLeaseParseOptions = {
   model?: string;
   maxChars?: number;
+  /** Pre-extraction category so the model emphasizes the right fields. */
+  documentCategory?: DocumentCategory;
 };
 
 /**
@@ -151,6 +171,7 @@ export async function parseLeaseFieldsWithOpenAi(
 
     const model = options?.model ?? "gpt-4o-mini";
     const maxChars = options?.maxChars ?? 12000;
+    const systemPrompt = systemPromptForCategory(options?.documentCategory);
     const client = new OpenAI({ apiKey });
 
     let completion: unknown;
@@ -158,7 +179,7 @@ export async function parseLeaseFieldsWithOpenAi(
       completion = await client.chat.completions.create({
         model,
         messages: [
-          { role: "system", content: LEASE_PARSE_SYSTEM },
+          { role: "system", content: systemPrompt },
           {
             role: "user",
             content: `Extract lease fields from this document text:\n\n${normalizedForModel.slice(0, maxChars)}`,

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFinancialSummary,
+  detectDivisionOrderDirectValues,
+  detectExplicitCheckOrPaymentAmount,
   extractExplicitAnnualRevenueRange,
   extractExplicitMonthlyRevenueRange,
+  getDirectFinancialEvidenceBoost,
   parseFinancialSignalsFromText,
   parseMoneyToken,
   parseRoyaltyOrDecimalFraction,
@@ -66,6 +69,8 @@ describe("buildFinancialSummary", () => {
     expect(s.valuation_estimate_min).toBe(30_000 * 24);
     expect(s.valuation_estimate_max).toBe(30_000 * 48);
     expect(s.confidence).toBe("High");
+    expect(s.financial_signals_evidence).toBe("direct_document_evidence");
+    expect(s.sources?.financial_signals).toBe("direct document evidence");
   });
 
   it("CASE 1: monthly range sets min/max", () => {
@@ -131,5 +136,30 @@ describe("parseFinancialSignalsFromText", () => {
     expect(p.hasNetRevenueKeyword).toBe(true);
     expect(p.hasRoyaltyKeyword).toBe(true);
     expect(p.royaltyFraction).toBeCloseTo(0.125);
+  });
+});
+
+describe("direct document financial evidence", () => {
+  it("detects check detail with dollar amount", () => {
+    expect(
+      detectExplicitCheckOrPaymentAmount("CHECK DETAIL — owner payment $1,234.56 for March.")
+    ).toBe(true);
+  });
+
+  it("detects division order with decimal interest", () => {
+    const t = `DIVISION ORDER\nPayee A decimal interest 0.000123456\n`;
+    expect(detectDivisionOrderDirectValues(t)).toBe(true);
+  });
+
+  it("getDirectFinancialEvidenceBoost scales with signal strength", () => {
+    expect(
+      getDirectFinancialEvidenceBoost("Royalty income $5,000 per month net to owner.", null)
+    ).toBeCloseTo(0.18);
+    expect(
+      getDirectFinancialEvidenceBoost("CHECK DETAIL $2,500.00 net amount of check.", null)
+    ).toBeCloseTo(0.15);
+    expect(
+      getDirectFinancialEvidenceBoost("MINERAL DEED only, no dollars.", null)
+    ).toBe(0);
   });
 });

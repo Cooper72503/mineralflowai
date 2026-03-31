@@ -11,6 +11,13 @@ import {
   estimateExtractedTextConfidence,
 } from "./extracted-text-quality";
 import {
+  blendConfidenceWeights,
+  categoryConfidenceProfile,
+  classifyDocumentCategory,
+  type DocumentCategory,
+  resolveDocumentCategory,
+} from "./document-classification";
+import {
   type ExtractionDocumentClass,
   documentClassToDisplayLabel,
   normalizePartyName,
@@ -30,6 +37,7 @@ import {
   type HeuristicFieldResult,
 } from "./heuristic-field-extraction";
 import { parseLeaseFieldsWithOpenAi } from "./lease-fields-openai";
+import { getDirectFinancialEvidenceBoost } from "../financial/financial-summary";
 import { parseAcreageFromLegalDescription } from "./parse-acreage-from-legal";
 import {
   type ParsedLeaseResult,
@@ -71,6 +79,10 @@ export type ExtractionArtifacts = {
   document_type_confidence: number;
   legal_description_confidence: number;
   extraction_confidence: number;
+  /** Five-way category (pre-extraction classifier + heuristic resolve). */
+  document_category: DocumentCategory;
+  /** Pre-merge classifier score 0–1. */
+  classification_score: number;
 };
 
 export type StructuredExtractionResult = {
@@ -689,6 +701,12 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   const safeCombinedText = combinedText || rawPdfText || (ocrText ?? "") || "";
   const usableTextLen = computeUsableTextLength(normalizedText, ocrText, rawPdfText);
 
+  const earlyClassification = classifyDocumentCategory(safeCombinedText);
+  logExtract("DOC_CLASSIFICATION", {
+    category: earlyClassification.category,
+    score: earlyClassification.score,
+  });
+
   logExtract("RAW_TEXT_LENGTH", {
     normalizedLen: normalizedText.trim().length,
     rawPdfLen: rawPdfText.length,
@@ -712,6 +730,8 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   logExtract("HEURISTIC_FIELDS", { textLen: normalizedText.length, combinedLen: safeCombinedText.length });
   const heur = extractHeuristicFields(normalizedText, { ocrText, rawPdfText: rawPdfText || null });
   const detected_class: ExtractionDocumentClass = heur.detected_class;
+  const documentCategory = resolveDocumentCategory(earlyClassification, heur.detected_class);
+  const catProfile = categoryConfidenceProfile(documentCategory);
 
   const llmInputRaw = selectTextForLlm(normalizedText, ocrText, rawPdfText);
   const llmInput =
@@ -726,7 +746,10 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   if (!args.skipOpenAi && process.env.OPENAI_API_KEY) {
     logExtract("LLM_NORMALIZATION_START", { textLen: llmInput.length, source: "combined_priority" });
     try {
-      llm = await parseLeaseFieldsWithOpenAi(llmInput, { model: args.openAiModel });
+      llm = await parseLeaseFieldsWithOpenAi(llmInput, {
+        model: args.openAiModel,
+        documentCategory,
+      });
       logExtract("LLM_NORMALIZATION_SUCCESS", { model: args.openAiModel ?? "gpt-4o-mini" });
     } catch (err) {
       console.error("[extract] OPENAI_FAILED", err);
@@ -844,6 +867,8 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
   const extracted_fields: Record<string, unknown> = {
     ...hBase,
     detected_class,
+    document_category: documentCategory,
+    classification_score: earlyClassification.score,
   };
 
   const fallback_extracted_fields: Record<string, unknown> = {
@@ -945,19 +970,15 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
       : inferred.acreage_status === "unknown"
         ? 0.08
         : 0.12;
-  const document_type_confidence =
+  const baseDocTypeConf =
     detected_class !== "unknown" ? 0.72 : llm?.document_type ? 0.55 : 0.28;
+  const document_type_confidence = Math.min(
+    0.95,
+    baseDocTypeConf * catProfile.docTypeMultiplier * (0.6 + earlyClassification.score * 0.4)
+  );
   const legal_description_confidence = confidence_by_field.legal_description ?? 0;
 
-  const weights = {
-    party: 0.22,
-    county: 0.18,
-    state: 0.08,
-    legal: 0.12,
-    docType: 0.12,
-    acreage: 0.08,
-    text: 0.2,
-  };
+  const weights = blendConfidenceWeights(catProfile);
   const legalC = legal_description_confidence;
   const weightedBase =
     party_confidence * weights.party +
@@ -977,13 +998,21 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     args.ocrMeanConfidence0to100
   );
 
-  let extraction_confidence = preCalibrated;
-  if (!parsed.term_length?.trim()) extraction_confidence -= 0.03;
+  let extraction_confidence = preCalibrated * catProfile.overallMultiplier;
+  if (!parsed.term_length?.trim() && !catProfile.skipTermMissingPenalty) {
+    extraction_confidence -= 0.03;
+    extraction_confidence -= catProfile.extraTermPenalty;
+  }
+  if (!parsed.royalty_rate?.trim() && !catProfile.skipRoyaltyMissingPenalty) {
+    extraction_confidence -= 0.02;
+  }
   if (parsed.acreage == null || parsed.acreage <= 0) extraction_confidence -= 0.03;
   if (countInferredPenaltyKeys(inferred) > 0) extraction_confidence -= 0.03;
 
   if (isStrongLegalDescription(parsed.legal_description)) extraction_confidence += 0.1;
   if (bothPartiesClearlyIdentified(parsed)) extraction_confidence += 0.1;
+
+  extraction_confidence += getDirectFinancialEvidenceBoost(safeCombinedText, parsed.royalty_rate);
 
   extraction_confidence = Math.max(0, Math.min(1, extraction_confidence));
   extraction_confidence = Math.min(0.95, extraction_confidence);
@@ -1144,6 +1173,8 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     document_type_confidence,
     legal_description_confidence,
     extraction_confidence: extraction_confidence_reported,
+    document_category: documentCategory,
+    classification_score: earlyClassification.score,
   };
 
   return { parsed, artifacts };

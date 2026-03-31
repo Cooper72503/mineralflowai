@@ -968,6 +968,8 @@ export async function POST(
           acreage_confidence: extractionArtifacts?.acreage_confidence,
           document_type_confidence:
             extractionArtifacts?.document_type_confidence,
+          document_category: extractionArtifacts?.document_category ?? null,
+          classification_score: extractionArtifacts?.classification_score ?? null,
           extraction_artifacts: extractionArtifacts ?? null,
           development_signals: dealScoreInput.development_signals ?? null,
           estimated_formation: drillSnap.estimated_formation,

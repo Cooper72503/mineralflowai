@@ -5,9 +5,14 @@
 
 export type FinancialConfidenceLabel = "High" | "Medium" | "Low";
 
+/** Whether dollar figures come from explicit document text vs modeled inference. */
+export type FinancialSignalsEvidence = "direct_document_evidence" | "approximate" | "qualitative";
+
 export type FinancialSummary = {
   has_financials: boolean;
   confidence: FinancialConfidenceLabel;
+  /** Set when revenue or payment figures are grounded in explicit document text vs wide-band modeling. */
+  financial_signals_evidence?: FinancialSignalsEvidence;
   monthly_revenue_estimate_min?: number;
   monthly_revenue_estimate_max?: number;
   annual_revenue_estimate_min?: number;
@@ -160,6 +165,10 @@ export function parseRoyaltyOrDecimalFraction(raw: string | null | undefined): n
 export type ParsedFinancialSignals = {
   explicitMonthlyRange: { min: number; max: number } | null;
   explicitAnnualRange: { min: number; max: number } | null;
+  /** Dollar line on a check stub / detail (not necessarily normalized to monthly revenue). */
+  hasExplicitCheckOrPaymentAmount: boolean;
+  /** Division order (or DOI-style) header plus decimals or dollar amounts. */
+  hasDivisionOrderDirectValues: boolean;
   /** Approximate oil bbl per month (from text). */
   oilBblMonthlyApprox: number | null;
   /** Approximate gas MCF per month. */
@@ -226,6 +235,62 @@ function extractOilGasMonthlyApprox(text: string): { oil: number | null; gas: nu
   return { oil, gas };
 }
 
+/** Check stub / remittance line with an explicit dollar amount. */
+export function detectExplicitCheckOrPaymentAmount(text: string): boolean {
+  if (!text?.trim()) return false;
+  const t = text.slice(0, 200_000);
+  const dollar = /\$\s*[\d,]+(?:\.\d{2})?/;
+  if (dollar.test(t) && /\bcheck\s+detail\b/i.test(t)) return true;
+  if (
+    /\b(?:net\s+)?(?:amount|payment)\s*(?:of\s+)?(?:check|remittance)?\b/i.test(t) &&
+    /\$\s*[\d,]+/.test(t)
+  ) {
+    return true;
+  }
+  if (/\bcheck\s+(?:amount|total)\b/i.test(t) && dollar.test(t)) return true;
+  return false;
+}
+
+/**
+ * Division order / DOI-style document with explicit decimals (NRI) or dollar columns.
+ */
+export function detectDivisionOrderDirectValues(text: string): boolean {
+  if (!text?.trim()) return false;
+  const head = text.slice(0, 14_000);
+  const upper = head.toUpperCase();
+  const doiLike =
+    /\bDIVISION\s+ORDER\b/.test(upper) ||
+    /\bREVISED\s+DIVISION\s+ORDER\b/.test(upper) ||
+    (/\bDOI\b/.test(upper.slice(0, 5000)) &&
+      /\b(DECIMAL|INTEREST|NRI|NET\s+REVENUE|BURNDOWN|PAYEE)\b/.test(upper));
+  if (!doiLike) return false;
+  if (/\$\s*[\d,]+(?:\.\d{2})?/.test(text)) return true;
+  if (/\b\d+\.\d{6,9}\b/.test(text)) return true;
+  return false;
+}
+
+/**
+ * Boost structured extraction confidence (0–1) when explicit dollars or DOI decimals appear in text.
+ * Intended range: +10% to +20% for the strongest cases.
+ */
+export function getDirectFinancialEvidenceBoost(
+  text: string,
+  royaltyRateStr: string | null | undefined
+): number {
+  const signals = parseFinancialSignalsFromText(text, royaltyRateStr);
+  let boost = 0;
+  if (signals.explicitMonthlyRange != null || signals.explicitAnnualRange != null) {
+    boost = Math.max(boost, 0.18);
+  }
+  if (signals.hasExplicitCheckOrPaymentAmount) {
+    boost = Math.max(boost, 0.15);
+  }
+  if (signals.hasDivisionOrderDirectValues) {
+    boost = Math.max(boost, 0.12);
+  }
+  return Math.min(0.2, boost);
+}
+
 /** Detect financial / production keywords for methodology and regional mode. */
 export function parseFinancialSignalsFromText(
   text: string,
@@ -235,6 +300,8 @@ export function parseFinancialSignalsFromText(
   const explicitMonthlyRange = extractExplicitMonthlyRevenueRange(text);
   const explicitAnnualRange =
     explicitMonthlyRange == null ? extractExplicitAnnualRevenueRange(text) : null;
+  const hasExplicitCheckOrPaymentAmount = detectExplicitCheckOrPaymentAmount(text);
+  const hasDivisionOrderDirectValues = detectDivisionOrderDirectValues(text);
   const { oil: oilBblMonthlyApprox, gas: gasMcfMonthlyApprox } = extractOilGasMonthlyApprox(text);
 
   const royaltyFromField = parseRoyaltyOrDecimalFraction(royaltyRateStr ?? null);
@@ -256,6 +323,8 @@ export function parseFinancialSignalsFromText(
   return {
     explicitMonthlyRange,
     explicitAnnualRange,
+    hasExplicitCheckOrPaymentAmount,
+    hasDivisionOrderDirectValues,
     oilBblMonthlyApprox,
     gasMcfMonthlyApprox,
     royaltyFraction,
@@ -324,6 +393,9 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
         : null;
 
   const sources: Record<string, string> = {};
+  const markDirectFinancialSignals = () => {
+    sources.financial_signals = "direct document evidence";
+  };
 
   /** CASE 1: explicit monthly revenue */
   if (signals.explicitMonthlyRange != null) {
@@ -331,9 +403,11 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
     const { vmin, vmax } = valuationFromMonthlyRange(min, max);
     const conf: FinancialConfidenceLabel = min === max ? "High" : "Medium";
     sources.revenue_basis = "Explicit monthly revenue language in document text.";
+    markDirectFinancialSignals();
     return {
       has_financials: true,
       confidence: conf,
+      financial_signals_evidence: "direct_document_evidence",
       monthly_revenue_estimate_min: min,
       monthly_revenue_estimate_max: max,
       annual_revenue_estimate_min: min * 12,
@@ -360,9 +434,11 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
     const moMax = max / 12;
     const { vmin, vmax } = valuationFromMonthlyRange(moMin, moMax);
     sources.revenue_basis = "Explicit annual revenue language in document text.";
+    markDirectFinancialSignals();
     return {
       has_financials: true,
       confidence: "Medium",
+      financial_signals_evidence: "direct_document_evidence",
       monthly_revenue_estimate_min: moMin,
       monthly_revenue_estimate_max: moMax,
       annual_revenue_estimate_min: min,
@@ -410,6 +486,7 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
       return {
         has_financials: true,
         confidence: "Low",
+        financial_signals_evidence: "approximate",
         monthly_revenue_estimate_min: moMin,
         monthly_revenue_estimate_max: moMax,
         annual_revenue_estimate_min: moMin * 12,
@@ -443,6 +520,9 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
     signals.hasGrossRevenueKeyword ||
     signals.hasCheckOrDivisionKeyword;
 
+  const directNumericContext =
+    signals.hasExplicitCheckOrPaymentAmount || signals.hasDivisionOrderDirectValues;
+
   if (hasLoc && (devSig || keywordBundle)) {
     const strength = developmentStrength(dev);
     const note =
@@ -451,9 +531,11 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
         : strength === "weaker"
           ? "Economic potential appears limited based on available document signals (directional only)."
           : "Some mineral economic context may exist, but no reliable monthly revenue could be inferred from this document alone.";
+    if (directNumericContext) markDirectFinancialSignals();
     return {
       has_financials: false,
       confidence: "Low",
+      financial_signals_evidence: directNumericContext ? "direct_document_evidence" : "qualitative",
       payback_context: note,
       methodology: uniqStrings([
         "County / acreage / development cues present; no explicit revenue or production volumes suitable for a numeric estimate.",
@@ -462,14 +544,18 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
       warnings: uniqStrings([
         "Financial estimate unavailable — document lacks direct revenue or usable production data for a numeric range.",
       ]),
-      sources: { context: "Regional/heuristic mode — qualitative only." },
+      sources: directNumericContext
+        ? { ...sources, context: "Regional/heuristic mode — qualitative only." }
+        : { context: "Regional/heuristic mode — qualitative only." },
     };
   }
 
   if (hasLoc && acreage != null && acreage > 0) {
+    if (directNumericContext) markDirectFinancialSignals();
     return {
       has_financials: false,
       confidence: "Low",
+      financial_signals_evidence: directNumericContext ? "direct_document_evidence" : "qualitative",
       payback_context: "Limited financial confidence due to missing production and revenue detail in the document.",
       methodology: uniqStrings([
         "Acreage and location noted; no explicit revenue or production figures to support a numeric estimate.",
@@ -477,13 +563,17 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
       warnings: uniqStrings([
         "Not enough direct production or revenue data found to estimate deal economics from this document alone.",
       ]),
-      sources: { context: "Insufficient financial signals." },
+      sources: directNumericContext
+        ? { ...sources, context: "Insufficient financial signals." }
+        : { context: "Insufficient financial signals." },
     };
   }
 
+  if (directNumericContext) markDirectFinancialSignals();
   return {
     has_financials: false,
     confidence: "Low",
+    financial_signals_evidence: directNumericContext ? "direct_document_evidence" : "qualitative",
     payback_context: "Limited financial confidence due to missing production and revenue detail.",
     methodology: uniqStrings([
       "Document-based preliminary screen only.",
@@ -491,6 +581,8 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
     warnings: uniqStrings([
       "Not enough direct production or revenue data found to estimate deal economics from this document alone.",
     ]),
-    sources: { context: "Insufficient financial signals." },
+    sources: directNumericContext
+      ? { ...sources, context: "Insufficient financial signals." }
+      : { context: "Insufficient financial signals." },
   };
 }
