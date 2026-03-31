@@ -18,6 +18,7 @@ import {
   drillSnapshotFromDealInput,
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
+import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -262,6 +263,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }),
     );
 
+    const financialSummary = buildFinancialSummary({
+      extractedText: ext.extracted_text ?? "",
+      dealScoreInput,
+      royaltyRateStr: ext.royalty_rate,
+      county: ext.county ?? doc.county,
+    });
+
     const dealScoreCalculated = calculateDealScore(dealScoreInput);
     const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
 
@@ -274,13 +282,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       typeof merged.estimated_formation !== "string" || !String(merged.estimated_formation).trim();
     const drillColumnsAligned = topLevelDrillMatchesSnapshot(ext, drillSnap);
 
+    const needsFinancialBackfill =
+      merged.financial_summary == null || typeof merged.financial_summary !== "object";
+
     if (
       stored != null &&
       stored.score === dealScore.score &&
       stored.type === dealScore.type &&
       !drillDataMissingInMerged &&
       drillColumnsAligned &&
-      !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals)
+      !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals) &&
+      !needsFinancialBackfill
     ) {
       const finalAfter = await fetchMergedDealScoreFromExtraction(supabase, ext.id, user.id);
       console.log("SCORE SAVED", dealScore.score);
@@ -297,6 +309,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ...drillSnap,
       development_signals: dealScoreInput.development_signals ?? merged.development_signals,
       deal_score: dealScore,
+      financial_summary: financialSummary,
     });
     console.log("SCORE SAVED", dealScore.score);
     console.log(`${LOG_PREFIX} SAVED SCORE`, dealScore.score);

@@ -14,6 +14,7 @@ import {
   dealScoreFromExtractionColumns,
   dealScoreFromStructuredBlobOnly,
   dealScoreKindLabel,
+  EM_DASH,
   mergeStructuredFields,
 } from "@/lib/deals/dashboard-normalize";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
@@ -30,6 +31,27 @@ import {
   readStructuredConfidenceLists,
   resolveExtractionConfidencePercent,
 } from "@/lib/extraction/extraction-confidence-display";
+import type { FinancialSummary } from "@/lib/financial/financial-summary";
+
+function readFinancialSummary(merged: Record<string, unknown>): FinancialSummary | null {
+  const raw = merged.financial_summary;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return raw as FinancialSummary;
+}
+
+function formatUsdCompact(n: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: n >= 1_000_000 ? 2 : 0,
+  }).format(n);
+}
+
+function formatUsdRange(min?: number, max?: number): string {
+  if (min == null || max == null) return EM_DASH;
+  if (Math.abs(min - max) < 1e-6) return formatUsdCompact(min);
+  return `${formatUsdCompact(min)}–${formatUsdCompact(max)}`;
+}
 
 function logDocumentDetailDealScores(ext: ExtractionRow, scoreDisplayed: number | null, label: string) {
   const fromData = dealScoreFromStructuredBlobOnly(ext.structured_data)?.score ?? null;
@@ -967,6 +989,116 @@ export default function DocumentDetailPage() {
             Regional estimate — may be unavailable for some locations. Based on county-level geology mapping.
             Not tract-level subsurface analysis.
           </p>
+        </div>
+      ) : null}
+
+      {extraction ? (
+        <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
+          <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+            Financial Output
+          </h2>
+          {(() => {
+            const fin = readFinancialSummary(snapshotMerged as Record<string, unknown>);
+            if (fin == null) {
+              return (
+                <p style={{ color: "#555", fontSize: "0.9rem", lineHeight: 1.5, margin: 0 }}>
+                  Not enough direct production or revenue data found to estimate deal economics from this document
+                  alone. Process or resync the document to generate a preliminary financial snapshot when available.
+                </p>
+              );
+            }
+            if (!fin.has_financials) {
+              return (
+                <>
+                  <p style={{ color: "#555", fontSize: "0.9rem", lineHeight: 1.5, margin: "0 0 0.75rem" }}>
+                    {fin.warnings?.[0] ??
+                      "Not enough direct production or revenue data found to estimate deal economics from this document alone."}
+                  </p>
+                  {fin.payback_context ? (
+                    <p style={{ color: "#374151", fontSize: "0.88rem", lineHeight: 1.5, margin: "0 0 0.75rem" }}>
+                      {fin.payback_context}
+                    </p>
+                  ) : null}
+                  {fin.methodology != null && fin.methodology.length > 0 ? (
+                    <div style={{ marginBottom: "0.5rem" }}>
+                      <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Methodology</div>
+                      <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#444", lineHeight: 1.45 }}>
+                        {fin.methodology.slice(0, 4).map((line, idx) => (
+                          <li key={`m-a-${idx}`}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: 0, lineHeight: 1.45 }}>
+                    Directional, preliminary, and document-based — not a formal valuation or reserve report.
+                  </p>
+                </>
+              );
+            }
+            return (
+              <>
+                <dl style={{ display: "flex", flexDirection: "column", gap: "0.65rem", marginBottom: "0.75rem" }}>
+                  <div>
+                    <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>
+                      Estimated monthly revenue (preliminary)
+                    </dt>
+                    <dd style={{ fontSize: "0.95rem", margin: 0 }}>
+                      {formatUsdRange(fin.monthly_revenue_estimate_min, fin.monthly_revenue_estimate_max)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>
+                      Estimated annual revenue (preliminary)
+                    </dt>
+                    <dd style={{ fontSize: "0.95rem", margin: 0 }}>
+                      {formatUsdRange(fin.annual_revenue_estimate_min, fin.annual_revenue_estimate_max)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>
+                      Rough market valuation range
+                    </dt>
+                    <dd style={{ fontSize: "0.95rem", margin: 0 }}>
+                      {formatUsdRange(fin.valuation_estimate_min, fin.valuation_estimate_max)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>Confidence</dt>
+                    <dd style={{ fontSize: "0.95rem", margin: 0 }}>{fin.confidence}</dd>
+                  </div>
+                </dl>
+                {fin.payback_context ? (
+                  <p style={{ color: "#374151", fontSize: "0.88rem", lineHeight: 1.45, margin: "0 0 0.75rem" }}>
+                    {fin.payback_context}
+                  </p>
+                ) : null}
+                {fin.methodology != null && fin.methodology.length > 0 ? (
+                  <div style={{ marginBottom: "0.5rem" }}>
+                    <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Methodology</div>
+                    <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#444", lineHeight: 1.45 }}>
+                      {fin.methodology.slice(0, 4).map((line, idx) => (
+                        <li key={`m-b-${idx}`}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {fin.warnings != null && fin.warnings.length > 0 ? (
+                  <div style={{ marginBottom: "0.5rem" }}>
+                    <div style={{ fontSize: "0.8rem", color: "#92400e", marginBottom: "0.25rem" }}>Warnings</div>
+                    <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#78350f", lineHeight: 1.45 }}>
+                      {fin.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: 0, lineHeight: 1.45 }}>
+                  Directional only, not a formal reserve report or appraisal. Rough market valuation range uses a
+                  simple 24×–48× monthly cash flow multiple for illustration.
+                </p>
+              </>
+            );
+          })()}
         </div>
       ) : null}
 

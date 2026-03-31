@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { shortDrillingProximityPhrase, type DealScoreResult } from "@/lib/document-processing/deal-score";
+import type { FinancialSummary } from "@/lib/financial/financial-summary";
 import {
   EM_DASH,
   acreageDisplayFromStructured,
@@ -90,11 +91,21 @@ export type ProcessedDealRow = {
   docType: string;
   /** From structured proximity fields (same signals as deal score); optional one-line summaries use this first. */
   drillingProximityPhrase: string | null;
+  /** Short dashboard label from persisted `financial_summary` (MVP). */
+  financialsLabel: string;
 };
 
 function strFromMerged(merged: Record<string, unknown>, key: string): string | null {
   const v = merged[key];
   return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+function financialsLabelFromMerged(merged: Record<string, unknown>): string {
+  const raw = merged.financial_summary;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return EM_DASH;
+  const fs = raw as FinancialSummary;
+  if (fs.has_financials) return "Est. value avail.";
+  return "Limited";
 }
 
 function singleJoinedDocument(
@@ -128,6 +139,7 @@ export function buildProcessedDealRowFromExtractionJoin(row: ExtractionWithCompl
       leaseStatus: leaseStatusFromStructured(merged),
       docType: documentTypeDisplay(merged, null),
       drillingProximityPhrase,
+      financialsLabel: financialsLabelFromMerged(merged),
     };
   }
   return {
@@ -144,6 +156,7 @@ export function buildProcessedDealRowFromExtractionJoin(row: ExtractionWithCompl
     leaseStatus: leaseStatusFromStructured(merged),
     docType: documentTypeDisplay(merged, doc.document_type),
     drillingProximityPhrase,
+    financialsLabel: financialsLabelFromMerged(merged),
   };
 }
 
@@ -171,6 +184,7 @@ export function buildProcessedDealRow(
     leaseStatus: leaseStatusFromStructured(merged),
     docType: documentTypeDisplay(merged, doc.document_type),
     drillingProximityPhrase: shortDrillingProximityPhrase(merged),
+    financialsLabel: financialsLabelFromMerged(merged),
   };
 }
 

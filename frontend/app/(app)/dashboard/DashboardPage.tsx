@@ -280,6 +280,7 @@ export default function DashboardPage() {
                       <th>County</th>
                       <th>State</th>
                       <th>Acres</th>
+                      <th>Financials</th>
                       <th>Lease status</th>
                       <th>Document type</th>
                       <th>Completed</th>
@@ -352,6 +353,7 @@ export default function DashboardPage() {
                           <td>{r.county?.trim() ? r.county : EM_DASH}</td>
                           <td>{r.state?.trim() ? r.state : EM_DASH}</td>
                           <td>{r.acres}</td>
+                          <td title="Document-based financial snapshot (preliminary)">{r.financialsLabel}</td>
                           <td>{r.leaseStatus}</td>
                           <td style={{ maxWidth: 160 }}>{r.docType}</td>
                           <td>{completedLabel}</td>

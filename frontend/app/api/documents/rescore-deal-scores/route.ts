@@ -12,6 +12,7 @@ import {
   drillSnapshotFromDealInput,
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
+import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -192,6 +193,13 @@ export async function POST(request: Request) {
         }),
       );
 
+      const financialSummary = buildFinancialSummary({
+        extractedText: row.extracted_text ?? "",
+        dealScoreInput,
+        royaltyRateStr: row.royalty_rate,
+        county: row.county ?? doc.county,
+      });
+
       const dealScoreCalculated = calculateDealScore(dealScoreInput);
       const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
       if (
@@ -216,6 +224,7 @@ export async function POST(request: Request) {
         ...drillSnap,
         development_signals: dealScoreInput.development_signals ?? merged.development_signals,
         deal_score: dealScore,
+        financial_summary: financialSummary,
       };
       const drillCols = drillTopLevelPayload(drillSnap);
 
