@@ -16,6 +16,8 @@ export type FinancialSummary = {
   confidence: FinancialConfidenceLabel;
   /** Document-grounded revenue estimate confidence as a percent (90–98 when using direct $). */
   confidence_percent?: number;
+  /** Present when explicit monthly revenue was parsed from document text (not inferred). */
+  reason?: string;
   /** Primary derivation path for revenue figures. */
   financial_source?: FinancialSource;
   /** Set when revenue or payment figures are grounded in explicit document text vs wide-band modeling. */
@@ -449,13 +451,16 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
   if (signals.explicitMonthlyRange != null) {
     const { min, max } = signals.explicitMonthlyRange;
     const { vmin, vmax } = valuationFromMonthlyRange(min, max);
-    const pct = directDocumentConfidencePercent(min, max);
+    /** Direct extraction: floor at 90% (0.9) — overrides OCR / inferred paths below. */
+    const pct = Math.max(90, directDocumentConfidencePercent(min, max));
     sources.revenue_basis = "Direct monthly revenue figure from document text (not production-derived).";
+    sources.reason = "Direct revenue extracted from document";
     markDirectFinancialSignals();
     return {
       has_financials: true,
       confidence: "High",
       confidence_percent: pct,
+      reason: "Direct revenue extracted from document",
       financial_source: "direct_document_value",
       financial_signals_evidence: "direct_document_evidence",
       monthly_revenue_estimate_min: min,
@@ -467,6 +472,7 @@ export function buildFinancialSummary(args: BuildFinancialSummaryArgs): Financia
       payback_context:
         "At this revenue level, a buyer may recover capital in roughly 24–48 months depending on decline and operating costs.",
       methodology: uniqStrings([
+        "Direct revenue extracted from document — overrides production-based or OCR-inferred financial estimates.",
         "Based on explicit monthly revenue or remittance language and dollar amounts in the document (preliminary).",
         "Annual revenue shown as monthly × 12 (directional).",
         "Rough market valuation range: 24× to 48× monthly cash flow — directional only, not a formal appraisal.",

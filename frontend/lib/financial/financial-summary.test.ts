@@ -81,9 +81,12 @@ describe("buildFinancialSummary", () => {
     expect(s.confidence).toBe("High");
     expect(s.confidence_percent).toBeGreaterThanOrEqual(90);
     expect(s.confidence_percent).toBeLessThanOrEqual(98);
+    expect(s.reason).toBe("Direct revenue extracted from document");
+    expect(s.sources?.reason).toBe("Direct revenue extracted from document");
     expect(s.financial_source).toBe("direct_document_value");
     expect(s.financial_signals_evidence).toBe("direct_document_evidence");
     expect(s.sources?.financial_signals).toBe("direct document evidence");
+    expect(s.methodology?.[0]).toMatch(/overrides.*OCR|OCR-inferred/i);
   });
 
   it("CASE 1: monthly range sets min/max", () => {
@@ -131,6 +134,7 @@ describe("buildFinancialSummary", () => {
     expect(s.monthly_revenue_estimate_min).toBe(4_500);
     expect(s.monthly_revenue_estimate_max).toBe(4_500);
     expect(s.financial_source).toBe("direct_document_value");
+    expect(s.reason).toBe("Direct revenue extracted from document");
     expect(s.methodology?.join(" ")).not.toMatch(/illustrative pricing/i);
   });
 

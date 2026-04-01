@@ -1,6 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { requireSupabasePublicConfig } from "./env";
+import { getSupabasePublicConfig, requireSupabasePublicConfig } from "./env";
+
+/** Returns the current user when Supabase env is configured; otherwise null. */
+export async function getSessionUser() {
+  const cfg = getSupabasePublicConfig();
+  if (!cfg.ok) return null;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+}
 
 export async function createClient() {
   const { url, anonKey } = requireSupabasePublicConfig();
