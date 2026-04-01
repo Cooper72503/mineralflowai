@@ -1,4 +1,5 @@
 import { createServerClient, serializeCookieHeader } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabasePublicConfig } from "@/lib/supabase/env";
 
@@ -100,9 +101,13 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user: User | null = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (err) {
+    console.error("[middleware] getUser failed; treating as signed out", err);
+  }
 
   if (user) {
     console.log("MIDDLEWARE SESSION FOUND", pathname);

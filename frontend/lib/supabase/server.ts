@@ -6,11 +6,16 @@ import { getSupabasePublicConfig, requireSupabasePublicConfig } from "./env";
 export async function getSessionUser() {
   const cfg = getSupabasePublicConfig();
   if (!cfg.ok) return null;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return user;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    return user;
+  } catch {
+    // Invalid/expired cookies or transient Supabase errors should not break public pages.
+    return null;
+  }
 }
 
 export async function createClient() {
