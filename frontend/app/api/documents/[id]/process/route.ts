@@ -29,6 +29,8 @@ import {
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
+import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
+import { buildLocationContext } from "@/lib/location/location-context";
 
 const LOG_PREFIX = "[process-document]";
 const BUCKET_NAME = "documents";
@@ -939,6 +941,15 @@ export async function POST(
           royaltyRateStr: parsed.royalty_rate,
           county: parsed.county ?? doc.county,
         });
+        const locationContext = buildLocationContext({
+          county: parsed.county ?? doc.county,
+          state: parsed.state ?? doc.state,
+          legal_description: parsed.legal_description,
+          extracted_text: extractedText,
+          merged: dealScoreInput as Record<string, unknown>,
+          development_signals:
+            (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
+        });
         const structuredExtraction = {
           lessor: parsed.lessor,
           lessee: parsed.lessee,
@@ -980,6 +991,7 @@ export async function POST(
           drill_difficulty_reason: drillSnap.drill_difficulty_reason,
           deal_score: dealScore,
           financial_summary: financialSummary,
+          location_context: locationContext,
         };
 
         assertPlainObject(structuredExtraction, "DB_INSERT_START");
@@ -1498,6 +1510,16 @@ export async function POST(
           dealScoreInput: dealScoreInputForPipeline ?? {},
           royaltyRateStr: parsed.royalty_rate,
           county: parsed.county ?? doc.county,
+        }),
+        location_context: buildLocationContext({
+          county: parsed.county ?? doc.county,
+          state: parsed.state ?? doc.state,
+          legal_description: parsed.legal_description,
+          extracted_text: extractedText,
+          merged: (dealScoreInputForPipeline ?? {}) as Record<string, unknown>,
+          development_signals:
+            (dealScoreInputForPipeline?.development_signals as DevelopmentSignalsSnapshot | null) ??
+            null,
         }),
       };
       const fallbackExtractionResponse: SavedExtraction = {

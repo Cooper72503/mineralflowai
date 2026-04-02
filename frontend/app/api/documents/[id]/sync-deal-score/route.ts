@@ -19,6 +19,8 @@ import {
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
+import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
+import { buildLocationContext } from "@/lib/location/location-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -270,6 +272,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       county: ext.county ?? doc.county,
     });
 
+    const locationContext = buildLocationContext({
+      county: ext.county ?? doc.county,
+      state: ext.state ?? doc.state,
+      legal_description: ext.legal_description,
+      extracted_text: ext.extracted_text ?? "",
+      merged: dealScoreInput as Record<string, unknown>,
+      development_signals:
+        (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
+    });
+
     const dealScoreCalculated = calculateDealScore(dealScoreInput);
     const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
 
@@ -285,6 +297,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const needsFinancialBackfill =
       merged.financial_summary == null || typeof merged.financial_summary !== "object";
 
+    const needsLocationBackfill =
+      merged.location_context == null || typeof merged.location_context !== "object";
+
     if (
       stored != null &&
       stored.score === dealScore.score &&
@@ -292,7 +307,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       !drillDataMissingInMerged &&
       drillColumnsAligned &&
       !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals) &&
-      !needsFinancialBackfill
+      !needsFinancialBackfill &&
+      !needsLocationBackfill
     ) {
       const finalAfter = await fetchMergedDealScoreFromExtraction(supabase, ext.id, user.id);
       console.log("SCORE SAVED", dealScore.score);
@@ -310,6 +326,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       development_signals: dealScoreInput.development_signals ?? merged.development_signals,
       deal_score: dealScore,
       financial_summary: financialSummary,
+      location_context: locationContext,
     });
     console.log("SCORE SAVED", dealScore.score);
     console.log(`${LOG_PREFIX} SAVED SCORE`, dealScore.score);

@@ -13,6 +13,8 @@ import {
   enrichDealScoreInputWithDrillDifficulty,
 } from "@/lib/scoring/drillDifficultyEngine";
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
+import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
+import { buildLocationContext } from "@/lib/location/location-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -200,6 +202,16 @@ export async function POST(request: Request) {
         county: row.county ?? doc.county,
       });
 
+      const locationContext = buildLocationContext({
+        county: row.county ?? doc.county,
+        state: row.state ?? doc.state,
+        legal_description: row.legal_description,
+        extracted_text: row.extracted_text ?? "",
+        merged: dealScoreInput as Record<string, unknown>,
+        development_signals:
+          (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
+      });
+
       const dealScoreCalculated = calculateDealScore(dealScoreInput);
       const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
       if (
@@ -225,6 +237,7 @@ export async function POST(request: Request) {
         development_signals: dealScoreInput.development_signals ?? merged.development_signals,
         deal_score: dealScore,
         financial_summary: financialSummary,
+        location_context: locationContext,
       };
       const drillCols = drillTopLevelPayload(drillSnap);
 

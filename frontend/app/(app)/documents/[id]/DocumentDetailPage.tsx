@@ -32,6 +32,11 @@ import {
   resolveExtractionConfidencePercent,
 } from "@/lib/extraction/extraction-confidence-display";
 import type { FinancialSummary } from "@/lib/financial/financial-summary";
+import {
+  buildLocationContext,
+  isLocationContext,
+  type LocationContext,
+} from "@/lib/location/location-context";
 
 function readFinancialSummary(merged: Record<string, unknown>): FinancialSummary | null {
   const raw = merged.financial_summary;
@@ -143,6 +148,83 @@ function dealScoreCardSurface(
     case "D":
       return { background: "#f3f4f6", borderColor: "#e5e7eb" };
   }
+}
+
+function locationContextStatColor(field: "activity" | "confidence", value: string): string {
+  if (field === "activity") {
+    if (value === "High") return "#15803d";
+    if (value === "Moderate") return "#4b5563";
+    if (value === "Low") return "#6b7280";
+    return "#9ca3af";
+  }
+  if (value === "High") return "#15803d";
+  if (value === "Medium") return "#4b5563";
+  return "#6b7280";
+}
+
+function LocationContextCard({ ctx }: { ctx: LocationContext }) {
+  const stats: Array<{
+    label: string;
+    value: string;
+    colorKey?: "activity" | "confidence";
+  }> = [
+    { label: "Approximate area", value: ctx.approximate_area },
+    { label: "Parsed legal description", value: ctx.parsed_legal_description },
+    {
+      label: "Nearby activity signal",
+      value: ctx.nearby_activity_signal,
+      colorKey: "activity",
+    },
+    {
+      label: "Location confidence",
+      value: ctx.confidence,
+      colorKey: "confidence",
+    },
+  ];
+
+  return (
+    <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
+      <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>Location Context</h2>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: "0.75rem",
+          marginBottom: "0.85rem",
+        }}
+      >
+        {stats.map((row) => (
+          <div
+            key={row.label}
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              padding: "0.65rem 0.75rem",
+              background: "#fafafa",
+            }}
+          >
+            <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.35rem" }}>
+              {row.label}
+            </div>
+            <div
+              style={{
+                fontSize: "0.9rem",
+                fontWeight: 500,
+                color: row.colorKey
+                  ? locationContextStatColor(row.colorKey, row.value)
+                  : "#111827",
+                lineHeight: 1.45,
+              }}
+            >
+              {row.value}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p style={{ color: "#374151", fontSize: "0.9rem", lineHeight: 1.55, margin: "0 0 0.65rem" }}>{ctx.summary}</p>
+      <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: 0, lineHeight: 1.5 }}>{ctx.notes}</p>
+    </div>
+  );
 }
 
 function DealScoreCard({ dealScore }: { dealScore: DealScoreResult }) {
@@ -465,6 +547,25 @@ export default function DocumentDetailPage() {
       snapshotMerged as Record<string, unknown>
     );
   }, [snapshotMerged, extraction]);
+
+  const resolvedLocationContext = useMemo((): LocationContext | null => {
+    if (!doc || !extraction) return null;
+    const processed =
+      (doc.status ?? "").toLowerCase() === "completed" ||
+      (doc.status ?? "").toLowerCase() === "processed";
+    if (!processed) return null;
+    const merged = snapshotMerged as Record<string, unknown>;
+    const raw = merged.location_context;
+    if (isLocationContext(raw)) return raw;
+    return buildLocationContext({
+      county: extraction.county ?? doc.county,
+      state: extraction.state ?? doc.state,
+      legal_description: extraction.legal_description,
+      extracted_text: extraction.extracted_text,
+      merged,
+      development_signals: resolvedDevelopmentSignals,
+    });
+  }, [doc, extraction, snapshotMerged, resolvedDevelopmentSignals]);
 
   useEffect(() => {
     if (!displayDealScore) return;
@@ -927,6 +1028,8 @@ export default function DocumentDetailPage() {
       </div>
 
       {displayDealScore ? <DealScoreCard dealScore={displayDealScore} /> : null}
+
+      {resolvedLocationContext ? <LocationContextCard ctx={resolvedLocationContext} /> : null}
 
       {showDevelopmentSnapshot ? (
         <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
