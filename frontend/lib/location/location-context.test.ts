@@ -68,6 +68,22 @@ describe("buildLocationContext", () => {
     expect(lc.confidence).toBe("High");
   });
 
+  it("uses Central county when section/block/survey exist but no directional hint", () => {
+    const lc = buildLocationContext({
+      county: "Reeves",
+      state: "TX",
+      legal_description: "Section 5, Block 2, H&GN RR Co Survey",
+      extracted_text: null,
+      merged: {},
+      development_signals: null,
+    });
+    expect(lc.approximate_area).toBe("Central Reeves County");
+    expect(lc.confidence).toBe("High");
+    expect(lc.summary).toBe(
+      "This tract appears to sit within an active area of Reeves County based on the legal description and regional development patterns."
+    );
+  });
+
   it("falls back when county-area cannot be inferred", () => {
     const lc = buildLocationContext({
       county: "Midland",
@@ -77,7 +93,7 @@ describe("buildLocationContext", () => {
       merged: {},
       development_signals: null,
     });
-    expect(lc.approximate_area).toBe("County area not confidently determined");
+    expect(lc.approximate_area).toBe("Area not determined");
     expect(lc.nearby_activity_signal).toBe("Unknown");
     expect(lc.parsed_legal_description).toBe("Various lands");
   });

@@ -204,6 +204,11 @@ export function inferApproximateAreaDescriptor(scan: string): string | null {
   return null;
 }
 
+/** True when common PLSS-style fields are present (section, block, or survey name). */
+function hasStructuredLegalFields(parts: ParsedLegalParts): boolean {
+  return Boolean(parts.section || parts.block || parts.survey);
+}
+
 function scoreStructureStrength(parts: ParsedLegalParts): number {
   let n = 0;
   if (parts.section) n += 2;
@@ -248,6 +253,7 @@ function deriveLocationConfidence(
   const structureScore = scoreStructureStrength(parts);
   const hasCounty = countyLabel != null;
 
+  if (hasCounty && hasStructuredLegalFields(parts)) return "High";
   if (hasCounty && descriptor && structureScore >= 3) return "High";
   if (hasCounty && descriptor && structureScore >= 1) return "High";
   if (hasCounty && structureScore >= 3) return "High";
@@ -258,6 +264,8 @@ function deriveLocationConfidence(
   return "Low";
 }
 
+const AREA_NOT_DETERMINED = "Area not determined";
+
 function buildSummary(params: {
   approximate_area: string;
   confidence: LocationConfidence;
@@ -267,9 +275,9 @@ function buildSummary(params: {
 }): string {
   const { approximate_area, confidence, activity, descriptor, countyBase } = params;
 
-  if (approximate_area === "County area not confidently determined") {
+  if (approximate_area === AREA_NOT_DETERMINED) {
     if (confidence === "Low" || !countyBase) {
-      return "The legal description did not provide enough structure to confidently place the tract within the county.";
+      return "The legal description did not provide enough structure to place the tract within the county.";
     }
     return `County is known (${countyBase}), but the description did not support a finer within-county placement.`;
   }
@@ -282,7 +290,11 @@ function buildSummary(params: {
     return `This tract appears to sit in ${approximate_area.toLowerCase()}, ${act}.`;
   }
 
-  if (confidence === "High" || confidence === "Medium") {
+  if (confidence === "High" && countyBase) {
+    return `This tract appears to sit within an active area of ${countyBase} based on the legal description and regional development patterns.`;
+  }
+
+  if (confidence === "Medium") {
     return "Structured legal elements (section, survey, or similar) support a clearer read of where the interest is described, relative to county-level context.";
   }
 
@@ -317,8 +329,10 @@ export function buildLocationContext(params: BuildLocationContextParams): Locati
   let approximate_area: string;
   if (countyLabel && descriptor) {
     approximate_area = `${descriptor} ${countyLabel}`;
+  } else if (countyLabel && hasStructuredLegalFields(parts)) {
+    approximate_area = `Central ${countyLabel}`;
   } else {
-    approximate_area = "County area not confidently determined";
+    approximate_area = AREA_NOT_DETERMINED;
   }
 
   const parsed_legal_description = legalDescriptionDisplay;
