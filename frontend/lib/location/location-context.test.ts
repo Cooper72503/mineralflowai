@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLocationContext,
+  formatLegalDescriptionDisplay,
   inferApproximateAreaDescriptor,
   parseLegalDescriptionParts,
 } from "./location-context";
@@ -14,6 +15,15 @@ describe("parseLegalDescriptionParts", () => {
       block: "22",
       survey: expect.stringMatching(/Survey/i),
       abstract: "1234",
+    });
+  });
+
+  it("extracts alphanumeric block ids like C-3", () => {
+    const t = "Section 11, Block C-3, PSL Survey, Reeves County, TX";
+    expect(parseLegalDescriptionParts(t)).toMatchObject({
+      section: "11",
+      block: "C-3",
+      survey: expect.stringMatching(/PSL Survey/i),
     });
   });
 });
@@ -54,6 +64,7 @@ describe("buildLocationContext", () => {
     expect(lc.approximate_area).toContain("Northeastern");
     expect(lc.approximate_area).toContain("Reeves County");
     expect(lc.parsed_legal_description).toContain("Section 5");
+    expect(lc.parsed_legal_description).toContain("Reeves County");
     expect(lc.confidence).toBe("High");
   });
 
@@ -68,5 +79,31 @@ describe("buildLocationContext", () => {
     });
     expect(lc.approximate_area).toBe("County area not confidently determined");
     expect(lc.nearby_activity_signal).toBe("Unknown");
+    expect(lc.parsed_legal_description).toBe("Various lands");
+  });
+});
+
+describe("formatLegalDescriptionDisplay", () => {
+  it("formats structured parts with county and state", () => {
+    const r = formatLegalDescriptionDisplay({
+      county: "Reeves",
+      state: "TX",
+      legal_description: "Section 11, Block C-3, PSL Survey",
+      extracted_text: null,
+    });
+    expect(r.display).toContain("Section 11");
+    expect(r.display).toContain("Block C-3");
+    expect(r.display).toContain("Reeves County");
+    expect(r.display).toContain("TX");
+  });
+
+  it("uses raw legal field when structure is weak", () => {
+    const r = formatLegalDescriptionDisplay({
+      county: "Reeves",
+      state: "TX",
+      legal_description: "Various lands in the county",
+      extracted_text: null,
+    });
+    expect(r.display).toBe("Various lands in the county");
   });
 });

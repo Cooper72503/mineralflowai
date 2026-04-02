@@ -65,7 +65,9 @@ export function parseLegalDescriptionParts(text: string): ParsedLegalParts {
   if (secM) section = secM[1].trim();
 
   let block: string | null = null;
-  const blockM = s.match(/\bBlock\s+(\d+[A-Za-z]?)\b/i);
+  const blockM =
+    s.match(/\bBlock\s+([A-Za-z0-9]+(?:-[A-Za-z0-9]+)?)\b/i) ??
+    s.match(/\bBlock\s+(\d+[A-Za-z]?)\b/i);
   if (blockM) block = blockM[1].trim();
 
   let survey: string | null = null;
@@ -91,8 +93,64 @@ function formatParsedLegalLine(parts: ParsedLegalParts): { line: string; tier: "
   if (parts.block) bits.push(`Block ${parts.block}`);
   if (parts.survey) bits.push(parts.survey);
   if (parts.abstract) bits.push(`Abstract ${parts.abstract}`);
-  if (bits.length >= 1) return { line: bits.join(" · "), tier: "structured" };
+  if (bits.length >= 1) return { line: bits.join(", "), tier: "structured" };
   return { line: "", tier: "weak" };
+}
+
+const LEGAL_DISPLAY_SNIPPET_MAX = 600;
+
+export type LegalDescriptionDisplayParams = {
+  county: string | null;
+  state: string | null;
+  legal_description: string | null;
+  extracted_text: string | null;
+};
+
+/**
+ * Single display string for UI: structured section/block/survey (+ county/state) when parseable,
+ * else raw legal snippet, else extracted-text snippet, else fallbacks.
+ */
+export function formatLegalDescriptionDisplay(
+  params: LegalDescriptionDisplayParams
+): { display: string; parts: ParsedLegalParts; tier: "structured" | "weak" } {
+  const { county, state, legal_description, extracted_text } = params;
+  const scan = scanText(legal_description, extracted_text);
+  const parts = parseLegalDescriptionParts(scan);
+  const { line: parsedLine, tier: parsedTier } = formatParsedLegalLine(parts);
+  const countyLabel = normalizeCountyLabel(county);
+  const stateTrim = state?.trim() || null;
+
+  if (parsedTier === "structured" && parsedLine) {
+    const bits: string[] = [];
+    if (parts.section) bits.push(`Section ${parts.section}`);
+    if (parts.block) bits.push(`Block ${parts.block}`);
+    if (parts.survey) bits.push(parts.survey);
+    if (parts.abstract) bits.push(`Abstract ${parts.abstract}`);
+    if (countyLabel) bits.push(countyLabel);
+    if (stateTrim) bits.push(stateTrim);
+    return { display: bits.join(", "), parts, tier: "structured" };
+  }
+
+  if (legal_description?.trim()) {
+    return {
+      display: legal_description.trim().slice(0, LEGAL_DISPLAY_SNIPPET_MAX),
+      parts,
+      tier: "weak",
+    };
+  }
+
+  const scanTrim = scan.trim();
+  if (scanTrim) {
+    const prefix = "Partial legal description available — ";
+    const rest = scanTrim.slice(0, Math.max(0, LEGAL_DISPLAY_SNIPPET_MAX - prefix.length));
+    return {
+      display: `${prefix}${rest}`,
+      parts,
+      tier: "weak",
+    };
+  }
+
+  return { display: "Not clearly parsed", parts, tier: "weak" };
 }
 
 /**
@@ -244,8 +302,14 @@ export function buildLocationContext(params: BuildLocationContextParams): Locati
   const { county, legal_description, extracted_text, merged, development_signals } = params;
   const scan = scanText(legal_description, extracted_text);
   const parts = parseLegalDescriptionParts(scan);
-  const { line: parsedLine, tier: parsedTier } = formatParsedLegalLine(parts);
+  const { tier: parsedTier } = formatParsedLegalLine(parts);
   const legalHasText = Boolean(legal_description?.trim()) || Boolean(scan.trim());
+  const { display: legalDescriptionDisplay } = formatLegalDescriptionDisplay({
+    county,
+    state: params.state,
+    legal_description,
+    extracted_text,
+  });
 
   const countyLabel = normalizeCountyLabel(county);
   const descriptor = inferApproximateAreaDescriptor(scan);
@@ -257,14 +321,7 @@ export function buildLocationContext(params: BuildLocationContextParams): Locati
     approximate_area = "County area not confidently determined";
   }
 
-  let parsed_legal_description: string;
-  if (parsedTier === "structured" && parsedLine) {
-    parsed_legal_description = parsedLine;
-  } else if (legalHasText) {
-    parsed_legal_description = "Partial match only";
-  } else {
-    parsed_legal_description = "Not clearly parsed";
-  }
+  const parsed_legal_description = legalDescriptionDisplay;
 
   const nearby_activity_signal = deriveNearbyActivity(development_signals, merged);
 

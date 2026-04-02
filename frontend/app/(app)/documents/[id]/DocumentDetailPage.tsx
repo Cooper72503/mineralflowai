@@ -34,7 +34,9 @@ import {
 import type { FinancialSummary } from "@/lib/financial/financial-summary";
 import {
   buildLocationContext,
+  formatLegalDescriptionDisplay,
   isLocationContext,
+  parseLegalDescriptionParts,
   type LocationContext,
 } from "@/lib/location/location-context";
 
@@ -162,6 +164,31 @@ function locationContextStatColor(field: "activity" | "confidence", value: strin
   return "#6b7280";
 }
 
+function LegalDescriptionCard({
+  displayText,
+}: {
+  displayText: string;
+}) {
+  return (
+    <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
+      <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+        Legal Description
+      </h2>
+      <p
+        style={{
+          fontSize: "0.95rem",
+          lineHeight: 1.55,
+          color: "#111827",
+          margin: 0,
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {displayText}
+      </p>
+    </div>
+  );
+}
+
 function LocationContextCard({ ctx }: { ctx: LocationContext }) {
   const stats: Array<{
     label: string;
@@ -169,7 +196,7 @@ function LocationContextCard({ ctx }: { ctx: LocationContext }) {
     colorKey?: "activity" | "confidence";
   }> = [
     { label: "Approximate area", value: ctx.approximate_area },
-    { label: "Parsed legal description", value: ctx.parsed_legal_description },
+    { label: "Legal description", value: ctx.parsed_legal_description },
     {
       label: "Nearby activity signal",
       value: ctx.nearby_activity_signal,
@@ -566,6 +593,37 @@ export default function DocumentDetailPage() {
       development_signals: resolvedDevelopmentSignals,
     });
   }, [doc, extraction, snapshotMerged, resolvedDevelopmentSignals]);
+
+  const legalDescriptionDisplayText = useMemo(() => {
+    if (!doc) return "Not clearly parsed";
+    if (!extraction) return "No extraction record yet.";
+    return formatLegalDescriptionDisplay({
+      county: extraction.county ?? doc.county,
+      state: extraction.state ?? doc.state,
+      legal_description: extraction.legal_description,
+      extracted_text: extraction.extracted_text,
+    }).display;
+  }, [doc, extraction]);
+
+  useEffect(() => {
+    if (!extraction) return;
+    const scanSource = [extraction.legal_description, extraction.extracted_text]
+      .filter((s): s is string => typeof s === "string" && s.trim() !== "")
+      .join("\n\n");
+    const extractedParts = parseLegalDescriptionParts(scanSource);
+    const formatted = formatLegalDescriptionDisplay({
+      county: extraction.county ?? doc?.county ?? null,
+      state: extraction.state ?? doc?.state ?? null,
+      legal_description: extraction.legal_description,
+      extracted_text: extraction.extracted_text,
+    });
+    console.log("[legal-description-debug]", {
+      legal_description_field: extraction.legal_description,
+      extracted_text_len: extraction.extracted_text?.length ?? 0,
+      extracted_parts: extractedParts,
+      formatted_legal_display: formatted.display,
+    });
+  }, [extraction, doc]);
 
   useEffect(() => {
     if (!displayDealScore) return;
@@ -1029,6 +1087,8 @@ export default function DocumentDetailPage() {
 
       {displayDealScore ? <DealScoreCard dealScore={displayDealScore} /> : null}
 
+      <LegalDescriptionCard displayText={legalDescriptionDisplayText} />
+
       {resolvedLocationContext ? <LocationContextCard ctx={resolvedLocationContext} /> : null}
 
       {showDevelopmentSnapshot ? (
@@ -1230,12 +1290,18 @@ export default function DocumentDetailPage() {
                 </p>
               );
             }
+            const legalDisplayRow = formatLegalDescriptionDisplay({
+              county: extraction.county ?? doc.county,
+              state: extraction.state ?? doc.state,
+              legal_description: extraction.legal_description,
+              extracted_text: extraction.extracted_text,
+            }).display;
             const extMeta = [
               { label: "Lessor", value: extraction.lessor ?? "—" },
               { label: "Lessee", value: extraction.lessee ?? "—" },
               { label: "County", value: extraction.county ?? "—" },
               { label: "State", value: extraction.state ?? "—" },
-              { label: "Legal description", value: extraction.legal_description ?? "—" },
+              { label: "Legal description", value: legalDisplayRow },
               { label: "Effective date", value: extraction.effective_date ?? "—" },
               { label: "Recording date", value: extraction.recording_date ?? "—" },
               { label: "Royalty rate", value: extraction.royalty_rate ?? "—" },
