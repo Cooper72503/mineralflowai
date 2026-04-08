@@ -93,6 +93,16 @@ Midland, TX 79701`;
     const h = extractHeuristicFields(t, {});
     expect(h.county).toBe("Midland");
   });
+
+  it("extracts North Dakota county, full state name, and acreage from plain lines", () => {
+    const t = `Stark County, North Dakota
+24 acres
+Twp 140N Range 94W`;
+    const h = extractHeuristicFields(t, {});
+    expect(h.county).toBe("Stark");
+    expect(h.state).toBe("North Dakota");
+    expect(h.acreage).toBe(24);
+  });
 });
 
 describe("inferCountyFromTxCityLine", () => {

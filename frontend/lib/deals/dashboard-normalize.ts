@@ -36,8 +36,43 @@ export function coerceStructuredRecord(value: unknown): Record<string, unknown> 
   return isPlainObject(value) ? value : null;
 }
 
+function isVacuousStructuredValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string" && value.trim() === "") return true;
+  return false;
+}
+
 /**
- * Legacy structured blob first (e.g. old `structured_json` column), then `structured_data` overwrites.
+ * Deep-merge plain objects: primary wins when non-vacuous; otherwise keep legacy so `null` never clobbers a good value.
+ */
+function mergePlainObjectsPreferringNonVacuous(
+  legacy: Record<string, unknown>,
+  primary: Record<string, unknown>
+): Record<string, unknown> {
+  const keys = [...Object.keys(legacy), ...Object.keys(primary)].filter(
+    (key, idx, arr) => arr.indexOf(key) === idx
+  );
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const pVal = primary[k];
+    const lVal = legacy[k];
+    if (isPlainObject(pVal) && isPlainObject(lVal)) {
+      out[k] = mergePlainObjectsPreferringNonVacuous(lVal, pVal);
+      continue;
+    }
+    if (!isVacuousStructuredValue(pVal)) {
+      out[k] = pVal;
+    } else if (!isVacuousStructuredValue(lVal)) {
+      out[k] = lVal;
+    } else {
+      out[k] = pVal !== undefined ? pVal : lVal;
+    }
+  }
+  return out;
+}
+
+/**
+ * Legacy `structured_json` plus `structured_data`, merged so non-null / non-empty values are never overwritten by null.
  * Pass a single coalesced blob as the first arg when the DB only exposes `structured_data`.
  */
 export function mergeStructuredFields(
@@ -46,7 +81,7 @@ export function mergeStructuredFields(
 ): Record<string, unknown> {
   const fromLegacy = coerceStructuredRecord(structured_json) ?? {};
   const fromPrimary = coerceStructuredRecord(structured_data) ?? {};
-  return { ...fromLegacy, ...fromPrimary };
+  return mergePlainObjectsPreferringNonVacuous(fromLegacy, fromPrimary);
 }
 
 function normalizedNumericScore(value: unknown): number | null {

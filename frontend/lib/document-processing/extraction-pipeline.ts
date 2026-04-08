@@ -116,6 +116,12 @@ function mergeStr(llm: string | null | undefined, heur: string | null | undefine
   return b || null;
 }
 
+function mergeNum(llm: number | null | undefined, heur: number | null | undefined): number | null {
+  if (llm != null && typeof llm === "number" && Number.isFinite(llm) && llm > 0) return llm;
+  if (heur != null && typeof heur === "number" && Number.isFinite(heur) && heur > 0) return heur;
+  return null;
+}
+
 function computeUsableTextLength(normalizedText: string, ocrText: string | null, rawPdfText: string): number {
   return Math.max(
     normalizedText.trim().length,
@@ -791,7 +797,7 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
       parties: withPartyKinds(llm?.parties ?? null),
       owner: hBase.owner ?? null,
       buyer: hBase.buyer ?? null,
-      acreage: hBase.acreage ?? null,
+      acreage: mergeNum(llm?.acreage ?? null, hBase.acreage ?? null),
     },
     headingScan
   );
@@ -954,22 +960,25 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
           : 0.12,
   };
 
+  if (heur.county?.trim() && parsed.county?.trim()) {
+    confidence_by_field.county = Math.max(confidence_by_field.county ?? 0, 0.88);
+  }
+  if (
+    heur.acreage != null &&
+    heur.acreage > 0 &&
+    parsed.acreage != null &&
+    parsed.acreage > 0
+  ) {
+    confidence_by_field.acreage = Math.max(confidence_by_field.acreage ?? 0, 0.88);
+  }
+
   const party_confidence = computePartyConfidence(parsed);
   let county_confidence = confidence_by_field.county ?? 0;
   if (!parsed.county?.trim() && detectTexasContext(safeCombinedText)) {
     county_confidence = Math.min(county_confidence, 0.15);
     logExtract("FALLBACK_COUNTY_USED", { source: "texas_strong_no_county", county_confidence });
   }
-  const acreage_confidence =
-    parsed.acreage != null && parsed.acreage > 0
-      ? inferred.acreage
-        ? 0.45
-        : heur.acreage
-          ? 0.55
-          : 0.5
-      : inferred.acreage_status === "unknown"
-        ? 0.08
-        : 0.12;
+  const acreage_confidence = confidence_by_field.acreage ?? 0;
   const baseDocTypeConf =
     detected_class !== "unknown" ? 0.72 : llm?.document_type ? 0.55 : 0.28;
   const document_type_confidence = Math.min(

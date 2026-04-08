@@ -28,6 +28,73 @@ export type HeuristicFieldResult = {
   detected_class: ExtractionDocumentClass;
 };
 
+/** Full U.S. state names — used to validate text after `County, …` and standalone mentions. */
+const US_STATE_FULL_NAMES = new Set(
+  [
+    "Alabama",
+    "Alaska",
+    "Arizona",
+    "Arkansas",
+    "California",
+    "Colorado",
+    "Connecticut",
+    "Delaware",
+    "Florida",
+    "Georgia",
+    "Hawaii",
+    "Idaho",
+    "Illinois",
+    "Indiana",
+    "Iowa",
+    "Kansas",
+    "Kentucky",
+    "Louisiana",
+    "Maine",
+    "Maryland",
+    "Massachusetts",
+    "Michigan",
+    "Minnesota",
+    "Mississippi",
+    "Missouri",
+    "Montana",
+    "Nebraska",
+    "Nevada",
+    "New Hampshire",
+    "New Jersey",
+    "New Mexico",
+    "New York",
+    "North Carolina",
+    "North Dakota",
+    "Ohio",
+    "Oklahoma",
+    "Oregon",
+    "Pennsylvania",
+    "Rhode Island",
+    "South Carolina",
+    "South Dakota",
+    "Tennessee",
+    "Texas",
+    "Utah",
+    "Vermont",
+    "Virginia",
+    "Washington",
+    "West Virginia",
+    "Wisconsin",
+    "Wyoming",
+  ].map((s) => s.toLowerCase())
+);
+
+function canonicalUsStateName(matched: string): string | null {
+  const t = matched.replace(/\s+/g, " ").trim();
+  if (!t) return null;
+  const key = t.toLowerCase();
+  if (!US_STATE_FULL_NAMES.has(key)) return null;
+  return t
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
 /** Common Texas place names (city or county) when followed by `, TX` — helps county inference. */
 const TX_PLACE_HINTS = new Set(
   [
@@ -236,34 +303,72 @@ export function extractMailingAddressBlock(text: string): string | null {
   return block;
 }
 
+function normalizeCountyName(raw: string): string | null {
+  let t = raw.replace(/\s+/g, " ").trim();
+  t = t.replace(/\s+County\b/gi, "").trim();
+  const n = normalizePartyName(t);
+  if (!n || n.length < 2) return null;
+  if (/^(the|state|united|public|in|of|and|or|a|an|per|for)\b/i.test(n)) return null;
+  return n;
+}
+
+/** Texas stays abbreviated as `TX` for compatibility with existing scoring and UI. */
+function formatHeuristicState(state: string | null): string | null {
+  if (state == null) return null;
+  return state === "Texas" ? "TX" : state;
+}
+
 export function extractCountyFromText(text: string): string | null {
   const slice = text.slice(0, 28000);
-  const patterns: RegExp[] = [
+  /** High-signal patterns first; normalize to bare county name (e.g. "Stark County" → "Stark"). */
+  const strongPatterns: RegExp[] = [
+    /\b([A-Z][a-z]+)\s+County\b/g,
+    /County\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/gi,
     /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+County,?\s*(?:Texas|\bTX\b)?/gm,
     /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+County\b/g,
     /\b([A-Z]{2,}(?:\s+[A-Z]{2,}){0,2})\s+COUNTY\b/g,
-    /County\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
     /County\s+of\s+([A-Z]{2,}(?:\s+[A-Z]{2,}){0,2})/gi,
     /County\s+of\s+the\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
     /,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+County\b/g,
     /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+Co\.?\s*,\s*(?:TX|Texas)\b/gi,
   ];
+  const ocrFallbackPatterns: RegExp[] = [
+    /\b([A-Za-z][A-Za-z]+(?:\s+[A-Za-z][A-Za-z]+)?)\s+County\b/gi,
+  ];
   let best: string | null = null;
-  for (const re of patterns) {
-    let m: RegExpExecArray | null;
-    const r = new RegExp(re.source, re.flags.replace("g", "") + "g");
-    while ((m = r.exec(slice)) !== null) {
-      const raw = m[1]?.trim();
-      if (!raw || raw.length < 2) continue;
-      const n = normalizePartyName(raw);
-      if (n && !/^(the|state|united|public)\b/i.test(n)) best = n;
+  const run = (patterns: RegExp[]) => {
+    for (const re of patterns) {
+      let m: RegExpExecArray | null;
+      const r = new RegExp(re.source, re.flags.replace("g", "") + "g");
+      while ((m = r.exec(slice)) !== null) {
+        const raw = m[1]?.trim();
+        if (!raw || raw.length < 2) continue;
+        const n = normalizeCountyName(raw);
+        if (n) best = n;
+      }
     }
-  }
+  };
+  run(strongPatterns);
+  if (!best) run(ocrFallbackPatterns);
   return best;
 }
 
 export function extractStateFromText(text: string): string | null {
   const slice = text.slice(0, 32000);
+  const afterCounty = slice.match(
+    /\b[A-Za-z][A-Za-z]+(?:\s+[A-Za-z][A-Za-z]+)*\s+County,?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/
+  );
+  if (afterCounty?.[1]) {
+    const canon = canonicalUsStateName(afterCounty[1]);
+    if (canon) return formatHeuristicState(canon);
+  }
+  const standalone = slice.match(
+    /\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/i
+  );
+  if (standalone?.[1]) {
+    const canon = canonicalUsStateName(standalone[1]);
+    if (canon) return formatHeuristicState(canon);
+  }
   if (/\bTexas\b/i.test(slice) || /\bTX\b/.test(slice)) {
     const txCount = (slice.match(/\b(Texas|TX)\b/gi) ?? []).length;
     if (txCount >= 1) return "TX";
@@ -295,6 +400,7 @@ export function extractLegalDescriptionHeuristic(text: string): string | null {
 export function extractAcreageFromText(text: string): number | null {
   const slice = text.slice(0, 28000);
   const patterns = [
+    /\b([\d,]+(?:\.\d+)?)\s*(?:acres?|acre|ac)\b/gi,
     /\b([\d,]+(?:\.\d+)?)\s*(?:net\s+)?(?:mineral\s+)?acres?\b/gi,
     /\b([\d,]+(?:\.\d+)?)\s*ac\.?\b/gi,
     /\babout\s+([\d,]+(?:\.\d+)?)\s*acres?\b/gi,
@@ -635,6 +741,13 @@ export function extractHeuristicFields(
       county = cityCounty;
       console.log("[extract] FALLBACK_COUNTY_USED", { source: "heuristic_tx_city_line" });
     }
+  }
+
+  if (county) {
+    console.log(`[extract] COUNTY_FOUND: ${county}`);
+  }
+  if (acreage != null) {
+    console.log(`[extract] ACREAGE_FOUND: ${acreage}`);
   }
 
   let document_type: string | null = documentClassToDisplayLabel(detected_class);
