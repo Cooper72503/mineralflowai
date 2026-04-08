@@ -3,6 +3,7 @@ import {
   normalizeDocumentTypeLabel,
 } from "@/lib/document-processing";
 import { parseAcreageFromLegalDescription } from "@/lib/document-processing/parse-acreage-from-legal";
+import { preferNonEmptyString, preferNumericAcreageFromUnknown } from "@/lib/deals/dashboard-normalize";
 
 /** Below this, lease-parse columns and matching structured fields are ignored for deal scoring. */
 const LOW_CONFIDENCE_DEAL_SCORE_THRESHOLD = 0.6;
@@ -73,7 +74,11 @@ export type ParsedFieldsForDealScore = {
   extraction_status?: string | null;
 };
 
-/** Structured / column fields produced by the lease extraction pass (same scope as ParsedFieldsForDealScore). */
+/**
+ * Keys cleared on low-trust lease parse so bad party/date fields do not leak.
+ * Location and parcel size (county, state, acreage, legal_description) are excluded so merged
+ * structured JSON and heuristics are not wiped before scoring.
+ */
 const EXTRACTION_BACKED_DEAL_INPUT_KEYS = [
   "lessor",
   "lessee",
@@ -83,16 +88,10 @@ const EXTRACTION_BACKED_DEAL_INPUT_KEYS = [
   "owner",
   "owner_name",
   "ownerName",
-  "county",
-  "state",
-  "legal_description",
   "effective_date",
   "recording_date",
   "royalty_rate",
   "lease_status",
-  "acreage",
-  "net_acreage",
-  "net_mineral_acres",
   "term_length",
   "document_type",
   "owner",
@@ -108,9 +107,7 @@ function parsedFieldsWithReducedTrust(parsed: ParsedFieldsForDealScore): ParsedF
     grantor: null,
     grantee: null,
     parties: undefined,
-    county: null,
-    state: null,
-    legal_description: null,
+    // Keep county, state, legal_description, acreage — same pipeline/heuristics as structured blob.
     effective_date: null,
     recording_date: null,
     royalty_rate: null,
@@ -118,7 +115,6 @@ function parsedFieldsWithReducedTrust(parsed: ParsedFieldsForDealScore): ParsedF
     document_type: null,
     owner: null,
     buyer: null,
-    acreage: null,
     extraction_status: parsed.extraction_status ?? null,
   };
 }
@@ -143,6 +139,27 @@ function stripExtractionBackedKeysFromDealInput(input: Record<string, unknown>):
   for (const k of EXTRACTION_BACKED_DEAL_INPUT_KEYS) {
     delete input[k];
   }
+}
+
+function coerceAcreageToNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = parseFloat(value.trim().replace(/,/g, ""));
+    if (!Number.isNaN(n) && Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function traceDealScoreLocation(stage: string, payload: Record<string, unknown>): void {
+  if (process.env.DEAL_SCORE_TRACE !== "1") return;
+  console.log(
+    `[debug] ${stage} county:`,
+    payload.county ?? null,
+    `state:`,
+    payload.state ?? null,
+    `acreage:`,
+    payload.acreage ?? null
+  );
 }
 
 export type DocumentMetaForDealScore = {
@@ -203,12 +220,23 @@ export function buildDealScoreInput(args: {
 
   if (dealScoreInput.acreage === undefined || dealScoreInput.acreage === null) {
     const fromLegal = parseAcreageFromLegalDescription(parsed.legal_description);
+    const fromExtracted = parseAcreageFromLegalDescription(args.extractedText);
+    const fromParsedNum = coerceAcreageToNumber(parsed.acreage);
+    const fromMerged =
+      preferNumericAcreageFromUnknown(dealScoreInput as Record<string, unknown>) ??
+      preferNumericAcreageFromUnknown((args.optionalBaseline ?? {}) as Record<string, unknown>);
     if (fromLegal !== undefined) {
       dealScoreInput.acreage = fromLegal;
-    } else if (typeof parsed.acreage === "number" && Number.isFinite(parsed.acreage)) {
-      dealScoreInput.acreage = parsed.acreage;
+    } else if (fromExtracted !== undefined) {
+      dealScoreInput.acreage = fromExtracted;
+    } else if (fromParsedNum !== undefined) {
+      dealScoreInput.acreage = fromParsedNum;
+    } else if (fromMerged != null) {
+      dealScoreInput.acreage = fromMerged;
     }
   }
+  const acNorm = coerceAcreageToNumber(dealScoreInput.acreage);
+  if (acNorm !== undefined) dealScoreInput.acreage = acNorm;
 
   const mineralDeedSignals = mineralDeedSignalsForLeaseFallback({
     metadataDocumentType: args.doc.document_type,
@@ -219,14 +247,14 @@ export function buildDealScoreInput(args: {
     dealScoreInput.lease_status = "none";
   }
 
-  dealScoreInput.county =
-    dealScoreInput.county ?? parsed.county ?? args.doc.county ?? null;
-  dealScoreInput.state =
-    dealScoreInput.state ?? parsed.state ?? args.doc.state ?? null;
+  dealScoreInput.county = preferNonEmptyString(
+    dealScoreInput.county,
+    parsed.county,
+    args.doc.county
+  );
+  dealScoreInput.state = preferNonEmptyString(dealScoreInput.state, parsed.state, args.doc.state);
   dealScoreInput.legal_description =
-    (typeof dealScoreInput.legal_description === "string" && dealScoreInput.legal_description.trim()
-      ? dealScoreInput.legal_description
-      : null) ?? parsed.legal_description;
+    preferNonEmptyString(dealScoreInput.legal_description, parsed.legal_description) ?? null;
 
   const existingLessor = dealScoreInput.lessor;
   const lessorFromParsed = parsed.lessor;
@@ -292,5 +320,6 @@ export function buildDealScoreInput(args: {
     dealScoreInput.royalty_rate = parsed.royalty_rate;
   }
 
+  traceDealScoreLocation("score input", dealScoreInput as Record<string, unknown>);
   return dealScoreInput;
 }

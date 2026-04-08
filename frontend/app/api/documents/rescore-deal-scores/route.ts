@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { calculateDealScore } from "@/lib/document-processing";
 import { buildDealScoreInput } from "@/lib/deals/build-deal-score-input";
-import { coerceDealScoreResult, dealScoreFromMerged, mergeStructuredFields } from "@/lib/deals/dashboard-normalize";
+import {
+  coerceDealScoreResult,
+  dealScoreFromMerged,
+  mergeStructuredFields,
+  preferNonEmptyString,
+  preferNumericAcreageFromUnknown,
+  stringFieldFromMergedRecord,
+} from "@/lib/deals/dashboard-normalize";
 import {
   developmentSignalsNeedsPersistInMerged,
   extractionFieldsRecordForSignals,
@@ -67,13 +74,6 @@ function singleDoc(d: DocJoin | DocJoin[]): DocJoin | null {
     return first && typeof first === "object" ? first : null;
   }
   return d && typeof d === "object" ? d : null;
-}
-
-function stringFieldFromMerged(merged: Record<string, unknown>, key: string): string | null {
-  const v = merged[key];
-  if (typeof v !== "string") return null;
-  const t = v.trim();
-  return t || null;
 }
 
 export async function POST(request: Request) {
@@ -143,14 +143,25 @@ export async function POST(request: Request) {
       const baseline: Record<string, unknown> = { ...merged };
       delete baseline.deal_score;
 
+      const resolvedCounty = preferNonEmptyString(
+        stringFieldFromMergedRecord(merged, "county"),
+        row.county,
+        doc.county
+      );
+      const resolvedState = preferNonEmptyString(
+        stringFieldFromMergedRecord(merged, "state"),
+        row.state,
+        doc.state
+      );
+
       const parsed = {
         lessor: row.lessor,
         lessee: row.lessee,
-        grantor: stringFieldFromMerged(merged, "grantor"),
-        grantee: stringFieldFromMerged(merged, "grantee"),
+        grantor: stringFieldFromMergedRecord(merged, "grantor"),
+        grantee: stringFieldFromMergedRecord(merged, "grantee"),
         parties: merged.parties,
-        county: row.county,
-        state: row.state,
+        county: resolvedCounty,
+        state: resolvedState,
         legal_description: row.legal_description,
         effective_date: row.effective_date,
         recording_date: row.recording_date,
@@ -158,6 +169,7 @@ export async function POST(request: Request) {
         term_length: row.term_length,
         document_type: row.document_type,
         confidence_score: row.confidence_score,
+        acreage: preferNumericAcreageFromUnknown(merged),
       };
 
       const dealScoreInput = buildDealScoreInput({
@@ -184,14 +196,14 @@ export async function POST(request: Request) {
         extractionFieldsRecordForSignals({
           legal_description: row.legal_description,
           document_type: row.document_type,
-          county: row.county,
-          state: row.state,
+          county: resolvedCounty,
+          state: resolvedState,
           lessor: row.lessor,
           lessee: row.lessee,
-          grantor: stringFieldFromMerged(merged, "grantor"),
-          grantee: stringFieldFromMerged(merged, "grantee"),
-          owner: stringFieldFromMerged(merged, "owner"),
-          buyer: stringFieldFromMerged(merged, "buyer"),
+          grantor: stringFieldFromMergedRecord(merged, "grantor"),
+          grantee: stringFieldFromMergedRecord(merged, "grantee"),
+          owner: stringFieldFromMergedRecord(merged, "owner"),
+          buyer: stringFieldFromMergedRecord(merged, "buyer"),
         }),
       );
 
@@ -199,12 +211,12 @@ export async function POST(request: Request) {
         extractedText: row.extracted_text ?? "",
         dealScoreInput,
         royaltyRateStr: row.royalty_rate,
-        county: row.county ?? doc.county,
+        county: resolvedCounty ?? doc.county,
       });
 
       const locationContext = buildLocationContext({
-        county: row.county ?? doc.county,
-        state: row.state ?? doc.state,
+        county: resolvedCounty ?? doc.county,
+        state: resolvedState ?? doc.state,
         legal_description: row.legal_description,
         extracted_text: row.extracted_text ?? "",
         merged: dealScoreInput as Record<string, unknown>,

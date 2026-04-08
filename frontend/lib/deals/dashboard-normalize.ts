@@ -42,6 +42,45 @@ function isVacuousStructuredValue(value: unknown): boolean {
   return false;
 }
 
+/** First trimmed non-empty string, or null (treats "", null, undefined as missing). */
+export function preferNonEmptyString(...values: unknown[]): string | null {
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    const t = v.trim();
+    if (t) return t;
+  }
+  return null;
+}
+
+function readFiniteNumberLoose(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = parseFloat(value.trim().replace(/,/g, ""));
+    if (!Number.isNaN(n) && Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+/** Prefer first finite numeric acreage from structured blobs (snake_case net_* aliases). */
+export function preferNumericAcreageFromUnknown(merged: Record<string, unknown>): number | null {
+  const keys = ["acreage", "net_acreage", "net_mineral_acres"] as const;
+  for (const k of keys) {
+    const n = readFiniteNumberLoose(merged[k]);
+    if (n !== undefined && n >= 0) return n;
+  }
+  return null;
+}
+
+export function stringFieldFromMergedRecord(
+  merged: Record<string, unknown>,
+  key: string
+): string | null {
+  const v = merged[key];
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t || null;
+}
+
 /**
  * Deep-merge plain objects: primary wins when non-vacuous; otherwise keep legacy so `null` never clobbers a good value.
  */

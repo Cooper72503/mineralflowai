@@ -7,6 +7,9 @@ import {
   coerceDealScoreResult,
   dealScoreFromExtractionColumns,
   mergeStructuredFields,
+  preferNonEmptyString,
+  preferNumericAcreageFromUnknown,
+  stringFieldFromMergedRecord,
 } from "@/lib/deals/dashboard-normalize";
 import { dealGradeFullLabelFromScore, getGradeFromScore } from "@/lib/document-processing";
 import {
@@ -75,13 +78,6 @@ function singleDoc(d: DocJoin | DocJoin[]): DocJoin | null {
 /** Ensure JSONB update receives a plain serializable object (drops undefined, survives structured clones). */
 function jsonbSafeClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function stringFieldFromMerged(merged: Record<string, unknown>, key: string): string | null {
-  const v = merged[key];
-  if (typeof v !== "string") return null;
-  const t = v.trim();
-  return t || null;
 }
 
 function topLevelDrillMatchesSnapshot(
@@ -211,17 +207,36 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const merged = mergeStructuredFields(ext.structured_data, ext.structured_json) as Record<string, unknown>;
     const stored = dealScoreFromExtractionColumns(ext.structured_data, ext.structured_json);
 
+    if (process.env.DEAL_SCORE_TRACE === "1") {
+      const mc = preferNonEmptyString(stringFieldFromMergedRecord(merged, "county"), ext.county, doc?.county);
+      const ms = preferNonEmptyString(stringFieldFromMergedRecord(merged, "state"), ext.state, doc?.state);
+      const ma = preferNumericAcreageFromUnknown(merged);
+      console.log("[debug] merged county:", mc, "state:", ms, "acreage:", ma);
+      console.log("[debug] column county:", ext.county, "state:", ext.state);
+    }
+
     const baseline: Record<string, unknown> = { ...merged };
     delete baseline.deal_score;
+
+    const resolvedCounty = preferNonEmptyString(
+      stringFieldFromMergedRecord(merged, "county"),
+      ext.county,
+      doc.county
+    );
+    const resolvedState = preferNonEmptyString(
+      stringFieldFromMergedRecord(merged, "state"),
+      ext.state,
+      doc.state
+    );
 
     const parsed = {
       lessor: ext.lessor,
       lessee: ext.lessee,
-      grantor: stringFieldFromMerged(merged, "grantor"),
-      grantee: stringFieldFromMerged(merged, "grantee"),
+      grantor: stringFieldFromMergedRecord(merged, "grantor"),
+      grantee: stringFieldFromMergedRecord(merged, "grantee"),
       parties: merged.parties,
-      county: ext.county,
-      state: ext.state,
+      county: resolvedCounty,
+      state: resolvedState,
       legal_description: ext.legal_description,
       effective_date: ext.effective_date,
       recording_date: ext.recording_date,
@@ -229,6 +244,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       term_length: ext.term_length,
       document_type: ext.document_type,
       confidence_score: ext.confidence_score,
+      acreage: preferNumericAcreageFromUnknown(merged),
     };
 
     const dealScoreInput = buildDealScoreInput({
@@ -254,14 +270,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       extractionFieldsRecordForSignals({
         legal_description: ext.legal_description,
         document_type: ext.document_type,
-        county: ext.county,
-        state: ext.state,
+        county: resolvedCounty,
+        state: resolvedState,
         lessor: ext.lessor,
         lessee: ext.lessee,
-        grantor: stringFieldFromMerged(merged, "grantor"),
-        grantee: stringFieldFromMerged(merged, "grantee"),
-        owner: stringFieldFromMerged(merged, "owner"),
-        buyer: stringFieldFromMerged(merged, "buyer"),
+        grantor: stringFieldFromMergedRecord(merged, "grantor"),
+        grantee: stringFieldFromMergedRecord(merged, "grantee"),
+        owner: stringFieldFromMergedRecord(merged, "owner"),
+        buyer: stringFieldFromMergedRecord(merged, "buyer"),
       }),
     );
 
@@ -269,12 +285,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       extractedText: ext.extracted_text ?? "",
       dealScoreInput,
       royaltyRateStr: ext.royalty_rate,
-      county: ext.county ?? doc.county,
+      county: resolvedCounty ?? doc.county,
     });
 
     const locationContext = buildLocationContext({
-      county: ext.county ?? doc.county,
-      state: ext.state ?? doc.state,
+      county: resolvedCounty ?? doc.county,
+      state: resolvedState ?? doc.state,
       legal_description: ext.legal_description,
       extracted_text: ext.extracted_text ?? "",
       merged: dealScoreInput as Record<string, unknown>,
@@ -328,6 +344,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       financial_summary: financialSummary,
       location_context: locationContext,
     });
+    if (process.env.DEAL_SCORE_TRACE === "1") {
+      const ns = nextStructured as Record<string, unknown>;
+      console.log(
+        "[debug] db write county:",
+        ns.county ?? null,
+        "state:",
+        ns.state ?? null,
+        "acreage:",
+        ns.acreage ?? null
+      );
+    }
     console.log("SCORE SAVED", dealScore.score);
     console.log(`${LOG_PREFIX} SAVED SCORE`, dealScore.score);
 

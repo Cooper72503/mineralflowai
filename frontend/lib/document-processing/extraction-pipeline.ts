@@ -735,6 +735,9 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
 
   logExtract("HEURISTIC_FIELDS", { textLen: normalizedText.length, combinedLen: safeCombinedText.length });
   const heur = extractHeuristicFields(normalizedText, { ocrText, rawPdfText: rawPdfText || null });
+  if (process.env.DEAL_SCORE_TRACE === "1") {
+    console.log("[debug] heuristic county:", heur.county ?? null, "state:", heur.state ?? null, "acreage:", heur.acreage ?? null);
+  }
   const detected_class: ExtractionDocumentClass = heur.detected_class;
   const documentCategory = resolveDocumentCategory(earlyClassification, heur.detected_class);
   const catProfile = categoryConfidenceProfile(documentCategory);
@@ -1185,6 +1188,17 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     document_category: documentCategory,
     classification_score: earlyClassification.score,
   };
+
+  if (process.env.DEAL_SCORE_TRACE === "1") {
+    console.log(
+      "[debug] normalized county:",
+      parsed.county ?? null,
+      "state:",
+      parsed.state ?? null,
+      "acreage:",
+      parsed.acreage ?? null
+    );
+  }
 
   return { parsed, artifacts };
 }

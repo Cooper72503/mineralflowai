@@ -996,6 +996,17 @@ export async function POST(
 
         assertPlainObject(structuredExtraction, "DB_INSERT_START");
 
+        if (process.env.DEAL_SCORE_TRACE === "1") {
+          console.log(
+            "[debug] db write county:",
+            structuredExtraction.county ?? null,
+            "state:",
+            structuredExtraction.state ?? null,
+            "acreage:",
+            structuredExtraction.acreage ?? null
+          );
+        }
+
         const basePayloadFull = {
           document_id: documentId,
           user_id: user.id,
