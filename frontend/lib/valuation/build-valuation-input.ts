@@ -1,6 +1,6 @@
 import type { FinancialSummary } from "@/lib/financial/financial-summary";
 import type { LocationContext } from "@/lib/location/location-context";
-import type { DealValuationInput } from "./types";
+import type { DealValuationInput, ValuationFieldSource } from "./types";
 import { parseFinancialSignalsFromText } from "@/lib/financial/financial-summary";
 import {
   normalizeOwnershipPercentToDecimal,
@@ -9,6 +9,11 @@ import {
 } from "./normalize";
 import type { DrillDifficultySnapshotSnake } from "@/lib/scoring/drillDifficultyEngine";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
+import {
+  inferCountyFromTexts,
+  inferTexasStateFromText,
+  parseLegalDescription,
+} from "@/lib/location/legal-description-parser";
 
 function readString(rec: Record<string, unknown>, keys: string[]): string | null {
   for (const k of keys) {
@@ -53,6 +58,33 @@ export function buildValuationInput(args: {
   const { parsed, dealScoreInput: dsi } = args;
   const merged: Record<string, unknown> = { ...dsi, ...parsed };
 
+  const legalDescRaw =
+    (typeof parsed.legal_description === "string" && parsed.legal_description.trim()
+      ? parsed.legal_description.trim()
+      : null) ?? readString(merged, ["legal_description"]);
+  const legal_description_parsed = parseLegalDescription(legalDescRaw);
+  const locationHaystack = [legalDescRaw, args.extractedText ?? ""].join("\n\n");
+
+  const countyExtracted = readString(merged, ["county"]);
+  let county = countyExtracted ?? null;
+  let county_source: ValuationFieldSource | null = null;
+  if (county?.trim()) {
+    county_source = "extracted";
+  } else {
+    county = inferCountyFromTexts(legalDescRaw, args.extractedText);
+    county_source = county?.trim() ? "inferred" : null;
+  }
+
+  const stateExtracted = readString(merged, ["state"]);
+  let state = stateExtracted ?? null;
+  let state_source: ValuationFieldSource | null = null;
+  if (state?.trim()) {
+    state_source = "extracted";
+  } else {
+    state = inferTexasStateFromText(locationHaystack);
+    state_source = state?.trim() ? "inferred" : null;
+  }
+
   const acreage = pickFirstFiniteNumber(
     merged.acreage,
     merged.acres,
@@ -83,11 +115,13 @@ export function buildValuationInput(args: {
 
   const out: DealValuationInput = {
     document_id: args.documentId ?? undefined,
-    county: readString(merged, ["county"]) ?? null,
-    state: readString(merged, ["state"]) ?? null,
+    county,
+    county_source,
+    state,
+    state_source,
     basin: readString(merged, ["basin"]) ?? null,
-    legal_description:
-      typeof parsed.legal_description === "string" ? parsed.legal_description : readString(merged, ["legal_description"]),
+    legal_description: legalDescRaw,
+    legal_description_parsed,
     acreage,
     royalty_rate,
     ownership_percent,

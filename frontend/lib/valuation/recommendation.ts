@@ -17,11 +17,23 @@ export function deriveRecommendation(args: {
     args.totalHigh > 0 &&
     args.totalLow >= 0;
 
+  // No numeric screening band or inputs too thin for a directional $ range → always review in-app.
+  if (!hasValue) {
+    logValuationDev("recommendation_path", {
+      rec: "REVIEW",
+      score,
+      confidence: args.confidence,
+      activity: args.activity,
+      hasValue,
+      missingCritical: args.missingCritical,
+      note: "no_numeric_band",
+    });
+    return "REVIEW";
+  }
+
   let rec: "PURSUE" | "REVIEW" | "PASS" = "REVIEW";
 
   if (args.confidence === "low" && args.missingCritical >= 3) {
-    rec = "PASS";
-  } else if (!hasValue && args.confidence === "low") {
     rec = "REVIEW";
   } else if (
     hasValue &&

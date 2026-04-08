@@ -1,15 +1,24 @@
 import type { FinancialSummary } from "@/lib/financial/financial-summary";
 import type { LocationContext } from "@/lib/location/location-context";
+import type { LegalDescriptionParseResult } from "@/lib/location/legal-description-parser";
 import type { DealScoreResult } from "@/lib/document-processing/deal-score";
 import type { DrillDifficultySnapshotSnake } from "@/lib/scoring/drillDifficultyEngine";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 
+/** How county/state landed on the merged valuation input (drives confidence weights). */
+export type ValuationFieldSource = "extracted" | "inferred";
+
 export type DealValuationInput = {
   document_id?: string;
   county?: string | null;
+  /** When county is non-null: structured extraction vs text inference. */
+  county_source?: ValuationFieldSource | null;
   state?: string | null;
+  state_source?: ValuationFieldSource | null;
   basin?: string | null;
   legal_description?: string | null;
+  /** Parsed from {@link legal_description} / merged text — used for screening and narratives. */
+  legal_description_parsed?: LegalDescriptionParseResult | null;
   acreage?: number | null;
   royalty_rate?: number | null;
   ownership_percent?: number | null;
@@ -38,6 +47,16 @@ export type DealValuationDealType =
 
 export type DealValuationActivityLevel = "low" | "moderate" | "high" | "unknown";
 
+/** Explainable output from the signal-based confidence engine. */
+export type ValuationConfidenceReasoning = {
+  /** Short justification for the tier (conservative, user-facing). */
+  summary: string;
+  /** Signals that increased score (with direct vs inferred where relevant). */
+  present_signals: string[];
+  /** Important gaps that limited confidence. */
+  missing_signals: string[];
+};
+
 export type DealValuationOutput = {
   deal_type: DealValuationDealType;
   activity_level: DealValuationActivityLevel;
@@ -49,6 +68,8 @@ export type DealValuationOutput = {
   estimated_total_value_high?: number | null;
   recommendation: "PURSUE" | "REVIEW" | "PASS";
   confidence: "low" | "medium" | "high";
+  /** Added with signal-based confidence; may be absent on older stored valuations. */
+  confidence_reasoning?: ValuationConfidenceReasoning;
   summary: string;
   reasoning: string[];
   risks: string[];

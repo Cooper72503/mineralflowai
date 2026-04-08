@@ -186,6 +186,10 @@ function preUnderwritingConfidenceBadgeSurface(
 }
 
 function PreUnderwritingValuationSection({ v }: { v: DealValuationOutput }) {
+  const reasoning = v.reasoning ?? [];
+  const risks = v.risks ?? [];
+  const missingData = v.missing_data ?? [];
+  const confReason = v.confidence_reasoning;
   const rec = preUnderwritingRecommendationBadgeSurface(v.recommendation);
   const conf = preUnderwritingConfidenceBadgeSurface(v.confidence);
   return (
@@ -229,6 +233,39 @@ function PreUnderwritingValuationSection({ v }: { v: DealValuationOutput }) {
           Deal type: {v.deal_type.replace(/_/g, " ")} · Activity: {v.activity_level}
         </span>
       </div>
+      {confReason &&
+      (confReason.summary ||
+        (confReason.present_signals?.length ?? 0) > 0 ||
+        (confReason.missing_signals?.length ?? 0) > 0) ? (
+        <div style={{ marginBottom: "0.75rem" }}>
+          <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Confidence reasoning</div>
+          {confReason.summary ? (
+            <p style={{ fontSize: "0.82rem", color: "#4b5563", margin: "0 0 0.5rem", lineHeight: 1.45 }}>
+              {confReason.summary}
+            </p>
+          ) : null}
+          {(confReason.present_signals?.length ?? 0) > 0 ? (
+            <div style={{ marginBottom: "0.35rem" }}>
+              <div style={{ fontSize: "0.75rem", color: "#6b7280", marginBottom: "0.15rem" }}>Present signals</div>
+              <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.8rem", color: "#374151", lineHeight: 1.4 }}>
+                {(confReason.present_signals ?? []).map((line, idx) => (
+                  <li key={`pue-cp-${idx}`}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {(confReason.missing_signals?.length ?? 0) > 0 ? (
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "#6b7280", marginBottom: "0.15rem" }}>Missing or weak signals</div>
+              <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.8rem", color: "#6b7280", lineHeight: 1.4 }}>
+                {(confReason.missing_signals ?? []).map((line, idx) => (
+                  <li key={`pue-cm-${idx}`}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <dl style={{ display: "flex", flexDirection: "column", gap: "0.65rem", marginBottom: "0.75rem" }}>
         <div>
           <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>
@@ -236,6 +273,11 @@ function PreUnderwritingValuationSection({ v }: { v: DealValuationOutput }) {
           </dt>
           <dd style={{ fontSize: "0.95rem", margin: 0 }}>
             {formatUsdRange(v.estimated_total_value_low ?? undefined, v.estimated_total_value_high ?? undefined)}
+            {v.estimated_total_value_low == null && v.estimated_total_value_high == null ? (
+              <span style={{ display: "block", fontSize: "0.78rem", color: "#6b7280", marginTop: "0.25rem" }}>
+                No directional dollar band from available inputs — use missing data list and manual diligence.
+              </span>
+            ) : null}
           </dd>
         </div>
         <div>
@@ -259,31 +301,31 @@ function PreUnderwritingValuationSection({ v }: { v: DealValuationOutput }) {
         </div>
       </dl>
       <p style={{ color: "#111827", fontSize: "0.92rem", lineHeight: 1.5, margin: "0 0 0.75rem" }}>{v.summary}</p>
-      {v.reasoning.length > 0 ? (
+      {reasoning.length > 0 ? (
         <div style={{ marginBottom: "0.65rem" }}>
           <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Reasoning</div>
           <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#374151", lineHeight: 1.45 }}>
-            {v.reasoning.map((line, idx) => (
+            {reasoning.map((line, idx) => (
               <li key={`pue-r-${idx}`}>{line}</li>
             ))}
           </ul>
         </div>
       ) : null}
-      {v.risks.length > 0 ? (
+      {risks.length > 0 ? (
         <div style={{ marginBottom: "0.65rem" }}>
           <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Risks & limitations</div>
           <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#6b7280", lineHeight: 1.45 }}>
-            {v.risks.map((line, idx) => (
+            {risks.map((line, idx) => (
               <li key={`pue-k-${idx}`}>{line}</li>
             ))}
           </ul>
         </div>
       ) : null}
-      {v.missing_data.length > 0 ? (
+      {missingData.length > 0 ? (
         <div>
           <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Missing data</div>
           <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#6b7280", lineHeight: 1.45 }}>
-            {v.missing_data.map((line, idx) => (
+            {missingData.map((line, idx) => (
               <li key={`pue-m-${idx}`}>{line}</li>
             ))}
           </ul>

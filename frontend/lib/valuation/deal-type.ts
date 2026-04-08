@@ -2,6 +2,7 @@ import type { DealValuationDealType } from "./types";
 import type { DealValuationInput } from "./types";
 import type { FinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
+import { parseLegalDescription } from "@/lib/location/legal-description-parser";
 import { logValuationDev } from "./normalize";
 
 const INFRA_RE =
@@ -79,8 +80,19 @@ export function classifyDealType(args: {
   }
 
   const leaseOnly = scanLeaseLanguage(text) && !prod;
-  const hasLoc = Boolean(args.county?.trim()) && (args.acreage != null && args.acreage > 0);
-  const hasLegal = Boolean(args.legalDescription?.trim()) && args.legalDescription!.trim().length >= 40;
+  const legalParsed = parseLegalDescription(args.legalDescription ?? "");
+  const hasStructuredLegal = Boolean(
+    legalParsed.section ||
+      legalParsed.block ||
+      legalParsed.survey_name ||
+      legalParsed.abstract_number
+  );
+  const hasLoc =
+    Boolean(args.county?.trim()) &&
+    ((args.acreage != null && args.acreage > 0) || hasStructuredLegal);
+  const legalTrim = args.legalDescription?.trim() ?? "";
+  const hasLegal =
+    Boolean(legalTrim) && (legalTrim.length >= 40 || hasStructuredLegal);
 
   if (leaseOnly && hasLoc) {
     logValuationDev("deal_type_path", { result: "lease", note: "lease_language_no_production" });

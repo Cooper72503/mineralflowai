@@ -22,6 +22,20 @@ export function buildValuationNarrative(args: {
     missing_data.push("county");
   }
 
+  if (!args.input.state?.trim()) {
+    missing_data.push("state");
+  }
+
+  const lp = args.input.legal_description_parsed;
+  if (lp && (lp.section || lp.block || lp.survey_name || lp.abstract_number)) {
+    const bits: string[] = [];
+    if (lp.abstract_number) bits.push(`abstract ${lp.abstract_number}`);
+    if (lp.survey_name) bits.push(lp.survey_name);
+    if (lp.block) bits.push(`block ${lp.block}`);
+    if (lp.section) bits.push(`section ${lp.section}`);
+    reasoning.push(`Legal description cues (parsed): ${bits.join(", ")}.`);
+  }
+
   if (args.input.acreage != null && args.input.acreage > 0) {
     reasoning.push(`Acreage signal: ${args.input.acreage} acres (document-derived).`);
   } else {
@@ -36,6 +50,14 @@ export function buildValuationNarrative(args: {
 
   if (args.input.ownership_percent == null) {
     missing_data.push("ownership");
+  }
+
+  const hasEcon =
+    (args.input.annual_revenue != null && args.input.annual_revenue > 0) ||
+    (args.input.monthly_revenue != null && args.input.monthly_revenue > 0) ||
+    (args.input.bopd != null && args.input.bopd > 0);
+  if (!hasEcon) {
+    missing_data.push("revenue or production indication");
   }
 
   if (args.activity === "high" || args.activity === "moderate") {

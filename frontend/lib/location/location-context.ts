@@ -5,6 +5,7 @@
 
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { hasRegionalDrillFromDealInput } from "@/lib/development/detect-development-signals";
+import { parseLegalDescription } from "./legal-description-parser";
 
 export type LocationConfidence = "High" | "Medium" | "Low";
 export type NearbyActivitySignal = "High" | "Moderate" | "Low" | "Unknown";
@@ -51,40 +52,16 @@ export type ParsedLegalParts = {
 
 /**
  * Best-effort extraction of common Texas / mineral-deed style descriptors.
+ * @see parseLegalDescription in `legal-description-parser.ts`
  */
 export function parseLegalDescriptionParts(text: string): ParsedLegalParts {
-  const s = text.replace(/\s+/g, " ").trim();
-  if (!s) {
-    return { section: null, block: null, survey: null, abstract: null };
-  }
-
-  let section: string | null = null;
-  const secM =
-    s.match(/\bSection\s+(\d+[A-Za-z]?(?:\s*\/\s*\d+)?)\b/i) ??
-    s.match(/\bSec\.?\s+(\d+[A-Za-z]?(?:\s*\/\s*\d+)?)\b/i);
-  if (secM) section = secM[1].trim();
-
-  let block: string | null = null;
-  const blockM =
-    s.match(/\bBlock\s+([A-Za-z0-9]+(?:-[A-Za-z0-9]+)?)\b/i) ??
-    s.match(/\bBlock\s+(\d+[A-Za-z]?)\b/i);
-  if (blockM) block = blockM[1].trim();
-
-  let survey: string | null = null;
-  const surveyM = s.match(
-    /\b((?:[A-Z][A-Za-z0-9&'.\s-]{1,64}?)(?:Survey|Srvy|Surv)\.?)\b/i
-  );
-  if (surveyM) {
-    survey = surveyM[1].replace(/\s+/g, " ").trim();
-  }
-
-  let abstract: string | null = null;
-  const absM =
-    s.match(/\bAbstract\s+(?:No\.?\s*)?([A-Z]?\d+[A-Za-z]?)\b/i) ??
-    s.match(/\bA(?:bstract)?[- ](\d+[A-Za-z]?)\b/i);
-  if (absM) abstract = absM[1].trim();
-
-  return { section, block, survey, abstract };
+  const r = parseLegalDescription(text);
+  return {
+    section: r.section,
+    block: r.block,
+    survey: r.survey_name,
+    abstract: r.abstract_number,
+  };
 }
 
 function formatParsedLegalLine(parts: ParsedLegalParts): { line: string; tier: "structured" | "weak" } {

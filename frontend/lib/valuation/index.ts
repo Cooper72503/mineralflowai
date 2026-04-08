@@ -3,7 +3,7 @@ import { buildValuationInput } from "./build-valuation-input";
 import { classifyDealType, inferHasProductionSignals } from "./deal-type";
 import { resolveActivityLevel } from "./activity-tier";
 import { estimateDirectionalNriProxy } from "./nri";
-import { deriveValuationConfidence } from "./confidence";
+import { computeValuationConfidence } from "./confidence";
 import { estimateValueRange } from "./value-estimator";
 import { deriveRecommendation } from "./recommendation";
 import { buildValuationNarrative } from "./summary";
@@ -34,6 +34,11 @@ const FALLBACK: DealValuationOutput = {
   estimated_total_value_high: null,
   recommendation: "REVIEW",
   confidence: "low",
+  confidence_reasoning: {
+    summary: "Confidence could not be computed — defaulting to low.",
+    present_signals: [],
+    missing_signals: ["complete extraction"],
+  },
   summary:
     "Pre-underwriting valuation could not be computed safely from available signals — treat as manual review.",
   reasoning: ["Insufficient structured inputs after a safe merge — defaulting to conservative review mode."],
@@ -83,10 +88,40 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
     });
 
     const nriResult = estimateDirectionalNriProxy(vIn);
-    const confidence = deriveValuationConfidence(vIn, dealType);
     const value = estimateValueRange({ input: vIn, dealType, activity });
 
     const missingCritical = countMissingCritical(vIn);
+    const hasNumericBand =
+      value.estimated_total_value_low != null &&
+      value.estimated_total_value_high != null &&
+      value.estimated_total_value_high > 0;
+
+    const confidenceComputed = computeValuationConfidence(vIn, dealType);
+    let confidence = confidenceComputed.tier;
+    let confidence_reasoning = confidenceComputed.reasoning;
+
+    // Screening $ band is part of explainability: do not label "high" without a numeric range.
+    if (!hasNumericBand && confidence === "high") {
+      confidence = "medium";
+      confidence_reasoning = {
+        ...confidence_reasoning,
+        summary:
+          confidence_reasoning.summary +
+          " Dollar band not formed from inputs, so confidence is capped at medium.",
+      };
+    }
+    // Extremely thin inputs: align with conservative review posture.
+    if (missingCritical >= 5) {
+      confidence = "low";
+      confidence_reasoning = {
+        ...confidence_reasoning,
+        summary:
+          "Low confidence: multiple critical underwriting fields are missing from the merged extraction.",
+        missing_signals: confidence_reasoning.missing_signals,
+        present_signals: confidence_reasoning.present_signals,
+      };
+    }
+
     const recommendation = deriveRecommendation({
       dealScore: args.dealScore,
       confidence,
@@ -115,6 +150,7 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       estimated_total_value_high: value.estimated_total_value_high,
       recommendation,
       confidence,
+      confidence_reasoning,
       summary: narrative.summary,
       reasoning: narrative.reasoning,
       risks: narrative.risks,
@@ -144,5 +180,7 @@ export type {
   DealValuationInput,
   DealValuationOutput,
   RunPreUnderwritingValuationArgs,
+  ValuationConfidenceReasoning,
 } from "./types";
 export { buildValuationInput } from "./build-valuation-input";
+export { computeValuationConfidence } from "./confidence";
