@@ -31,6 +31,8 @@ import {
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { buildLocationContext } from "@/lib/location/location-context";
+import { runPreUnderwritingValuation } from "@/lib/valuation";
+import type { DealValuationOutput } from "@/lib/valuation";
 
 const LOG_PREFIX = "[process-document]";
 const BUCKET_NAME = "documents";
@@ -309,6 +311,7 @@ export async function POST(
       let dealScoreInputForPipeline: Record<string, unknown> | null = null;
       let dealScoreResult: DealScoreResult | null = null;
       let dealAcreageForAlerts: number | null | undefined = undefined;
+      let preUnderwritingValuation: DealValuationOutput | null = null;
       try {
         const contentType = request.headers.get("content-type") ?? "";
         if (contentType.includes("application/json")) {
@@ -950,6 +953,24 @@ export async function POST(
           development_signals:
             (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
         });
+
+        preUnderwritingValuation = runPreUnderwritingValuation({
+          documentId,
+          parsed: parsed as unknown as Record<string, unknown>,
+          dealScoreInput,
+          dealScore,
+          financialSummary,
+          locationContext,
+          drillSnapshot: drillSnap,
+          extractedText,
+        });
+        console.log(`${LOG_PREFIX} PRE_UNDERWRITING_VALUATION`, {
+          documentId,
+          deal_type: preUnderwritingValuation.deal_type,
+          recommendation: preUnderwritingValuation.recommendation,
+          confidence: preUnderwritingValuation.confidence,
+        });
+
         const structuredExtraction = {
           lessor: parsed.lessor,
           lessee: parsed.lessee,
@@ -992,6 +1013,7 @@ export async function POST(
           deal_score: dealScore,
           financial_summary: financialSummary,
           location_context: locationContext,
+          pre_underwriting_valuation: preUnderwritingValuation,
         };
 
         assertPlainObject(structuredExtraction, "DB_INSERT_START");
@@ -1532,6 +1554,39 @@ export async function POST(
             (dealScoreInputForPipeline?.development_signals as DevelopmentSignalsSnapshot | null) ??
             null,
         }),
+        pre_underwriting_valuation:
+          preUnderwritingValuation ??
+          runPreUnderwritingValuation({
+            documentId,
+            parsed: parsed as unknown as Record<string, unknown>,
+            dealScoreInput: dealScoreInputForPipeline ?? {},
+            dealScore:
+              dealScoreResult ??
+              ({
+                score: 0,
+                grade: dealGradeFullLabelFromScore(0),
+                type: "lead" as const,
+                reasons: [] as string[],
+              } satisfies DealScoreResult),
+            financialSummary: buildFinancialSummary({
+              extractedText,
+              dealScoreInput: dealScoreInputForPipeline ?? {},
+              royaltyRateStr: parsed.royalty_rate,
+              county: parsed.county ?? doc.county,
+            }),
+            locationContext: buildLocationContext({
+              county: parsed.county ?? doc.county,
+              state: parsed.state ?? doc.state,
+              legal_description: parsed.legal_description,
+              extracted_text: extractedText,
+              merged: (dealScoreInputForPipeline ?? {}) as Record<string, unknown>,
+              development_signals:
+                (dealScoreInputForPipeline?.development_signals as DevelopmentSignalsSnapshot | null) ??
+                null,
+            }),
+            drillSnapshot: drillSnapshotFromDealInput(dealScoreInputForPipeline ?? {}),
+            extractedText,
+          }),
       };
       const fallbackExtractionResponse: SavedExtraction = {
         id: documentId as string,

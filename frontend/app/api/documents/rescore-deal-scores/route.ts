@@ -22,6 +22,7 @@ import {
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { buildLocationContext } from "@/lib/location/location-context";
+import { runPreUnderwritingValuation } from "@/lib/valuation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -138,7 +139,9 @@ export async function POST(request: Request) {
 
       const merged = mergeStructuredFields(row.structured_data, row.structured_json) as Record<string, unknown>;
       const existing = dealScoreFromMerged(merged);
-      if (existing != null && existing.score !== 0) continue;
+      const needsValuationBackfill =
+        merged.pre_underwriting_valuation == null || typeof merged.pre_underwriting_valuation !== "object";
+      if (existing != null && existing.score !== 0 && !needsValuationBackfill) continue;
 
       const baseline: Record<string, unknown> = { ...merged };
       delete baseline.deal_score;
@@ -226,11 +229,45 @@ export async function POST(request: Request) {
 
       const dealScoreCalculated = calculateDealScore(dealScoreInput);
       const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
+      const drillSnap = drillSnapshotFromDealInput(dealScoreInput);
+
+      const preUnderwritingValuation = runPreUnderwritingValuation({
+        documentId: row.document_id,
+        parsed: {
+          ...merged,
+          lessor: row.lessor,
+          lessee: row.lessee,
+          grantor: stringFieldFromMergedRecord(merged, "grantor"),
+          grantee: stringFieldFromMergedRecord(merged, "grantee"),
+          county: resolvedCounty,
+          state: resolvedState,
+          legal_description: row.legal_description,
+          effective_date: row.effective_date,
+          recording_date: row.recording_date,
+          royalty_rate: row.royalty_rate,
+          term_length: row.term_length,
+          document_type: row.document_type,
+          confidence_score: row.confidence_score,
+          owner: stringFieldFromMergedRecord(merged, "owner"),
+          buyer: stringFieldFromMergedRecord(merged, "buyer"),
+          acreage: preferNumericAcreageFromUnknown(merged),
+          parties: merged.parties,
+          extraction_status: merged.extraction_status,
+        } as Record<string, unknown>,
+        dealScoreInput,
+        dealScore,
+        financialSummary,
+        locationContext,
+        drillSnapshot: drillSnap,
+        extractedText: row.extracted_text ?? "",
+      });
+
       if (
         existing != null &&
         dealScore.score === existing.score &&
         dealScore.type === existing.type &&
-        !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals)
+        !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals) &&
+        !needsValuationBackfill
       ) {
         continue;
       }
@@ -242,7 +279,6 @@ export async function POST(request: Request) {
         type: dealScore.type,
       });
 
-      const drillSnap = drillSnapshotFromDealInput(dealScoreInput);
       const nextStructured = {
         ...merged,
         ...drillSnap,
@@ -250,6 +286,7 @@ export async function POST(request: Request) {
         deal_score: dealScore,
         financial_summary: financialSummary,
         location_context: locationContext,
+        pre_underwriting_valuation: preUnderwritingValuation,
       };
       const drillCols = drillTopLevelPayload(drillSnap);
 

@@ -39,11 +39,20 @@ import {
   parseLegalDescriptionParts,
   type LocationContext,
 } from "@/lib/location/location-context";
+import type { DealValuationOutput } from "@/lib/valuation";
 
 function readFinancialSummary(merged: Record<string, unknown>): FinancialSummary | null {
   const raw = merged.financial_summary;
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
   return raw as FinancialSummary;
+}
+
+function readPreUnderwritingValuation(merged: Record<string, unknown>): DealValuationOutput | null {
+  const raw = merged.pre_underwriting_valuation;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.summary !== "string" || typeof o.recommendation !== "string") return null;
+  return raw as DealValuationOutput;
 }
 
 function formatUsdCompact(n: number): string {
@@ -150,6 +159,138 @@ function dealScoreCardSurface(
     case "D":
       return { background: "#f3f4f6", borderColor: "#e5e7eb" };
   }
+}
+
+function preUnderwritingRecommendationBadgeSurface(
+  r: DealValuationOutput["recommendation"]
+): { background: string; color: string; borderColor: string } {
+  if (r === "PURSUE") {
+    return { background: "#dcfce7", color: "#166534", borderColor: "#86efac" };
+  }
+  if (r === "PASS") {
+    return { background: "#fee2e2", color: "#991b1b", borderColor: "#fecaca" };
+  }
+  return { background: "#fef9c3", color: "#854d0e", borderColor: "#fde047" };
+}
+
+function preUnderwritingConfidenceBadgeSurface(
+  c: DealValuationOutput["confidence"]
+): { background: string; color: string; borderColor: string } {
+  if (c === "high") {
+    return { background: "#dbeafe", color: "#1e40af", borderColor: "#93c5fd" };
+  }
+  if (c === "medium") {
+    return { background: "#f3f4f6", color: "#374151", borderColor: "#e5e7eb" };
+  }
+  return { background: "#fafafa", color: "#6b7280", borderColor: "#e5e7eb" };
+}
+
+function PreUnderwritingValuationSection({ v }: { v: DealValuationOutput }) {
+  const rec = preUnderwritingRecommendationBadgeSurface(v.recommendation);
+  const conf = preUnderwritingConfidenceBadgeSurface(v.confidence);
+  return (
+    <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
+      <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+        Pre-Underwriting Valuation
+      </h2>
+      <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: "0 0 0.75rem", lineHeight: 1.45 }}>
+        Directional first-pass screening only — not an appraisal, title opinion, or reserve report.
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.75rem" }}>
+        <span
+          style={{
+            display: "inline-block",
+            fontSize: "0.75rem",
+            fontWeight: 600,
+            padding: "0.2rem 0.55rem",
+            borderRadius: 6,
+            border: `1px solid ${rec.borderColor}`,
+            background: rec.background,
+            color: rec.color,
+          }}
+        >
+          {v.recommendation}
+        </span>
+        <span
+          style={{
+            display: "inline-block",
+            fontSize: "0.75rem",
+            fontWeight: 600,
+            padding: "0.2rem 0.55rem",
+            borderRadius: 6,
+            border: `1px solid ${conf.borderColor}`,
+            background: conf.background,
+            color: conf.color,
+          }}
+        >
+          Confidence: {v.confidence}
+        </span>
+        <span style={{ fontSize: "0.85rem", color: "#374151", alignSelf: "center" }}>
+          Deal type: {v.deal_type.replace(/_/g, " ")} · Activity: {v.activity_level}
+        </span>
+      </div>
+      <dl style={{ display: "flex", flexDirection: "column", gap: "0.65rem", marginBottom: "0.75rem" }}>
+        <div>
+          <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>
+            Estimated total value (range)
+          </dt>
+          <dd style={{ fontSize: "0.95rem", margin: 0 }}>
+            {formatUsdRange(v.estimated_total_value_low ?? undefined, v.estimated_total_value_high ?? undefined)}
+          </dd>
+        </div>
+        <div>
+          <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>Value per acre (range)</dt>
+          <dd style={{ fontSize: "0.95rem", margin: 0 }}>
+            {formatUsdRange(v.value_per_acre_low ?? undefined, v.value_per_acre_high ?? undefined)}
+          </dd>
+        </div>
+        <div>
+          <dt style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.2rem" }}>
+            Estimated NRI Proxy
+          </dt>
+          <dd style={{ fontSize: "0.95rem", margin: 0 }}>
+            {v.nri != null && Number.isFinite(v.nri) ? String(v.nri) : EM_DASH}
+            {v.nri_basis ? (
+              <span style={{ display: "block", fontSize: "0.78rem", color: "#6b7280", marginTop: "0.25rem" }}>
+                {v.nri_basis}
+              </span>
+            ) : null}
+          </dd>
+        </div>
+      </dl>
+      <p style={{ color: "#111827", fontSize: "0.92rem", lineHeight: 1.5, margin: "0 0 0.75rem" }}>{v.summary}</p>
+      {v.reasoning.length > 0 ? (
+        <div style={{ marginBottom: "0.65rem" }}>
+          <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Reasoning</div>
+          <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#374151", lineHeight: 1.45 }}>
+            {v.reasoning.map((line, idx) => (
+              <li key={`pue-r-${idx}`}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {v.risks.length > 0 ? (
+        <div style={{ marginBottom: "0.65rem" }}>
+          <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Risks & limitations</div>
+          <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#6b7280", lineHeight: 1.45 }}>
+            {v.risks.map((line, idx) => (
+              <li key={`pue-k-${idx}`}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {v.missing_data.length > 0 ? (
+        <div>
+          <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Missing data</div>
+          <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem", color: "#6b7280", lineHeight: 1.45 }}>
+            {v.missing_data.map((line, idx) => (
+              <li key={`pue-m-${idx}`}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function locationContextStatColor(field: "activity" | "confidence", value: string): string {
@@ -553,6 +694,11 @@ export default function DocumentDetailPage() {
     const base = mergedStructured ?? {};
     return overlayDrillColumnsFromRow(base, extraction);
   }, [mergedStructured, extraction]);
+
+  const preUnderwritingValuation = useMemo(
+    () => readPreUnderwritingValuation(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
 
   /** Prefer persisted `development_signals`; otherwise derive from extracted text for display. */
   const resolvedDevelopmentSignals = useMemo((): DevelopmentSignalsSnapshot | null => {
@@ -1086,6 +1232,8 @@ export default function DocumentDetailPage() {
       </div>
 
       {displayDealScore ? <DealScoreCard dealScore={displayDealScore} /> : null}
+
+      {preUnderwritingValuation ? <PreUnderwritingValuationSection v={preUnderwritingValuation} /> : null}
 
       <LegalDescriptionCard displayText={legalDescriptionDisplayText} />
 

@@ -24,6 +24,7 @@ import {
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { buildLocationContext } from "@/lib/location/location-context";
+import { runPreUnderwritingValuation } from "@/lib/valuation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -301,6 +302,37 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const dealScoreCalculated = calculateDealScore(dealScoreInput);
     const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
 
+    const preUnderwritingValuation = runPreUnderwritingValuation({
+      documentId,
+      parsed: {
+        ...merged,
+        lessor: ext.lessor,
+        lessee: ext.lessee,
+        grantor: stringFieldFromMergedRecord(merged, "grantor"),
+        grantee: stringFieldFromMergedRecord(merged, "grantee"),
+        county: resolvedCounty,
+        state: resolvedState,
+        legal_description: ext.legal_description,
+        effective_date: ext.effective_date,
+        recording_date: ext.recording_date,
+        royalty_rate: ext.royalty_rate,
+        term_length: ext.term_length,
+        document_type: ext.document_type,
+        confidence_score: ext.confidence_score,
+        owner: stringFieldFromMergedRecord(merged, "owner"),
+        buyer: stringFieldFromMergedRecord(merged, "buyer"),
+        acreage: preferNumericAcreageFromUnknown(merged),
+        parties: merged.parties,
+        extraction_status: merged.extraction_status,
+      } as Record<string, unknown>,
+      dealScoreInput,
+      dealScore,
+      financialSummary,
+      locationContext,
+      drillSnapshot: drillSnapshotFromDealInput(dealScoreInput),
+      extractedText: ext.extracted_text ?? "",
+    });
+
     const oldStoredScore = stored?.score ?? null;
     console.log(`${LOG_PREFIX} OLD STORED SCORE`, oldStoredScore);
     console.log(`${LOG_PREFIX} RECALCULATED SCORE`, dealScore.score);
@@ -316,6 +348,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const needsLocationBackfill =
       merged.location_context == null || typeof merged.location_context !== "object";
 
+    const needsValuationBackfill =
+      merged.pre_underwriting_valuation == null || typeof merged.pre_underwriting_valuation !== "object";
+
     if (
       stored != null &&
       stored.score === dealScore.score &&
@@ -324,7 +359,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       drillColumnsAligned &&
       !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals) &&
       !needsFinancialBackfill &&
-      !needsLocationBackfill
+      !needsLocationBackfill &&
+      !needsValuationBackfill
     ) {
       const finalAfter = await fetchMergedDealScoreFromExtraction(supabase, ext.id, user.id);
       console.log("SCORE SAVED", dealScore.score);
@@ -343,6 +379,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       deal_score: dealScore,
       financial_summary: financialSummary,
       location_context: locationContext,
+      pre_underwriting_valuation: preUnderwritingValuation,
     });
     if (process.env.DEAL_SCORE_TRACE === "1") {
       const ns = nextStructured as Record<string, unknown>;
