@@ -27,12 +27,23 @@ export function buildValuationNarrative(args: {
   }
 
   const lp = args.input.legal_description_parsed;
-  if (lp && (lp.section || lp.block || lp.survey_name || lp.abstract_number)) {
+  if (
+    lp &&
+    (lp.section ||
+      lp.block ||
+      lp.survey_name ||
+      lp.abstract_number ||
+      lp.plss_township ||
+      lp.plss_range)
+  ) {
     const bits: string[] = [];
+    if (lp.plss_township) bits.push(`township ${lp.plss_township}`);
+    if (lp.plss_range) bits.push(`range ${lp.plss_range}`);
     if (lp.abstract_number) bits.push(`abstract ${lp.abstract_number}`);
     if (lp.survey_name) bits.push(lp.survey_name);
     if (lp.block) bits.push(`block ${lp.block}`);
     if (lp.section) bits.push(`section ${lp.section}`);
+    if (lp.plss_aliquot) bits.push(lp.plss_aliquot);
     reasoning.push(`Legal description cues (parsed): ${bits.join(", ")}.`);
   }
 

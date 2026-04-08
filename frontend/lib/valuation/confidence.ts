@@ -44,7 +44,13 @@ function scaledStateWeight(source: DealValuationInput["state_source"]): number {
 
 function hasStructuredLegal(lp: DealValuationInput["legal_description_parsed"]): boolean {
   if (!lp) return false;
-  return Boolean(lp.section || lp.block || lp.survey_name || lp.abstract_number);
+  return Boolean(
+    lp.section ||
+      lp.block ||
+      lp.survey_name ||
+      lp.abstract_number ||
+      (lp.plss_township && lp.plss_range)
+  );
 }
 
 function hasProductionEconomics(input: DealValuationInput): boolean {
@@ -207,13 +213,15 @@ export function computeValuationConfidence(
   if (hasStructuredLegal(lp)) {
     score += W.legal_structure;
     const bits: string[] = [];
+    if (lp?.plss_township) bits.push(`township ${lp.plss_township}`);
+    if (lp?.plss_range) bits.push(`range ${lp.plss_range}`);
     if (lp?.abstract_number) bits.push(`abstract ${lp.abstract_number}`);
     if (lp?.survey_name) bits.push(lp.survey_name);
     if (lp?.block) bits.push(`block ${lp.block}`);
     if (lp?.section) bits.push(`section ${lp.section}`);
     present.push(`Legal structure (parsed): ${bits.join(", ")}`);
   } else {
-    missing.push("Structured legal cues (section / block / survey / abstract)");
+    missing.push("Structured legal cues (section / block / survey / abstract / PLSS)");
   }
 
   const drill = drillWeight(input);

@@ -283,4 +283,81 @@ describe("pre-underwriting valuation scenarios", () => {
     expect(out.confidence).toBe("medium");
     expect(out.confidence_reasoning?.summary?.length).toBeGreaterThan(20);
   });
+
+  it("PLSS + ND: infers county/state and acreage from text; legal parse and valuation band", () => {
+    const text = [
+      "Stark County, North Dakota",
+      "24 acres",
+      "Township 140 North",
+      "Range 94 West",
+      "Section 4 SE 1/4",
+    ].join("\n");
+    const parsed = {
+      legal_description: text,
+      royalty_rate: "1/5",
+      ownership_percent: 0.25,
+      document_type: "Mineral Deed",
+    };
+    const dealScoreInput: Record<string, unknown> = {
+      legal_description: text,
+      royalty_rate: "1/5",
+      ownership_percent: 0.25,
+    };
+    const dev = buildDevelopmentSignalsSnapshot(
+      text,
+      extractionFieldsRecordForSignals({
+        legal_description: text,
+        document_type: "Mineral Deed",
+        county: null,
+        state: null,
+        lessor: null,
+        lessee: null,
+        grantor: null,
+        grantee: null,
+      }),
+      dealScoreInput
+    );
+    dealScoreInput.development_signals = dev;
+    const loc = buildLocationContext({
+      county: null,
+      state: null,
+      legal_description: text,
+      extracted_text: text,
+      merged: dealScoreInput,
+      development_signals: dev,
+    });
+    const drill = drillSnapshotFromDealInput(dealScoreInput);
+    const vIn = buildValuationInput({
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText: text,
+    });
+
+    expect(vIn.county).toBe("Stark County");
+    expect(vIn.state).toBe("North Dakota");
+    expect(vIn.acreage).toBe(24);
+    expect(vIn.legal_description_parsed?.plss_township).toBe("140 North");
+    expect(vIn.legal_description_parsed?.plss_range).toBe("94 West");
+    expect(vIn.legal_description_parsed?.section).toBe("4");
+    expect(vIn.legal_description_parsed?.plss_aliquot).toBe("SE 1/4");
+
+    const out = runPreUnderwritingValuation({
+      documentId: "doc-plss-nd",
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      dealScore: baseDealScore(),
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText: text,
+    });
+
+    expect(out.deal_type).not.toBe("unknown");
+    expect(out._value_method).not.toBe("error_fallback");
+    expect(out.estimated_total_value_high).not.toBeNull();
+    expect(out.estimated_total_value_high).toBeGreaterThan(0);
+  });
 });

@@ -48,6 +48,10 @@ export type ParsedLegalParts = {
   block: string | null;
   survey: string | null;
   abstract: string | null;
+  /** PLSS township (e.g. "140 North") when present. */
+  township: string | null;
+  /** PLSS range (e.g. "94 West") when present. */
+  range: string | null;
 };
 
 /**
@@ -61,11 +65,15 @@ export function parseLegalDescriptionParts(text: string): ParsedLegalParts {
     block: r.block,
     survey: r.survey_name,
     abstract: r.abstract_number,
+    township: r.plss_township,
+    range: r.plss_range,
   };
 }
 
 function formatParsedLegalLine(parts: ParsedLegalParts): { line: string; tier: "structured" | "weak" } {
   const bits: string[] = [];
+  if (parts.township) bits.push(`Township ${parts.township}`);
+  if (parts.range) bits.push(`Range ${parts.range}`);
   if (parts.section) bits.push(`Section ${parts.section}`);
   if (parts.block) bits.push(`Block ${parts.block}`);
   if (parts.survey) bits.push(parts.survey);
@@ -99,6 +107,8 @@ export function formatLegalDescriptionDisplay(
 
   if (parsedTier === "structured" && parsedLine) {
     const bits: string[] = [];
+    if (parts.township) bits.push(`Township ${parts.township}`);
+    if (parts.range) bits.push(`Range ${parts.range}`);
     if (parts.section) bits.push(`Section ${parts.section}`);
     if (parts.block) bits.push(`Block ${parts.block}`);
     if (parts.survey) bits.push(parts.survey);
@@ -181,13 +191,17 @@ export function inferApproximateAreaDescriptor(scan: string): string | null {
   return null;
 }
 
-/** True when common PLSS-style fields are present (section, block, or survey name). */
+/** True when common Texas or PLSS-style fields are present. */
 function hasStructuredLegalFields(parts: ParsedLegalParts): boolean {
-  return Boolean(parts.section || parts.block || parts.survey);
+  return Boolean(
+    parts.section || parts.block || parts.survey || parts.abstract || (parts.township && parts.range)
+  );
 }
 
 function scoreStructureStrength(parts: ParsedLegalParts): number {
   let n = 0;
+  if (parts.township) n += 1;
+  if (parts.range) n += 1;
   if (parts.section) n += 2;
   if (parts.block) n += 1;
   if (parts.survey) n += 2;

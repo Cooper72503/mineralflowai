@@ -85,7 +85,8 @@ export function classifyDealType(args: {
     legalParsed.section ||
       legalParsed.block ||
       legalParsed.survey_name ||
-      legalParsed.abstract_number
+      legalParsed.abstract_number ||
+      (legalParsed.plss_township && legalParsed.plss_range)
   );
   const hasLoc =
     Boolean(args.county?.trim()) &&

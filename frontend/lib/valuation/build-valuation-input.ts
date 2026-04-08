@@ -10,8 +10,9 @@ import {
 import type { DrillDifficultySnapshotSnake } from "@/lib/scoring/drillDifficultyEngine";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import {
-  inferCountyFromTexts,
-  inferTexasStateFromText,
+  extractAcreageFromTexts,
+  inferCountyAndStateFromTexts,
+  inferUSStateFromText,
   parseLegalDescription,
 } from "@/lib/location/legal-description-parser";
 
@@ -66,22 +67,24 @@ export function buildValuationInput(args: {
   const locationHaystack = [legalDescRaw, args.extractedText ?? ""].join("\n\n");
 
   const countyExtracted = readString(merged, ["county"]);
+  const stateExtracted = readString(merged, ["state"]);
+  const inferredLoc = inferCountyAndStateFromTexts(legalDescRaw, args.extractedText);
+
   let county = countyExtracted ?? null;
   let county_source: ValuationFieldSource | null = null;
   if (county?.trim()) {
     county_source = "extracted";
   } else {
-    county = inferCountyFromTexts(legalDescRaw, args.extractedText);
+    county = inferredLoc.county;
     county_source = county?.trim() ? "inferred" : null;
   }
 
-  const stateExtracted = readString(merged, ["state"]);
   let state = stateExtracted ?? null;
   let state_source: ValuationFieldSource | null = null;
   if (state?.trim()) {
     state_source = "extracted";
   } else {
-    state = inferTexasStateFromText(locationHaystack);
+    state = inferredLoc.state ?? inferUSStateFromText(locationHaystack);
     state_source = state?.trim() ? "inferred" : null;
   }
 
@@ -91,7 +94,8 @@ export function buildValuationInput(args: {
     merged.net_acres,
     merged.nma,
     merged.net_mineral_acres,
-    parsed.acreage
+    parsed.acreage,
+    extractAcreageFromTexts(legalDescRaw, args.extractedText)
   );
 
   const royaltyRaw =
