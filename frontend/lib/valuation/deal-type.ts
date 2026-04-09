@@ -2,7 +2,10 @@ import type { DealValuationDealType } from "./types";
 import type { DealValuationInput } from "./types";
 import type { FinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
-import { parseLegalDescription } from "@/lib/location/legal-description-parser";
+import {
+  mergeLegalDescriptionParseResults,
+  parseLegalDescription,
+} from "@/lib/location/legal-description-parser";
 import { logValuationDev } from "./normalize";
 
 const INFRA_RE =
@@ -51,10 +54,8 @@ export function classifyDealType(args: {
   county: string | null;
   hasProduction: boolean;
 }): DealValuationDealType {
-  const text = `${args.documentType ?? ""}\n${args.legalDescription ?? ""}\n${args.extractedText ?? ""}`.slice(
-    0,
-    120_000
-  );
+  const ocrAndLegal = `${args.legalDescription ?? ""}\n${args.extractedText ?? ""}`;
+  const text = `${args.documentType ?? ""}\n${ocrAndLegal}`.slice(0, 120_000);
   const infra = scanInfra(text);
   const dev = args.developmentSignals;
   const infraDev =
@@ -80,7 +81,10 @@ export function classifyDealType(args: {
   }
 
   const leaseOnly = scanLeaseLanguage(text) && !prod;
-  const legalParsed = parseLegalDescription(args.legalDescription ?? "");
+  const legalParsed = mergeLegalDescriptionParseResults(
+    parseLegalDescription(args.extractedText ?? ""),
+    parseLegalDescription(args.legalDescription ?? "")
+  );
   const hasStructuredLegal = Boolean(
     legalParsed.section ||
       legalParsed.block ||
@@ -91,7 +95,7 @@ export function classifyDealType(args: {
   const hasLoc =
     Boolean(args.county?.trim()) &&
     ((args.acreage != null && args.acreage > 0) || hasStructuredLegal);
-  const legalTrim = args.legalDescription?.trim() ?? "";
+  const legalTrim = ocrAndLegal.trim();
   const hasLegal =
     Boolean(legalTrim) && (legalTrim.length >= 40 || hasStructuredLegal);
 

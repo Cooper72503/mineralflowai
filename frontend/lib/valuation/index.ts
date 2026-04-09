@@ -52,6 +52,8 @@ const FALLBACK: DealValuationOutput = {
  */
 export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArgs): DealValuationOutput {
   try {
+    const fullText = args.extractedText || args.raw_text || "";
+
     const vIn = buildValuationInput({
       documentId: args.documentId ?? undefined,
       parsed: args.parsed,
@@ -60,6 +62,7 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       locationContext: args.locationContext,
       drillSnapshot: args.drillSnapshot,
       extractedText: args.extractedText,
+      raw_text: args.raw_text,
     });
 
     logValuationDev("valuation_input", {
@@ -74,7 +77,7 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
     const dealType = classifyDealType({
       documentType: vIn.document_type ?? null,
       legalDescription: vIn.legal_description ?? null,
-      extractedText: args.extractedText,
+      extractedText: fullText,
       developmentSignals: vIn.development_signals ?? null,
       acreage: vIn.acreage ?? null,
       county: vIn.county ?? null,

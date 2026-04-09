@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractAcreageFromTexts,
   inferCountyAndStateFromTexts,
+  mergeLegalDescriptionParseResults,
   parseLegalDescription,
   parsePlssLegalDescription,
 } from "./legal-description-parser";
@@ -46,5 +47,18 @@ describe("extractAcreageFromTexts", () => {
   it("reads acres from narrative text", () => {
     expect(extractAcreageFromTexts("approximately 24 acres more or less")).toBe(24);
     expect(extractAcreageFromTexts("12.5 acre tract")).toBe(12.5);
+  });
+});
+
+describe("mergeLegalDescriptionParseResults", () => {
+  it("fills PLSS from full text when structured legal only has a stub", () => {
+    const fromOcr = parseLegalDescription(
+      "Township 140 North\nRange 94 West\nSection 4 SE 1/4\nStark County, North Dakota\n24 acres"
+    );
+    const fromStructured = parseLegalDescription("Mineral interest");
+    const m = mergeLegalDescriptionParseResults(fromOcr, fromStructured);
+    expect(m.plss_township).toBe("140 North");
+    expect(m.plss_range).toBe("94 West");
+    expect(m.section).toBe("4");
   });
 });

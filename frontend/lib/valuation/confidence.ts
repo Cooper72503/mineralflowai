@@ -44,12 +44,14 @@ function scaledStateWeight(source: DealValuationInput["state_source"]): number {
 
 function hasStructuredLegal(lp: DealValuationInput["legal_description_parsed"]): boolean {
   if (!lp) return false;
+  /** Texas-style or PLSS: township + range counts as structured; section often present with PLSS. */
+  const plssTownshipRange = Boolean(lp.plss_township?.trim() && lp.plss_range?.trim());
   return Boolean(
     lp.section ||
       lp.block ||
       lp.survey_name ||
       lp.abstract_number ||
-      (lp.plss_township && lp.plss_range)
+      plssTownshipRange
   );
 }
 

@@ -359,5 +359,71 @@ describe("pre-underwriting valuation scenarios", () => {
     expect(out._value_method).not.toBe("error_fallback");
     expect(out.estimated_total_value_high).not.toBeNull();
     expect(out.estimated_total_value_high).toBeGreaterThan(0);
+    expect(out.confidence === "medium" || out.confidence === "high").toBe(true);
+  });
+
+  it("raw_text only: Stark County ND, 24 acres, PLSS from full extracted text (no structured county/state/acreage)", () => {
+    const body = [
+      "Stark County, North Dakota",
+      "24 acres",
+      "Township 140 North",
+      "Range 94 West",
+      "Section 4 SE 1/4",
+    ].join("\n");
+    const parsed = {
+      legal_description: null as string | null,
+      royalty_rate: "1/5",
+      ownership_percent: 0.25,
+      document_type: "Mineral Deed",
+    };
+    const dealScoreInput: Record<string, unknown> = {
+      royalty_rate: "1/5",
+      ownership_percent: 0.25,
+    };
+    const loc = buildLocationContext({
+      county: null,
+      state: null,
+      legal_description: null,
+      extracted_text: "",
+      merged: dealScoreInput,
+      development_signals: null,
+    });
+    const drill = drillSnapshotFromDealInput(dealScoreInput);
+    const vIn = buildValuationInput({
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText: "",
+      raw_text: body,
+    });
+
+    expect(vIn.county).toBe("Stark County");
+    expect(vIn.state).toBe("North Dakota");
+    expect(vIn.acreage).toBe(24);
+    expect(vIn.legal_description_parsed?.plss_township).toBe("140 North");
+    expect(vIn.legal_description_parsed?.plss_range).toBe("94 West");
+    expect(vIn.legal_description_parsed?.section).toBe("4");
+
+    const conf = computeValuationConfidence(vIn, "undeveloped");
+    expect(conf.tier === "medium" || conf.tier === "high").toBe(true);
+
+    const out = runPreUnderwritingValuation({
+      documentId: "doc-raw-text-only",
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      dealScore: baseDealScore(),
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText: "",
+      raw_text: body,
+    });
+
+    expect(out).not.toBeNull();
+    expect(out.estimated_total_value_high).not.toBeNull();
+    expect(out.estimated_total_value_high).toBeGreaterThan(0);
+    expect(out.confidence === "medium" || out.confidence === "high").toBe(true);
   });
 });

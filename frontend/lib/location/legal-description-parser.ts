@@ -146,6 +146,38 @@ export function parseLegalDescription(raw: string | null | undefined): LegalDesc
   };
 }
 
+function isNonEmptyLegalField(v: string | null | undefined): boolean {
+  return v != null && String(v).trim().length > 0;
+}
+
+/**
+ * Merge multiple {@link parseLegalDescription} results. Earlier entries win per field
+ * (useful when full OCR text is parsed first and structured legal fills gaps).
+ */
+export function mergeLegalDescriptionParseResults(
+  ...parts: LegalDescriptionParseResult[]
+): LegalDescriptionParseResult {
+  const keys: (keyof LegalDescriptionParseResult)[] = [
+    "abstract_number",
+    "survey_name",
+    "block",
+    "section",
+    "plss_township",
+    "plss_range",
+    "plss_aliquot",
+  ];
+  const out: LegalDescriptionParseResult = { ...EMPTY };
+  for (const p of parts) {
+    if (!p) continue;
+    for (const k of keys) {
+      if (!isNonEmptyLegalField(out[k]) && isNonEmptyLegalField(p[k])) {
+        out[k] = p[k];
+      }
+    }
+  }
+  return out;
+}
+
 const US_STATE_NAMES: readonly string[] = [
   "Alabama",
   "Alaska",

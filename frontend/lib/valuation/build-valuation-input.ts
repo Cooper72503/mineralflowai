@@ -12,7 +12,9 @@ import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-develo
 import {
   extractAcreageFromTexts,
   inferCountyAndStateFromTexts,
+  inferCountyFromTexts,
   inferUSStateFromText,
+  mergeLegalDescriptionParseResults,
   parseLegalDescription,
 } from "@/lib/location/legal-description-parser";
 
@@ -55,27 +57,38 @@ export function buildValuationInput(args: {
   locationContext: LocationContext | null;
   drillSnapshot: DrillDifficultySnapshotSnake;
   extractedText: string;
+  raw_text?: string | null;
 }): DealValuationInput {
   const { parsed, dealScoreInput: dsi } = args;
   const merged: Record<string, unknown> = { ...dsi, ...parsed };
+
+  const fullText = args.extractedText || args.raw_text || "";
 
   const legalDescRaw =
     (typeof parsed.legal_description === "string" && parsed.legal_description.trim()
       ? parsed.legal_description.trim()
       : null) ?? readString(merged, ["legal_description"]);
-  const legal_description_parsed = parseLegalDescription(legalDescRaw);
-  const locationHaystack = [legalDescRaw, args.extractedText ?? ""].join("\n\n");
+
+  const parsedFromFullText = parseLegalDescription(fullText);
+  const parsedFromStructuredLegal = parseLegalDescription(legalDescRaw);
+  const legal_description_parsed = mergeLegalDescriptionParseResults(
+    parsedFromFullText,
+    parsedFromStructuredLegal
+  );
+
+  const locationHaystack = [legalDescRaw, fullText].filter(Boolean).join("\n\n");
 
   const countyExtracted = readString(merged, ["county"]);
   const stateExtracted = readString(merged, ["state"]);
-  const inferredLoc = inferCountyAndStateFromTexts(legalDescRaw, args.extractedText);
+  const inferredLoc = inferCountyAndStateFromTexts(fullText);
+  const countyInferredFromText = inferCountyFromTexts(fullText);
 
   let county = countyExtracted ?? null;
   let county_source: ValuationFieldSource | null = null;
   if (county?.trim()) {
     county_source = "extracted";
   } else {
-    county = inferredLoc.county;
+    county = inferredLoc.county ?? countyInferredFromText;
     county_source = county?.trim() ? "inferred" : null;
   }
 
@@ -84,7 +97,7 @@ export function buildValuationInput(args: {
   if (state?.trim()) {
     state_source = "extracted";
   } else {
-    state = inferredLoc.state ?? inferUSStateFromText(locationHaystack);
+    state = inferredLoc.state ?? inferUSStateFromText(locationHaystack) ?? inferUSStateFromText(fullText);
     state_source = state?.trim() ? "inferred" : null;
   }
 
@@ -95,7 +108,8 @@ export function buildValuationInput(args: {
     merged.nma,
     merged.net_mineral_acres,
     parsed.acreage,
-    extractAcreageFromTexts(legalDescRaw, args.extractedText)
+    extractAcreageFromTexts(fullText),
+    extractAcreageFromTexts(legalDescRaw)
   );
 
   const royaltyRaw =
@@ -112,10 +126,13 @@ export function buildValuationInput(args: {
   const monthly_revenue = monthlyMid(financial_summary);
   const annual_revenue = annualMid(financial_summary);
 
-  const sig = parseFinancialSignalsFromText(args.extractedText ?? "", royaltyRaw);
+  const sig = parseFinancialSignalsFromText(fullText, royaltyRaw);
   const oilMonthly = sig.oilBblMonthlyApprox;
   const bopd =
     oilMonthly != null && oilMonthly > 0 ? oilMonthly / 30 : pickFirstFiniteNumber(merged.bopd, merged.oil_bopd, merged.barrels_per_day);
+
+  const legalDescriptionOut =
+    (legalDescRaw && legalDescRaw.trim()) || (fullText.trim() ? fullText : null);
 
   const out: DealValuationInput = {
     document_id: args.documentId ?? undefined,
@@ -124,7 +141,7 @@ export function buildValuationInput(args: {
     state,
     state_source,
     basin: readString(merged, ["basin"]) ?? null,
-    legal_description: legalDescRaw,
+    legal_description: legalDescriptionOut,
     legal_description_parsed,
     acreage,
     royalty_rate,
@@ -146,8 +163,15 @@ export function buildValuationInput(args: {
         ? (dsi.development_signals as DevelopmentSignalsSnapshot)
         : null,
     financial_summary: financial_summary ?? undefined,
-    extracted_text_sample: (args.extractedText ?? "").slice(0, 4000) || null,
+    extracted_text_sample: fullText.slice(0, 4000) || null,
   };
+
+  console.log("[valuation-debug]", {
+    county: out.county,
+    state: out.state,
+    acreage: out.acreage,
+    parsedLegal: out.legal_description_parsed,
+  });
 
   return out;
 }

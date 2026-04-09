@@ -87,4 +87,6 @@ export type RunPreUnderwritingValuationArgs = {
   locationContext: LocationContext | null;
   drillSnapshot: DrillDifficultySnapshotSnake;
   extractedText: string;
+  /** When present, merged with {@link extractedText} inside {@link buildValuationInput} as full document text. */
+  raw_text?: string | null;
 };
