@@ -362,6 +362,68 @@ describe("pre-underwriting valuation scenarios", () => {
     expect(out.confidence === "medium" || out.confidence === "high").toBe(true);
   });
 
+  it("TEST: Mineral Property Summary — structured county/state/acreage/legal null; full extracted text only", () => {
+    const extractedText = [
+      "Mineral Property Summary",
+      "",
+      "County: Stark County, North Dakota",
+      "Acreage: 24 acres",
+      "",
+      "Legal Description:",
+      "Township 140 North",
+      "Range 94 West",
+      "Section 4 SE 1/4",
+      "Section 9 N 1/2",
+    ].join("\n");
+    const parsed = {
+      county: null as string | null,
+      state: null as string | null,
+      legal_description: null as string | null,
+      acreage: null as number | null,
+      royalty_rate: "1/5" as string | null,
+      ownership_percent: 0.25,
+      document_type: "Mineral Deed",
+    };
+    const dealScoreInput: Record<string, unknown> = {
+      royalty_rate: "1/5",
+      ownership_percent: 0.25,
+    };
+    const loc = buildLocationContext({
+      county: null,
+      state: null,
+      legal_description: null,
+      extracted_text: extractedText,
+      merged: dealScoreInput,
+      development_signals: null,
+    });
+    const drill = drillSnapshotFromDealInput(dealScoreInput);
+    const vIn = buildValuationInput({
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText,
+    });
+    expect(vIn.county).toBe("Stark County");
+    expect(vIn.state).toBe("North Dakota");
+    expect(vIn.acreage).toBe(24);
+    expect(vIn.legal_description_parsed?.plss_township).toBe("140 North");
+    expect(vIn.legal_description_parsed?.plss_range).toBe("94 West");
+    const out = runPreUnderwritingValuation({
+      documentId: "doc-mineral-summary",
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      dealScore: baseDealScore(),
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText,
+    });
+    expect(out.deal_type).not.toBe("unknown");
+    expect(out._value_method).not.toBe("error_fallback");
+  });
+
   it("raw_text only: Stark County ND, 24 acres, PLSS from full extracted text (no structured county/state/acreage)", () => {
     const body = [
       "Stark County, North Dakota",

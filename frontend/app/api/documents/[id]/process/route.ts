@@ -312,6 +312,8 @@ export async function POST(
       let dealScoreResult: DealScoreResult | null = null;
       let dealAcreageForAlerts: number | null | undefined = undefined;
       let preUnderwritingValuation: DealValuationOutput | null = null;
+      /** Combined PDF + OCR + normalized text from structured extraction (valuation / location fallbacks). */
+      let combinedPipelineText: string | null = null;
       try {
         const contentType = request.headers.get("content-type") ?? "";
         if (contentType.includes("application/json")) {
@@ -809,6 +811,10 @@ export async function POST(
         }
 
         debug.extraction_artifacts = artifacts;
+        combinedPipelineText =
+          artifacts && typeof artifacts.combined_text === "string"
+            ? artifacts.combined_text
+            : null;
         debug.parsed = pipelineParsed;
 
         const extractionErrs = artifacts?.extraction_errors;
@@ -949,6 +955,7 @@ export async function POST(
           state: parsed.state ?? doc.state,
           legal_description: parsed.legal_description,
           extracted_text: extractedText,
+          combined_extraction_text: combinedPipelineText,
           merged: dealScoreInput as Record<string, unknown>,
           development_signals:
             (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
@@ -963,6 +970,7 @@ export async function POST(
           locationContext,
           drillSnapshot: drillSnap,
           extractedText,
+          combinedExtractionText: combinedPipelineText,
         });
         console.log(`${LOG_PREFIX} PRE_UNDERWRITING_VALUATION`, {
           documentId,
@@ -1549,6 +1557,7 @@ export async function POST(
           state: parsed.state ?? doc.state,
           legal_description: parsed.legal_description,
           extracted_text: extractedText,
+          combined_extraction_text: combinedPipelineText,
           merged: (dealScoreInputForPipeline ?? {}) as Record<string, unknown>,
           development_signals:
             (dealScoreInputForPipeline?.development_signals as DevelopmentSignalsSnapshot | null) ??
@@ -1579,6 +1588,7 @@ export async function POST(
               state: parsed.state ?? doc.state,
               legal_description: parsed.legal_description,
               extracted_text: extractedText,
+              combined_extraction_text: combinedPipelineText,
               merged: (dealScoreInputForPipeline ?? {}) as Record<string, unknown>,
               development_signals:
                 (dealScoreInputForPipeline?.development_signals as DevelopmentSignalsSnapshot | null) ??
@@ -1586,6 +1596,7 @@ export async function POST(
             }),
             drillSnapshot: drillSnapshotFromDealInput(dealScoreInputForPipeline ?? {}),
             extractedText,
+            combinedExtractionText: combinedPipelineText,
           }),
       };
       const fallbackExtractionResponse: SavedExtraction = {

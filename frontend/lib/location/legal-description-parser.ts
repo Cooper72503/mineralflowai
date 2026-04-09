@@ -76,7 +76,8 @@ export function parsePlssLegalDescription(raw: string | null | undefined): Pick<
 
   const aliM =
     s.match(/\b((?:NE|NW|SE|SW)\s*\/\s*4)\b/i) ??
-    s.match(/\b((?:NE|NW|SE|SW)\s+1\s*\/\s*4)\b/i);
+    s.match(/\b((?:NE|NW|SE|SW)\s+1\s*\/\s*4)\b/i) ??
+    s.match(/\b([NSEW])\s+1\s*\/\s*2\b/i);
   if (aliM) out.plss_aliquot = aliM[1].replace(/\s+/g, " ").trim();
 
   return out;
@@ -272,6 +273,20 @@ export function inferCountyAndStateFromTexts(
     }
   }
 
+  // "County: Stark County, North Dakota" / labeled heading lines
+  const labeledCountyState =
+    /County:\s*([A-Za-z][A-Za-z\s'.-]{0,56}?)\s*,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/;
+  const mLabel = combined.match(labeledCountyState);
+  if (mLabel?.[1] && mLabel[2]) {
+    let chunk = mLabel[1].replace(/\s+/g, " ").trim();
+    chunk = chunk.replace(/\s+County$/i, "");
+    const state = mLabel[2].replace(/\s+/g, " ").trim();
+    if (chunk.length >= 2 && !/^(the|a|an|being|all|part)$/i.test(chunk)) {
+      const countyLabel = /\bCounty\b/i.test(mLabel[1]) ? mLabel[1].replace(/\s+/g, " ").trim() : `${chunk} County`;
+      return { county: countyLabel, state };
+    }
+  }
+
   const patterns: RegExp[] = [
     /\b([A-Za-z][A-Za-z\s'.-]{1,48}?)\s+County,\s*(?:Texas|TX)\b/i,
     /\b(?:in|within|situated\s+in)\s+(?:the\s+)?([A-Za-z][A-Za-z\s'.-]{1,48}?)\s+County\b/i,
@@ -285,8 +300,8 @@ export function inferCountyAndStateFromTexts(
       let c = m[1].replace(/\s+/g, " ").trim();
       c = c.replace(/\s+County$/i, "");
       if (c.length >= 2 && !/^(the|a|an|being|all|part)$/i.test(c)) {
-        const st = inferTexasStateFromText(combined);
-        return { county: c, state: st };
+        const st = inferUSStateFromText(combined);
+        return { county: `${c} County`, state: st };
       }
     }
   }
@@ -307,8 +322,29 @@ export function inferCountyFromTexts(...sources: (string | null | undefined)[]):
 export function extractAcreageFromTexts(...sources: (string | null | undefined)[]): number | null {
   const combined = sources.filter((s): s is string => typeof s === "string" && s.trim().length > 0).join("\n\n");
   if (!combined.trim()) return null;
+  const labeled = combined.match(/\bAcreage:\s*(\d+(?:\.\d+)?)\s*(?:acres?\b)?/i);
+  if (labeled) {
+    const n = Number(labeled[1]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
   const m = combined.match(/\b(\d+(?:\.\d+)?)\s+acres?\b/i);
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * When `legal_description` is empty, pull the block after a "Legal Description:" label from full OCR/PDF text.
+ */
+export function extractLegalDescriptionBlockFromText(raw: string | null | undefined): string | null {
+  const s = normalizeWhitespace(raw);
+  if (!s) return null;
+  const m = s.match(
+    /\bLegal\s+Description\s*:\s*([\s\S]{20,12000}?)(?=\n\s*(?:County|State|Acreage|Recording|Effective|Witness|Notary|Mineral|PAGE)\b|$)/i
+  );
+  if (m?.[1]) {
+    const block = normalizeWhitespace(m[1]);
+    return block.length >= 12 ? block : null;
+  }
+  return null;
 }

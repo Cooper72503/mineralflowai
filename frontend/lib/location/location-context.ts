@@ -5,7 +5,7 @@
 
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { hasRegionalDrillFromDealInput } from "@/lib/development/detect-development-signals";
-import { parseLegalDescription } from "./legal-description-parser";
+import { extractLegalDescriptionBlockFromText, parseLegalDescription } from "./legal-description-parser";
 
 export type LocationConfidence = "High" | "Medium" | "Low";
 export type NearbyActivitySignal = "High" | "Moderate" | "Low" | "Unknown";
@@ -33,12 +33,16 @@ function normalizeCountyLabel(county: string | null | undefined): string | null 
 /** Combined text for scanning (legal description primary). */
 function scanText(
   legal_description: string | null | undefined,
-  extracted_text: string | null | undefined
+  extracted_text: string | null | undefined,
+  combined_extraction_text?: string | null
 ): string {
   const parts: string[] = [];
   if (legal_description?.trim()) parts.push(legal_description.trim());
   if (extracted_text?.trim()) {
     parts.push(extracted_text.trim().slice(0, 80_000));
+  }
+  if (combined_extraction_text?.trim()) {
+    parts.push(combined_extraction_text.trim().slice(0, 80_000));
   }
   return parts.join("\n\n");
 }
@@ -297,20 +301,27 @@ export type BuildLocationContextParams = {
   state: string | null;
   legal_description: string | null;
   extracted_text: string | null;
+  /** PDF + OCR + normalized layers from structured extraction — same corpus as valuation full-text fallbacks. */
+  combined_extraction_text?: string | null;
   merged: Record<string, unknown>;
   development_signals: DevelopmentSignalsSnapshot | null;
 };
 
 export function buildLocationContext(params: BuildLocationContextParams): LocationContext {
   const { county, legal_description, extracted_text, merged, development_signals } = params;
-  const scan = scanText(legal_description, extracted_text);
+  const legalBlock =
+    !legal_description?.trim() && extracted_text?.trim()
+      ? extractLegalDescriptionBlockFromText(extracted_text)
+      : null;
+  const legalForScan = legal_description?.trim() ? legal_description.trim() : legalBlock;
+  const scan = scanText(legalForScan, extracted_text, params.combined_extraction_text);
   const parts = parseLegalDescriptionParts(scan);
   const { tier: parsedTier } = formatParsedLegalLine(parts);
-  const legalHasText = Boolean(legal_description?.trim()) || Boolean(scan.trim());
+  const legalHasText = Boolean(legalForScan?.trim()) || Boolean(scan.trim());
   const { display: legalDescriptionDisplay } = formatLegalDescriptionDisplay({
     county,
     state: params.state,
-    legal_description,
+    legal_description: legalForScan,
     extracted_text,
   });
 

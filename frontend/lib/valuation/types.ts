@@ -89,4 +89,9 @@ export type RunPreUnderwritingValuationArgs = {
   extractedText: string;
   /** When present, merged with {@link extractedText} inside {@link buildValuationInput} as full document text. */
   raw_text?: string | null;
+  /**
+   * Full combined PDF + OCR + normalized text from {@link runStructuredExtraction} artifacts when available.
+   * Ensures valuation fallbacks see the same corpus the extractor used.
+   */
+  combinedExtractionText?: string | null;
 };

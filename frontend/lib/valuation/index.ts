@@ -52,7 +52,10 @@ const FALLBACK: DealValuationOutput = {
  */
 export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArgs): DealValuationOutput {
   try {
-    const fullText = args.extractedText || args.raw_text || "";
+    const fullText = [args.extractedText, args.raw_text, args.combinedExtractionText]
+      .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+      .join("\n\n")
+      .trim();
 
     const vIn = buildValuationInput({
       documentId: args.documentId ?? undefined,
@@ -63,6 +66,7 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       drillSnapshot: args.drillSnapshot,
       extractedText: args.extractedText,
       raw_text: args.raw_text,
+      combinedExtractionText: args.combinedExtractionText,
     });
 
     logValuationDev("valuation_input", {
@@ -185,5 +189,5 @@ export type {
   RunPreUnderwritingValuationArgs,
   ValuationConfidenceReasoning,
 } from "./types";
-export { buildValuationInput } from "./build-valuation-input";
+export { buildValuationInput, readCombinedPipelineTextFromStructured } from "./build-valuation-input";
 export { computeValuationConfidence } from "./confidence";

@@ -24,7 +24,7 @@ import {
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { buildLocationContext } from "@/lib/location/location-context";
-import { runPreUnderwritingValuation } from "@/lib/valuation";
+import { readCombinedPipelineTextFromStructured, runPreUnderwritingValuation } from "@/lib/valuation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -206,6 +206,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const merged = mergeStructuredFields(ext.structured_data, ext.structured_json) as Record<string, unknown>;
+    const combinedPipelineText = readCombinedPipelineTextFromStructured(merged);
     const stored = dealScoreFromExtractionColumns(ext.structured_data, ext.structured_json);
 
     if (process.env.DEAL_SCORE_TRACE === "1") {
@@ -294,6 +295,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       state: resolvedState ?? doc.state,
       legal_description: ext.legal_description,
       extracted_text: ext.extracted_text ?? "",
+      combined_extraction_text: combinedPipelineText,
       merged: dealScoreInput as Record<string, unknown>,
       development_signals:
         (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
@@ -331,6 +333,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       locationContext,
       drillSnapshot: drillSnapshotFromDealInput(dealScoreInput),
       extractedText: ext.extracted_text ?? "",
+      combinedExtractionText: combinedPipelineText,
     });
 
     const oldStoredScore = stored?.score ?? null;

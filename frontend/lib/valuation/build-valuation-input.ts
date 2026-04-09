@@ -11,12 +11,14 @@ import type { DrillDifficultySnapshotSnake } from "@/lib/scoring/drillDifficulty
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import {
   extractAcreageFromTexts,
+  extractLegalDescriptionBlockFromText,
   inferCountyAndStateFromTexts,
   inferCountyFromTexts,
   inferUSStateFromText,
   mergeLegalDescriptionParseResults,
   parseLegalDescription,
 } from "@/lib/location/legal-description-parser";
+import { preferNonEmptyString } from "@/lib/deals/dashboard-normalize";
 
 function readString(rec: Record<string, unknown>, keys: string[]): string | null {
   for (const k of keys) {
@@ -24,6 +26,50 @@ function readString(rec: Record<string, unknown>, keys: string[]): string | null
     if (typeof v === "string" && v.trim()) return v.trim();
   }
   return null;
+}
+
+/** Overlay `parsed` onto `dealScoreInput` without letting null/empty strings wipe existing values. */
+function mergeDealScoreWithParsed(
+  dsi: Record<string, unknown>,
+  parsed: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...dsi };
+  for (const [k, v] of Object.entries(parsed)) {
+    if (v === null || v === undefined) continue;
+    if (typeof v === "string" && !v.trim()) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Reads `combined_text` saved inside `extraction_artifacts` on structured extraction blobs (process + DB).
+ */
+export function readCombinedPipelineTextFromStructured(merged: Record<string, unknown> | null | undefined): string | null {
+  if (!merged || typeof merged !== "object") return null;
+  const art = merged.extraction_artifacts;
+  if (art == null || typeof art !== "object" || Array.isArray(art)) return null;
+  const c = (art as Record<string, unknown>).combined_text;
+  return typeof c === "string" && c.trim().length > 0 ? c : null;
+}
+
+function buildFullDocumentText(args: {
+  extractedText: string;
+  raw_text?: string | null;
+  combinedExtractionText?: string | null;
+}): string {
+  const parts = [args.extractedText, args.raw_text, args.combinedExtractionText].filter(
+    (s): s is string => typeof s === "string" && s.trim().length > 0
+  );
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const p of parts) {
+    const key = p.trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(key);
+  }
+  return unique.join("\n\n").trim();
 }
 
 function monthlyMid(fs: FinancialSummary | null | undefined): number | null {
@@ -58,16 +104,30 @@ export function buildValuationInput(args: {
   drillSnapshot: DrillDifficultySnapshotSnake;
   extractedText: string;
   raw_text?: string | null;
+  combinedExtractionText?: string | null;
 }): DealValuationInput {
   const { parsed, dealScoreInput: dsi } = args;
-  const merged: Record<string, unknown> = { ...dsi, ...parsed };
+  const merged = mergeDealScoreWithParsed(dsi, parsed);
 
-  const fullText = args.extractedText || args.raw_text || "";
+  const fullText = buildFullDocumentText({
+    extractedText: args.extractedText ?? "",
+    raw_text: args.raw_text,
+    combinedExtractionText: args.combinedExtractionText,
+  });
 
-  const legalDescRaw =
-    (typeof parsed.legal_description === "string" && parsed.legal_description.trim()
-      ? parsed.legal_description.trim()
-      : null) ?? readString(merged, ["legal_description"]);
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[valuation-fulltext]", {
+      len: fullText.length,
+      sample: fullText.slice(0, 280),
+    });
+  }
+
+  const legalDescFromRecords = preferNonEmptyString(
+    typeof parsed.legal_description === "string" ? parsed.legal_description : null,
+    readString(merged, ["legal_description"])
+  );
+  const legalFromLabels = extractLegalDescriptionBlockFromText(fullText);
+  const legalDescRaw = preferNonEmptyString(legalDescFromRecords, legalFromLabels);
 
   const parsedFromFullText = parseLegalDescription(fullText);
   const parsedFromStructuredLegal = parseLegalDescription(legalDescRaw);
@@ -75,6 +135,10 @@ export function buildValuationInput(args: {
     parsedFromFullText,
     parsedFromStructuredLegal
   );
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[valuation-parsed-legal]", legal_description_parsed);
+  }
 
   const locationHaystack = [legalDescRaw, fullText].filter(Boolean).join("\n\n");
 
@@ -90,6 +154,9 @@ export function buildValuationInput(args: {
   } else {
     county = inferredLoc.county ?? countyInferredFromText;
     county_source = county?.trim() ? "inferred" : null;
+    if (process.env.NODE_ENV !== "production" && county?.trim()) {
+      console.log("[valuation-fallback-county]", { county, from: inferredLoc.county ? "county_state" : "county_only" });
+    }
   }
 
   let state = stateExtracted ?? null;
@@ -99,6 +166,9 @@ export function buildValuationInput(args: {
   } else {
     state = inferredLoc.state ?? inferUSStateFromText(locationHaystack) ?? inferUSStateFromText(fullText);
     state_source = state?.trim() ? "inferred" : null;
+    if (process.env.NODE_ENV !== "production" && state?.trim()) {
+      console.log("[valuation-fallback-state]", { state });
+    }
   }
 
   const acreage = pickFirstFiniteNumber(
@@ -111,6 +181,10 @@ export function buildValuationInput(args: {
     extractAcreageFromTexts(fullText),
     extractAcreageFromTexts(legalDescRaw)
   );
+
+  if (process.env.NODE_ENV !== "production" && acreage != null && acreage > 0) {
+    console.log("[valuation-fallback-acreage]", { acreage });
+  }
 
   const royaltyRaw =
     readString(merged, ["royalty_rate", "lease_royalty", "royalty"]) ??
@@ -166,12 +240,17 @@ export function buildValuationInput(args: {
     extracted_text_sample: fullText.slice(0, 4000) || null,
   };
 
-  console.log("[valuation-debug]", {
-    county: out.county,
-    state: out.state,
-    acreage: out.acreage,
-    parsedLegal: out.legal_description_parsed,
-  });
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[valuation-input-final]", {
+      county: out.county,
+      state: out.state,
+      acreage: out.acreage,
+      county_source: out.county_source,
+      state_source: out.state_source,
+      legal_len: out.legal_description?.length ?? 0,
+      parsed_legal: out.legal_description_parsed,
+    });
+  }
 
   return out;
 }
