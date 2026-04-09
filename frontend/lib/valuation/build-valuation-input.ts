@@ -20,6 +20,42 @@ import {
 } from "@/lib/location/legal-description-parser";
 import { preferNonEmptyString } from "@/lib/deals/dashboard-normalize";
 
+/**
+ * Haystack for valuation fallbacks: prefer pipeline {@link combinedExtractionText} (PDF + OCR + normalized),
+ * then primary stored extraction, then raw PDF text layer. Deduplicates exact trimmed-string matches only.
+ */
+export function buildValuationHaystackText(args: {
+  extractedText?: string | null;
+  raw_text?: string | null;
+  combinedExtractionText?: string | null;
+}): string {
+  const parts = [args.combinedExtractionText, args.extractedText, args.raw_text].filter(
+    (s): s is string => typeof s === "string" && s.trim().length > 0,
+  );
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const p of parts) {
+    const key = p.trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(key);
+  }
+  return unique.join("\n\n").trim();
+}
+
+/** First finite numeric acreage &gt; 0 (structured fields); skips zero so text fallbacks can win. */
+function pickFirstPositiveAcreage(...values: unknown[]): number | null {
+  for (const v of values) {
+    if (v == null) continue;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    if (typeof v === "string") {
+      const n = parseFloat(v.trim().replace(/,/g, ""));
+      if (!Number.isNaN(n) && Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return null;
+}
+
 function readString(rec: Record<string, unknown>, keys: string[]): string | null {
   for (const k of keys) {
     const v = rec[k];
@@ -53,23 +89,13 @@ export function readCombinedPipelineTextFromStructured(merged: Record<string, un
   return typeof c === "string" && c.trim().length > 0 ? c : null;
 }
 
-function buildFullDocumentText(args: {
-  extractedText: string;
-  raw_text?: string | null;
-  combinedExtractionText?: string | null;
-}): string {
-  const parts = [args.extractedText, args.raw_text, args.combinedExtractionText].filter(
-    (s): s is string => typeof s === "string" && s.trim().length > 0
-  );
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const p of parts) {
-    const key = p.trim();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(key);
-  }
-  return unique.join("\n\n").trim();
+/** Raw PDF text layer saved in {@link ExtractionArtifacts} on structured blobs (process + DB). */
+export function readRawPdfTextFromStructured(merged: Record<string, unknown> | null | undefined): string | null {
+  if (!merged || typeof merged !== "object") return null;
+  const art = merged.extraction_artifacts;
+  if (art == null || typeof art !== "object" || Array.isArray(art)) return null;
+  const r = (art as Record<string, unknown>).raw_pdf_text;
+  return typeof r === "string" && r.trim().length > 0 ? r : null;
 }
 
 function monthlyMid(fs: FinancialSummary | null | undefined): number | null {
@@ -107,19 +133,47 @@ export function buildValuationInput(args: {
   combinedExtractionText?: string | null;
 }): DealValuationInput {
   const { parsed, dealScoreInput: dsi } = args;
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[valuation-pre-merge-loc]", {
+      county: dsi.county,
+      state: dsi.state,
+      acreage: dsi.acreage,
+    });
+    console.log("[valuation-parsed-structured-loc]", {
+      county: parsed.county,
+      state: parsed.state,
+      acreage: parsed.acreage,
+      legal_description:
+        typeof parsed.legal_description === "string"
+          ? parsed.legal_description.slice(0, 160)
+          : parsed.legal_description,
+    });
+  }
+
   const merged = mergeDealScoreWithParsed(dsi, parsed);
 
-  const fullText = buildFullDocumentText({
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[valuation-post-merge-loc]", {
+      county: merged.county,
+      state: merged.state,
+      acreage: merged.acreage,
+    });
+  }
+
+  const fullText = buildValuationHaystackText({
     extractedText: args.extractedText ?? "",
     raw_text: args.raw_text,
     combinedExtractionText: args.combinedExtractionText,
   });
 
   if (process.env.NODE_ENV !== "production") {
-    console.log("[valuation-fulltext]", {
-      len: fullText.length,
-      sample: fullText.slice(0, 280),
+    console.log("[valuation-source-fields]", {
+      hasExtractedText: !!(args.extractedText && String(args.extractedText).trim()),
+      hasRawText: !!(args.raw_text && String(args.raw_text).trim()),
+      hasCombinedExtractionText: !!(args.combinedExtractionText && String(args.combinedExtractionText).trim()),
     });
+    console.log("[valuation-fulltext-length]", fullText.length);
+    console.log("[valuation-fulltext-sample]", fullText.slice(0, 500));
   }
 
   const legalDescFromRecords = preferNonEmptyString(
@@ -154,9 +208,6 @@ export function buildValuationInput(args: {
   } else {
     county = inferredLoc.county ?? countyInferredFromText;
     county_source = county?.trim() ? "inferred" : null;
-    if (process.env.NODE_ENV !== "production" && county?.trim()) {
-      console.log("[valuation-fallback-county]", { county, from: inferredLoc.county ? "county_state" : "county_only" });
-    }
   }
 
   let state = stateExtracted ?? null;
@@ -166,24 +217,24 @@ export function buildValuationInput(args: {
   } else {
     state = inferredLoc.state ?? inferUSStateFromText(locationHaystack) ?? inferUSStateFromText(fullText);
     state_source = state?.trim() ? "inferred" : null;
-    if (process.env.NODE_ENV !== "production" && state?.trim()) {
-      console.log("[valuation-fallback-state]", { state });
-    }
   }
 
-  const acreage = pickFirstFiniteNumber(
-    merged.acreage,
-    merged.acres,
-    merged.net_acres,
-    merged.nma,
-    merged.net_mineral_acres,
-    parsed.acreage,
-    extractAcreageFromTexts(fullText),
-    extractAcreageFromTexts(legalDescRaw)
-  );
+  const acreage =
+    pickFirstPositiveAcreage(
+      merged.acreage,
+      merged.acres,
+      merged.net_acres,
+      merged.nma,
+      merged.net_mineral_acres,
+      parsed.acreage,
+    ) ??
+    extractAcreageFromTexts(fullText) ??
+    extractAcreageFromTexts(legalDescRaw);
 
-  if (process.env.NODE_ENV !== "production" && acreage != null && acreage > 0) {
-    console.log("[valuation-fallback-acreage]", { acreage });
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[valuation-fallback-county]", county);
+    console.log("[valuation-fallback-state]", state);
+    console.log("[valuation-fallback-acreage]", acreage);
   }
 
   const royaltyRaw =

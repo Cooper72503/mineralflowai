@@ -488,4 +488,83 @@ describe("pre-underwriting valuation scenarios", () => {
     expect(out.estimated_total_value_high).toBeGreaterThan(0);
     expect(out.confidence === "medium" || out.confidence === "high").toBe(true);
   });
+
+  it("data flow: thin extractedText + full combinedExtractionText infers county/state/acreage/legal when structured is null", () => {
+    const combined = [
+      "Mineral Property Summary",
+      "",
+      "County: Stark County, North Dakota",
+      "Acreage: 24 acres",
+      "",
+      "Legal Description:",
+      "Township 140 North",
+      "Range 94 West",
+      "Section 4 SE 1/4",
+    ].join("\n");
+    const parsed = {
+      county: null as string | null,
+      state: null as string | null,
+      legal_description: null as string | null,
+      acreage: null as number | null,
+      royalty_rate: "1/5" as string | null,
+      ownership_percent: 0.25,
+      document_type: "Mineral Deed",
+    };
+    const dealScoreInput: Record<string, unknown> = {
+      royalty_rate: "1/5",
+      ownership_percent: 0.25,
+    };
+    const loc = buildLocationContext({
+      county: null,
+      state: null,
+      legal_description: null,
+      extracted_text: "header only",
+      merged: dealScoreInput,
+      development_signals: null,
+    });
+    const drill = drillSnapshotFromDealInput(dealScoreInput);
+    const vIn = buildValuationInput({
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText: "header only",
+      combinedExtractionText: combined,
+    });
+    expect(vIn.county).toBe("Stark County");
+    expect(vIn.state).toBe("North Dakota");
+    expect(vIn.acreage).toBe(24);
+    expect(vIn.legal_description_parsed?.plss_township).toBe("140 North");
+
+    const out = runPreUnderwritingValuation({
+      documentId: "doc-combined-only",
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      dealScore: baseDealScore(),
+      financialSummary: null,
+      locationContext: loc,
+      drillSnapshot: drill,
+      extractedText: "header only",
+      combinedExtractionText: combined,
+    });
+    expect(out.deal_type).not.toBe("unknown");
+    expect(out._value_method).not.toBe("error_fallback");
+  });
+
+  it("merge: zero acreage on deal score does not block acreage from fullText", () => {
+    const body = "County: Stark County, North Dakota\nAcreage: 24 acres\n";
+    const parsed = { county: null, state: null, legal_description: null, acreage: null };
+    const dealScoreInput: Record<string, unknown> = { acreage: 0 };
+    const drill = drillSnapshotFromDealInput({});
+    const vIn = buildValuationInput({
+      parsed: parsed as Record<string, unknown>,
+      dealScoreInput,
+      financialSummary: null,
+      locationContext: null,
+      drillSnapshot: drill,
+      extractedText: body,
+    });
+    expect(vIn.acreage).toBe(24);
+  });
 });

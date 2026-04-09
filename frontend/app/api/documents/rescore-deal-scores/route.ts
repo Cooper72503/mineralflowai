@@ -22,7 +22,11 @@ import {
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { buildLocationContext } from "@/lib/location/location-context";
-import { readCombinedPipelineTextFromStructured, runPreUnderwritingValuation } from "@/lib/valuation";
+import {
+  readCombinedPipelineTextFromStructured,
+  readRawPdfTextFromStructured,
+  runPreUnderwritingValuation,
+} from "@/lib/valuation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -138,7 +142,14 @@ export async function POST(request: Request) {
       if (!doc) continue;
 
       const merged = mergeStructuredFields(row.structured_data, row.structured_json) as Record<string, unknown>;
-      const combinedPipelineText = readCombinedPipelineTextFromStructured(merged);
+      let combinedPipelineText = readCombinedPipelineTextFromStructured(merged);
+      const rawPdfForValuation = readRawPdfTextFromStructured(merged);
+      if (!combinedPipelineText?.trim()) {
+        const parts = [row.extracted_text ?? "", rawPdfForValuation ?? ""].filter(
+          (s) => typeof s === "string" && s.trim().length > 0,
+        );
+        if (parts.length) combinedPipelineText = parts.join("\n\n");
+      }
       const existing = dealScoreFromMerged(merged);
       const needsValuationBackfill =
         merged.pre_underwriting_valuation == null || typeof merged.pre_underwriting_valuation !== "object";
@@ -262,8 +273,11 @@ export async function POST(request: Request) {
         locationContext,
         drillSnapshot: drillSnap,
         extractedText: row.extracted_text ?? "",
+        raw_text: rawPdfForValuation,
         combinedExtractionText: combinedPipelineText,
       });
+
+      console.log("[valuation-final-before-save]", preUnderwritingValuation);
 
       if (
         existing != null &&

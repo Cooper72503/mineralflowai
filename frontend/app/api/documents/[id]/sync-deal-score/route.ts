@@ -24,7 +24,11 @@ import {
 import { buildFinancialSummary } from "@/lib/financial/financial-summary";
 import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-development-signals";
 import { buildLocationContext } from "@/lib/location/location-context";
-import { readCombinedPipelineTextFromStructured, runPreUnderwritingValuation } from "@/lib/valuation";
+import {
+  readCombinedPipelineTextFromStructured,
+  readRawPdfTextFromStructured,
+  runPreUnderwritingValuation,
+} from "@/lib/valuation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -206,7 +210,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const merged = mergeStructuredFields(ext.structured_data, ext.structured_json) as Record<string, unknown>;
-    const combinedPipelineText = readCombinedPipelineTextFromStructured(merged);
+    let combinedPipelineText = readCombinedPipelineTextFromStructured(merged);
+    const rawPdfForValuation = readRawPdfTextFromStructured(merged);
+    if (!combinedPipelineText?.trim()) {
+      const parts = [ext.extracted_text ?? "", rawPdfForValuation ?? ""].filter(
+        (s) => typeof s === "string" && s.trim().length > 0,
+      );
+      if (parts.length) combinedPipelineText = parts.join("\n\n");
+    }
     const stored = dealScoreFromExtractionColumns(ext.structured_data, ext.structured_json);
 
     if (process.env.DEAL_SCORE_TRACE === "1") {
@@ -333,8 +344,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       locationContext,
       drillSnapshot: drillSnapshotFromDealInput(dealScoreInput),
       extractedText: ext.extracted_text ?? "",
+      raw_text: rawPdfForValuation,
       combinedExtractionText: combinedPipelineText,
     });
+
+    console.log("[valuation-final-before-save]", preUnderwritingValuation);
 
     const oldStoredScore = stored?.score ?? null;
     console.log(`${LOG_PREFIX} OLD STORED SCORE`, oldStoredScore);

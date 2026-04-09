@@ -314,6 +314,8 @@ export async function POST(
       let preUnderwritingValuation: DealValuationOutput | null = null;
       /** Combined PDF + OCR + normalized text from structured extraction (valuation / location fallbacks). */
       let combinedPipelineText: string | null = null;
+      /** Raw PDF text layer (same as extraction meta) — passed to valuation when distinct from extractedText. */
+      let rawPdfTextForValuation: string | null = null;
       try {
         const contentType = request.headers.get("content-type") ?? "";
         if (contentType.includes("application/json")) {
@@ -692,6 +694,11 @@ export async function POST(
           assertString(extractedText, failureStep);
           log("TEXT_EXTRACTION_SUCCESS", { textLength: extractedText.length });
           debug.extractedTextLength = extractedText.length;
+          const em = debug.extractionMeta as Record<string, unknown> | undefined;
+          const rp = typeof em?.raw_pdf_text === "string" ? em.raw_pdf_text : "";
+          if (rp.trim()) rawPdfTextForValuation = rp;
+          console.log("[process-extractedText-length]", extractedText.length);
+          console.log("[process-extracted-sample]", (extractedText || "").slice(0, 500));
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -815,6 +822,13 @@ export async function POST(
           artifacts && typeof artifacts.combined_text === "string"
             ? artifacts.combined_text
             : null;
+        if (
+          artifacts &&
+          typeof artifacts.raw_pdf_text === "string" &&
+          artifacts.raw_pdf_text.trim()
+        ) {
+          rawPdfTextForValuation = artifacts.raw_pdf_text;
+        }
         debug.parsed = pipelineParsed;
 
         const extractionErrs = artifacts?.extraction_errors;
@@ -861,6 +875,28 @@ export async function POST(
         openAiError = msg;
         debug.structured_extraction_throw = msg;
         log("STRUCTURED_EXTRACTION_ERROR", { error_message: msg });
+      }
+
+      {
+        const metaFb = (debug.extractionMeta as Record<string, unknown> | undefined) ?? {};
+        const rawFb = typeof metaFb.raw_pdf_text === "string" ? metaFb.raw_pdf_text : "";
+        const ocrFb = typeof metaFb.ocr_text === "string" ? metaFb.ocr_text : "";
+        if (!rawPdfTextForValuation?.trim() && rawFb.trim()) {
+          rawPdfTextForValuation = rawFb;
+        }
+        if (!combinedPipelineText?.trim()) {
+          const parts = [extractedText ?? "", ocrFb, rawFb].filter(
+            (s) => typeof s === "string" && s.trim().length > 0,
+          );
+          if (parts.length) {
+            combinedPipelineText = parts.join("\n\n");
+          }
+        }
+        console.log("[process-combined-text-length]", combinedPipelineText?.length ?? 0);
+        console.log(
+          "[process-text-sample]",
+          (combinedPipelineText || extractedText || "").slice(0, 500),
+        );
       }
 
       try {
@@ -961,6 +997,20 @@ export async function POST(
             (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
         });
 
+        console.log("[valuation-call-has-extractedText]", !!String(extractedText ?? "").trim());
+        console.log(
+          "[valuation-call-has-combinedExtractionText]",
+          !!String(combinedPipelineText ?? "").trim(),
+        );
+        console.log(
+          "[valuation-call-combinedExtractionText-length]",
+          combinedPipelineText?.length ?? 0,
+        );
+        console.log(
+          "[valuation-call-has-rawPdfText]",
+          !!String(rawPdfTextForValuation ?? "").trim(),
+        );
+
         preUnderwritingValuation = runPreUnderwritingValuation({
           documentId,
           parsed: parsed as unknown as Record<string, unknown>,
@@ -970,6 +1020,7 @@ export async function POST(
           locationContext,
           drillSnapshot: drillSnap,
           extractedText,
+          raw_text: rawPdfTextForValuation,
           combinedExtractionText: combinedPipelineText,
         });
         console.log(`${LOG_PREFIX} PRE_UNDERWRITING_VALUATION`, {
@@ -1023,6 +1074,11 @@ export async function POST(
           location_context: locationContext,
           pre_underwriting_valuation: preUnderwritingValuation,
         };
+
+        console.log(
+          "[valuation-final-before-save]",
+          structuredExtraction.pre_underwriting_valuation,
+        );
 
         assertPlainObject(structuredExtraction, "DB_INSERT_START");
 
@@ -1596,6 +1652,7 @@ export async function POST(
             }),
             drillSnapshot: drillSnapshotFromDealInput(dealScoreInputForPipeline ?? {}),
             extractedText,
+            raw_text: rawPdfTextForValuation,
             combinedExtractionText: combinedPipelineText,
           }),
       };
