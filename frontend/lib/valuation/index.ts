@@ -93,6 +93,8 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       locationContext: args.locationContext,
       dealScoreInput: args.dealScoreInput,
       dealType,
+      county: vIn.county,
+      state: vIn.state,
     });
 
     const nriResult = estimateDirectionalNriProxy(vIn);
