@@ -151,8 +151,12 @@ export async function POST(request: Request) {
         if (parts.length) combinedPipelineText = parts.join("\n\n");
       }
       const existing = dealScoreFromMerged(merged);
+      const storedValuation = merged.pre_underwriting_valuation as Record<string, unknown> | null | undefined;
       const needsValuationBackfill =
-        merged.pre_underwriting_valuation == null || typeof merged.pre_underwriting_valuation !== "object";
+        storedValuation == null ||
+        typeof storedValuation !== "object" ||
+        storedValuation.deal_type === "unknown" ||
+        storedValuation._value_method === "error_fallback";
       if (existing != null && existing.score !== 0 && !needsValuationBackfill) continue;
 
       const baseline: Record<string, unknown> = { ...merged };

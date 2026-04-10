@@ -366,8 +366,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const needsLocationBackfill =
       merged.location_context == null || typeof merged.location_context !== "object";
 
+    const storedValuation = merged.pre_underwriting_valuation as Record<string, unknown> | null | undefined;
     const needsValuationBackfill =
-      merged.pre_underwriting_valuation == null || typeof merged.pre_underwriting_valuation !== "object";
+      storedValuation == null ||
+      typeof storedValuation !== "object" ||
+      storedValuation.deal_type === "unknown" ||
+      storedValuation._value_method === "error_fallback";
 
     if (
       stored != null &&

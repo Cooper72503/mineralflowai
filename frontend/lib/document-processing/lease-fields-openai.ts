@@ -43,20 +43,21 @@ function assertPlainObject(
   }
 }
 
-const LEASE_PARSE_SYSTEM = `You are a parser for mineral lease and deed documents. Given extracted text from a document, output a JSON object with exactly these keys (use null for any value you cannot find):
+const LEASE_PARSE_SYSTEM = `You are a parser for mineral rights documents including leases, deeds, assignments, and property summaries. Given extracted text from a document, output a JSON object with exactly these keys (use null for any value you cannot find):
 - grantor (string or null): party granting / conveying (use when the instrument says Grantor or is a deed; for a lease you may use the lessor here too, or null if only Lessor is labeled)
 - grantee (string or null): party receiving the interest (Grantee on deeds/assignments; may match Lessee on leases)
 - lessor (string or null): party granting the lease / mineral rights (Lessor in a lease)
 - lessee (string or null): party receiving the lease / mineral rights (Lessee in a lease)
-- county (string or null): county name
+- county (string or null): county name (e.g. "Stark County" or "Stark" — include the word County if present)
 - state (string or null): state name or abbreviation
-- legal_description (string or null): legal land description
+- legal_description (string or null): legal land description (PLSS, metes and bounds, abstract/survey, etc.)
 - effective_date (string or null): effective date of the lease (any clear date format)
 - recording_date (string or null): date recorded
 - royalty_rate (string or null): royalty percentage or fraction, e.g. "1/8" or "12.5%"
 - term_length (string or null): primary term or duration
+- acreage (number or null): total acres described or conveyed, e.g. 24 or 320.5 — extract from "Acreage: 24 acres", "24-acre tract", "320.5 NMA", or any clear acreage statement
 - mailing_address (string or null): owner or notice mailing block when clearly present
-- document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Assignment of Oil and Gas Lease", "Oil and Gas Lease" — use null if unclear
+- document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Assignment of Oil and Gas Lease", "Oil and Gas Lease", "Mineral Property Summary" — use null if unclear
 - confidence_score (number): your confidence in the overall extraction, between 0 and 1 (e.g. 0.85).
 
 When the text has explicit headings such as "Grantor", "GRANTOR:", "Grantee", or "GRANTEE:", copy those names into grantor and grantee (not into lessor/lessee unless the document is clearly a lease using Lessor/Lessee labels).
@@ -245,6 +246,14 @@ export async function parseLeaseFieldsWithOpenAi(
       }
       return 0;
     };
+    const numPositive = (v: unknown): number | null => {
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+      if (typeof v === "string") {
+        const n = parseFloat(v.replace(/,/g, ""));
+        if (!Number.isNaN(n) && Number.isFinite(n) && n > 0) return n;
+      }
+      return null;
+    };
     const llmConf = num(parsed.confidence_score);
     const confFloored =
       normalizedForModel.trim().length >= 15
@@ -269,6 +278,7 @@ export async function parseLeaseFieldsWithOpenAi(
         mailing_address: str(parsed.mailing_address),
         document_type: str(parsed.document_type),
         confidence_score: confFloored,
+        acreage: numPositive(parsed.acreage),
       },
       normalizedForModel,
     );
