@@ -20,6 +20,8 @@ export type DealValuationInput = {
   /** Parsed from {@link legal_description} / merged text — used for screening and narratives. */
   legal_description_parsed?: LegalDescriptionParseResult | null;
   acreage?: number | null;
+  /** When acreage is non-null: how it was resolved (drives narrative labeling). */
+  acreage_source?: "extracted" | "inferred_plss" | null;
   royalty_rate?: number | null;
   ownership_percent?: number | null;
   interest_type?: string | null;

@@ -48,7 +48,12 @@ export function buildValuationNarrative(args: {
   }
 
   if (args.input.acreage != null && args.input.acreage > 0) {
-    reasoning.push(`Acreage signal: ${args.input.acreage} acres (document-derived).`);
+    if (args.input.acreage_source === "inferred_plss") {
+      reasoning.push(`Acreage assumed ~${args.input.acreage} acres from PLSS aliquot — confirm actual NMA.`);
+      missing_data.push("confirm acreage (assumed from PLSS aliquot)");
+    } else {
+      reasoning.push(`Acreage signal: ${args.input.acreage} acres (document-derived).`);
+    }
   } else {
     missing_data.push("acreage");
   }

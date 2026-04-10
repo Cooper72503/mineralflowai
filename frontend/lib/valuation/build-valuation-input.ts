@@ -43,6 +43,21 @@ export function buildValuationHaystackText(args: {
   return unique.join("\n\n").trim();
 }
 
+/**
+ * Infer approximate acreage from a PLSS aliquot string.
+ * Quarter sections (NE/4, SW/4, etc.) ≈ 160 acres; half sections (N 1/2, etc.) ≈ 320 acres.
+ * Returns null when the pattern isn't recognized (better to show nothing than a wrong number).
+ */
+function inferAcreageFromPlssAliquot(aliquot: string | null | undefined): number | null {
+  if (!aliquot) return null;
+  const a = aliquot.trim().toUpperCase().replace(/\s+/g, " ");
+  // Quarter section: NE/4, NW/4, SE/4, SW/4, NE 1/4, etc.
+  if (/^(NE|NW|SE|SW)\s*(\/\s*4|1\s*\/\s*4)$/i.test(a)) return 160;
+  // Half section: N 1/2, S 1/2, E 1/2, W 1/2
+  if (/^[NSEW]\s+1\s*\/\s*2$/i.test(a)) return 320;
+  return null;
+}
+
 /** First finite numeric acreage &gt; 0 (structured fields); skips zero so text fallbacks can win. */
 function pickFirstPositiveAcreage(...values: unknown[]): number | null {
   for (const v of values) {
@@ -219,7 +234,7 @@ export function buildValuationInput(args: {
     state_source = state?.trim() ? "inferred" : null;
   }
 
-  const acreage =
+  const acreageExplicit =
     pickFirstPositiveAcreage(
       merged.acreage,
       merged.acres,
@@ -230,6 +245,16 @@ export function buildValuationInput(args: {
     ) ??
     extractAcreageFromTexts(fullText) ??
     extractAcreageFromTexts(legalDescRaw);
+
+  const plssInferredAcreage = acreageExplicit == null
+    ? inferAcreageFromPlssAliquot(legal_description_parsed.plss_aliquot)
+    : null;
+
+  const acreage = acreageExplicit ?? plssInferredAcreage;
+  const acreage_source: "extracted" | "inferred_plss" | null =
+    acreage == null ? null
+    : plssInferredAcreage != null ? "inferred_plss"
+    : "extracted";
 
   if (process.env.NODE_ENV !== "production") {
     console.log("[valuation-fallback-county]", county);
@@ -269,6 +294,7 @@ export function buildValuationInput(args: {
     legal_description: legalDescriptionOut,
     legal_description_parsed,
     acreage,
+    acreage_source,
     royalty_rate,
     ownership_percent,
     interest_type: readString(merged, ["interest_type"]),
