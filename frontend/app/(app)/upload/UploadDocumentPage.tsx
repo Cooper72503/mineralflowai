@@ -14,6 +14,7 @@ export default function UploadDocumentPage() {
   const [documentType, setDocumentType] = useState("");
   const [county, setCounty] = useState("");
   const [state, setState] = useState("");
+  const [legalDescription, setLegalDescription] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
@@ -63,6 +64,8 @@ export default function UploadDocumentPage() {
       const trimmedDocumentType = documentType.trim();
       const trimmedCounty = county.trim();
       const trimmedState = state.trim();
+      const trimmedLegalDescription = legalDescription.trim();
+
       const insertPayload = {
         user_id: user.id,
         file_name: fileName,
@@ -75,13 +78,13 @@ export default function UploadDocumentPage() {
         storage_path: filePath,
       };
 
-      const { error: insertErr } = await supabase
+      const { data: docData, error: insertErr } = await supabase
         .from("documents")
         .insert(insertPayload)
         .select("id")
         .maybeSingle();
 
-      if (insertErr) {
+      if (insertErr || !docData?.id) {
         await supabase.storage.from("documents").remove([filePath]);
         setUploadError(
           "We couldn't save the document record. The file was removed. Please try again."
@@ -90,10 +93,26 @@ export default function UploadDocumentPage() {
         return;
       }
 
+      // If the user provided any extraction hints (legal description, county, state),
+      // seed a preliminary extraction record so sync-deal-score can use them immediately.
+      if (trimmedLegalDescription || trimmedCounty || trimmedState) {
+        await supabase.from("document_extractions").insert({
+          document_id: docData.id,
+          user_id: user.id,
+          extracted_text: "",
+          legal_description: trimmedLegalDescription || null,
+          county: trimmedCounty || null,
+          state: trimmedState || null,
+          confidence_score: 0,
+        });
+        // Ignore errors — this is a best-effort hint; full extraction will fill the rest.
+      }
+
       setFile(null);
       setDocumentType("");
       setCounty("");
       setState("");
+      setLegalDescription("");
       setUploadSuccess("Document uploaded successfully. You can view it in Documents.");
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : String(err);
@@ -111,7 +130,7 @@ export default function UploadDocumentPage() {
     <div className="container">
       <div className="pageHeader">
         <h1>Upload document</h1>
-        <p>Drag and drop or select a file to upload mineral deeds and related documents</p>
+        <p>Upload mineral deeds, leases, and related documents for pre-underwriting analysis</p>
       </div>
 
       <div className="card">
@@ -130,7 +149,7 @@ export default function UploadDocumentPage() {
           </p>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: 400 }}>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: 480 }}>
           <div>
             <label htmlFor="document-type" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
               Document type
@@ -140,36 +159,66 @@ export default function UploadDocumentPage() {
               type="text"
               value={documentType}
               onChange={(e) => setDocumentType(e.target.value)}
-              placeholder="e.g. Mineral Deed, Lease"
+              placeholder="e.g. Mineral Deed, Lease, Mineral Property Summary"
               style={{ width: "100%", padding: "0.5rem", border: "1px solid #e5e5e5", borderRadius: 6 }}
             />
           </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div>
+              <label htmlFor="county" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
+                County
+              </label>
+              <input
+                id="county"
+                type="text"
+                value={county}
+                onChange={(e) => setCounty(e.target.value)}
+                placeholder="e.g. Stark, Reeves"
+                style={{ width: "100%", padding: "0.5rem", border: "1px solid #e5e5e5", borderRadius: 6 }}
+              />
+            </div>
+            <div>
+              <label htmlFor="state" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
+                State
+              </label>
+              <input
+                id="state"
+                type="text"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+                placeholder="e.g. North Dakota, Texas"
+                style={{ width: "100%", padding: "0.5rem", border: "1px solid #e5e5e5", borderRadius: 6 }}
+              />
+            </div>
+          </div>
+
           <div>
-            <label htmlFor="county" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
-              County
+            <label htmlFor="legal-description" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
+              Legal description{" "}
+              <span style={{ color: "#888", fontWeight: 400 }}>(optional — paste PLSS or metes-and-bounds)</span>
             </label>
-            <input
-              id="county"
-              type="text"
-              value={county}
-              onChange={(e) => setCounty(e.target.value)}
-              placeholder="e.g. Reeves, Loving"
-              style={{ width: "100%", padding: "0.5rem", border: "1px solid #e5e5e5", borderRadius: 6 }}
+            <textarea
+              id="legal-description"
+              value={legalDescription}
+              onChange={(e) => setLegalDescription(e.target.value)}
+              placeholder={"e.g. SE/4 of Section 12, Township 140 North, Range 94 West\nor: Township 140 North, Range 94 West, Section 4 SE 1/4"}
+              rows={4}
+              style={{
+                width: "100%",
+                padding: "0.5rem",
+                border: "1px solid #e5e5e5",
+                borderRadius: 6,
+                fontFamily: "inherit",
+                fontSize: "0.875rem",
+                resize: "vertical",
+              }}
             />
+            <p style={{ fontSize: "0.8rem", color: "#888", marginTop: "0.25rem" }}>
+              Providing this speeds up valuation — the system will also extract it automatically from your document.
+            </p>
           </div>
-          <div>
-            <label htmlFor="state" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
-              State
-            </label>
-            <input
-              id="state"
-              type="text"
-              value={state}
-              onChange={(e) => setState(e.target.value)}
-              placeholder="e.g. Texas, New Mexico"
-              style={{ width: "100%", padding: "0.5rem", border: "1px solid #e5e5e5", borderRadius: 6 }}
-            />
-          </div>
+
           {uploadError && (
             <p style={{ color: "#b91c1c", fontSize: "0.9rem" }}>{uploadError}</p>
           )}
