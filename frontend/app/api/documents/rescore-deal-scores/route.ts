@@ -224,6 +224,7 @@ export async function POST(request: Request) {
 
       const financialSummary = buildFinancialSummary({
         extractedText: row.extracted_text ?? "",
+        combinedText: combinedPipelineText,
         dealScoreInput,
         royaltyRateStr: row.royalty_rate,
         county: resolvedCounty ?? doc.county,

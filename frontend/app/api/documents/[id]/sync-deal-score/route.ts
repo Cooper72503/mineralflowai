@@ -296,6 +296,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const financialSummary = buildFinancialSummary({
       extractedText: ext.extracted_text ?? "",
+      combinedText: combinedPipelineText,
       dealScoreInput,
       royaltyRateStr: ext.royalty_rate,
       county: resolvedCounty ?? doc.county,

@@ -420,6 +420,13 @@ function developmentStrength(s: unknown): "stronger" | "weaker" | "neutral" {
 
 export type BuildFinancialSummaryArgs = {
   extractedText: string;
+  /**
+   * Full combined text (native PDF + OCR + normalized).
+   * When extractedText is sparse or degraded (e.g. thin native layer after OCR fallback),
+   * combinedText is used as the primary signal source so financial patterns visible only
+   * in OCR output are not silently dropped.
+   */
+  combinedText?: string | null;
   /** Enriched deal score input (development_signals, acreage, etc.). */
   dealScoreInput: Record<string, unknown>;
   royaltyRateStr: string | null | undefined;
@@ -429,9 +436,20 @@ export type BuildFinancialSummaryArgs = {
 
 /**
  * Build persisted financial summary from extracted text + deal context.
+ *
+ * Text selection: uses the richest available source so OCR-recovered content is never
+ * silently dropped when the native PDF layer is thin.
+ *   1. If combinedText is substantially longer than extractedText, use combinedText.
+ *   2. Otherwise fall back to extractedText.
+ * This prevents the cascading failure where sparse extractedText causes
+ * parseFinancialSignalsFromText to miss revenue patterns that are present in the
+ * OCR/combined corpus, which would force deal_type → "unknown".
  */
 export function buildFinancialSummary(args: BuildFinancialSummaryArgs): FinancialSummary {
-  const text = args.extractedText ?? "";
+  const extracted = args.extractedText ?? "";
+  const combined = typeof args.combinedText === "string" ? args.combinedText : "";
+  // Prefer combinedText when it contains meaningfully more content than extractedText alone.
+  const text = combined.length > extracted.length + 100 ? combined : extracted;
   const signals = parseFinancialSignalsFromText(text, args.royaltyRateStr);
   const acreage = readFiniteNumberLoose(args.dealScoreInput.acreage);
   const dev = args.dealScoreInput.development_signals;

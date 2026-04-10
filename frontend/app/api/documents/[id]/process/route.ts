@@ -982,6 +982,7 @@ export async function POST(
         const drillSnap = drillSnapshotFromDealInput(dealScoreInput);
         const financialSummary = buildFinancialSummary({
           extractedText,
+          combinedText: combinedPipelineText,
           dealScoreInput,
           royaltyRateStr: parsed.royalty_rate,
           county: parsed.county ?? doc.county,
@@ -1604,6 +1605,7 @@ export async function POST(
           } satisfies DealScoreResult),
         financial_summary: buildFinancialSummary({
           extractedText,
+          combinedText: combinedPipelineText,
           dealScoreInput: dealScoreInputForPipeline ?? {},
           royaltyRateStr: parsed.royalty_rate,
           county: parsed.county ?? doc.county,
@@ -1635,6 +1637,7 @@ export async function POST(
               } satisfies DealScoreResult),
             financialSummary: buildFinancialSummary({
               extractedText,
+              combinedText: combinedPipelineText,
               dealScoreInput: dealScoreInputForPipeline ?? {},
               royaltyRateStr: parsed.royalty_rate,
               county: parsed.county ?? doc.county,
