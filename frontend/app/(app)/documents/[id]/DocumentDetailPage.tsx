@@ -876,7 +876,7 @@ export default function DocumentDetailPage() {
       try {
         const { data, error: fetchError } = await supabase
           .from("documents")
-          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
+          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
           .eq("id", id)
           .maybeSingle();
 
@@ -1065,7 +1065,7 @@ export default function DocumentDetailPage() {
         try {
           const { data: refreshedDoc, error: refreshedDocErr } = await supabase
             .from("documents")
-            .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
+            .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
             .eq("id", id)
             .maybeSingle();
 
@@ -1101,7 +1101,7 @@ export default function DocumentDetailPage() {
         // Fallback: reload from DB (in case the API response didn't include extraction).
         const { data, error: fetchError } = await supabase
           .from("documents")
-          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
+          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
           .eq("id", id)
           .maybeSingle();
         if (!fetchError && data) setDoc(data as DocumentRow);
@@ -1135,7 +1135,7 @@ export default function DocumentDetailPage() {
       try {
         const { data: refreshedDoc, error: refreshedDocErr } = await supabase
           .from("documents")
-          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
+          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
           .eq("id", id)
           .maybeSingle();
 

@@ -52,8 +52,24 @@ export default function PipelinePage() {
         .from("documents")
         .select("id, file_name, county, state, deal_stage, created_at")
         .order("created_at", { ascending: false });
-      if (err) { setError("Failed to load deals."); }
-      else { setDeals(data ?? []); }
+      if (err) {
+        // If deal_stage column doesn't exist yet, fall back to loading without it
+        if (err.message?.includes("deal_stage")) {
+          const { data: fallback, error: fallbackErr } = await supabase
+            .from("documents")
+            .select("id, file_name, county, state, created_at")
+            .order("created_at", { ascending: false });
+          if (fallbackErr) { setError("Failed to load deals."); }
+          else {
+            setDeals((fallback ?? []).map((d) => ({ ...d, deal_stage: "new_lead" })));
+            setError("⚠ Pipeline stages need a one-time database migration. Run the SQL in frontend/supabase/migrations/20260410_deal_pipeline.sql in your Supabase dashboard to enable drag-and-drop staging.");
+          }
+        } else {
+          setError("Failed to load deals.");
+        }
+      } else {
+        setDeals(data ?? []);
+      }
       setLoading(false);
     }
     load();

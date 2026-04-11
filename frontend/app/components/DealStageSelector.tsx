@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export const STAGE_LABELS: Record<string, string> = {
@@ -35,8 +35,31 @@ export function DealStageSelector({ documentId, currentStage, onStageChange }: P
   const [stage, setStage] = useState(currentStage ?? "new_lead");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [migrationMissing, setMigrationMissing] = useState(false);
 
   const supabase = createClient();
+
+  // Fetch current stage independently — avoids crashing the parent page query
+  // when deal_stage column doesn't exist yet (migration not yet run).
+  useEffect(() => {
+    if (currentStage != null) return; // already provided by parent
+    supabase
+      .from("documents")
+      .select("deal_stage")
+      .eq("id", documentId)
+      .maybeSingle()
+      .then(({ data, error: err }) => {
+        if (err) {
+          // Column doesn't exist yet — silently hide the selector
+          setMigrationMissing(true);
+          return;
+        }
+        if (data?.deal_stage) setStage(data.deal_stage as string);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId]);
+
+  if (migrationMissing) return null;
 
   async function handleChange(newStage: string) {
     setSaving(true);
