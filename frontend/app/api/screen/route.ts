@@ -1,0 +1,128 @@
+import { NextResponse } from "next/server";
+import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
+import { runPreUnderwritingValuation } from "@/lib/valuation";
+import { buildLocationContext } from "@/lib/location/location-context";
+import { buildFinancialSummary } from "@/lib/financial/financial-summary";
+import { drillSnapshotFromDealInput } from "@/lib/scoring/drillDifficultyEngine";
+import { calculateDealScore } from "@/lib/document-processing";
+import { coerceDealScoreResult } from "@/lib/deals/dashboard-normalize";
+import {
+  inferCountyAndStateFromTexts,
+  extractAcreageFromTexts,
+  parseLegalDescription,
+} from "@/lib/location/legal-description-parser";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function POST(request: Request) {
+  try {
+    const supabase = await createSupabaseFromRouteRequest(request);
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
+    }
+
+    const body = (await request.json().catch(() => ({}))) as {
+      legal_description?: string;
+      county?: string;
+      state?: string;
+      acreage?: number | string;
+      royalty_rate?: string;
+      document_type?: string;
+    };
+
+    const legalDescription = (body.legal_description ?? "").trim();
+    if (!legalDescription) {
+      return NextResponse.json({ ok: false, error: "legal_description is required." }, { status: 400 });
+    }
+
+    // Resolve county + state: prefer explicit inputs, fall back to inference from the legal description text
+    const inferred = inferCountyAndStateFromTexts(legalDescription);
+    const county = (body.county ?? "").trim() || inferred.county || null;
+    const state = (body.state ?? "").trim() || inferred.state || null;
+
+    // Resolve acreage: prefer explicit input, fall back to text extraction
+    let acreage: number | null = null;
+    if (body.acreage != null) {
+      const n = typeof body.acreage === "number" ? body.acreage : parseFloat(String(body.acreage).replace(/,/g, ""));
+      if (Number.isFinite(n) && n > 0) acreage = n;
+    }
+    if (acreage == null) {
+      acreage = extractAcreageFromTexts(legalDescription);
+    }
+
+    const legalParsed = parseLegalDescription(legalDescription);
+
+    // Build a minimal parsed / dealScoreInput — just enough for the valuation engine
+    const parsed: Record<string, unknown> = {
+      county,
+      state,
+      legal_description: legalDescription,
+      acreage,
+      royalty_rate: body.royalty_rate ?? null,
+      document_type: body.document_type ?? "Legal Description",
+      legal_description_parsed: legalParsed,
+    };
+
+    const dealScoreInput: Record<string, unknown> = {
+      county,
+      state,
+      legal_description: legalDescription,
+      acreage,
+      royalty_rate: body.royalty_rate ?? null,
+      document_type: body.document_type ?? "Legal Description",
+    };
+
+    const drillSnapshot = drillSnapshotFromDealInput(dealScoreInput);
+
+    const locationContext = buildLocationContext({
+      county,
+      state,
+      legal_description: legalDescription,
+      extracted_text: legalDescription,
+      combined_extraction_text: null,
+      merged: dealScoreInput,
+      development_signals: null,
+    });
+
+    const financialSummary = buildFinancialSummary({
+      extractedText: legalDescription,
+      combinedText: null,
+      dealScoreInput,
+      royaltyRateStr: body.royalty_rate ?? null,
+      county,
+    });
+
+    const dealScoreCalculated = calculateDealScore(dealScoreInput);
+    const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
+
+    const valuation = runPreUnderwritingValuation({
+      parsed,
+      dealScoreInput,
+      dealScore,
+      financialSummary,
+      locationContext,
+      drillSnapshot,
+      extractedText: legalDescription,
+      raw_text: null,
+      combinedExtractionText: null,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      county,
+      state,
+      acreage,
+      legal_description_parsed: legalParsed,
+      location_context: locationContext,
+      valuation,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}
