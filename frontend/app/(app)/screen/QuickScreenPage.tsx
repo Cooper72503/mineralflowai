@@ -7,6 +7,7 @@ import type { LegalDescriptionParseResult } from "@/lib/location/legal-descripti
 import type { LocationContext } from "@/lib/location/location-context";
 import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
 import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
+import { ParcelMapCard } from "@/app/components/ParcelMapCard";
 
 const EM_DASH = "—";
 
@@ -221,6 +222,16 @@ function ValuationResult({ result }: { result: ScreenResult }) {
       {result.production_snapshot ? (
         <ProductionSnapshotCard snap={result.production_snapshot} />
       ) : null}
+
+      {result.legal_description_parsed?.plss_township && result.legal_description_parsed?.plss_range && (
+        <ParcelMapCard
+          township={result.legal_description_parsed.plss_township}
+          range={result.legal_description_parsed.plss_range}
+          section={result.legal_description_parsed.section ?? null}
+          state={result.state}
+          county={result.county}
+        />
+      )}
     </div>
   );
 }

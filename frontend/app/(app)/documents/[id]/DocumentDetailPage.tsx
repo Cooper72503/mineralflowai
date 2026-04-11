@@ -45,6 +45,7 @@ import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard"
 import { DealStageSelector } from "@/app/components/DealStageSelector";
 import { DealNotesSection } from "@/app/components/DealNotesSection";
 import { WellDataCard } from "@/app/components/WellDataCard";
+import { ParcelMapCard } from "@/app/components/ParcelMapCard";
 
 function readProductionSnapshot(merged: Record<string, unknown>): ProductionSnapshot | null {
   const raw = merged.production_snapshot;
@@ -812,6 +813,16 @@ export default function DocumentDetailPage() {
     }).display;
   }, [doc, extraction]);
 
+  /** PLSS parts parsed from legal description + extracted text — used for map pin. */
+  const legalParsedParts = useMemo(() => {
+    if (!extraction) return null;
+    const scanSource = [extraction.legal_description, extraction.extracted_text]
+      .filter((s): s is string => typeof s === "string" && s.trim() !== "")
+      .join("\n\n");
+    if (!scanSource) return null;
+    return parseLegalDescriptionParts(scanSource);
+  }, [extraction]);
+
   useEffect(() => {
     if (!extraction) return;
     const scanSource = [extraction.legal_description, extraction.extracted_text]
@@ -1312,6 +1323,17 @@ export default function DocumentDetailPage() {
       )}
 
       <LegalDescriptionCard displayText={legalDescriptionDisplayText} />
+
+      {legalParsedParts?.township && legalParsedParts?.range && (
+        <ParcelMapCard
+          township={legalParsedParts.township}
+          range={legalParsedParts.range}
+          section={legalParsedParts.section ?? null}
+          state={extraction?.state ?? doc?.state ?? null}
+          county={extraction?.county ?? doc?.county ?? null}
+          label={legalDescriptionDisplayText}
+        />
+      )}
 
       {resolvedLocationContext ? <LocationContextCard ctx={resolvedLocationContext} /> : null}
 
