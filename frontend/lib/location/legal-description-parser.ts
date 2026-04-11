@@ -77,8 +77,14 @@ export function parsePlssLegalDescription(raw: string | null | undefined): Pick<
   const aliM =
     s.match(/\b((?:NE|NW|SE|SW)\s*\/\s*4)\b/i) ??
     s.match(/\b((?:NE|NW|SE|SW)\s+1\s*\/\s*4)\b/i) ??
-    s.match(/\b([NSEW])\s+1\s*\/\s*2\b/i);
-  if (aliM) out.plss_aliquot = aliM[1].replace(/\s+/g, " ").trim();
+    s.match(/\b((?:NE|NW|SE|SW)(?:\s+Quarter)?)\s+Quarter\b/i) ??
+    s.match(/\b([NSEW])\s+(?:1\s*\/\s*2|Half)\b/i);
+  if (aliM) {
+    // Normalize "NE Quarter" → "NE/4" for downstream acreage inference
+    const raw = aliM[1].replace(/\s+/g, " ").trim();
+    const quarterWord = /^(NE|NW|SE|SW)\s+Quarter$/i.exec(raw);
+    out.plss_aliquot = quarterWord ? `${quarterWord[1].toUpperCase()}/4` : raw;
+  }
 
   return out;
 }
@@ -179,6 +185,32 @@ export function mergeLegalDescriptionParseResults(
   return out;
 }
 
+/**
+ * Maps common 2-letter postal abbreviations to full state names.
+ * Covers all oil-and-gas producing states plus the full US list.
+ */
+const STATE_ABBREV_MAP: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi",
+  MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire",
+  NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina",
+  ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania",
+  RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee",
+  TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington",
+  WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+/**
+ * Convert ALL-CAPS words to Title Case for pattern matching purposes.
+ * Does not modify mixed-case or lowercase words. Used to normalize scanned/OCR text.
+ */
+function softTitleCase(text: string): string {
+  return text.replace(/\b([A-Z]{2,})\b/g, (m) => m.charAt(0) + m.slice(1).toLowerCase());
+}
+
 const US_STATE_NAMES: readonly string[] = [
   "Alabama",
   "Alaska",
@@ -232,20 +264,30 @@ const US_STATE_NAMES: readonly string[] = [
   "Wyoming",
 ];
 
-/** When structured state is missing, infer US state from common phrases (Texas legacy + full state names). */
+/** When structured state is missing, infer US state from common phrases (full names + 2-letter abbreviations). */
 export function inferUSStateFromText(raw: string | null | undefined): string | null {
   if (raw == null || !String(raw).trim()) return null;
   const t = String(raw);
-  if (/\bTexas\b/i.test(t)) return "Texas";
-  if (/\bTX\b/.test(t)) return "Texas";
+  // Full state names first (most reliable)
   for (let i = 0; i < US_STATE_NAMES.length; i++) {
     const name = US_STATE_NAMES[i];
-    if (name === "Texas") continue;
     const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (new RegExp(`\\b${esc}\\b`, "i").test(t)) return name;
   }
-  if (/\bND\b/.test(t)) return "North Dakota";
-  if (/\bSD\b/.test(t)) return "South Dakota";
+  // 2-letter abbreviations (word-boundary anchored to avoid false positives like "IN" inside words)
+  // Try all-caps first, then soft-title-case version
+  for (const [abbr, name] of Object.entries(STATE_ABBREV_MAP)) {
+    if (new RegExp(`\\b${abbr}\\b`).test(t)) return name;
+  }
+  // Handle all-caps document text: normalize then retry full names
+  const normalized = softTitleCase(t);
+  if (normalized !== t) {
+    for (let i = 0; i < US_STATE_NAMES.length; i++) {
+      const name = US_STATE_NAMES[i];
+      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`\\b${esc}\\b`, "i").test(normalized)) return name;
+    }
+  }
   return null;
 }
 
@@ -254,57 +296,94 @@ export function inferTexasStateFromText(raw: string | null | undefined): string 
   return inferUSStateFromText(raw);
 }
 
-/** Infer "X County, State" (multi-state) and legacy Texas-oriented patterns. */
+function resolveStateFromCapture(raw: string, fallbackText: string): string | null {
+  const trimmed = raw.replace(/\s+/g, " ").trim();
+  if (!trimmed) return inferUSStateFromText(fallbackText);
+  // 2-letter abbreviation
+  if (/^[A-Z]{2}$/.test(trimmed)) {
+    return STATE_ABBREV_MAP[trimmed] ?? inferUSStateFromText(fallbackText);
+  }
+  // All-caps full state name → normalize then look up
+  const normalized = softTitleCase(trimmed);
+  return inferUSStateFromText(normalized) ?? inferUSStateFromText(trimmed) ?? inferUSStateFromText(fallbackText);
+}
+
+function tryCountyStateMatch(
+  text: string,
+  fallbackText: string
+): { county: string; state: string | null } | null {
+  const JUNK = /^(the|a|an|being|all|part|of|in|at|to)$/i;
+
+  // Pattern 1: "X County, State" or "X County State" (comma optional, handles newlines)
+  const p1 = text.match(
+    /\b([A-Za-z][A-Za-z\s'.-]{0,48}?)\s+County[,\s][\s\n]*([A-Za-z][A-Za-z\s.]{2,32}?)(?=\s*[\n,.]|$)/i
+  );
+  if (p1?.[1] && p1[2]) {
+    let base = p1[1].replace(/\s+/g, " ").trim().replace(/\s+County$/i, "");
+    if (base.length >= 2 && !JUNK.test(base)) {
+      const state = resolveStateFromCapture(p1[2].trim(), fallbackText);
+      return { county: `${base} County`, state };
+    }
+  }
+
+  // Pattern 2: "County: X County, State" or "County: X, State"
+  const p2 = text.match(
+    /County:\s*([A-Za-z][A-Za-z\s'.-]{0,56}?)\s*[,\n]\s*([A-Za-z][A-Za-z\s.]{2,32}?)(?=\s*[\n,.]|$)/i
+  );
+  if (p2?.[1] && p2[2]) {
+    let chunk = p2[1].replace(/\s+/g, " ").trim().replace(/\s+County$/i, "");
+    if (chunk.length >= 2 && !JUNK.test(chunk)) {
+      const countyLabel = /\bCounty\b/i.test(p2[1]) ? p2[1].replace(/\s+/g, " ").trim() : `${chunk} County`;
+      const state = resolveStateFromCapture(p2[2].trim(), fallbackText);
+      return { county: countyLabel, state };
+    }
+  }
+
+  // Pattern 3: contextual ("situated in X County", "located in X County")
+  const p3 = text.match(
+    /\b(?:in|within|situated\s+in|located\s+in)\s+(?:the\s+)?([A-Za-z][A-Za-z\s'.-]{1,48}?)\s+County\b/i
+  );
+  if (p3?.[1]) {
+    let c = p3[1].replace(/\s+/g, " ").trim();
+    if (c.length >= 2 && !JUNK.test(c)) {
+      const state = inferUSStateFromText(fallbackText);
+      return { county: `${c} County`, state };
+    }
+  }
+
+  // Pattern 4: "County of X"
+  const p4 = text.match(
+    /\bCounty\s+of\s+([A-Za-z][A-Za-z\s'.-]{1,48}?)\b/i
+  );
+  if (p4?.[1]) {
+    let c = p4[1].replace(/\s+/g, " ").trim().replace(/[,.].*$/, "").trim();
+    if (c.length >= 2 && !JUNK.test(c)) {
+      const state = inferUSStateFromText(fallbackText);
+      return { county: `${c} County`, state };
+    }
+  }
+
+  return null;
+}
+
+/** Infer "X County, State" (multi-state) and legacy Texas-oriented patterns. Handles all-caps, abbreviations, and newlines. */
 export function inferCountyAndStateFromTexts(
   ...sources: (string | null | undefined)[]
 ): { county: string | null; state: string | null } {
   const combined = sources.filter((s): s is string => typeof s === "string" && s.trim().length > 0).join("\n\n");
   if (!combined.trim()) return { county: null, state: null };
 
-  const countyStateRe =
-    /\b([A-Za-z][A-Za-z\s'.-]{0,48}?)\s+County,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/;
-  const mCs = combined.match(countyStateRe);
-  if (mCs?.[1] && mCs[2]) {
-    let countyBase = mCs[1].replace(/\s+/g, " ").trim();
-    countyBase = countyBase.replace(/\s+County$/i, "");
-    const state = mCs[2].replace(/\s+/g, " ").trim();
-    if (countyBase.length >= 2 && !/^(the|a|an|being|all|part)$/i.test(countyBase)) {
-      return { county: `${countyBase} County`, state };
-    }
+  // First pass: try on original text
+  const result = tryCountyStateMatch(combined, combined);
+  if (result) return result;
+
+  // Second pass: normalize all-caps words (scanned PDFs often produce all-caps text)
+  const normalized = softTitleCase(combined);
+  if (normalized !== combined) {
+    const result2 = tryCountyStateMatch(normalized, combined);
+    if (result2) return result2;
   }
 
-  // "County: Stark County, North Dakota" / labeled heading lines
-  const labeledCountyState =
-    /County:\s*([A-Za-z][A-Za-z\s'.-]{0,56}?)\s*,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/;
-  const mLabel = combined.match(labeledCountyState);
-  if (mLabel?.[1] && mLabel[2]) {
-    let chunk = mLabel[1].replace(/\s+/g, " ").trim();
-    chunk = chunk.replace(/\s+County$/i, "");
-    const state = mLabel[2].replace(/\s+/g, " ").trim();
-    if (chunk.length >= 2 && !/^(the|a|an|being|all|part)$/i.test(chunk)) {
-      const countyLabel = /\bCounty\b/i.test(mLabel[1]) ? mLabel[1].replace(/\s+/g, " ").trim() : `${chunk} County`;
-      return { county: countyLabel, state };
-    }
-  }
-
-  const patterns: RegExp[] = [
-    /\b([A-Za-z][A-Za-z\s'.-]{1,48}?)\s+County,\s*(?:Texas|TX)\b/i,
-    /\b(?:in|within|situated\s+in)\s+(?:the\s+)?([A-Za-z][A-Za-z\s'.-]{1,48}?)\s+County\b/i,
-    /\bCounty\s+of\s+([A-Za-z][A-Za-z\s'.-]{1,48}?)(?:[,.]|\s+)(?:Texas|TX|State)/i,
-    /\bCounty\s+of\s+([A-Za-z][A-Za-z\s'.-]{1,48}?)\b/i,
-  ];
-
-  for (const re of patterns) {
-    const m = combined.match(re);
-    if (m?.[1]) {
-      let c = m[1].replace(/\s+/g, " ").trim();
-      c = c.replace(/\s+County$/i, "");
-      if (c.length >= 2 && !/^(the|a|an|being|all|part)$/i.test(c)) {
-        const st = inferUSStateFromText(combined);
-        return { county: `${c} County`, state: st };
-      }
-    }
-  }
   return { county: null, state: null };
 }
 
@@ -317,20 +396,33 @@ export function inferCountyFromTexts(...sources: (string | null | undefined)[]):
 }
 
 /**
- * Extract first acreage figure from phrases like "24 acres" / "12.5 acre".
+ * Extract first acreage figure from phrases like "24 acres", "160 NMA", "12.5 net mineral acres", etc.
  */
 export function extractAcreageFromTexts(...sources: (string | null | undefined)[]): number | null {
   const combined = sources.filter((s): s is string => typeof s === "string" && s.trim().length > 0).join("\n\n");
   if (!combined.trim()) return null;
-  const labeled = combined.match(/\bAcreage:\s*(\d+(?:\.\d+)?)\s*(?:acres?\b)?/i);
-  if (labeled) {
-    const n = Number(labeled[1]);
-    if (Number.isFinite(n) && n > 0) return n;
+
+  const patterns: RegExp[] = [
+    // Labeled: "Acreage: 160" or "Acreage: 160 acres"
+    /\bAcreage:\s*(\d+(?:\.\d+)?)\s*(?:acres?\b)?/i,
+    // "160 NMA" or "160.5 NMAs" (net mineral acres abbreviation)
+    /\b(\d+(?:\.\d+)?)\s*NMAs?\b/i,
+    // "160 net mineral acres" or "160 net acres"
+    /\b(\d+(?:\.\d+)?)\s+net(?:\s+mineral)?\s+acres?\b/i,
+    // "160 gross acres" / "160 acres" / "160 acre"
+    /\b(\d+(?:\.\d+)?)\s+(?:gross\s+)?acres?\b/i,
+    // "containing 160 acres, more or less"
+    /\bcontaining\s+(\d+(?:\.\d+)?)\s+acres?\b/i,
+  ];
+
+  for (const re of patterns) {
+    const m = combined.match(re);
+    if (m?.[1]) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
   }
-  const m = combined.match(/\b(\d+(?:\.\d+)?)\s+acres?\b/i);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return null;
 }
 
 /**

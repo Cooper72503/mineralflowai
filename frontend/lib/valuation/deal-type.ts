@@ -92,8 +92,11 @@ export function classifyDealType(args: {
       legalParsed.abstract_number ||
       (legalParsed.plss_township && legalParsed.plss_range)
   );
+  // A PLSS township+range pair is a strong location anchor even without a county name (common in
+  // pure legal description documents where county may not appear in the text).
+  const hasPlssAnchor = Boolean(legalParsed.plss_township && legalParsed.plss_range);
   const hasLoc =
-    Boolean(args.county?.trim()) &&
+    (Boolean(args.county?.trim()) || hasPlssAnchor) &&
     ((args.acreage != null && args.acreage > 0) || hasStructuredLegal);
   const legalTrim = ocrAndLegal.trim();
   const hasLegal =
