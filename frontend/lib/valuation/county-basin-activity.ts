@@ -38,6 +38,12 @@ const BASIN_MAP: StateMap = {
     burleigh: "low",
     divide: "moderate",
     burke: "moderate",
+    bottineau: "moderate",
+    ward: "moderate",
+    mclean: "moderate",
+    renville: "moderate",
+    wells: "low",
+    sheridan: "low",
   },
 
   // ── Montana — Williston Basin / Powder River ───────────────────────────────
@@ -146,8 +152,10 @@ const BASIN_MAP: StateMap = {
     johnson: "moderate",
     crook: "moderate",
     niobrara: "moderate",
+    weston: "moderate",
     // Pinedale / Green River
     lincoln: "moderate",
+    teton: "low",
   },
 
   // ── Oklahoma — SCOOP / STACK / Anadarko ───────────────────────────────────
@@ -243,6 +251,15 @@ const BASIN_MAP: StateMap = {
     searcy: "low",
   },
 
+  // ── Utah — Uinta Basin ────────────────────────────────────────────────────
+  UT: {
+    uintah: "high",
+    duchesne: "high",
+    daggett: "moderate",
+    carbon: "moderate",
+    emery: "low",
+  },
+
   // ── Kansas — Hugoton / Anadarko ────────────────────────────────────────────
   KS: {
     seward: "moderate",
@@ -278,6 +295,15 @@ const STATE_NAME_TO_ABBR: Record<string, string> = {
   "south carolina": "SC",
   california: "CA",
   utah: "UT",
+  idaho: "ID",
+  nevada: "NV",
+  arizona: "AZ",
+  mississippi: "MS",
+  alabama: "AL",
+  virginia: "VA",
+  michigan: "MI",
+  illinois: "IL",
+  indiana: "IN",
 };
 
 function normalizeStateToAbbr(state: string | null | undefined): string | null {
