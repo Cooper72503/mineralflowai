@@ -40,6 +40,16 @@ import {
   type LocationContext,
 } from "@/lib/location/location-context";
 import type { DealValuationOutput } from "@/lib/valuation";
+import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
+import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
+
+function readProductionSnapshot(merged: Record<string, unknown>): ProductionSnapshot | null {
+  const raw = merged.production_snapshot;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.status !== "string" || typeof o.trend !== "string") return null;
+  return raw as ProductionSnapshot;
+}
 
 function readFinancialSummary(merged: Record<string, unknown>): FinancialSummary | null {
   const raw = merged.financial_summary;
@@ -742,6 +752,11 @@ export default function DocumentDetailPage() {
     [snapshotMerged]
   );
 
+  const productionSnapshot = useMemo(
+    () => readProductionSnapshot(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
+
   /** Prefer persisted `development_signals`; otherwise derive from extracted text for display. */
   const resolvedDevelopmentSignals = useMemo((): DevelopmentSignalsSnapshot | null => {
     const fromMerged = readDevelopmentSignals(snapshotMerged as Record<string, unknown>);
@@ -1276,6 +1291,8 @@ export default function DocumentDetailPage() {
       {displayDealScore ? <DealScoreCard dealScore={displayDealScore} /> : null}
 
       {preUnderwritingValuation ? <PreUnderwritingValuationSection v={preUnderwritingValuation} /> : null}
+
+      {productionSnapshot ? <ProductionSnapshotCard snap={productionSnapshot} /> : null}
 
       <LegalDescriptionCard displayText={legalDescriptionDisplayText} />
 

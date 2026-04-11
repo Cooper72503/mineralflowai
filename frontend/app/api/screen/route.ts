@@ -11,6 +11,8 @@ import {
   extractAcreageFromTexts,
   parseLegalDescription,
 } from "@/lib/location/legal-description-parser";
+import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
+import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -112,6 +114,16 @@ export async function POST(request: Request) {
       combinedExtractionText: null,
     });
 
+    const royaltyDecimal = normalizeRoyaltyToDecimal(body.royalty_rate ?? null);
+    const productionSnapshot = buildProductionSnapshot({
+      dealType: valuation.deal_type,
+      activityLevel: valuation.activity_level,
+      acreage,
+      royalty_rate: royaltyDecimal,
+      county,
+      state,
+    });
+
     return NextResponse.json({
       ok: true,
       county,
@@ -120,6 +132,7 @@ export async function POST(request: Request) {
       legal_description_parsed: legalParsed,
       location_context: locationContext,
       valuation,
+      production_snapshot: productionSnapshot,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

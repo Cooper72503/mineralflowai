@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import type { DealValuationOutput } from "@/lib/valuation";
 import type { LegalDescriptionParseResult } from "@/lib/location/legal-description-parser";
 import type { LocationContext } from "@/lib/location/location-context";
+import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
+import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
 
 const EM_DASH = "—";
 
@@ -15,6 +17,7 @@ type ScreenResult = {
   legal_description_parsed: LegalDescriptionParseResult;
   location_context: LocationContext;
   valuation: DealValuationOutput;
+  production_snapshot?: ProductionSnapshot | null;
 };
 
 function formatUsdCompact(n: number): string {
@@ -214,6 +217,10 @@ function ValuationResult({ result }: { result: ScreenResult }) {
           </div>
         ) : null}
       </div>
+
+      {result.production_snapshot ? (
+        <ProductionSnapshotCard snap={result.production_snapshot} />
+      ) : null}
     </div>
   );
 }

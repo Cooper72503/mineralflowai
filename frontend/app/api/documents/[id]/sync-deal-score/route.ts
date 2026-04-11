@@ -29,6 +29,8 @@ import {
   readRawPdfTextFromStructured,
   runPreUnderwritingValuation,
 } from "@/lib/valuation";
+import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
+import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -351,6 +353,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     console.log("[valuation-final-before-save]", preUnderwritingValuation);
 
+    const productionSnapshot = buildProductionSnapshot({
+      dealType: preUnderwritingValuation.deal_type,
+      activityLevel: preUnderwritingValuation.activity_level,
+      bopd: typeof dealScoreInput.bopd === "number" ? dealScoreInput.bopd : null,
+      monthly_revenue: financialSummary?.monthly_revenue_estimate_min ?? null,
+      annual_revenue: financialSummary?.annual_revenue_estimate_min ?? null,
+      acreage: typeof dealScoreInput.acreage === "number" ? dealScoreInput.acreage : null,
+      royalty_rate: normalizeRoyaltyToDecimal(
+        typeof ext.royalty_rate === "string" ? ext.royalty_rate : null
+      ),
+      county: resolvedCounty,
+      state: resolvedState,
+    });
+
     const oldStoredScore = stored?.score ?? null;
     console.log(`${LOG_PREFIX} OLD STORED SCORE`, oldStoredScore);
     console.log(`${LOG_PREFIX} RECALCULATED SCORE`, dealScore.score);
@@ -373,6 +389,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       storedValuation.deal_type === "unknown" ||
       storedValuation._value_method === "error_fallback";
 
+    const needsProductionBackfill =
+      merged.production_snapshot == null || typeof merged.production_snapshot !== "object";
+
     if (
       stored != null &&
       stored.score === dealScore.score &&
@@ -382,7 +401,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       !developmentSignalsNeedsPersistInMerged(merged, dealScoreInput.development_signals) &&
       !needsFinancialBackfill &&
       !needsLocationBackfill &&
-      !needsValuationBackfill
+      !needsValuationBackfill &&
+      !needsProductionBackfill
     ) {
       const finalAfter = await fetchMergedDealScoreFromExtraction(supabase, ext.id, user.id);
       console.log("SCORE SAVED", dealScore.score);
@@ -402,6 +422,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       financial_summary: financialSummary,
       location_context: locationContext,
       pre_underwriting_valuation: preUnderwritingValuation,
+      production_snapshot: productionSnapshot,
     });
     if (process.env.DEAL_SCORE_TRACE === "1") {
       const ns = nextStructured as Record<string, unknown>;

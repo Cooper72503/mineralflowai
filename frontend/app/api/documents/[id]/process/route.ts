@@ -33,6 +33,8 @@ import type { DevelopmentSignalsSnapshot } from "@/lib/development/detect-develo
 import { buildLocationContext } from "@/lib/location/location-context";
 import { runPreUnderwritingValuation } from "@/lib/valuation";
 import type { DealValuationOutput } from "@/lib/valuation";
+import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
+import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
 
 const LOG_PREFIX = "[process-document]";
 const BUCKET_NAME = "documents";
@@ -312,6 +314,7 @@ export async function POST(
       let dealScoreResult: DealScoreResult | null = null;
       let dealAcreageForAlerts: number | null | undefined = undefined;
       let preUnderwritingValuation: DealValuationOutput | null = null;
+      let productionSnapshot: ProductionSnapshot | null = null;
       /** Combined PDF + OCR + normalized text from structured extraction (valuation / location fallbacks). */
       let combinedPipelineText: string | null = null;
       /** Raw PDF text layer (same as extraction meta) — passed to valuation when distinct from extractedText. */
@@ -1063,6 +1066,18 @@ export async function POST(
           confidence: preUnderwritingValuation.confidence,
         });
 
+        productionSnapshot = buildProductionSnapshot({
+          dealType: preUnderwritingValuation.deal_type,
+          activityLevel: preUnderwritingValuation.activity_level,
+          bopd: typeof dealScoreInput.bopd === "number" ? dealScoreInput.bopd : null,
+          monthly_revenue: financialSummary?.monthly_revenue_estimate_min ?? null,
+          annual_revenue: financialSummary?.annual_revenue_estimate_min ?? null,
+          acreage: typeof parsed.acreage === "number" ? parsed.acreage : null,
+          royalty_rate: typeof dealScoreInput.royalty_rate === "number" ? dealScoreInput.royalty_rate : null,
+          county: parsed.county ?? null,
+          state: parsed.state ?? null,
+        });
+
         const structuredExtraction = {
           lessor: parsed.lessor,
           lessee: parsed.lessee,
@@ -1106,6 +1121,7 @@ export async function POST(
           financial_summary: financialSummary,
           location_context: locationContext,
           pre_underwriting_valuation: preUnderwritingValuation,
+          production_snapshot: productionSnapshot,
         };
 
         console.log(
@@ -1701,6 +1717,20 @@ export async function POST(
               );
             })(),
           }),
+        production_snapshot: (() => {
+          const fallbackValuation = preUnderwritingValuation;
+          if (!fallbackValuation) return null;
+          return buildProductionSnapshot({
+            dealType: fallbackValuation.deal_type,
+            activityLevel: fallbackValuation.activity_level,
+            acreage: typeof parsed.acreage === "number" ? parsed.acreage : null,
+            royalty_rate: typeof (dealScoreInputForPipeline ?? {}).royalty_rate === "number"
+              ? (dealScoreInputForPipeline ?? {}).royalty_rate as number
+              : null,
+            county: parsed.county ?? null,
+            state: parsed.state ?? null,
+          });
+        })(),
       };
       const fallbackExtractionResponse: SavedExtraction = {
         id: documentId as string,
