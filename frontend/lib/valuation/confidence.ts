@@ -261,7 +261,7 @@ export function computeValuationConfidence(
 
   let tier: "low" | "medium" | "high" = "low";
 
-  // Thresholds: conservative. "High" needs strong commercial OR a complete direct tract picture (undeveloped/lease).
+  // High: strong commercial signals OR complete direct tract picture. Score threshold is firm.
   if (
     score >= 56 &&
     critical_gap_count <= 1 &&
@@ -271,23 +271,23 @@ export function computeValuationConfidence(
   ) {
     tier = "high";
   } else if (
-    score >= 30 &&
+    // Medium: solid inputs — direct county, or weak anchor with enough score, and ≤2 critical gaps.
+    // No permissive fallback: acreage alone or inferred-only location does not earn medium.
+    score >= 36 &&
     critical_gap_count <= 2 &&
-    (strongCommercial || hasDirectCounty || (hasWeakLocationAnchor(input) && score >= 36))
+    (strongCommercial || hasDirectCounty || (hasWeakLocationAnchor(input) && score >= 44))
   ) {
-    tier = "medium";
-  } else if (score >= 22 || (hasWeakLocationAnchor(input) && score >= 18)) {
     tier = "medium";
   } else {
     tier = "low";
   }
 
-  // Sparse / weak: pull down only when the score is very thin (location-inferred bundles may sit in the high-teens).
-  if (score < 15 && tier !== "low") tier = "low";
+  // Hard floor: thin scores must stay low regardless of tier logic above.
+  if (score < 20 && tier !== "low") tier = "low";
   if (critical_gap_count >= 4) tier = tier === "high" ? "medium" : "low";
   if (critical_gap_count >= 5) tier = "low";
 
-  // Inferred-only location without economics caps high
+  // Inferred-only location without economics caps at medium.
   if (tier === "high" && !hasDirectCounty && !hasStrongEcon) tier = "medium";
 
   if (dealType === "unknown" || dealType === "infrastructure") {

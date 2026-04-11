@@ -179,10 +179,23 @@ function confidenceTier(args: {
 }): "low" | "medium" | "high" {
   const { hasDocumentProduction, activityLevel, hasAcreage, hasRoyalty, bopdSource } = args;
 
+  // High: explicit production in doc + explicit BOPD signal + royalty known — all three required.
   if (hasDocumentProduction && bopdSource === "document" && hasRoyalty) return "high";
-  if (hasDocumentProduction && activityLevel !== "unknown") return "medium";
-  if (bopdSource === "benchmark" && activityLevel !== "unknown" && hasAcreage && hasRoyalty) return "medium";
-  if (bopdSource === "benchmark" && activityLevel !== "unknown" && hasAcreage) return "medium";
+
+  // Medium: document has production signals AND we have acreage to anchor the estimate.
+  // Royalty not strictly required when production is document-confirmed, but activity must be known.
+  if (hasDocumentProduction && activityLevel !== "unknown" && hasAcreage) return "medium";
+
+  // Medium: pure benchmark path — requires acreage + royalty + active/moderate basin.
+  // "low" activity tier or missing royalty means the math is too speculative for medium.
+  if (
+    bopdSource === "benchmark" &&
+    (activityLevel === "high" || activityLevel === "moderate") &&
+    hasAcreage &&
+    hasRoyalty
+  ) return "medium";
+
+  // Everything else is low: benchmark without royalty, unknown activity, undeveloped speculation.
   return "low";
 }
 
