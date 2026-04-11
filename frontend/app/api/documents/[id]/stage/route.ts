@@ -4,7 +4,7 @@ import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-reques
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VALID_STAGES = new Set([
+const VALID_STAGES_LIST = [
   "new_lead",
   "screening",
   "pursuing",
@@ -13,7 +13,9 @@ const VALID_STAGES = new Set([
   "closed_won",
   "closed_lost",
   "passed",
-]);
+] as const;
+
+const VALID_STAGES = new Set<string>(VALID_STAGES_LIST);
 
 export async function PATCH(
   request: NextRequest,
@@ -40,7 +42,7 @@ export async function PATCH(
   const stage = body.stage;
   if (typeof stage !== "string" || !VALID_STAGES.has(stage)) {
     return NextResponse.json(
-      { ok: false, error: `Invalid stage. Must be one of: ${[...VALID_STAGES].join(", ")}` },
+      { ok: false, error: `Invalid stage. Must be one of: ${VALID_STAGES_LIST.join(", ")}` },
       { status: 400 }
     );
   }

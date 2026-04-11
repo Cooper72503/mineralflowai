@@ -50,7 +50,7 @@ export function WellDataCard({ county, state, township, range }: Props) {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
 
-      const params = new URLSearchParams({ county, state: state! });
+      const params = new URLSearchParams({ county: county ?? "", state: state ?? "" });
       if (township) params.set("township", township);
       if (range)    params.set("range", range);
 
