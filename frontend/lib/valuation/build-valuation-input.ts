@@ -148,6 +148,17 @@ export function buildValuationInput(args: {
   combinedExtractionText?: string | null;
 }): DealValuationInput {
   const { parsed, dealScoreInput: dsi } = args;
+
+  const fullText = buildValuationHaystackText({
+    extractedText: args.extractedText ?? "",
+    raw_text: args.raw_text,
+    combinedExtractionText: args.combinedExtractionText,
+  });
+  console.log(
+    "[VALUATION INPUT DEBUG] incoming text length:",
+    fullText?.length || 0,
+  );
+
   if (process.env.NODE_ENV !== "production") {
     console.log("[valuation-pre-merge-loc]", {
       county: dsi.county,
@@ -174,12 +185,6 @@ export function buildValuationInput(args: {
       acreage: merged.acreage,
     });
   }
-
-  const fullText = buildValuationHaystackText({
-    extractedText: args.extractedText ?? "",
-    raw_text: args.raw_text,
-    combinedExtractionText: args.combinedExtractionText,
-  });
 
   if (process.env.NODE_ENV !== "production") {
     console.log("[valuation-source-fields]", {
@@ -255,6 +260,11 @@ export function buildValuationInput(args: {
     acreage == null ? null
     : plssInferredAcreage != null ? "inferred_plss"
     : "extracted";
+
+  console.log("[VALUATION INPUT DEBUG] county:", county);
+  console.log("[VALUATION INPUT DEBUG] state:", state);
+  console.log("[VALUATION INPUT DEBUG] acreage:", acreage);
+  console.log("[VALUATION INPUT DEBUG] parsedLegal:", legal_description_parsed);
 
   if (process.env.NODE_ENV !== "production") {
     console.log("[valuation-fallback-county]", county);

@@ -1,5 +1,5 @@
 import type { DealValuationOutput, RunPreUnderwritingValuationArgs } from "./types";
-import { buildValuationHaystackText, buildValuationInput } from "./build-valuation-input";
+import { buildValuationInput } from "./build-valuation-input";
 import { classifyDealType, inferHasProductionSignals } from "./deal-type";
 import { resolveActivityLevel } from "./activity-tier";
 import { estimateDirectionalNriProxy } from "./nri";
@@ -52,11 +52,14 @@ const FALLBACK: DealValuationOutput = {
  */
 export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArgs): DealValuationOutput {
   try {
-    const fullText = buildValuationHaystackText({
-      extractedText: args.extractedText,
-      raw_text: args.raw_text,
-      combinedExtractionText: args.combinedExtractionText,
-    });
+    const fullText =
+      args.combinedExtractionText ||
+      args.extractedText ||
+      args.raw_text ||
+      "";
+
+    console.log("[VALUATION DEBUG] fullText length:", fullText.length);
+    console.log("[VALUATION DEBUG] fullText sample:", fullText.slice(0, 300));
 
     const vIn = buildValuationInput({
       documentId: args.documentId ?? undefined,

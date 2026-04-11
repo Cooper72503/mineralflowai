@@ -688,6 +688,11 @@ export async function POST(
             step_failed: "TEXT_EXTRACTION_START",
             error_message: extractionError,
           });
+          console.log("[PROCESS DEBUG] extractedText length:", extractedText?.length || 0);
+          console.log(
+            "[PROCESS DEBUG] extractedText sample:",
+            (extractedText || "").slice(0, 300),
+          );
           // Continue to DB insert so we persist an extraction row with the error.
         } else {
           extractedText = result.extractedText ?? "";
@@ -699,6 +704,14 @@ export async function POST(
           if (rp.trim()) rawPdfTextForValuation = rp;
           console.log("[process-extractedText-length]", extractedText.length);
           console.log("[process-extracted-sample]", (extractedText || "").slice(0, 500));
+          console.log(
+            "[PROCESS DEBUG] extractedText length:",
+            extractedText?.length || 0,
+          );
+          console.log(
+            "[PROCESS DEBUG] extractedText sample:",
+            (extractedText || "").slice(0, 300),
+          );
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -804,6 +817,14 @@ export async function POST(
               : "";
           const dbgCombined =
             typeof artifacts.combined_text === "string" ? artifacts.combined_text : "";
+          console.log(
+            "[PROCESS DEBUG] combined_text length:",
+            dbgCombined?.length || 0,
+          );
+          console.log(
+            "[PROCESS DEBUG] combined_text sample:",
+            (dbgCombined || "").slice(0, 300),
+          );
           console.log(`${LOG_PREFIX} [doc-pipeline-debug] STAGE_SNAPSHOT process_route`, {
             documentId,
             RAW_PDF_TEXT_LENGTH: dbgRawPdf.length,
@@ -1012,6 +1033,17 @@ export async function POST(
           !!String(rawPdfTextForValuation ?? "").trim(),
         );
 
+        const valuationCombinedPipelineText =
+          (typeof extractionArtifacts?.combined_text === "string"
+            ? extractionArtifacts.combined_text
+            : "") ||
+          extractedText ||
+          "";
+        console.log(
+          "[PROCESS DEBUG] combinedPipelineText length:",
+          valuationCombinedPipelineText.length,
+        );
+
         preUnderwritingValuation = runPreUnderwritingValuation({
           documentId,
           parsed: parsed as unknown as Record<string, unknown>,
@@ -1022,7 +1054,7 @@ export async function POST(
           drillSnapshot: drillSnap,
           extractedText,
           raw_text: rawPdfTextForValuation,
-          combinedExtractionText: combinedPipelineText,
+          combinedExtractionText: valuationCombinedPipelineText,
         });
         console.log(`${LOG_PREFIX} PRE_UNDERWRITING_VALUATION`, {
           documentId,
@@ -1656,7 +1688,18 @@ export async function POST(
             drillSnapshot: drillSnapshotFromDealInput(dealScoreInputForPipeline ?? {}),
             extractedText,
             raw_text: rawPdfTextForValuation,
-            combinedExtractionText: combinedPipelineText,
+            combinedExtractionText: (() => {
+              const art = debug.extraction_artifacts as
+                | Record<string, unknown>
+                | undefined;
+              return (
+                (typeof art?.combined_text === "string"
+                  ? art.combined_text
+                  : "") ||
+                extractedText ||
+                ""
+              );
+            })(),
           }),
       };
       const fallbackExtractionResponse: SavedExtraction = {
