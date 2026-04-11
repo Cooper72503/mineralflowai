@@ -8,9 +8,11 @@ const ALLOWED_EXTENSIONS = [".pdf", ".csv", ".txt"];
 export type DocumentDropZoneProps = {
   accept?: string;
   maxSizeBytes?: number;
-  onFileSelect: (file: File) => void;
+  onFileSelect: (file: File | File[]) => void;
   disabled?: boolean;
   className?: string;
+  /** Allow selecting multiple files at once. */
+  multiple?: boolean;
 };
 
 export function DocumentDropZone({
@@ -19,6 +21,7 @@ export function DocumentDropZone({
   onFileSelect,
   disabled = false,
   className = "",
+  multiple = false,
 }: DocumentDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,16 +50,17 @@ export function DocumentDropZone({
       setIsDragging(false);
       setError(null);
       if (disabled) return;
-      const file = e.dataTransfer.files?.[0];
-      if (!file) return;
-      const err = validateFile(file);
-      if (err) {
-        setError(err);
-        return;
+      const files = Array.from(e.dataTransfer.files ?? []);
+      if (files.length === 0) return;
+      const errors = files.map(validateFile).filter(Boolean);
+      if (errors.length > 0) { setError(errors[0]!); return; }
+      if (multiple) {
+        onFileSelect(files);
+      } else {
+        onFileSelect(files[0]);
       }
-      onFileSelect(file);
     },
-    [disabled, onFileSelect, validateFile]
+    [disabled, multiple, onFileSelect, validateFile]
   );
 
   const handleDragOver = useCallback(
@@ -78,17 +82,18 @@ export function DocumentDropZone({
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       setError(null);
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const err = validateFile(file);
-      if (err) {
-        setError(err);
-        return;
+      const files = Array.from(e.target.files ?? []);
+      if (files.length === 0) return;
+      const errors = files.map(validateFile).filter(Boolean);
+      if (errors.length > 0) { setError(errors[0]!); e.target.value = ""; return; }
+      if (multiple) {
+        onFileSelect(files);
+      } else {
+        onFileSelect(files[0]);
       }
-      onFileSelect(file);
       e.target.value = "";
     },
-    [onFileSelect, validateFile]
+    [multiple, onFileSelect, validateFile]
   );
 
   return (
@@ -113,14 +118,17 @@ export function DocumentDropZone({
           accept={accept}
           onChange={handleChange}
           disabled={disabled}
+          multiple={multiple}
           style={{ display: "none" }}
           aria-label="Choose file"
         />
         <p style={{ fontSize: "0.95rem", color: "#555", marginBottom: "0.25rem" }}>
-          {isDragging ? "Drop file here" : "Drag and drop a file here, or click to browse"}
+          {isDragging
+            ? `Drop file${multiple ? "s" : ""} here`
+            : `Drag and drop ${multiple ? "files" : "a file"} here, or click to browse`}
         </p>
         <p style={{ fontSize: "0.8rem", color: "#888" }}>
-          PDF, TXT, CSV — max 20 MB
+          PDF, TXT, CSV — max 20 MB{multiple ? " per file" : ""}
         </p>
       </label>
       {error && (

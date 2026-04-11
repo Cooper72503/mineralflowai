@@ -5,14 +5,16 @@ import { usePathname } from "next/navigation";
 import { SignOutButton } from "./SignOutButton";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/screen", label: "Quick Screen" },
-  { href: "/upload", label: "Upload document" },
-  { href: "/documents", label: "Documents" },
-  { href: "/leads", label: "Leads" },
-  { href: "/alerts", label: "Alerts" },
-  { href: "/settings", label: "Settings" },
-  { href: "/billing", label: "Billing" },
+  { href: "/dashboard",  label: "Dashboard"       },
+  { href: "/pipeline",   label: "Pipeline"         },
+  { href: "/screen",     label: "Quick Screen"     },
+  { href: "/offer",      label: "Offer Calculator" },
+  { href: "/upload",     label: "Upload"           },
+  { href: "/documents",  label: "Documents"        },
+  { href: "/leads",      label: "Leads"            },
+  { href: "/alerts",     label: "Alerts"           },
+  { href: "/settings",   label: "Settings"         },
+  { href: "/billing",    label: "Billing"          },
 ] as const;
 
 export function Sidebar() {

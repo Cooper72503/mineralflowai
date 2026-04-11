@@ -42,6 +42,9 @@ import {
 import type { DealValuationOutput } from "@/lib/valuation";
 import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
 import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
+import { DealStageSelector } from "@/app/components/DealStageSelector";
+import { DealNotesSection } from "@/app/components/DealNotesSection";
+import { WellDataCard } from "@/app/components/WellDataCard";
 
 function readProductionSnapshot(merged: Record<string, unknown>): ProductionSnapshot | null {
   const raw = merged.production_snapshot;
@@ -106,6 +109,7 @@ type DocumentRow = {
   created_at: string;
   processed_at: string | null;
   error_message: string | null;
+  deal_stage?: string | null;
 };
 
 type ExtractionRow = {
@@ -861,7 +865,7 @@ export default function DocumentDetailPage() {
       try {
         const { data, error: fetchError } = await supabase
           .from("documents")
-          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
+          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
           .eq("id", id)
           .maybeSingle();
 
@@ -1050,7 +1054,7 @@ export default function DocumentDetailPage() {
         try {
           const { data: refreshedDoc, error: refreshedDocErr } = await supabase
             .from("documents")
-            .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
+            .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
             .eq("id", id)
             .maybeSingle();
 
@@ -1086,7 +1090,7 @@ export default function DocumentDetailPage() {
         // Fallback: reload from DB (in case the API response didn't include extraction).
         const { data, error: fetchError } = await supabase
           .from("documents")
-          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
+          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
           .eq("id", id)
           .maybeSingle();
         if (!fetchError && data) setDoc(data as DocumentRow);
@@ -1120,7 +1124,7 @@ export default function DocumentDetailPage() {
       try {
         const { data: refreshedDoc, error: refreshedDocErr } = await supabase
           .from("documents")
-          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message")
+          .select("id, file_name, county, state, document_type, file_size, status, storage_path, created_at, processed_at, error_message, deal_stage")
           .eq("id", id)
           .maybeSingle();
 
@@ -1273,9 +1277,15 @@ export default function DocumentDetailPage() {
       )}
 
       <div className="card" style={{ maxWidth: 560, marginBottom: "1.5rem" }}>
-        <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
-          Metadata
-        </h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
+          <h2 style={{ fontSize: "1.05rem", fontWeight: 600, margin: 0 }}>Metadata</h2>
+          {doc && (
+            <DealStageSelector
+              documentId={doc.id}
+              currentStage={doc.deal_stage ?? "new_lead"}
+            />
+          )}
+        </div>
         <dl style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           {meta.map(({ label, value }) => (
             <div key={label}>
@@ -1293,6 +1303,13 @@ export default function DocumentDetailPage() {
       {preUnderwritingValuation ? <PreUnderwritingValuationSection v={preUnderwritingValuation} /> : null}
 
       {productionSnapshot ? <ProductionSnapshotCard snap={productionSnapshot} /> : null}
+
+      {doc && (
+        <WellDataCard
+          county={extraction?.county ?? doc.county ?? null}
+          state={extraction?.state ?? doc.state ?? null}
+        />
+      )}
 
       <LegalDescriptionCard displayText={legalDescriptionDisplayText} />
 
@@ -1693,6 +1710,8 @@ export default function DocumentDetailPage() {
           </button>
         ) : null}
       </div>
+
+      {doc && <DealNotesSection documentId={doc.id} />}
     </div>
   );
 }
