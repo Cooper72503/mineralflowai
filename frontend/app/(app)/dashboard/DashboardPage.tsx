@@ -22,6 +22,7 @@ import {
   type ProcessedDealRow,
 } from "@/lib/deals/processed-deals-query";
 import { DealScoreHotBadge } from "@/app/components/DealScoreHotBadge";
+import { GettingStartedCard } from "@/app/components/GettingStartedCard";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return EM_DASH;
@@ -164,6 +165,8 @@ export default function DashboardPage() {
         <h1>Deals dashboard</h1>
         <p>Completed documents ranked by deal score — best opportunities first</p>
       </div>
+
+      <GettingStartedCard />
 
       <div
         style={{
