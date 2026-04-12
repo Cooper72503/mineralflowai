@@ -5,9 +5,6 @@ import Stripe from "stripe";
 
 export const dynamic = "force-dynamic";
 
-// Stripe sends raw body — Next.js must NOT parse it
-export const config = { api: { bodyParser: false } };
-
 function respond(status: number, body: object) {
   return NextResponse.json(body, { status });
 }
