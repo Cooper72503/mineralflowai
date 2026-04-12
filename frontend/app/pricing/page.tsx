@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PublicHeader } from "../components/PublicHeader";
 
 const FREE_FEATURES = [
-  "25 document analyses per day",
+  "100 document analyses per day",
   "AI extraction — lease terms, acreage, royalty, ownership",
   "Deal scoring (A / B / C grades)",
   "Pre-underwriting valuation",
@@ -78,11 +78,11 @@ export default function PricingPage() {
                 Free
               </p>
               <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem" }}>
-                <span style={{ fontSize: "2.5rem", fontWeight: 700, color: "#111827" }}>$0</span>
+                <span style={{ fontSize: "2.5rem", fontWeight: 700, color: "#111827" }}>$500</span>
                 <span style={{ color: "#6b7280", fontSize: "0.9rem" }}>/month</span>
               </div>
               <p style={{ fontSize: "0.88rem", color: "#6b7280", marginTop: "0.5rem" }}>
-                25 analyses/day · all core features
+                100 analyses/day · all core features
               </p>
             </div>
 
@@ -146,7 +146,7 @@ export default function PricingPage() {
                 Pro
               </p>
               <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem" }}>
-                <span style={{ fontSize: "2.5rem", fontWeight: 700, color: "#fff" }}>$99</span>
+                <span style={{ fontSize: "2.5rem", fontWeight: 700, color: "#fff" }}>$1,250</span>
                 <span style={{ color: "#93c5fd", fontSize: "0.9rem" }}>/month</span>
               </div>
               <p style={{ fontSize: "0.88rem", color: "#93c5fd", marginTop: "0.5rem" }}>

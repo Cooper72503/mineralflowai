@@ -380,7 +380,7 @@ export async function POST(
         });
       }
 
-      // ── Rate limit: 25 document processes per user per 24 hours ──────────
+      // ── Rate limit: 100 document processes per user per 24 hours ──────────
       try {
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         const { count, error: countErr } = await supabase
@@ -390,11 +390,11 @@ export async function POST(
           .not("processed_at", "is", null)
           .gte("processed_at", since);
 
-        if (!countErr && (count ?? 0) >= 25) {
+        if (!countErr && (count ?? 0) >= 100) {
           return respond(429, {
             ok: false,
             step: "rate_limit",
-            error: "You've processed 25 documents in the last 24 hours — the daily limit. This resets on a rolling 24-hour basis. Contact support if you need a higher limit.",
+            error: "You've processed 100 documents in the last 24 hours — the daily limit. This resets on a rolling 24-hour basis. Upgrade to Pro for unlimited processing.",
           });
         }
       } catch {

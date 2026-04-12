@@ -222,7 +222,7 @@ export default function BillingPage() {
                   <strong>Free tier</strong>
                 </p>
                 <p style={{ margin: "0 0 0.75rem", color: "#6b7280" }}>
-                  25 document analyses per day · all core features included
+                  100 document analyses per day · all core features included
                 </p>
               </div>
             )}

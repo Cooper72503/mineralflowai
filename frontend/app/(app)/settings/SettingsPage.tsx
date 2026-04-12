@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-const DAILY_LIMIT = 25;
+const DAILY_LIMIT = 100;
 
 function SectionCard({
   title,
