@@ -544,3 +544,142 @@ tr:hover td {
   overflow: auto;
   padding: 1.5rem;
 }
+
+/* ── Mobile sidebar / hamburger ── */
+.mobile-topbar {
+  display: none;
+}
+
+.mobile-hamburger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #374151;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.mobile-overlay {
+  display: none;
+}
+
+.sidebar-mobile {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sidebar-desktop {
+    display: none;
+  }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: #fff;
+    border-bottom: 1px solid #e5e5e5;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    width: 100%;
+  }
+
+  .mobile-topbar-brand {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #1a1a1a;
+    text-decoration: none;
+  }
+
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+
+  .mobile-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 200;
+  }
+
+  .sidebar-mobile {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    background: #fff;
+    border-right: 1px solid #e5e5e5;
+    z-index: 300;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+
+  .sidebar-mobile.open {
+    transform: translateX(0);
+  }
+
+  /* Tables: allow horizontal scroll on mobile */
+  .tableWrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Pipeline kanban: full-width scroll */
+  .container {
+    padding: 0 0.75rem;
+  }
+}
+
+/* ── Print / PDF export styles ── */
+@media print {
+  .sidebar,
+  .sidebar-desktop,
+  .sidebar-mobile,
+  .mobile-topbar,
+  .no-print {
+    display: none !important;
+  }
+
+  .app-shell {
+    display: block;
+  }
+
+  .app-main {
+    padding: 0;
+  }
+
+  .container {
+    max-width: 100%;
+    padding: 0;
+  }
+
+  .card {
+    break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #e5e7eb;
+  }
+
+  body {
+    font-size: 11pt;
+    color: #000;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .print-header {
+    display: block !important;
+  }
+}

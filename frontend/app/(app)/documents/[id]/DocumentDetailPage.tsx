@@ -823,43 +823,6 @@ export default function DocumentDetailPage() {
     return parseLegalDescriptionParts(scanSource);
   }, [extraction]);
 
-  useEffect(() => {
-    if (!extraction) return;
-    const scanSource = [extraction.legal_description, extraction.extracted_text]
-      .filter((s): s is string => typeof s === "string" && s.trim() !== "")
-      .join("\n\n");
-    const extractedParts = parseLegalDescriptionParts(scanSource);
-    const formatted = formatLegalDescriptionDisplay({
-      county: extraction.county ?? doc?.county ?? null,
-      state: extraction.state ?? doc?.state ?? null,
-      legal_description: extraction.legal_description,
-      extracted_text: extraction.extracted_text,
-    });
-    console.log("[legal-description-debug]", {
-      legal_description_field: extraction.legal_description,
-      extracted_text_len: extraction.extracted_text?.length ?? 0,
-      extracted_parts: extractedParts,
-      formatted_legal_display: formatted.display,
-    });
-  }, [extraction, doc]);
-
-  useEffect(() => {
-    if (!displayDealScore) return;
-    console.log("SCORE LOADED", displayDealScore.score);
-    console.log("GRADE LOADED", displayDealScore.grade);
-    console.log("GRADE FROM SCORE", getGradeFromScore(displayDealScore.score));
-    console.log("[score-debug] score =", displayDealScore.score);
-    console.log("[score-debug] grade =", getGradeFromScore(displayDealScore.score));
-  }, [displayDealScore]);
-
-  useEffect(() => {
-    if (!extraction) return;
-    logDocumentDetailDealScores(
-      extraction,
-      displayDealScore?.score ?? null,
-      "on load"
-    );
-  }, [extraction, displayDealScore]);
 
   useEffect(() => {
     if (!id) {
@@ -1252,9 +1215,35 @@ export default function DocumentDetailPage() {
         </Link>
       </div>
 
-      <div className="pageHeader">
-        <h1>Document details</h1>
-        <p>{doc.file_name ?? "Document"}</p>
+      <div className="pageHeader" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.75rem" }}>
+        <div>
+          <h1>Document details</h1>
+          <p>{doc.file_name ?? "Document"}</p>
+        </div>
+        <button
+          type="button"
+          className="no-print"
+          onClick={() => window.print()}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.45rem 0.9rem",
+            background: "#fff",
+            border: "1px solid #d1d5db",
+            borderRadius: 6,
+            fontSize: "0.85rem",
+            fontWeight: 500,
+            color: "#374151",
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <path d="M3 4V1h9v3M3 11H1V6h13v5h-2M3 8h9v6H3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+          </svg>
+          Print / Save PDF
+        </button>
       </div>
 
       {(doc.status === "processing" || doc.status === "queued" || processing) && (
