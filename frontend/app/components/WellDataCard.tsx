@@ -93,6 +93,12 @@ export function WellDataCard({ county, state, township, range }: Props) {
   const isUnavailable = result.source === "unavailable";
   const wells: WellSummary[] = result.wells ?? [];
 
+  // Texas TRRC returns location-only data — no operator/formation/production fields
+  const isTrrc = result.source === "trrc";
+  const hasRichData = !isTrrc && wells.some(
+    (w) => w.operator || w.status || w.formation || w.cum_oil_bbl != null
+  );
+
   return (
     <div className="card" style={{ maxWidth: 720, marginBottom: "1.5rem" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.6rem" }}>
@@ -112,7 +118,69 @@ export function WellDataCard({ county, state, township, range }: Props) {
         <p style={{ fontSize: "0.85rem", color: "#9ca3af", margin: 0 }}>
           No wells found in county via public records.
         </p>
+      ) : isTrrc && !hasRichData ? (
+        /* Texas limited-data view — show count + API list */
+        <>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "1rem",
+            padding: "0.75rem 1rem",
+            background: "#fef9c3",
+            border: "1px solid #fde047",
+            borderRadius: 8,
+            marginBottom: "0.75rem",
+          }}>
+            <div style={{ fontSize: "2rem", fontWeight: 700, color: "#713f12", lineHeight: 1 }}>
+              {wells.length}+
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 600, color: "#713f12" }}>
+                wells on record in this county
+              </p>
+              <p style={{ margin: 0, fontSize: "0.75rem", color: "#92400e" }}>
+                Texas RRC public GIS (location data only)
+              </p>
+            </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", fontSize: "0.8rem", width: "100%" }}>
+              <thead>
+                <tr>
+                  {["API Number", "Lat", "Lng"].map((h) => (
+                    <th key={h} style={{
+                      padding: "0.3rem 0.5rem", textAlign: "left",
+                      fontSize: "0.72rem", color: "#6b7280", fontWeight: 500,
+                      borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap",
+                    }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {wells.slice(0, 15).map((w) => (
+                  <tr key={w.api} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: "0.3rem 0.5rem", fontWeight: 500, color: "#111827", whiteSpace: "nowrap", fontFamily: "monospace" }}>
+                      {w.api}
+                    </td>
+                    <td style={{ padding: "0.3rem 0.5rem", color: "#374151" }}>
+                      {w.lat != null ? w.lat.toFixed(4) : "—"}
+                    </td>
+                    <td style={{ padding: "0.3rem 0.5rem", color: "#374151" }}>
+                      {w.lng != null ? w.lng.toFixed(4) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ fontSize: "0.73rem", color: "#9ca3af", marginTop: "0.5rem", marginBottom: 0 }}>
+            {result.note}
+          </p>
+        </>
       ) : (
+        /* Full rich data view (NDIC and future states) */
         <>
           <div style={{ overflowX: "auto" }}>
             <table style={{ borderCollapse: "collapse", fontSize: "0.8rem", width: "100%" }}>
@@ -157,7 +225,6 @@ export function WellDataCard({ county, state, township, range }: Props) {
           </div>
           <p style={{ fontSize: "0.73rem", color: "#9ca3af", marginTop: "0.5rem", marginBottom: 0 }}>
             Showing up to 15 wells in county. Data from {result.source.toUpperCase()} public records.
-            Monthly production data and proximity filtering coming soon.
           </p>
         </>
       )}

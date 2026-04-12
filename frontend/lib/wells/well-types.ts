@@ -20,6 +20,8 @@ export type WellSummary = {
 export type WellLookupResult = {
   /** Data source identifier. */
   source: "ndic" | "cogcc" | "trrc" | "unavailable";
+  /** Whether the transfer limit was exceeded (more wells exist than returned). */
+  exceeded_transfer_limit?: boolean;
   wells: WellSummary[];
   /** Human-readable description of the query (e.g. "McKenzie County, ND"). */
   query_description: string;

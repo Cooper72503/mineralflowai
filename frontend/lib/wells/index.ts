@@ -1,7 +1,9 @@
 export { lookupNdicWells } from "./ndic-api";
+export { lookupTrrcWells } from "./trrc-api";
 export type { WellSummary, WellLookupResult } from "./well-types";
 
 import { lookupNdicWells } from "./ndic-api";
+import { lookupTrrcWells } from "./trrc-api";
 import type { WellLookupResult } from "./well-types";
 
 /**
@@ -24,14 +26,17 @@ export async function lookupWellsByLocation(args: {
   }
 
   const stateNorm = args.state.trim().toUpperCase();
-  const isND = stateNorm === "ND" || stateNorm === "NORTH DAKOTA";
 
-  if (isND) return lookupNdicWells(args.county);
+  if (stateNorm === "ND" || stateNorm === "NORTH DAKOTA") {
+    return lookupNdicWells(args.county);
+  }
+
+  if (stateNorm === "TX" || stateNorm === "TEXAS") {
+    return lookupTrrcWells(args.county);
+  }
 
   // Stubs — coming soon
   const comingSoon: Record<string, string> = {
-    TX: "Texas RRC",
-    TEXAS: "Texas RRC",
     CO: "Colorado COGCC",
     COLORADO: "Colorado COGCC",
     OK: "Oklahoma OCC",
@@ -44,6 +49,14 @@ export async function lookupWellsByLocation(args: {
     PENNSYLVANIA: "Pennsylvania DEP",
     OH: "Ohio DNR",
     OHIO: "Ohio DNR",
+    MT: "Montana BOGC",
+    MONTANA: "Montana BOGC",
+    NM: "New Mexico EMNRD",
+    "NEW MEXICO": "New Mexico EMNRD",
+    UT: "Utah DNR",
+    UTAH: "Utah DNR",
+    KS: "Kansas Corporation Commission",
+    KANSAS: "Kansas Corporation Commission",
   };
 
   const src = comingSoon[stateNorm];
@@ -52,7 +65,7 @@ export async function lookupWellsByLocation(args: {
     wells: [],
     query_description: `${args.county} County, ${args.state}`,
     note: src
-      ? `${src} integration coming soon. Live well data currently available for North Dakota (NDIC).`
-      : `Live well data not yet available for ${args.state}. Currently supports: North Dakota (NDIC).`,
+      ? `${src} integration coming soon. Live well data currently available for Texas (TRRC) and North Dakota (NDIC).`
+      : `Live well data not yet available for ${args.state}. Currently supports: Texas (TRRC) and North Dakota (NDIC).`,
   };
 }
