@@ -31,11 +31,17 @@ CREATE POLICY "Users can view their own subscription"
 -- Service role (webhooks) can upsert freely via the API key — no RLS restriction
 -- needed there because we use the service-role key.
 
--- Helper: ensure every new user gets a free-tier row automatically
+-- Helper: ensure every new user gets a free-tier row automatically.
+-- Wrapped in EXCEPTION so it can NEVER abort the signup transaction.
 CREATE OR REPLACE FUNCTION handle_new_user_subscription()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
-  INSERT INTO subscriptions (user_id) VALUES (NEW.id) ON CONFLICT DO NOTHING;
+  BEGIN
+    INSERT INTO subscriptions (user_id) VALUES (NEW.id) ON CONFLICT DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    -- Log but never propagate — signup must not fail due to billing setup
+    NULL;
+  END;
   RETURN NEW;
 END;
 $$;
