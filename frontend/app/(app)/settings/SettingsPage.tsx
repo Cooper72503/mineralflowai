@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-const DAILY_LIMIT = 100;
+const WEEKLY_LIMIT = 50;
 
 function SectionCard({
   title,
@@ -97,8 +97,8 @@ export default function SettingsPage() {
       setNameInput(name);
     });
 
-    // Usage in last 24 h
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // Usage in last 7 days
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     supabase
       .from("documents")
       .select("id", { count: "exact", head: true })
@@ -156,7 +156,7 @@ export default function SettingsPage() {
   }
 
   const usagePct =
-    usageCount !== null ? Math.min(100, (usageCount / DAILY_LIMIT) * 100) : 0;
+    usageCount !== null ? Math.min(100, (usageCount / WEEKLY_LIMIT) * 100) : 0;
   const usageColor =
     usagePct >= 90 ? "#dc2626" : usagePct >= 60 ? "#d97706" : "#16a34a";
 
@@ -277,7 +277,7 @@ export default function SettingsPage() {
       {/* Usage */}
       <SectionCard title="Usage">
         <p style={{ fontSize: "0.85rem", color: "#6b7280", marginBottom: "0.75rem" }}>
-          Documents processed in the last 24 hours
+          Documents processed in the last 7 days
         </p>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
           <div style={{ flex: 1, height: 8, background: "#f3f4f6", borderRadius: 99, overflow: "hidden" }}>
@@ -292,7 +292,7 @@ export default function SettingsPage() {
             />
           </div>
           <span style={{ fontSize: "0.88rem", fontWeight: 600, color: usageColor, whiteSpace: "nowrap" }}>
-            {usageCount ?? "—"} / {DAILY_LIMIT}
+            {usageCount ?? "—"} / {WEEKLY_LIMIT}
           </span>
         </div>
         {usageCount !== null && usagePct >= 90 && (
@@ -301,7 +301,7 @@ export default function SettingsPage() {
           </p>
         )}
         <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.5rem", marginBottom: 0 }}>
-          Limit resets on a rolling 24-hour basis.
+          Limit resets on a rolling 7-day basis.
         </p>
       </SectionCard>
 

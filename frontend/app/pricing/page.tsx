@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PublicHeader } from "../components/PublicHeader";
 
 const FREE_FEATURES = [
-  "100 document analyses per day",
+  "50 document analyses per week",
   "AI extraction — lease terms, acreage, royalty, ownership",
   "Deal scoring (A / B / C grades)",
   "Pre-underwriting valuation",
@@ -16,7 +16,7 @@ const FREE_FEATURES = [
 ];
 
 const PRO_FEATURES = [
-  "Everything in Free",
+  "Everything in Basic",
   "Unlimited document analyses",
   "Priority AI processing queue",
   "PDF export of deal reports",
@@ -75,14 +75,14 @@ export default function PricingPage() {
           }}>
             <div style={{ marginBottom: "1.5rem" }}>
               <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem" }}>
-                Free
+                Basic
               </p>
               <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem" }}>
                 <span style={{ fontSize: "2.5rem", fontWeight: 700, color: "#111827" }}>$500</span>
                 <span style={{ color: "#6b7280", fontSize: "0.9rem" }}>/month</span>
               </div>
               <p style={{ fontSize: "0.88rem", color: "#6b7280", marginTop: "0.5rem" }}>
-                100 analyses/day · all core features
+                50 analyses/week · all core features
               </p>
             </div>
 
