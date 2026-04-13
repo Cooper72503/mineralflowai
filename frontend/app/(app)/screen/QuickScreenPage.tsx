@@ -118,7 +118,7 @@ function ValuationResult({ result }: { result: ScreenResult }) {
             padding: "0.2rem 0.55rem", borderRadius: 6,
             border: `1px solid ${conf.borderColor}`, background: conf.background, color: conf.color,
           }}>
-            Confidence: {v.confidence}
+            Signal Confidence: {v.confidence}
           </span>
           <span style={{ fontSize: "0.85rem", color: "#374151", alignSelf: "center" }}>
             Deal type: {v.deal_type.replace(/_/g, " ")} · Activity: {v.activity_level}
@@ -127,7 +127,7 @@ function ValuationResult({ result }: { result: ScreenResult }) {
 
         {confReason && (confReason.summary || (confReason.present_signals?.length ?? 0) > 0 || (confReason.missing_signals?.length ?? 0) > 0) ? (
           <div style={{ marginBottom: "0.75rem" }}>
-            <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>Confidence reasoning</div>
+            <div style={{ fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>What signals were found</div>
             {confReason.summary ? (
               <p style={{ fontSize: "0.82rem", color: "#4b5563", margin: "0 0 0.5rem", lineHeight: 1.45 }}>
                 {confReason.summary}
