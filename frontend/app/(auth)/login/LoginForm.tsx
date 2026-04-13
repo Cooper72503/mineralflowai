@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { AuthError } from "@supabase/supabase-js";
 import { isAuthError } from "@supabase/supabase-js";
@@ -115,10 +115,36 @@ function formatAuthErrorForUi(err: AuthError): string {
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect") ?? "/dashboard";
+  const plan = searchParams.get("plan") as "basic" | "pro" | null;
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function redirectAfterLogin() {
+    // If a plan param is present, kick off Stripe checkout directly
+    if (plan === "basic" || plan === "pro") {
+      try {
+        const res = await fetch("/api/billing/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan }),
+        });
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+          return;
+        }
+      } catch {
+        // Fall through to redirect
+      }
+    }
+    router.replace(redirectTo);
+    router.refresh();
+  }
 
   useEffect(() => {
     const supabase = createClient();
@@ -155,13 +181,13 @@ export function LoginForm() {
             );
             return;
           }
-          router.replace("/dashboard");
-          router.refresh();
+          await redirectAfterLogin();
         })();
       }
     });
     return () => subscription.unsubscribe();
-  }, [router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -223,8 +249,7 @@ export function LoginForm() {
         return;
       }
 
-      router.replace("/dashboard");
-      router.refresh();
+      await redirectAfterLogin();
     } catch (err) {
       console.log("LOGIN ERROR", err);
       if (isAuthError(err)) {

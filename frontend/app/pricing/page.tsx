@@ -53,8 +53,8 @@ export default function PricingPage() {
       });
 
       if (res.status === 401) {
-        // Not logged in — send to signup, then back to pricing
-        router.push(`/signup?redirect=/pricing`);
+        // Not logged in — send to login with redirect back to pricing + plan
+        router.push(`/login?redirect=/pricing&plan=${plan}`);
         return;
       }
 
