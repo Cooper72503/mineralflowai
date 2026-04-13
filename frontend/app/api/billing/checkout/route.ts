@@ -24,8 +24,14 @@ export async function POST(req: NextRequest) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) return respond(401, { ok: false, error: "Unauthorized" });
 
-  const priceId = process.env.STRIPE_PRO_PRICE_ID;
-  if (!priceId) return respond(503, { ok: false, error: "Pro plan price not configured." });
+  const body = await req.json().catch(() => ({}));
+  const plan = body?.plan === "basic" ? "basic" : "pro";
+
+  const priceId =
+    plan === "basic"
+      ? process.env.STRIPE_BASIC_PRICE_ID
+      : process.env.STRIPE_PRO_PRICE_ID;
+  if (!priceId) return respond(503, { ok: false, error: `${plan} plan price not configured.` });
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const stripe = getStripe();
