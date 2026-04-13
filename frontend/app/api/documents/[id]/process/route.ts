@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
+import { calculateExpirationDate } from "@/lib/alerts/parse-expiration";
 import {
   processDocumentContent,
   runStructuredExtraction,
@@ -1581,6 +1582,12 @@ export async function POST(
           });
         }
 
+        // Calculate and store lease expiration date
+        const expResult = calculateExpirationDate(
+          parsed.effective_date ?? null,
+          parsed.term_length    ?? null,
+        );
+
         const { error: updateCompletedError } = await updateDocumentFields(
           supabase,
           documentId,
@@ -1589,6 +1596,12 @@ export async function POST(
             completed_at: completedAt,
             processed_at: completedAt,
             error_message: null,
+            ...(expResult
+              ? {
+                  lease_expiration_date:   expResult.expiration_date_str,
+                  lease_expiration_source: expResult.source,
+                }
+              : {}),
           },
         );
 

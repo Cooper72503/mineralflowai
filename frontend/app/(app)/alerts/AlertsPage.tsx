@@ -1,9 +1,37 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 const MIN_SCORE_OPTIONS = [50, 60, 70, 80] as const;
+
+type ExpiringDoc = {
+  id: string;
+  file_name: string | null;
+  county: string | null;
+  state: string | null;
+  lease_expiration_date: string;
+  days_until: number;
+};
+
+function daysUntil(dateStr: string): number {
+  const exp = new Date(dateStr);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  exp.setHours(0, 0, 0, 0);
+  return Math.round((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function urgencyStyle(days: number): { background: string; color: string; border: string } {
+  if (days <= 7)  return { background: "#fef2f2", color: "#dc2626", border: "#fecaca" };
+  if (days <= 30) return { background: "#fff7ed", color: "#d97706", border: "#fed7aa" };
+  return              { background: "#eff6ff", color: "#2563eb", border: "#bfdbfe" };
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
 
 const inputStyle: CSSProperties = {
   width: "100%",
@@ -33,6 +61,31 @@ export default function AlertsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const [expiringDocs, setExpiringDocs] = useState<ExpiringDoc[]>([]);
+
+  // Load upcoming expirations
+  useEffect(() => {
+    const in90 = new Date();
+    in90.setDate(in90.getDate() + 90);
+    supabase
+      .from("documents")
+      .select("id, file_name, county, state, lease_expiration_date")
+      .not("lease_expiration_date", "is", null)
+      .gte("lease_expiration_date", new Date().toISOString().slice(0, 10))
+      .lte("lease_expiration_date", in90.toISOString().slice(0, 10))
+      .order("lease_expiration_date", { ascending: true })
+      .then(({ data }) => {
+        if (!data) return;
+        setExpiringDocs(
+          data.map((d) => ({
+            ...d,
+            days_until: daysUntil(d.lease_expiration_date),
+          }))
+        );
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadPreferences = useCallback(async () => {
     setLoading(true);
@@ -178,8 +231,48 @@ export default function AlertsPage() {
   return (
     <div className="container">
       <div className="pageHeader">
-        <h1>Deal Alerts</h1>
-        <p>Get notified when processed documents match your criteria (logging only for now)</p>
+        <h1>Alerts</h1>
+        <p>Lease expiration alerts — emails sent at 90, 30, and 7 days before expiration</p>
+      </div>
+
+      {/* Upcoming expirations */}
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+          Expiring within 90 days
+        </h2>
+        {expiringDocs.length === 0 ? (
+          <p style={{ fontSize: "0.88rem", color: "#9ca3af", margin: 0 }}>
+            No leases expiring in the next 90 days. Expiration dates are automatically calculated from each document&apos;s effective date and term length.
+          </p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            {expiringDocs.map((doc) => {
+              const s = urgencyStyle(doc.days_until);
+              const loc = [doc.county ? `${doc.county} County` : null, doc.state].filter(Boolean).join(", ");
+              return (
+                <div key={doc.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.7rem 1rem", background: s.background, border: `1px solid ${s.border}`, borderRadius: 8, gap: "1rem", flexWrap: "wrap" }}>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 600, fontSize: "0.88rem", color: "#111827" }}>
+                      {doc.file_name ?? "Untitled document"}
+                    </p>
+                    {loc && <p style={{ margin: "0.1rem 0 0", fontSize: "0.78rem", color: "#6b7280" }}>{loc}</p>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }}>
+                    <div style={{ textAlign: "right" }}>
+                      <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: s.color }}>
+                        {doc.days_until}d
+                      </p>
+                      <p style={{ margin: 0, fontSize: "0.72rem", color: "#6b7280" }}>{formatDate(doc.lease_expiration_date)}</p>
+                    </div>
+                    <Link href={`/documents/${doc.id}`} style={{ fontSize: "0.78rem", color: "#2563eb", textDecoration: "none", fontWeight: 500, whiteSpace: "nowrap" }}>
+                      View →
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ maxWidth: 480 }}>
