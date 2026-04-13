@@ -42,7 +42,7 @@ export function LandingPage() {
                   Book a Demo
                 </a>
                 <Link className={styles.btnSecondary} href="/signup">
-                  Run a Deal Free
+                  Get Started
                 </Link>
               </div>
               <div className={styles.chips} aria-hidden>
