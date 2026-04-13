@@ -62,11 +62,11 @@ export default function PricingPage() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        alert(data.error ?? "Something went wrong. Please try again.");
+        alert(data.error ?? `Error ${res.status} — please try again.`);
         setLoading(null);
       }
-    } catch {
-      alert("Something went wrong. Please try again.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Network error — please try again.");
       setLoading(null);
     }
   }

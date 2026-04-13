@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { getStripe, STRIPE_CONFIGURED } from "@/lib/stripe";
 
@@ -11,6 +12,7 @@ function respond(status: number, body: object) {
 
 export async function POST(req: NextRequest) {
   if (!STRIPE_CONFIGURED) {
+    console.error("[checkout] Stripe not configured — STRIPE_SECRET_KEY missing");
     return respond(503, { ok: false, error: "Billing not configured." });
   }
 
@@ -22,7 +24,10 @@ export async function POST(req: NextRequest) {
   );
 
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
-  if (authErr || !user) return respond(401, { ok: false, error: "Unauthorized" });
+  if (authErr || !user) {
+    console.error("[checkout] Auth failed:", authErr?.message ?? "no user");
+    return respond(401, { ok: false, error: "Unauthorized" });
+  }
 
   const body = await req.json().catch(() => ({}));
   const plan = body?.plan === "basic" ? "basic" : "pro";
@@ -31,40 +36,65 @@ export async function POST(req: NextRequest) {
     plan === "basic"
       ? process.env.STRIPE_BASIC_PRICE_ID
       : process.env.STRIPE_PRO_PRICE_ID;
-  if (!priceId) return respond(503, { ok: false, error: `${plan} plan price not configured.` });
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const stripe = getStripe();
-
-  // Retrieve or create Stripe customer
-  const { data: sub } = await supabase
-    .from("subscriptions")
-    .select("stripe_customer_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  let customerId = sub?.stripe_customer_id as string | undefined;
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email,
-      metadata: { supabase_user_id: user.id },
-    });
-    customerId = customer.id;
-    // Store for future lookups
-    await supabase
-      .from("subscriptions")
-      .upsert({ user_id: user.id, stripe_customer_id: customerId }, { onConflict: "user_id" });
+  if (!priceId) {
+    console.error(`[checkout] No price ID for plan: ${plan}`);
+    return respond(503, { ok: false, error: `${plan} plan price not configured.` });
   }
 
-  const session = await stripe.checkout.sessions.create({
-    customer: customerId,
-    mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${appUrl}/billing?success=1`,
-    cancel_url: `${appUrl}/billing?canceled=1`,
-    subscription_data: { metadata: { supabase_user_id: user.id } },
-    allow_promotion_codes: true,
-  });
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  return respond(200, { ok: true, url: session.url });
+  try {
+    const stripe = getStripe();
+
+    // Use service role to read/write subscriptions table (bypasses RLS)
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // Retrieve or create Stripe customer
+    const { data: sub } = await supabaseAdmin
+      .from("subscriptions")
+      .select("stripe_customer_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    let customerId = sub?.stripe_customer_id as string | undefined;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { supabase_user_id: user.id },
+      });
+      customerId = customer.id;
+      await supabaseAdmin
+        .from("subscriptions")
+        .upsert(
+          { user_id: user.id, stripe_customer_id: customerId },
+          { onConflict: "user_id" }
+        );
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${appUrl}/billing?success=1`,
+      cancel_url: `${appUrl}/billing?canceled=1`,
+      subscription_data: { metadata: { supabase_user_id: user.id } },
+      allow_promotion_codes: true,
+    });
+
+    if (!session.url) {
+      console.error("[checkout] Stripe session created but no URL returned");
+      return respond(500, { ok: false, error: "Checkout session has no URL." });
+    }
+
+    return respond(200, { ok: true, url: session.url });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[checkout] Stripe error:", msg);
+    return respond(500, { ok: false, error: `Stripe error: ${msg}` });
+  }
 }
