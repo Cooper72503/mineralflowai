@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/with-timeout";
@@ -39,6 +39,8 @@ function formatDate(iso: string | null | undefined): string {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isWelcome = searchParams.get("welcome") === "1";
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState<ProcessedDealRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,7 +168,7 @@ export default function DashboardPage() {
         <p>Completed documents ranked by deal score — best opportunities first</p>
       </div>
 
-      <GettingStartedCard />
+      <GettingStartedCard welcome={isWelcome} />
 
       <div
         style={{

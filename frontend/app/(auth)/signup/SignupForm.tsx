@@ -157,14 +157,13 @@ export function SignupForm() {
       }
 
       if (data.session) {
-        router.replace("/dashboard");
+        router.replace("/dashboard?welcome=1");
         router.refresh();
         return;
       }
 
-      setSuccessMessage(
-        "Your account was created. You can log in with your email and password."
-      );
+      // Email confirmation required — show a friendly waiting screen
+      setSuccessMessage("confirm_email");
     } catch (err) {
       console.log("SIGNUP ERROR", err);
       if (isAuthError(err)) {
@@ -184,29 +183,35 @@ export function SignupForm() {
     }
   }
 
+  // Email confirmation waiting screen
+  if (successMessage === "confirm_email") {
+    return (
+      <div className="auth-card" style={{ textAlign: "center" }}>
+        <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>📬</div>
+        <h1 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "0.5rem" }}>Check your email</h1>
+        <p style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "1.25rem", lineHeight: 1.6 }}>
+          We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account, then come back and log in.
+        </p>
+        <a
+          href="/login"
+          className="btn btnPrimary"
+          style={{ textDecoration: "none", display: "inline-block" }}
+        >
+          Go to login
+        </a>
+        <p style={{ marginTop: "1rem", fontSize: "0.8rem", color: "#9ca3af" }}>
+          Didn&apos;t get it? Check your spam folder.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-card">
       <div className="auth-card-header">
         <h1>Create an account</h1>
         <p>Mineral Flow AI</p>
       </div>
-      {successMessage && (
-        <div
-          className="auth-success"
-          role="status"
-          style={{
-            marginBottom: "1rem",
-            padding: "0.75rem 1rem",
-            background: "rgba(34, 197, 94, 0.12)",
-            border: "1px solid rgba(34, 197, 94, 0.35)",
-            borderRadius: "6px",
-            color: "#15803d",
-            fontSize: "0.875rem",
-          }}
-        >
-          {successMessage}
-        </div>
-      )}
       {error && (
         <div
           className="auth-error"

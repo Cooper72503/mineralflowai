@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
-const DISMISSED_KEY = "mineral_onboarding_dismissed";
-
 type Step = {
   id: string;
   label: string;
@@ -15,25 +13,43 @@ type Step = {
   done: boolean;
 };
 
-export function GettingStartedCard() {
+function dismissedKey(userId: string) {
+  return `mineral_onboarding_dismissed_${userId}`;
+}
+
+export function GettingStartedCard({ welcome }: { welcome?: boolean }) {
   const [steps, setSteps] = useState<Step[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<string>("");
 
   const supabase = createClient();
 
   useEffect(() => {
-    // Check localStorage for dismiss
-    if (typeof window !== "undefined") {
-      if (localStorage.getItem(DISMISSED_KEY) === "1") {
-        setDismissed(true);
-        setLoaded(true);
-        return;
-      }
-    }
-
     async function load() {
-      // Step 1: any documents at all?
+      // Get user first so we can key dismissed state per user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoaded(true); return; }
+
+      setUserId(user.id);
+      const name =
+        (user.user_metadata?.full_name as string | undefined) ??
+        (user.user_metadata?.name as string | undefined) ??
+        user.email?.split("@")[0] ??
+        "";
+      setDisplayName(name);
+
+      // Per-user dismissed check
+      if (typeof window !== "undefined") {
+        if (localStorage.getItem(dismissedKey(user.id)) === "1") {
+          setDismissed(true);
+          setLoaded(true);
+          return;
+        }
+      }
+
+      // Step 1: any documents uploaded?
       const { count: docCount } = await supabase
         .from("documents")
         .select("id", { count: "exact", head: true });
@@ -44,7 +60,7 @@ export function GettingStartedCard() {
         .select("id", { count: "exact", head: true })
         .not("processed_at", "is", null);
 
-      // Step 3: any document moved out of new_lead? (graceful if column missing)
+      // Step 3: any document moved out of new_lead?
       let movedCount = 0;
       try {
         const { count } = await supabase
@@ -53,7 +69,7 @@ export function GettingStartedCard() {
           .not("deal_stage", "eq", "new_lead");
         movedCount = count ?? 0;
       } catch {
-        // deal_stage column not yet migrated — treat as not done
+        // deal_stage column not yet migrated
       }
 
       const built: Step[] = [
@@ -92,8 +108,8 @@ export function GettingStartedCard() {
   }, []);
 
   function dismiss() {
-    if (typeof window !== "undefined") {
-      localStorage.setItem(DISMISSED_KEY, "1");
+    if (typeof window !== "undefined" && userId) {
+      localStorage.setItem(dismissedKey(userId), "1");
     }
     setDismissed(true);
   }
@@ -102,9 +118,8 @@ export function GettingStartedCard() {
 
   const allDone = steps.every((s) => s.done);
   const completedCount = steps.filter((s) => s.done).length;
+  const isNewUser = completedCount === 0;
 
-  // Auto-dismiss if everything is done and they've been here a while —
-  // or just show a completion state
   return (
     <div
       className="card"
@@ -112,54 +127,53 @@ export function GettingStartedCard() {
         marginBottom: "1.5rem",
         border: "1px solid #bfdbfe",
         background: "linear-gradient(135deg, #eff6ff 0%, #f8faff 100%)",
+        padding: "1.5rem",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          marginBottom: "0.875rem",
-        }}
-      >
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1rem" }}>
         <div>
-          <h2 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 0.2rem", color: "#1e40af" }}>
-            {allDone ? "🎉 You're all set!" : "Getting started"}
-          </h2>
-          <p style={{ fontSize: "0.82rem", color: "#6b7280", margin: 0 }}>
-            {allDone
-              ? "You've completed all the setup steps."
-              : `${completedCount} of ${steps.length} steps complete`}
-          </p>
+          {(welcome || isNewUser) ? (
+            <>
+              <h2 style={{ fontSize: "1.2rem", fontWeight: 700, margin: "0 0 0.3rem", color: "#1e40af" }}>
+                👋 Welcome to Mineral Flow AI{displayName ? `, ${displayName}` : ""}!
+              </h2>
+              <p style={{ fontSize: "0.88rem", color: "#3b82f6", margin: 0 }}>
+                The fastest way to screen, score, and manage mineral rights deals. Let&apos;s get you set up in 3 steps.
+              </p>
+            </>
+          ) : allDone ? (
+            <>
+              <h2 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 0.2rem", color: "#1e40af" }}>
+                🎉 You&apos;re all set!
+              </h2>
+              <p style={{ fontSize: "0.82rem", color: "#6b7280", margin: 0 }}>
+                You&apos;ve completed all the setup steps.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 0.2rem", color: "#1e40af" }}>
+                Getting started
+              </h2>
+              <p style={{ fontSize: "0.82rem", color: "#6b7280", margin: 0 }}>
+                {completedCount} of {steps.length} steps complete
+              </p>
+            </>
+          )}
         </div>
         <button
           type="button"
           onClick={dismiss}
           aria-label="Dismiss"
-          style={{
-            background: "none",
-            border: "none",
-            color: "#9ca3af",
-            cursor: "pointer",
-            fontSize: "1.1rem",
-            lineHeight: 1,
-            padding: "0.1rem 0.25rem",
-          }}
+          style={{ background: "none", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: "1.1rem", lineHeight: 1, padding: "0.1rem 0.25rem", flexShrink: 0 }}
         >
           ✕
         </button>
       </div>
 
       {/* Progress bar */}
-      <div
-        style={{
-          height: 4,
-          background: "#dbeafe",
-          borderRadius: 99,
-          marginBottom: "1rem",
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ height: 4, background: "#dbeafe", borderRadius: 99, marginBottom: "1rem", overflow: "hidden" }}>
         <div
           style={{
             width: `${(completedCount / steps.length) * 100}%`,
@@ -171,6 +185,7 @@ export function GettingStartedCard() {
         />
       </div>
 
+      {/* Steps */}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
         {steps.map((step, i) => (
           <div
@@ -179,24 +194,23 @@ export function GettingStartedCard() {
               display: "flex",
               alignItems: "flex-start",
               gap: "0.75rem",
-              padding: "0.6rem 0.75rem",
+              padding: "0.65rem 0.75rem",
               background: step.done ? "#f0fdf4" : "#fff",
               border: `1px solid ${step.done ? "#bbf7d0" : "#e5e7eb"}`,
               borderRadius: 8,
             }}
           >
-            {/* Step number / check */}
             <div
               style={{
-                width: 24,
-                height: 24,
+                width: 26,
+                height: 26,
                 borderRadius: "50%",
                 background: step.done ? "#16a34a" : "#e5e7eb",
                 color: step.done ? "#fff" : "#9ca3af",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: "0.75rem",
+                fontSize: "0.8rem",
                 fontWeight: 700,
                 flexShrink: 0,
                 marginTop: 1,
@@ -208,7 +222,7 @@ export function GettingStartedCard() {
               <p
                 style={{
                   margin: "0 0 0.1rem",
-                  fontSize: "0.88rem",
+                  fontSize: "0.9rem",
                   fontWeight: 600,
                   color: step.done ? "#15803d" : "#111827",
                   textDecoration: step.done ? "line-through" : "none",
@@ -217,19 +231,14 @@ export function GettingStartedCard() {
                 {step.label}
               </p>
               {!step.done && (
-                <p style={{ margin: "0 0 0.3rem", fontSize: "0.78rem", color: "#6b7280" }}>
+                <p style={{ margin: "0 0 0.35rem", fontSize: "0.78rem", color: "#6b7280" }}>
                   {step.description}
                 </p>
               )}
               {!step.done && (
                 <Link
                   href={step.href}
-                  style={{
-                    fontSize: "0.78rem",
-                    color: "#2563eb",
-                    textDecoration: "none",
-                    fontWeight: 500,
-                  }}
+                  style={{ fontSize: "0.82rem", color: "#2563eb", textDecoration: "none", fontWeight: 600 }}
                 >
                   {step.linkLabel}
                 </Link>
@@ -238,6 +247,13 @@ export function GettingStartedCard() {
           </div>
         ))}
       </div>
+
+      {/* New user quick-start tip */}
+      {isNewUser && (
+        <p style={{ margin: "1rem 0 0", fontSize: "0.78rem", color: "#6b7280", textAlign: "center" }}>
+          Start by uploading a lease, deed, or title opinion — AI extracts the key terms in seconds.
+        </p>
+      )}
     </div>
   );
 }
