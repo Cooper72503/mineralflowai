@@ -276,9 +276,9 @@ tr:hover td {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(12, 21, 37, 0.92);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(10, 22, 40, 0.94);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(201, 168, 76, 0.15);
   flex-wrap: wrap;
   gap: 0.75rem 1rem;
 }
@@ -323,18 +323,19 @@ tr:hover td {
   justify-content: center;
   padding: 0.45rem 0.9rem;
   border-radius: 8px;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 0.875rem;
-  background: #16a34a !important;
-  color: #fff !important;
+  background: linear-gradient(135deg, #C9A84C 0%, #d4a832 100%) !important;
+  color: #0a1628 !important;
   border: none;
   text-decoration: none !important;
-  transition: background 0.15s, box-shadow 0.15s;
+  transition: box-shadow 0.15s, transform 0.1s;
+  box-shadow: 0 2px 8px rgba(201, 168, 76, 0.3);
 }
 
 .btnLandingPrimary:hover {
-  background: #15803d !important;
-  box-shadow: 0 4px 14px rgba(22, 163, 74, 0.25);
+  box-shadow: 0 4px 16px rgba(201, 168, 76, 0.4) !important;
+  transform: translateY(-1px);
   text-decoration: none !important;
 }
 
@@ -348,21 +349,21 @@ tr:hover td {
   font-size: 0.875rem;
   background: transparent !important;
   color: #f1f5f9 !important;
-  border: 1px solid rgba(148, 163, 184, 0.35) !important;
+  border: 1px solid rgba(201, 168, 76, 0.3) !important;
   text-decoration: none !important;
   transition: background 0.15s, border-color 0.15s;
 }
 
 .btnLandingSecondary:hover {
-  background: rgba(255, 255, 255, 0.06) !important;
-  border-color: rgba(148, 163, 184, 0.5) !important;
+  background: rgba(201, 168, 76, 0.08) !important;
+  border-color: rgba(201, 168, 76, 0.5) !important;
   text-decoration: none !important;
 }
 
 /* Public footer — landing */
 .public-footer--landing {
-  border-top: 1px solid rgba(148, 163, 184, 0.15);
-  background: #0a1525;
+  border-top: 1px solid rgba(201, 168, 76, 0.15);
+  background: #070f1c;
   padding: 2rem 1.25rem;
 }
 
