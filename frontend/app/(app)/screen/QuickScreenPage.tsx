@@ -48,7 +48,7 @@ function confBadge(c: DealValuationOutput["confidence"]): { background: string; 
   return { background: "#fafafa", color: "#6b7280", borderColor: "#e5e7eb" };
 }
 
-function ValuationResult({ result }: { result: ScreenResult }) {
+function ValuationResult({ result, clientProducing }: { result: ScreenResult; clientProducing: "yes" | "no" | "unknown" }) {
   const v = result.valuation;
   const rec = recBadge(v.recommendation);
   const conf = confBadge(v.confidence);
@@ -220,9 +220,10 @@ function ValuationResult({ result }: { result: ScreenResult }) {
         ) : null}
       </div>
 
-      {result.production_snapshot ? (
-        <div style={{ maxWidth: 560 }}>
-          {result.producing_status === "no" && (
+      {/* Show snapshot when server returns one, OR when user explicitly said "no" (not producing) */}
+      {(result.production_snapshot || clientProducing === "no") ? (
+        <div style={{ maxWidth: 560, marginTop: "1rem" }}>
+          {(clientProducing === "no" || result.producing_status === "no") && (
             <div style={{
               display: "flex", alignItems: "flex-start", gap: "0.5rem",
               background: "#fef9c3", border: "1px solid #fde047", borderRadius: 8,
@@ -236,7 +237,20 @@ function ValuationResult({ result }: { result: ScreenResult }) {
               </span>
             </div>
           )}
-          <ProductionSnapshotCard snap={result.production_snapshot} />
+          {result.production_snapshot ? (
+            <ProductionSnapshotCard snap={result.production_snapshot} />
+          ) : (
+            <div className="card" style={{ marginBottom: "1.5rem" }}>
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                Potential Production Estimate
+              </h2>
+              <p style={{ fontSize: "0.85rem", color: "#6b7280", margin: 0, lineHeight: 1.5 }}>
+                Enter acreage, county, and state to see a directional BOPD and royalty estimate
+                based on nearby well activity in this basin. Because this property is not currently
+                producing, estimates are benchmarked against comparable developed leases in the area.
+              </p>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -300,6 +314,12 @@ export default function QuickScreenPage() {
       });
 
       const body = await res.json() as { ok: boolean; error?: string } & Partial<ScreenResult>;
+      console.log("[QuickScreen] API response:", JSON.stringify({
+        ok: body.ok,
+        producing_status: body.producing_status,
+        has_snapshot: !!body.production_snapshot,
+        snapshot_status: (body.production_snapshot as {status?: string} | null | undefined)?.status,
+      }));
       if (!res.ok || !body.ok) {
         setError(body.error ?? "Screening failed. Please try again.");
         return;
@@ -469,7 +489,7 @@ export default function QuickScreenPage() {
         </form>
       </div>
 
-      {result ? <ValuationResult result={result} /> : null}
+      {result ? <ValuationResult result={result} clientProducing={producing} /> : null}
     </div>
   );
 }
