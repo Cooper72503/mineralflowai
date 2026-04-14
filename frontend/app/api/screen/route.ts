@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       acreage?: number | string;
       royalty_rate?: string;
       document_type?: string;
+      producing?: "yes" | "no" | "unknown";
     };
 
     const legalDescription = (body.legal_description ?? "").trim();
@@ -114,15 +115,43 @@ export async function POST(request: Request) {
       combinedExtractionText: null,
     });
 
+    const producingStatus = body.producing ?? "unknown";
+
+    // Apply user-supplied producing override — prevents false "likely producing" outputs
+    if (producingStatus === "no") {
+      // User explicitly says not producing — strip any production signals
+      valuation.activity_level = "low";
+      if (valuation.deal_type === "producing") {
+        valuation.deal_type = "undeveloped";
+      }
+      valuation.summary = valuation.summary
+        ? `[User confirmed: not currently producing] ${valuation.summary.replace(/likely producing|likely a producing|appears to be producing/gi, "not producing")}`
+        : "User confirmed this property is not currently producing.";
+      if (!valuation.risks) valuation.risks = [];
+      valuation.risks.unshift("User confirmed: not currently producing — production-based estimates removed.");
+      if (valuation.confidence_reasoning?.present_signals) {
+        valuation.confidence_reasoning.present_signals = valuation.confidence_reasoning.present_signals
+          .filter((s: string) => !/producing|production|revenue|bopd/i.test(s));
+      }
+    } else if (producingStatus === "yes") {
+      // User confirms producing — note it explicitly
+      if (valuation.confidence_reasoning) {
+        if (!valuation.confidence_reasoning.present_signals) valuation.confidence_reasoning.present_signals = [];
+        valuation.confidence_reasoning.present_signals.unshift("User confirmed: currently producing");
+      }
+    }
+
     const royaltyDecimal = normalizeRoyaltyToDecimal(body.royalty_rate ?? null);
-    const productionSnapshot = buildProductionSnapshot({
-      dealType: valuation.deal_type,
-      activityLevel: valuation.activity_level,
-      acreage,
-      royalty_rate: royaltyDecimal,
-      county,
-      state,
-    });
+    const productionSnapshot = producingStatus === "no"
+      ? null
+      : buildProductionSnapshot({
+          dealType: valuation.deal_type,
+          activityLevel: valuation.activity_level,
+          acreage,
+          royalty_rate: royaltyDecimal,
+          county,
+          state,
+        });
 
     return NextResponse.json({
       ok: true,

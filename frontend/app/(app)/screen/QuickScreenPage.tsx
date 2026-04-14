@@ -242,6 +242,7 @@ export default function QuickScreenPage() {
   const [state, setState] = useState("");
   const [acreage, setAcreage] = useState("");
   const [royaltyRate, setRoyaltyRate] = useState("");
+  const [producing, setProducing] = useState<"yes" | "no" | "unknown">("unknown");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScreenResult | null>(null);
@@ -277,6 +278,7 @@ export default function QuickScreenPage() {
           state: state.trim() || undefined,
           acreage: acreage.trim() ? parseFloat(acreage.trim().replace(/,/g, "")) : undefined,
           royalty_rate: royaltyRate.trim() || undefined,
+          producing,
         }),
       });
 
@@ -356,6 +358,45 @@ export default function QuickScreenPage() {
                 }}
                 disabled={loading}
               />
+            </div>
+          </div>
+
+          {/* Producing status */}
+          <div>
+            <label htmlFor="qs-producing" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
+              Currently producing?
+            </label>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              {(["yes", "no", "unknown"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setProducing(opt)}
+                  disabled={loading}
+                  style={{
+                    flex: 1,
+                    padding: "0.45rem 0",
+                    borderRadius: 6,
+                    fontSize: "0.88rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    border: producing === opt ? "2px solid #2563eb" : "1px solid #d1d5db",
+                    background: producing === opt
+                      ? opt === "yes" ? "#dcfce7"
+                        : opt === "no" ? "#fee2e2"
+                        : "#dbeafe"
+                      : "#fff",
+                    color: producing === opt
+                      ? opt === "yes" ? "#166534"
+                        : opt === "no" ? "#991b1b"
+                        : "#1e40af"
+                      : "#6b7280",
+                    transition: "all 0.1s",
+                  }}
+                >
+                  {opt === "yes" ? "Yes" : opt === "no" ? "No" : "Unknown"}
+                </button>
+              ))}
             </div>
           </div>
 
