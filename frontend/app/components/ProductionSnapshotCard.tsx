@@ -112,7 +112,7 @@ export function ProductionSnapshotCard({ snap }: { snap: ProductionSnapshot }) {
           padding: "0.2rem 0.55rem", borderRadius: 6,
           border: `1px solid ${cb.borderColor}`, background: cb.background, color: cb.color,
         }}>
-          Estimate Reliability: {snap.confidence}
+          Data Basis: {snap.confidence === "high" ? "strong" : snap.confidence === "medium" ? "moderate" : "limited"}
         </span>
       </div>
 
