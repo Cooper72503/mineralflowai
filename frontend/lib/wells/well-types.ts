@@ -19,7 +19,7 @@ export type WellSummary = {
 
 export type WellLookupResult = {
   /** Data source identifier. */
-  source: "ndic" | "cogcc" | "trrc" | "unavailable";
+  source: "ndic" | "cogcc" | "trrc" | "occ" | "wvdep" | "unavailable";
   /** Whether the transfer limit was exceeded (more wells exist than returned). */
   exceeded_transfer_limit?: boolean;
   wells: WellSummary[];
