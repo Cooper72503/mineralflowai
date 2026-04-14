@@ -238,7 +238,7 @@ const BASIN_MAP: StateMap = {
     huron: "moderate",
     medina: "moderate",
     lorain: "moderate",
-    // Fringe Utica / Appalachian conventional
+    // Fringe Utica / Appalachian conventional (east Ohio)
     holmes: "low",
     wayne: "low",
     ashland: "low",
@@ -252,6 +252,42 @@ const BASIN_MAP: StateMap = {
     summit: "low",
     portage: "low",
     geauga: "low",
+    // East Ohio Utica / deeper Appalachian
+    belmont: "moderate",
+    monroe: "low",
+    // Lima–Indiana Trend (NW Ohio) — conventional oil play
+    allen: "moderate",
+    hancock: "moderate",
+    putnam: "moderate",
+    auglaize: "low",
+    hardin: "low",
+    wyandot: "low",
+    seneca: "low",
+    "van wert": "low",
+    henry: "low",
+    defiance: "low",
+    paulding: "low",
+    wood: "low",
+    sandusky: "low",
+    erie: "low",
+    // South / Southeast Ohio — conventional Appalachian (Virginia Military Survey territory)
+    pike: "low",
+    scioto: "low",
+    ross: "low",
+    vinton: "low",
+    jackson: "low",
+    gallia: "low",
+    lawrence: "low",
+    adams: "low",
+    hocking: "low",
+    // Central Ohio
+    delaware: "low",
+    marion: "low",
+    union: "low",
+    logan: "low",
+    fayette: "low",
+    highland: "low",
+    clinton: "low",
   },
 
   // ── Louisiana — Haynesville ────────────────────────────────────────────────
