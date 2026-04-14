@@ -119,8 +119,8 @@ export async function POST(request: Request) {
 
     // Apply user-supplied producing override — prevents false "likely producing" outputs
     if (producingStatus === "no") {
-      // User explicitly says not producing — strip any production signals
-      valuation.activity_level = "low";
+      // User says not currently producing — reframe deal type but preserve basin activity level
+      // so the production snapshot can show nearby-comparable development potential
       if (valuation.deal_type === "producing") {
         valuation.deal_type = "undeveloped";
       }
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
         ? `[User confirmed: not currently producing] ${valuation.summary.replace(/likely producing|likely a producing|appears to be producing/gi, "not producing")}`
         : "User confirmed this property is not currently producing.";
       if (!valuation.risks) valuation.risks = [];
-      valuation.risks.unshift("User confirmed: not currently producing — production-based estimates removed.");
+      valuation.risks.unshift("User confirmed: not currently producing — production estimate based on nearby basin/county activity.");
       if (valuation.confidence_reasoning?.present_signals) {
         valuation.confidence_reasoning.present_signals = valuation.confidence_reasoning.present_signals
           .filter((s: string) => !/producing|production|revenue|bopd/i.test(s));
@@ -142,16 +142,17 @@ export async function POST(request: Request) {
     }
 
     const royaltyDecimal = normalizeRoyaltyToDecimal(body.royalty_rate ?? null);
-    const productionSnapshot = producingStatus === "no"
-      ? null
-      : buildProductionSnapshot({
-          dealType: valuation.deal_type,
-          activityLevel: valuation.activity_level,
-          acreage,
-          royalty_rate: royaltyDecimal,
-          county,
-          state,
-        });
+    // Always build a production snapshot — when user says "no" we force deal_type to "undeveloped"
+    // so the snapshot frames results as development potential based on nearby basin activity,
+    // not as current production. The actual basin activity_level is preserved so benchmarks are accurate.
+    const productionSnapshot = buildProductionSnapshot({
+      dealType: producingStatus === "no" ? "undeveloped" : valuation.deal_type,
+      activityLevel: valuation.activity_level,
+      acreage,
+      royalty_rate: royaltyDecimal,
+      county,
+      state,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -162,6 +163,7 @@ export async function POST(request: Request) {
       location_context: locationContext,
       valuation,
       production_snapshot: productionSnapshot,
+      producing_status: producingStatus,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

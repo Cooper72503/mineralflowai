@@ -19,6 +19,7 @@ type ScreenResult = {
   location_context: LocationContext;
   valuation: DealValuationOutput;
   production_snapshot?: ProductionSnapshot | null;
+  producing_status?: "yes" | "no" | "unknown";
 };
 
 function formatUsdCompact(n: number): string {
@@ -220,7 +221,23 @@ function ValuationResult({ result }: { result: ScreenResult }) {
       </div>
 
       {result.production_snapshot ? (
-        <ProductionSnapshotCard snap={result.production_snapshot} />
+        <div style={{ maxWidth: 560 }}>
+          {result.producing_status === "no" && (
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: "0.5rem",
+              background: "#fef9c3", border: "1px solid #fde047", borderRadius: 8,
+              padding: "0.6rem 0.75rem", marginBottom: "0.5rem", fontSize: "0.82rem",
+              color: "#854d0e", lineHeight: 1.45,
+            }}>
+              <span style={{ fontSize: "1rem", flexShrink: 0 }}>⚠️</span>
+              <span>
+                <strong>Not currently producing</strong> — the estimate below reflects potential development
+                based on nearby well activity and basin benchmarks for this area, not current production.
+              </span>
+            </div>
+          )}
+          <ProductionSnapshotCard snap={result.production_snapshot} />
+        </div>
       ) : null}
 
       {result.legal_description_parsed?.plss_township && result.legal_description_parsed?.plss_range && (
