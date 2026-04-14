@@ -90,6 +90,21 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
               </dd>
             </div>
           )}
+          {result.legal_description_parsed.vms_survey_number && (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Survey</dt>
+              <dd style={{ fontSize: "0.85rem", margin: 0 }}>
+                Survey No. {result.legal_description_parsed.vms_survey_number}
+                {result.legal_description_parsed.lot_number ? `, Lot ${result.legal_description_parsed.lot_number}` : ""}
+              </dd>
+            </div>
+          )}
+          {!result.legal_description_parsed.vms_survey_number && result.legal_description_parsed.lot_number && (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Lot</dt>
+              <dd style={{ fontSize: "0.85rem", margin: 0 }}>Lot {result.legal_description_parsed.lot_number}</dd>
+            </div>
+          )}
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Activity area</dt>
             <dd style={{ fontSize: "0.85rem", margin: 0 }}>{result.location_context.approximate_area}</dd>

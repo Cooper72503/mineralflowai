@@ -214,19 +214,44 @@ const BASIN_MAP: StateMap = {
     fayette: "low",
   },
 
-  // ── Ohio — Utica / Marcellus ───────────────────────────────────────────────
+  // ── Ohio — Utica / Marcellus (East) + Clinton Sandstone (Central) ─────────
   OH: {
+    // Utica/Marcellus core — highest drilling activity
     carroll: "high",
     jefferson: "high",
     harrison: "high",
+    columbiana: "high",
+    // Utica/Marcellus active — wet gas / condensate window
     tuscarawas: "moderate",
     guernsey: "moderate",
     noble: "moderate",
     morgan: "moderate",
     muskingum: "moderate",
-    holmes: "moderate",
+    stark: "moderate",
+    mahoning: "moderate",
+    trumbull: "moderate",
+    coshocton: "moderate",
+    // Clinton Sandstone (central Ohio) — conventional, still active
+    morrow: "moderate",
+    richland: "moderate",
+    crawford: "moderate",
+    huron: "moderate",
+    medina: "moderate",
+    lorain: "moderate",
+    // Fringe Utica / Appalachian conventional
+    holmes: "low",
     wayne: "low",
     ashland: "low",
+    knox: "low",
+    licking: "low",
+    athens: "low",
+    meigs: "low",
+    washington: "low",
+    "new philadelphia": "low",
+    cuyahoga: "low",
+    summit: "low",
+    portage: "low",
+    geauga: "low",
   },
 
   // ── Louisiana — Haynesville ────────────────────────────────────────────────

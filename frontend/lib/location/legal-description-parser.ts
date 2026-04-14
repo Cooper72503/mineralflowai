@@ -1,6 +1,11 @@
 /**
- * Texas / mineral-deed style and PLSS (Public Land Survey System) legal description parsing —
- * best-effort, regex-based. Never throws.
+ * Texas / mineral-deed style, PLSS (Public Land Survey System), and Ohio-specific legal
+ * description parsing — best-effort, regex-based. Never throws.
+ *
+ * Ohio uses three survey systems:
+ *  - PLSS (northwest Ohio): standard township/range, ranges run East
+ *  - Virginia Military Survey (VMS): southeast/east Ohio, lot + survey number
+ *  - US Military Survey (USMS) / Congressional Lands: east Ohio, township/range East without N/S
  */
 
 export type LegalDescriptionParseResult = {
@@ -8,12 +13,16 @@ export type LegalDescriptionParseResult = {
   survey_name: string | null;
   block: string | null;
   section: string | null;
-  /** PLSS township, e.g. "140 North". */
+  /** PLSS township, e.g. "140 North" or Ohio congressional "4" (no direction). */
   plss_township: string | null;
-  /** PLSS range, e.g. "94 West". */
+  /** PLSS range, e.g. "94 West" or Ohio East "9 East". */
   plss_range: string | null;
   /** Quarter-section or similar aliquot when present, e.g. "SE 1/4". */
   plss_aliquot: string | null;
+  /** Virginia Military Survey or US Military Survey number (Ohio-specific). */
+  vms_survey_number: string | null;
+  /** Lot number — common in Ohio VMS/USMS and some other states. */
+  lot_number: string | null;
 };
 
 const EMPTY: LegalDescriptionParseResult = {
@@ -24,6 +33,8 @@ const EMPTY: LegalDescriptionParseResult = {
   plss_township: null,
   plss_range: null,
   plss_aliquot: null,
+  vms_survey_number: null,
+  lot_number: null,
 };
 
 function normalizeWhitespace(raw: string | null | undefined): string {
@@ -44,6 +55,7 @@ export function parsePlssLegalDescription(raw: string | null | undefined): Pick<
   };
   if (!s) return out;
 
+  // Standard PLSS township with direction (North/South)
   const twn =
     s.match(/\bTownship\s+(\d+)\s*(North|South)\b/i) ??
     s.match(/\bT\.?\s*(\d+)\s*(N|S|North|South)\b/i);
@@ -56,6 +68,10 @@ export function parsePlssLegalDescription(raw: string | null | undefined): Pick<
           ? "South"
           : rawH.replace(/\s+/g, " ").trim();
     out.plss_township = `${twn[1]} ${hem}`;
+  } else {
+    // Ohio Congressional / USMS: "Township 4" with no direction
+    const ohnTwn = s.match(/\bTownship\s+(\d+)\b(?!\s*(?:North|South|N\b|S\b))/i);
+    if (ohnTwn) out.plss_township = ohnTwn[1];
   }
 
   const rng =
@@ -69,6 +85,10 @@ export function parsePlssLegalDescription(raw: string | null | undefined): Pick<
           ? "West"
           : rawH.replace(/\s+/g, " ").trim();
     out.plss_range = `${rng[1]} ${hem}`;
+  } else if (!out.plss_range) {
+    // Ohio Congressional range without direction: "Range 9"
+    const ohRng = s.match(/\bRange\s+(\d+)\b(?!\s*(?:East|West|E\b|W\b))/i);
+    if (ohRng) out.plss_range = ohRng[1];
   }
 
   const secM = s.match(/\bSection\s+(\d+[A-Za-z]?)\b/i);
@@ -89,9 +109,45 @@ export function parsePlssLegalDescription(raw: string | null | undefined): Pick<
   return out;
 }
 
+/**
+ * Ohio-specific survey systems:
+ * - Virginia Military Survey (VMS): "Virginia Military Survey No. 4873"
+ * - US Military Survey (USMS): "U.S. Military Survey No. 12" / "USMS 14"
+ * - Lot numbers common in both: "Lot 47"
+ */
+function parseOhioSurvey(raw: string | null | undefined): Pick<
+  LegalDescriptionParseResult,
+  "vms_survey_number" | "lot_number"
+> {
+  const s = normalizeWhitespace(raw);
+  const out = { vms_survey_number: null as string | null, lot_number: null as string | null };
+  if (!s) return out;
+
+  // Virginia Military Survey
+  const vmsM =
+    s.match(/\bVirginia\s+Military\s+Survey\s+(?:No\.?\s*)?(\d+)\b/i) ??
+    s.match(/\bV\.?M\.?S\.?\s+(?:No\.?\s*)?(\d+)\b/i);
+  if (vmsM) out.vms_survey_number = vmsM[1];
+
+  // US Military Survey / Congressional Lands
+  if (!out.vms_survey_number) {
+    const usmsM =
+      s.match(/\bU\.?S\.?\s+Military\s+Survey\s+(?:No\.?\s*)?(\d+)\b/i) ??
+      s.match(/\bU\.?S\.?M\.?S\.?\s+(?:No\.?\s*)?(\d+)\b/i) ??
+      s.match(/\bCongress(?:ional)?\s+(?:Lands?\s+)?(?:No\.?\s*)?Survey\s+(\d+)\b/i);
+    if (usmsM) out.vms_survey_number = usmsM[1];
+  }
+
+  // Lot number (Ohio VMS, USMS, and some other states)
+  const lotM = s.match(/\bLot\s+(?:No\.?\s*)?(\d+[A-Za-z]?)\b/i);
+  if (lotM) out.lot_number = lotM[1];
+
+  return out;
+}
+
 function parseTexasStyleLegalDescription(raw: string | null | undefined): Omit<
   LegalDescriptionParseResult,
-  "plss_township" | "plss_range" | "plss_aliquot"
+  "plss_township" | "plss_range" | "plss_aliquot" | "vms_survey_number" | "lot_number"
 > {
   const s = normalizeWhitespace(raw);
   const empty = { abstract_number: null, survey_name: null, block: null, section: null as string | null };
@@ -127,7 +183,8 @@ function parseTexasStyleLegalDescription(raw: string | null | undefined): Omit<
 }
 
 /**
- * Extract abstract number, survey name, block, section, and PLSS fields when present.
+ * Extract abstract number, survey name, block, section, PLSS fields, and Ohio-specific
+ * survey system fields (VMS, USMS, lot number) when present.
  */
 export function parseLegalDescription(raw: string | null | undefined): LegalDescriptionParseResult {
   const s = normalizeWhitespace(raw);
@@ -135,6 +192,7 @@ export function parseLegalDescription(raw: string | null | undefined): LegalDesc
 
   const plss = parsePlssLegalDescription(s);
   const tx = parseTexasStyleLegalDescription(s);
+  const ohio = parseOhioSurvey(s);
 
   const hasPlssAnchor = Boolean(plss.plss_township && plss.plss_range);
 
@@ -150,6 +208,8 @@ export function parseLegalDescription(raw: string | null | undefined): LegalDesc
     plss_township: plss.plss_township,
     plss_range: plss.plss_range,
     plss_aliquot: plss.plss_aliquot,
+    vms_survey_number: ohio.vms_survey_number,
+    lot_number: ohio.lot_number,
   };
 }
 
@@ -172,6 +232,8 @@ export function mergeLegalDescriptionParseResults(
     "plss_township",
     "plss_range",
     "plss_aliquot",
+    "vms_survey_number",
+    "lot_number",
   ];
   const out: LegalDescriptionParseResult = { ...EMPTY };
   for (const p of parts) {
