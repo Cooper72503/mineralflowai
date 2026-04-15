@@ -6,6 +6,7 @@ import type { DealValuationOutput } from "@/lib/valuation";
 import type { LegalDescriptionParseResult } from "@/lib/location/legal-description-parser";
 import type { LocationContext } from "@/lib/location/location-context";
 import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
+import type { ParcelLookupResult } from "@/lib/parcels";
 import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
 import { ParcelMapCard } from "@/app/components/ParcelMapCard";
 
@@ -20,6 +21,7 @@ type ScreenResult = {
   valuation: DealValuationOutput;
   production_snapshot?: ProductionSnapshot | null;
   producing_status?: "yes" | "no" | "unknown";
+  parcel_data?: ParcelLookupResult | null;
 };
 
 function formatUsdCompact(n: number): string {
@@ -123,11 +125,32 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Acreage</dt>
             <dd style={{ fontSize: "0.85rem", margin: 0 }}>
-              {result.acreage != null ? `${result.acreage} acres` : (
+              {result.acreage != null ? (
+                <>
+                  {result.acreage} acres
+                  {result.parcel_data?.source === "ohio_dnr" && result.parcel_data.acreage != null && (
+                    <span style={{ fontSize: "0.75rem", color: "#6b7280", marginLeft: "0.4rem" }}>
+                      (Ohio auditor)
+                    </span>
+                  )}
+                </>
+              ) : (
                 <span style={{ color: "#d97706" }}>Not provided — add acreage for BOPD estimate</span>
               )}
             </dd>
           </div>
+          {result.parcel_data?.source === "ohio_dnr" && result.parcel_data.owner && (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Owner</dt>
+              <dd style={{ fontSize: "0.85rem", margin: 0 }}>{result.parcel_data.owner}</dd>
+            </div>
+          )}
+          {result.parcel_data?.source === "ohio_dnr" && result.parcel_data.property_class && (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Property class</dt>
+              <dd style={{ fontSize: "0.85rem", margin: 0 }}>{result.parcel_data.property_class}</dd>
+            </div>
+          )}
           {(result.legal_description_parsed.plss_township || result.legal_description_parsed.section) && (
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>PLSS parsed</dt>

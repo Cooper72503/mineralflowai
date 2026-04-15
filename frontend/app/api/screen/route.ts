@@ -14,6 +14,7 @@ import {
 import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
 import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 import { inferStateFromCounty } from "@/lib/valuation/county-basin-activity";
+import { lookupParcel } from "@/lib/parcels";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,6 +62,21 @@ export async function POST(request: Request) {
     }
 
     const legalParsed = parseLegalDescription(legalDescription);
+
+    // Parcel lookup — if a parcel ID was parsed and we know the state, fetch acreage + owner
+    let parcelData = null;
+    if (legalParsed.parcel_id) {
+      parcelData = await lookupParcel({
+        parcel_id: legalParsed.parcel_id,
+        state: state,
+        county,
+      });
+      // Auto-fill acreage from parcel if not already provided
+      if (acreage == null && parcelData?.acreage != null) {
+        acreage = parcelData.acreage;
+      }
+      // Auto-fill county from parcel if not already resolved
+    }
 
     // Build a minimal parsed / dealScoreInput — just enough for the valuation engine
     const parsed: Record<string, unknown> = {
@@ -166,6 +182,7 @@ export async function POST(request: Request) {
       valuation,
       production_snapshot: productionSnapshot,
       producing_status: producingStatus,
+      parcel_data: parcelData ?? undefined,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
