@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { getStripe, STRIPE_CONFIGURED } from "@/lib/stripe";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +14,23 @@ export async function POST(req: NextRequest) {
     return respond(503, { ok: false, error: "Billing not configured." });
   }
 
-  const supabase = await createSupabaseFromRouteRequest(req);
-  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  // Extract JWT from Authorization header (client sends it explicitly since pricing page
+  // is public and may not have a server-side cookie session)
+  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization") ?? "";
+  const bearer = /^Bearer\s+/i.test(authHeader.trim())
+    ? authHeader.trim().replace(/^Bearer\s+/i, "").trim()
+    : "";
+
+  const supabaseAnon = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  // auth.getUser(jwt) validates the JWT server-side — correct approach for public pages
+  const { data: { user }, error: authErr } = bearer
+    ? await supabaseAnon.auth.getUser(bearer)
+    : await supabaseAnon.auth.getUser();
+
   if (authErr || !user) {
     console.error("[checkout] Auth failed:", authErr?.message ?? "no user");
     return respond(401, { ok: false, error: "Unauthorized" });
