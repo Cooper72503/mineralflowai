@@ -153,7 +153,7 @@ function parseOhioSurvey(raw: string | null | undefined): Pick<
 
 function parseTexasStyleLegalDescription(raw: string | null | undefined): Omit<
   LegalDescriptionParseResult,
-  "plss_township" | "plss_range" | "plss_aliquot" | "vms_survey_number" | "lot_number"
+  "plss_township" | "plss_range" | "plss_aliquot" | "vms_survey_number" | "lot_number" | "parcel_id" | "civil_township"
 > {
   const s = normalizeWhitespace(raw);
   const empty = { abstract_number: null, survey_name: null, block: null, section: null as string | null };
