@@ -392,8 +392,20 @@ export function lookupCountyBasinActivity(
   state: string | null | undefined
 ): BasinActivityTier | null {
   const stateAbbr = normalizeStateToAbbr(state);
-  if (!stateAbbr) return null;
   const countyKey = normalizeCountyKey(county);
   if (!countyKey) return null;
-  return BASIN_MAP[stateAbbr]?.[countyKey] ?? null;
+
+  if (stateAbbr) {
+    return BASIN_MAP[stateAbbr]?.[countyKey] ?? null;
+  }
+
+  // No state provided — search all states. Return result only if unambiguous (one match).
+  const matches: BasinActivityTier[] = [];
+  for (const stateMap of Object.values(BASIN_MAP)) {
+    const tier = stateMap[countyKey];
+    if (tier) matches.push(tier);
+  }
+  if (matches.length === 1) return matches[0];
+  // Multiple states have this county name — can't disambiguate without state
+  return null;
 }

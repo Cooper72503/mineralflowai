@@ -23,6 +23,10 @@ export type LegalDescriptionParseResult = {
   vms_survey_number: string | null;
   /** Lot number — common in Ohio VMS/USMS and some other states. */
   lot_number: string | null;
+  /** County auditor / GIS parcel ID, e.g. "15-0000988.015". */
+  parcel_id: string | null;
+  /** Civil township name when present (not PLSS township number), e.g. "Monroe". */
+  civil_township: string | null;
 };
 
 const EMPTY: LegalDescriptionParseResult = {
@@ -35,6 +39,8 @@ const EMPTY: LegalDescriptionParseResult = {
   plss_aliquot: null,
   vms_survey_number: null,
   lot_number: null,
+  parcel_id: null,
+  civil_township: null,
 };
 
 function normalizeWhitespace(raw: string | null | undefined): string {
@@ -183,6 +189,34 @@ function parseTexasStyleLegalDescription(raw: string | null | undefined): Omit<
 }
 
 /**
+ * Parse county auditor / GIS parcel IDs and civil township names.
+ * Parcel ID formats: "15-0000988.015", "34-12-34-001-001.000", "001-12345-0000"
+ * Civil township: "Monroe Township", "Monroe Twp", "Monroe twp"
+ */
+function parseParcelAndTownship(raw: string | null | undefined): Pick<
+  LegalDescriptionParseResult,
+  "parcel_id" | "civil_township"
+> {
+  const s = normalizeWhitespace(raw);
+  const out = { parcel_id: null as string | null, civil_township: null as string | null };
+  if (!s) return out;
+
+  // Parcel ID: numeric segments separated by dashes/dots, e.g. "15-0000988.015"
+  const parcelM = s.match(/\b(\d{2,3}[-–]\d{4,10}(?:[.\-]\d{2,6})+)\b/);
+  if (parcelM) out.parcel_id = parcelM[1];
+
+  // Civil township name (not PLSS number): "Monroe Township" / "Monroe Twp" / "Monroe twp"
+  const twpM = s.match(/\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\s+(?:Township|Twp|Tp)\b/i);
+  if (twpM) {
+    const name = twpM[1].replace(/\s+/g, " ").trim();
+    // Exclude PLSS-style "Township 4" (numeric)
+    if (!/^\d+$/.test(name)) out.civil_township = name;
+  }
+
+  return out;
+}
+
+/**
  * Extract abstract number, survey name, block, section, PLSS fields, and Ohio-specific
  * survey system fields (VMS, USMS, lot number) when present.
  */
@@ -190,9 +224,13 @@ export function parseLegalDescription(raw: string | null | undefined): LegalDesc
   const s = normalizeWhitespace(raw);
   if (!s) return { ...EMPTY };
 
-  const plss = parsePlssLegalDescription(s);
-  const tx = parseTexasStyleLegalDescription(s);
-  const ohio = parseOhioSurvey(s);
+  // Expand common abbreviations before parsing so "Harrison cty" → "Harrison County"
+  const expanded = expandLocationAbbreviations(s);
+
+  const plss = parsePlssLegalDescription(expanded);
+  const tx = parseTexasStyleLegalDescription(expanded);
+  const ohio = parseOhioSurvey(expanded);
+  const parcel = parseParcelAndTownship(s); // use original for parcel ID patterns
 
   const hasPlssAnchor = Boolean(plss.plss_township && plss.plss_range);
 
@@ -210,6 +248,8 @@ export function parseLegalDescription(raw: string | null | undefined): LegalDesc
     plss_aliquot: plss.plss_aliquot,
     vms_survey_number: ohio.vms_survey_number,
     lot_number: ohio.lot_number,
+    parcel_id: parcel.parcel_id,
+    civil_township: parcel.civil_township,
   };
 }
 
@@ -234,6 +274,8 @@ export function mergeLegalDescriptionParseResults(
     "plss_aliquot",
     "vms_survey_number",
     "lot_number",
+    "parcel_id",
+    "civil_township",
   ];
   const out: LegalDescriptionParseResult = { ...EMPTY };
   for (const p of parts) {
@@ -428,6 +470,18 @@ function tryCountyStateMatch(
   return null;
 }
 
+/**
+ * Expand common county/township abbreviations found in auditor records and informal descriptions.
+ * e.g. "Harrison cty" → "Harrison County", "Monroe twp" → "Monroe Township"
+ */
+function expandLocationAbbreviations(text: string): string {
+  return text
+    .replace(/\bcty\.?\b/gi, "County")
+    .replace(/\btwp\.?\b/gi, "Township")
+    .replace(/\bco\.(?=\s+[A-Z])/g, "County ") // "Harrison Co. Ohio" → "Harrison County Ohio"
+    .replace(/\btp\.?\b/gi, "Township");
+}
+
 /** Infer "X County, State" (multi-state) and legacy Texas-oriented patterns. Handles all-caps, abbreviations, and newlines. */
 export function inferCountyAndStateFromTexts(
   ...sources: (string | null | undefined)[]
@@ -439,11 +493,18 @@ export function inferCountyAndStateFromTexts(
   const result = tryCountyStateMatch(combined, combined);
   if (result) return result;
 
-  // Second pass: normalize all-caps words (scanned PDFs often produce all-caps text)
-  const normalized = softTitleCase(combined);
-  if (normalized !== combined) {
-    const result2 = tryCountyStateMatch(normalized, combined);
+  // Second pass: expand common abbreviations (cty, twp, co.)
+  const expanded = expandLocationAbbreviations(combined);
+  if (expanded !== combined) {
+    const result2 = tryCountyStateMatch(expanded, expanded);
     if (result2) return result2;
+  }
+
+  // Third pass: normalize all-caps words (scanned PDFs often produce all-caps text)
+  const normalized = softTitleCase(expanded !== combined ? expanded : combined);
+  if (normalized !== combined) {
+    const result3 = tryCountyStateMatch(normalized, combined);
+    if (result3) return result3;
   }
 
   return { county: null, state: null };

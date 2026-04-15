@@ -90,6 +90,18 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
               </dd>
             </div>
           )}
+          {result.legal_description_parsed.civil_township && (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Township</dt>
+              <dd style={{ fontSize: "0.85rem", margin: 0 }}>{result.legal_description_parsed.civil_township}</dd>
+            </div>
+          )}
+          {result.legal_description_parsed.parcel_id && (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Parcel ID</dt>
+              <dd style={{ fontSize: "0.85rem", margin: 0 }}>{result.legal_description_parsed.parcel_id}</dd>
+            </div>
+          )}
           {result.legal_description_parsed.vms_survey_number && (
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Survey</dt>
