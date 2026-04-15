@@ -129,25 +129,32 @@ export function LoginForm() {
     if (plan === "basic" || plan === "pro") {
       try {
         const supabase = createClient();
+        // Wait a tick for session to be persisted after sign-in
+        await new Promise((r) => setTimeout(r, 300));
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData.session?.access_token;
-        const res = await fetch("/api/billing/checkout", {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ plan }),
-        });
-        const data = await res.json();
-        if (data.url) {
-          window.location.href = data.url;
-          return;
+        if (token) {
+          const res = await fetch("/api/billing/checkout", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ plan }),
+          });
+          const data = await res.json();
+          if (data.url) {
+            window.location.href = data.url;
+            return;
+          }
         }
       } catch {
-        // Fall through to redirect
+        // Fall through
       }
+      // Session not ready or checkout failed — go to pricing with plan param so it auto-retries
+      router.replace(`/pricing?plan=${plan}`);
+      return;
     }
     router.replace(redirectTo);
     router.refresh();

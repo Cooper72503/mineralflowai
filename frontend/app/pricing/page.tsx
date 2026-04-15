@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PublicHeader } from "../components/PublicHeader";
 import { createClient } from "@/lib/supabase/client";
 
@@ -33,39 +33,60 @@ function CheckIcon() {
 
 export default function PricingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+
+  // Auto-trigger checkout when returning from login with ?plan=pro
+  useEffect(() => {
+    if (searchParams.get("plan") === "pro") {
+      void startCheckout();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function startCheckout() {
+    const supabase = createClient();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+
+    if (!token) {
+      router.push(`/login?redirect=/pricing%3Fplan%3Dpro`);
+      return;
+    }
+
+    const res = await fetch("/api/billing/checkout", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ plan: "pro" }),
+    });
+
+    if (res.status === 401) {
+      router.push(`/login?redirect=/pricing%3Fplan%3Dpro`);
+      return null;
+    }
+
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+      return null;
+    }
+    return data.error ?? `Error ${res.status}`;
+  }
 
   async function handleCheckout() {
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-
-      const res = await fetch("/api/billing/checkout", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ plan: "pro" }),
-      });
-
-      if (res.status === 401) {
-        router.push(`/login?redirect=/pricing&plan=pro`);
-        return;
-      }
-
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        alert(data.error ?? `Error ${res.status} — please try again.`);
+      const err = await startCheckout();
+      if (err) {
+        alert(err);
         setLoading(false);
       }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Network error — please try again.");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Network error — please try again.");
       setLoading(false);
     }
   }
