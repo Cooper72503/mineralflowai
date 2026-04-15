@@ -57,8 +57,57 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
   const risks = v.risks ?? [];
   const missingData = v.missing_data ?? [];
 
+  const recColors = {
+    PURSUE: { bg: "#dcfce7", border: "#16a34a", text: "#14532d", icon: "✓" },
+    REVIEW: { bg: "#fef9c3", border: "#ca8a04", text: "#713f12", icon: "~" },
+    PASS:   { bg: "#fee2e2", border: "#dc2626", text: "#7f1d1d", icon: "✗" },
+  }[v.recommendation] ?? { bg: "#f3f4f6", border: "#9ca3af", text: "#374151", icon: "?" };
+
   return (
     <div style={{ marginTop: "2rem" }}>
+      {/* Verdict banner */}
+      <div style={{
+        maxWidth: 560,
+        marginBottom: "1rem",
+        background: recColors.bg,
+        border: `2px solid ${recColors.border}`,
+        borderRadius: 12,
+        padding: "1rem 1.25rem",
+        display: "flex",
+        alignItems: "center",
+        gap: "1rem",
+      }}>
+        <div style={{
+          width: 44, height: 44, borderRadius: "50%",
+          background: recColors.border,
+          color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "1.4rem", fontWeight: 900, flexShrink: 0,
+        }}>
+          {recColors.icon}
+        </div>
+        <div>
+          <div style={{ fontSize: "1.3rem", fontWeight: 800, color: recColors.text, letterSpacing: "-0.01em" }}>
+            {v.recommendation}
+          </div>
+          <div style={{ fontSize: "0.82rem", color: recColors.text, opacity: 0.85, marginTop: "0.1rem" }}>
+            {v.recommendation === "PURSUE"
+              ? "Strong signals — worth moving forward on diligence."
+              : v.recommendation === "PASS"
+              ? "Weak signals or high risk — likely not worth pursuing."
+              : "Mixed signals — review carefully before committing."}
+          </div>
+        </div>
+        {(v.estimated_total_value_low != null && v.estimated_total_value_high != null) && (
+          <div style={{ marginLeft: "auto", textAlign: "right", flexShrink: 0 }}>
+            <div style={{ fontSize: "0.72rem", color: recColors.text, opacity: 0.7, textTransform: "uppercase", letterSpacing: "0.05em" }}>Est. Value</div>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: recColors.text }}>
+              {formatUsdRange(v.estimated_total_value_low, v.estimated_total_value_high)}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Resolved fields */}
       <div className="card" style={{ maxWidth: 560, marginBottom: "1rem" }}>
         <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.6rem" }}>Resolved inputs</h2>
