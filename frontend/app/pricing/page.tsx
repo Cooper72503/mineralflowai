@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PublicHeader } from "../components/PublicHeader";
+import { createClient } from "@/lib/supabase/client";
 
 const PILOT_FEATURES = [
   "Unlimited document analyses",
@@ -37,9 +38,17 @@ export default function PricingPage() {
   async function handleCheckout() {
     setLoading(true);
     try {
+      const supabase = createClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ plan: "pro" }),
       });
 

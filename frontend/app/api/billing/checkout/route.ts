@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
+import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { getStripe, STRIPE_CONFIGURED } from "@/lib/stripe";
 
 export const dynamic = "force-dynamic";
@@ -16,13 +15,7 @@ export async function POST(req: NextRequest) {
     return respond(503, { ok: false, error: "Billing not configured." });
   }
 
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } }
-  );
-
+  const supabase = await createSupabaseFromRouteRequest(req);
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) {
     console.error("[checkout] Auth failed:", authErr?.message ?? "no user");

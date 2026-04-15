@@ -128,9 +128,16 @@ export function LoginForm() {
     // If a plan param is present, kick off Stripe checkout directly
     if (plan === "basic" || plan === "pro") {
       try {
+        const supabase = createClient();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
         const res = await fetch("/api/billing/checkout", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({ plan }),
         });
         const data = await res.json();
