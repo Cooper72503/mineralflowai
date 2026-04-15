@@ -10,7 +10,7 @@ const PILOT_FEATURES = [
   "Deal scoring with pursue / skip reasoning",
   "Pre-underwriting valuation",
   "Offer calculator with sensitivity matrix",
-  "Quick Screen — instant legal description analysis",
+  "Quick Screen — instant legal description analysis (TX, ND, OK, WV, OH)",
   "Kanban deal pipeline",
   "Live well data (Texas RRC, North Dakota NDIC, Oklahoma OCC, West Virginia DEP)",
   "Lease expiration alerts (90 / 30 / 7 days)",
