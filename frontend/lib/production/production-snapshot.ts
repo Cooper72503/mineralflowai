@@ -263,6 +263,9 @@ export function buildProductionSnapshot(args: ProductionSnapshotArgs): Productio
     if (!args.royalty_rate && royalty.lo != null) {
       caveats.push("No royalty rate in document — defaulted to 3/16 (18.75%) for revenue estimate.");
     }
+    if (!args.acreage && bopdResult.source === "none") {
+      caveats.push("Add acreage (NMA) to generate a BOPD and royalty estimate.");
+    }
     if (status === "likely_producing") {
       reasoning.push("Asset is in an active development area — likely producing or drillable in near term.");
       caveats.push("'Likely producing' is basin-context inference only — no confirmed production in document.");

@@ -383,6 +383,32 @@ function normalizeCountyKey(county: string | null | undefined): string | null {
     .trim();
 }
 
+// Reverse map: abbr → full state name
+const ABBR_TO_STATE_NAME: Record<string, string> = {
+  ND: "North Dakota", MT: "Montana", WY: "Wyoming", CO: "Colorado",
+  NM: "New Mexico", TX: "Texas", OK: "Oklahoma", KS: "Kansas",
+  NE: "Nebraska", WV: "West Virginia", OH: "Ohio", PA: "Pennsylvania",
+  LA: "Louisiana", AR: "Arkansas", UT: "Utah", CA: "California",
+  ID: "Idaho", NV: "Nevada", AZ: "Arizona", MS: "Mississippi",
+  AL: "Alabama", VA: "Virginia", MI: "Michigan", IL: "Illinois",
+  IN: "Indiana", NC: "North Carolina", SC: "South Carolina", SD: "South Dakota",
+};
+
+/**
+ * When county is unambiguous in the basin map (only one state has it), return that state name.
+ * Returns null when the county appears in multiple states or isn't in the map.
+ */
+export function inferStateFromCounty(county: string | null | undefined): string | null {
+  const countyKey = normalizeCountyKey(county);
+  if (!countyKey) return null;
+  const matches: string[] = [];
+  for (const [abbr, stateMap] of Object.entries(BASIN_MAP)) {
+    if (stateMap[countyKey] !== undefined) matches.push(abbr);
+  }
+  if (matches.length === 1) return ABBR_TO_STATE_NAME[matches[0]] ?? matches[0];
+  return null;
+}
+
 /**
  * Returns the known activity tier for a county+state pair, or null if not in the map.
  * Both county and state accept full names or abbreviations.

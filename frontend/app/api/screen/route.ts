@@ -13,6 +13,7 @@ import {
 } from "@/lib/location/legal-description-parser";
 import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
 import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
+import { inferStateFromCounty } from "@/lib/valuation/county-basin-activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +47,8 @@ export async function POST(request: Request) {
     // Resolve county + state: prefer explicit inputs, fall back to inference from the legal description text
     const inferred = inferCountyAndStateFromTexts(legalDescription);
     const county = (body.county ?? "").trim() || inferred.county || null;
-    const state = (body.state ?? "").trim() || inferred.state || null;
+    // If state is still null, try to infer from county name (works when county is unambiguous in basin map)
+    const state = (body.state ?? "").trim() || inferred.state || inferStateFromCounty(county) || null;
 
     // Resolve acreage: prefer explicit input, fall back to text extraction
     let acreage: number | null = null;

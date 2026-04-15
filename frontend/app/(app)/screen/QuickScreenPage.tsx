@@ -74,7 +74,9 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <dt style={{ fontSize: "0.82rem", color: "#6b7280", minWidth: 100 }}>Acreage</dt>
             <dd style={{ fontSize: "0.85rem", margin: 0 }}>
-              {result.acreage != null ? `${result.acreage} acres` : EM_DASH}
+              {result.acreage != null ? `${result.acreage} acres` : (
+                <span style={{ color: "#d97706" }}>Not provided — add acreage for BOPD estimate</span>
+              )}
             </dd>
           </div>
           {(result.legal_description_parsed.plss_township || result.legal_description_parsed.section) && (
@@ -247,8 +249,8 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
         ) : null}
       </div>
 
-      {/* Show snapshot when server returns one, OR when user explicitly said "no" (not producing) */}
-      {(result.production_snapshot || clientProducing === "no") ? (
+      {/* Show snapshot when server returns one, OR when user explicitly said "no", OR when county is resolved */}
+      {(result.production_snapshot || clientProducing === "no" || result.county) ? (
         <div style={{ maxWidth: 560, marginTop: "1rem" }}>
           {(clientProducing === "no" || result.producing_status === "no") && (
             <div style={{
