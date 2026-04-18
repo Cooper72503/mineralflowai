@@ -42,10 +42,20 @@ import {
 import type { DealValuationOutput } from "@/lib/valuation";
 import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
 import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
+import { DealBriefCard } from "@/app/components/DealBriefCard";
+import type { DealBrief } from "@/lib/intelligence/deal-brief";
 import { DealStageSelector } from "@/app/components/DealStageSelector";
 import { DealNotesSection } from "@/app/components/DealNotesSection";
 import { WellDataCard } from "@/app/components/WellDataCard";
 import { ParcelMapCard } from "@/app/components/ParcelMapCard";
+
+function readDealBrief(merged: Record<string, unknown>): DealBrief | null {
+  const raw = merged.deal_brief;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.narrative !== "string" || typeof o.primary_risk !== "string") return null;
+  return raw as DealBrief;
+}
 
 function readProductionSnapshot(merged: Record<string, unknown>): ProductionSnapshot | null {
   const raw = merged.production_snapshot;
@@ -762,6 +772,11 @@ export default function DocumentDetailPage() {
     [snapshotMerged]
   );
 
+  const dealBrief = useMemo(
+    () => readDealBrief(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
+
   /** Prefer persisted `development_signals`; otherwise derive from extracted text for display. */
   const resolvedDevelopmentSignals = useMemo((): DevelopmentSignalsSnapshot | null => {
     const fromMerged = readDevelopmentSignals(snapshotMerged as Record<string, unknown>);
@@ -1299,6 +1314,8 @@ export default function DocumentDetailPage() {
       </div>
 
       {displayDealScore ? <DealScoreCard dealScore={displayDealScore} /> : null}
+
+      {dealBrief ? <DealBriefCard brief={dealBrief} /> : null}
 
       {preUnderwritingValuation ? <PreUnderwritingValuationSection v={preUnderwritingValuation} /> : null}
 
