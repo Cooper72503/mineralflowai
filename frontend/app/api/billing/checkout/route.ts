@@ -89,7 +89,10 @@ export async function POST(req: NextRequest) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${appUrl}/billing?success=1`,
       cancel_url: `${appUrl}/billing?canceled=1`,
-      subscription_data: { metadata: { supabase_user_id: user.id } },
+      subscription_data: {
+        trial_period_days: 7,
+        metadata: { supabase_user_id: user.id },
+      },
       allow_promotion_codes: true,
     });
 

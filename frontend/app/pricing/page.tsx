@@ -6,18 +6,21 @@ import { PublicHeader } from "../components/PublicHeader";
 import { createClient } from "@/lib/supabase/client";
 
 const PILOT_FEATURES = [
+  "7-day free trial — no charge until day 8",
   "Unlimited document analyses",
   "AI extraction — lease terms, acreage, royalty, ownership",
+  "Deal Brief — AI interpretation with risk, recommendation & grades",
   "Deal scoring with pursue / skip reasoning",
-  "Pre-underwriting valuation",
+  "Pre-underwriting valuation with market-rate multiples",
   "Offer calculator with sensitivity matrix",
   "Quick Screen — instant legal description analysis (TX, ND, OK, WV, OH)",
+  "PDF export of screen reports",
   "Kanban deal pipeline",
-  "Live well data (Texas RRC, North Dakota NDIC, Oklahoma OCC, West Virginia DEP)",
+  "Live well data (Texas RRC, North Dakota NDIC, Oklahoma OCC, West Virginia DEP, Ohio DNR)",
+  "Royalty statement parsing & market value analysis",
   "Lease expiration alerts (90 / 30 / 7 days)",
   "Parcel map (PLSS centroid)",
   "Notes per document",
-  "PDF export of deal reports",
   "Priority email support",
   "Dedicated onboarding",
 ];
@@ -114,10 +117,10 @@ export default function PricingPage() {
             Pilot Program
           </div>
           <h1 style={{ fontSize: "2.2rem", fontWeight: 700, color: "#f8fafc", marginBottom: "0.75rem", letterSpacing: "-0.02em" }}>
-            One plan. Full access.
+            Try free for 7 days.
           </h1>
           <p style={{ fontSize: "1.05rem", color: "#94a3b8", maxWidth: 460, margin: "0 auto" }}>
-            Everything included for pilot customers. No tiered limits, no feature gates.
+            Full access from day one. No charge until your trial ends. Cancel anytime.
           </p>
         </div>
 
@@ -156,10 +159,10 @@ export default function PricingPage() {
               </p>
               <div style={{ display: "flex", alignItems: "baseline", gap: "0.3rem" }}>
                 <span style={{ fontSize: "2.6rem", fontWeight: 700, color: "#f8fafc" }}>$1,250</span>
-                <span style={{ color: "#94a3b8", fontSize: "0.9rem" }}>/month</span>
+                <span style={{ color: "#94a3b8", fontSize: "0.9rem" }}>/month after trial</span>
               </div>
               <p style={{ fontSize: "0.875rem", color: "#94a3b8", marginTop: "0.5rem" }}>
-                All features · unlimited analyses · priority support
+                Free for 7 days · then $1,250/mo · cancel anytime
               </p>
             </div>
 
@@ -182,7 +185,7 @@ export default function PricingPage() {
                 boxShadow: "0 2px 10px rgba(201,168,76,0.4)",
               }}
             >
-              {loading ? "Redirecting to Stripe…" : "Join the pilot"}
+              {loading ? "Redirecting to Stripe…" : "Start free trial"}
             </button>
 
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.65rem" }}>
@@ -199,7 +202,8 @@ export default function PricingPage() {
         {/* Footer note */}
         <div style={{ maxWidth: 420, margin: "3rem auto 0", textAlign: "center" }}>
           <p style={{ fontSize: "0.875rem", color: "#64748b", lineHeight: 1.7 }}>
-            Payments processed securely by Stripe. Cancel anytime from your billing settings.
+            7-day free trial. No charge until day 8 — we'll remind you before billing starts.
+            Payments processed securely by Stripe. Cancel anytime.
             Questions?{" "}
             <a href="mailto:cbosher@mineralflowai.com" style={{ color: "#C9A84C", textDecoration: "none" }}>
               Contact us

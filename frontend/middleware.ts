@@ -11,6 +11,9 @@ const PROTECTED_PREFIXES = [
   "/upload",
   "/settings",
   "/billing",
+  "/screen",
+  "/pipeline",
+  "/offer",
 ];
 
 const AUTH_PATHS_EXACT = new Set(["/login", "/signup"]);
