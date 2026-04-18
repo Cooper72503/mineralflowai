@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
 import type { DealValuationOutput } from "@/lib/valuation";
 import type { LegalDescriptionParseResult } from "@/lib/location/legal-description-parser";
@@ -11,6 +12,17 @@ import type { DealBrief } from "@/lib/intelligence/deal-brief";
 import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
 import { DealBriefCard } from "@/app/components/DealBriefCard";
 import { ParcelMapCard } from "@/app/components/ParcelMapCard";
+import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
+
+// PDFDownloadLink must be loaded client-side only (no SSR)
+const PDFDownloadLink = dynamic(
+  () => import("@react-pdf/renderer").then((m) => m.PDFDownloadLink),
+  { ssr: false, loading: () => null }
+);
+const ScreenResultPdfDocument = dynamic(
+  () => import("@/app/components/ScreenResultPdf").then((m) => m.ScreenResultPdfDocument),
+  { ssr: false, loading: () => null }
+);
 
 const EM_DASH = "—";
 
@@ -18,6 +30,7 @@ type ScreenResult = {
   county: string | null;
   state: string | null;
   acreage: number | null;
+  royalty_rate?: string | null;
   legal_description_parsed: LegalDescriptionParseResult;
   location_context: LocationContext;
   valuation: DealValuationOutput;
@@ -68,6 +81,25 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
     PASS:   { bg: "#fee2e2", border: "#dc2626", text: "#7f1d1d", icon: "✗" },
   }[v.recommendation] ?? { bg: "#f3f4f6", border: "#9ca3af", text: "#374151", icon: "?" };
 
+  const pdfData: ScreenResultPdfData = {
+    county: result.county,
+    state: result.state,
+    acreage: result.acreage,
+    royalty_rate: result.royalty_rate,
+    producing_status: clientProducing,
+    location_context: result.location_context,
+    valuation: result.valuation,
+    production_snapshot: result.production_snapshot,
+    deal_brief: result.deal_brief,
+    generatedAt: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
+  };
+
+  const pdfFileName = [
+    result.county?.replace(/\s+/g, "-") ?? "screen",
+    result.state ?? "",
+    "MineralFlowAI",
+  ].filter(Boolean).join("-") + ".pdf";
+
   return (
     <div style={{ marginTop: "2rem" }}>
       {/* Verdict banner */}
@@ -111,6 +143,26 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
             </div>
           </div>
         )}
+      </div>
+
+      {/* PDF Download */}
+      <div style={{ maxWidth: 560, marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
+        {/* @ts-ignore — PDFDownloadLink is dynamically loaded */}
+        <PDFDownloadLink
+          document={<ScreenResultPdfDocument data={pdfData} />}
+          fileName={pdfFileName}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.4rem",
+            padding: "0.45rem 0.9rem", borderRadius: 6, fontSize: "0.82rem",
+            fontWeight: 600, textDecoration: "none", cursor: "pointer",
+            background: "#f3f4f6", border: "1px solid #d1d5db", color: "#374151",
+            transition: "background 0.15s",
+          }}
+        >
+          {({ loading: pdfLoading }: { loading: boolean }) =>
+            pdfLoading ? "Preparing PDF…" : "⬇ Download PDF"
+          }
+        </PDFDownloadLink>
       </div>
 
       {/* Deal Brief */}

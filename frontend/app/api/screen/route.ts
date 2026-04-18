@@ -189,6 +189,7 @@ export async function POST(request: Request) {
       county,
       state,
       acreage,
+      royalty_rate: body.royalty_rate ?? null,
       legal_description_parsed: legalParsed,
       location_context: locationContext,
       valuation,
