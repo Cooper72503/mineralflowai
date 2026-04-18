@@ -43,7 +43,7 @@ function assertPlainObject(
   }
 }
 
-const LEASE_PARSE_SYSTEM = `You are a parser for mineral rights documents including leases, deeds, assignments, and property summaries. Given extracted text from a document, output a JSON object with exactly these keys (use null for any value you cannot find):
+const LEASE_PARSE_SYSTEM = `You are a parser for mineral rights documents including leases, deeds, assignments, royalty statements, and property summaries. Given extracted text from a document, output a JSON object with exactly these keys (use null for any value you cannot find):
 - grantor (string or null): party granting / conveying (use when the instrument says Grantor or is a deed; for a lease you may use the lessor here too, or null if only Lessor is labeled)
 - grantee (string or null): party receiving the interest (Grantee on deeds/assignments; may match Lessee on leases)
 - lessor (string or null): party granting the lease / mineral rights (Lessor in a lease)
@@ -57,10 +57,17 @@ const LEASE_PARSE_SYSTEM = `You are a parser for mineral rights documents includ
 - term_length (string or null): primary term or duration
 - acreage (number or null): total acres described or conveyed, e.g. 24 or 320.5 — extract from "Acreage: 24 acres", "24-acre tract", "320.5 NMA", or any clear acreage statement
 - mailing_address (string or null): owner or notice mailing block when clearly present
-- document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Assignment of Oil and Gas Lease", "Oil and Gas Lease", "Mineral Property Summary" — use null if unclear
-- confidence_score (number): your confidence in the overall extraction, between 0 and 1 (e.g. 0.85).
+- document_type (string or null): the kind of instrument, e.g. "Mineral Deed", "Assignment of Oil and Gas Lease", "Oil and Gas Lease", "Royalty Statement", "Revenue Statement" — use null if unclear
+- confidence_score (number): your confidence in the overall extraction, between 0 and 1 (e.g. 0.85)
+- operator_name (string or null): for royalty/revenue statements, the operator or payor company name (e.g. "Pioneer Natural Resources", "XTO Energy") — null for other document types
+- statement_period (string or null): for royalty/revenue statements, the production/payment period (e.g. "January 2024", "12/2023", "Q4 2023") — null for other document types
+- net_revenue_interest (string or null): for royalty/revenue statements or division orders, the owner's NRI decimal as a string (e.g. "0.00390625", "0.03125") — null if not found
+- net_payment_amount (number or null): for royalty/revenue statements, the total net check or payment amount in dollars (e.g. 1250.40) — null for other document types
+- payment_date (string or null): for royalty/revenue statements, the date the check was issued or the payment date — null for other document types.
 
 When the text has explicit headings such as "Grantor", "GRANTOR:", "Grantee", or "GRANTEE:", copy those names into grantor and grantee (not into lessor/lessee unless the document is clearly a lease using Lessor/Lessee labels).
+
+For royalty statements: "Operator:", "Payor:", "Company:" lines contain operator_name. "Statement Period:", "Production Period:", "Check Date:", "Pay Period:" lines contain statement_period or payment_date. "Net Revenue Interest:", "NRI:", "Decimal Interest:" contain net_revenue_interest. "Net Amount:", "Total Payment:", "Check Amount:", "Net Check:", or the final total dollar line contains net_payment_amount.
 
 The text may be from OCR or a weak PDF text layer: skip isolated garbage lines, infer words split across line breaks, and handle common OCR confusions (0 vs O, 1 vs l vs I, rn vs m) when resolving names, counties, states, and legal descriptions.
 
@@ -77,6 +84,8 @@ function systemPromptForCategory(category: DocumentCategory | undefined): string
       "Classifier: assignment — prioritize assignor/assignee (or grantor/grantee), subject lease references, and effective date.",
     division_order:
       "Classifier: division_order — prioritize interest owners, decimals/NRI, payee lines, and well/unit references; lease-style term fields may be absent.",
+    royalty_statement:
+      "Classifier: royalty_statement — this is a royalty/revenue statement or check stub. Prioritize: operator_name (Operator/Payor/Company), statement_period (Statement Period/Production Period/Pay Period), net_revenue_interest (NRI/Decimal Interest), net_payment_amount (Net Amount/Total Payment/Check Amount — the final dollar total), payment_date (Check Date/Payment Date). Also extract county and state from the well or property description if present. Set document_type to 'Royalty Statement'. Lease-style fields (royalty_rate, term_length, lessor, lessee) will usually be absent.",
     other:
       "Classifier: other — extract whatever parties and land references exist; document_type may be nonstandard.",
   };

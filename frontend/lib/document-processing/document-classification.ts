@@ -10,6 +10,7 @@ export type DocumentCategory =
   | "oil_gas_lease"
   | "assignment"
   | "division_order"
+  | "royalty_statement"
   | "other";
 
 export type DocumentCategoryResult = {
@@ -32,6 +33,23 @@ export function classifyDocumentCategory(text: string): DocumentCategoryResult {
   if (!text?.trim()) return { category: "other", score: 0.35 };
   const head = HEAD_TAIL(text);
   const headEarly = text.slice(0, 6000).toUpperCase();
+
+  // Royalty / revenue statements — direct income evidence; classify before division order or lease
+  if (
+    /\bROYALTY\s+STATEMENT\b/.test(headEarly) ||
+    /\bROYALTY\s+ACCOUNTING\b/.test(headEarly) ||
+    /\bREVENUE\s+STATEMENT\b/.test(headEarly) ||
+    /\bOWNER\s+(?:REVENUE\s+)?STATEMENT\b/.test(headEarly) ||
+    /\bREMITTANCE\s+(?:ADVICE|STATEMENT)\b/.test(headEarly) ||
+    /\bCHECK\s+DETAIL\b/.test(headEarly) ||
+    /\bROYALTY\s+CHECK\b/.test(headEarly) ||
+    (/\bPAYMENT\s+STATEMENT\b/.test(headEarly) &&
+      /\b(OPERATOR|ROYALTY|PRODUCTION|NRI|NET\s+REVENUE)\b/.test(head)) ||
+    (/\bREVENUE\s+ACCOUNTING\b/.test(headEarly) &&
+      /\b(ROYALTY|OWNER|STATEMENT|PERIOD|PAYMENT)\b/.test(head))
+  ) {
+    return { category: "royalty_statement", score: 0.9 };
+  }
 
   // Division orders / DOI — before generic "ORDER" or lease noise
   if (
@@ -100,7 +118,7 @@ export function classifyDocumentCategory(text: string): DocumentCategoryResult {
   return { category: "other", score: 0.42 };
 }
 
-/** Maps legacy heuristic/LLM classes into the five-way category used for confidence. */
+/** Maps legacy heuristic/LLM classes into the six-way category used for confidence. */
 export function mapExtractionClassToCategory(c: ExtractionDocumentClass): DocumentCategory {
   switch (c) {
     case "mineral_deed":
@@ -239,6 +257,16 @@ export function categoryConfidenceProfile(category: DocumentCategory): CategoryC
         overallMultiplier: 0.92,
         partyWeightMult: 1,
         legalWeightMult: 0.96,
+        skipTermMissingPenalty: true,
+        skipRoyaltyMissingPenalty: true,
+        extraTermPenalty: 0,
+      };
+    case "royalty_statement":
+      return {
+        docTypeMultiplier: 0.92,
+        overallMultiplier: 0.95,
+        partyWeightMult: 0.9,
+        legalWeightMult: 0.85,
         skipTermMissingPenalty: true,
         skipRoyaltyMissingPenalty: true,
         extraTermPenalty: 0,

@@ -107,10 +107,24 @@ export function estimateValueRange(args: {
 
   if (dealType === "producing" || dealType === "mixed") {
     if (annual) {
-      const method = "producing: directional multiple of annualized cash-flow proxy";
-      const low = annual.low * 1.5;
-      const high = annual.high * 3.5;
-      logValuationDev("value_method", { method });
+      // Mineral rights market multiples based on basin activity quality.
+      // Buyers pay more for higher-activity basins (stronger development pipeline).
+      // These are industry-standard ranges used in royalty acquisition.
+      let multLo: number;
+      let multHi: number;
+      if (activity === "high") {
+        multLo = 4.0; multHi = 6.0;      // Permian, Eagle Ford, Utica core, SCOOP/STACK
+      } else if (activity === "moderate") {
+        multLo = 3.0; multHi = 4.5;      // Active basins, moderate development pipeline
+      } else if (activity === "low") {
+        multLo = 2.0; multHi = 3.5;      // Low activity — conventional or mature fields
+      } else {
+        multLo = 2.5; multHi = 4.0;      // Unknown activity — conservative band
+      }
+      const method = `producing: market income multiple (${multLo}x–${multHi}x annual royalty income, ${activity} basin activity)`;
+      const low = annual.low * multLo;
+      const high = annual.high * multHi;
+      logValuationDev("value_method", { method, multLo, multHi, activity });
       return {
         value_per_acre_low: acres != null ? low / acres : null,
         value_per_acre_high: acres != null ? high / acres : null,

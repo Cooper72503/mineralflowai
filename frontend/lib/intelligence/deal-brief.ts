@@ -54,6 +54,12 @@ export type DealBriefArgs = {
     effective_date?: string | null;
     term_length?: string | null;
     operator?: string | null;
+    /** Royalty statement fields */
+    operator_name?: string | null;
+    statement_period?: string | null;
+    net_revenue_interest?: string | null;
+    net_payment_amount?: number | null;
+    payment_date?: string | null;
   } | null;
 };
 
@@ -68,6 +74,14 @@ Rules:
 - Lease term grades: compare against known basin/play market norms. Grade A = at or above market, B = slightly below, C = materially below, D = well below, F = unacceptable.
 - Negotiation flags should be specific talking points the buyer can use in a conversation, not generic advice.
 - If data is thin (missing acreage, royalty rate, county, etc.), say so in the narrative and lower confidence accordingly — but still produce a useful brief.
+
+ROYALTY STATEMENT GUIDANCE: When the document is a royalty/revenue statement:
+- The narrative must lead with the monthly income figure and annualized income (monthly × 12).
+- Calculate market value using the provided value range. Explain it as: "At a [X]x–[Y]x market multiple on $[annual] annual income, this interest is worth approximately $[low]–$[high]."
+- The primary risk is usually production decline, single-well concentration, or operator-driven curtailment.
+- Lease term grades should grade the NRI decimal (is it market rate for the royalty fraction?), operator quality, and production trend if data allows.
+- Negotiation flags: price per NMA implied by the offer price, whether income has been stable, whether there are undisclosed deductions.
+- Set document_type to "Royalty Statement" in your reasoning.
 
 Return ONLY valid JSON matching this exact structure, no markdown, no extra text:
 {
@@ -139,7 +153,18 @@ function buildUserMessage(args: DealBriefArgs): string {
   if (ext.lessee || ext.grantee) lines.push(`LESSEE/GRANTEE: ${ext.lessee ?? ext.grantee}`);
   if (ext.effective_date) lines.push(`EFFECTIVE DATE: ${ext.effective_date}`);
   if (ext.term_length) lines.push(`PRIMARY TERM: ${ext.term_length}`);
-  if (ext.operator) lines.push(`OPERATOR: ${ext.operator}`);
+  if (ext.operator || ext.operator_name) lines.push(`OPERATOR: ${ext.operator ?? ext.operator_name}`);
+
+  // Royalty statement fields
+  if (ext.operator_name) lines.push(`OPERATOR/PAYOR: ${ext.operator_name}`);
+  if (ext.statement_period) lines.push(`STATEMENT PERIOD: ${ext.statement_period}`);
+  if (ext.net_revenue_interest) lines.push(`NET REVENUE INTEREST (NRI): ${ext.net_revenue_interest}`);
+  if (ext.net_payment_amount != null) {
+    lines.push(`NET PAYMENT THIS PERIOD: $${ext.net_payment_amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    const annualized = ext.net_payment_amount * 12;
+    lines.push(`ANNUALIZED INCOME (est.): $${annualized.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/yr`);
+  }
+  if (ext.payment_date) lines.push(`PAYMENT DATE: ${ext.payment_date}`);
 
   return lines.join("\n");
 }

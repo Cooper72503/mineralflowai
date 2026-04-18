@@ -674,6 +674,75 @@ function bestAcreageAcrossLayers(layers: string[]): number | null {
   return best;
 }
 
+/** Extracted fields specific to royalty / revenue statements. */
+export type RoyaltyStatementFields = {
+  operator_name: string | null;
+  statement_period: string | null;
+  net_revenue_interest: string | null;
+  net_payment_amount: number | null;
+  payment_date: string | null;
+};
+
+/**
+ * Heuristic extraction for royalty / revenue statements.
+ * Looks for operator name, statement period, NRI decimal, net check amount, and payment date.
+ */
+export function extractRoyaltyStatementFields(text: string): RoyaltyStatementFields {
+  const t = text.replace(/\r\n/g, "\n");
+
+  // Operator / payor name
+  let operator_name: string | null = null;
+  const opM = t.match(/(?:Operator|Payor|Company|Purchaser)\s*[:\-–]\s*([^\n]{3,80})/i);
+  if (opM) operator_name = opM[1].trim().replace(/\s{2,}/g, " ") || null;
+
+  // Statement / production period
+  let statement_period: string | null = null;
+  const periodM = t.match(
+    /(?:Statement\s+Period|Production\s+Period|Pay\s+Period|Revenue\s+Period|Month)\s*[:\-–]\s*([^\n]{3,40})/i
+  );
+  if (periodM) statement_period = periodM[1].trim() || null;
+  if (!statement_period) {
+    // Try "January 2024" or "01/2024" or "2024-01" at start of a line
+    const mP = t.match(/(?:^|\n)\s*((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}|\d{1,2}\/\d{4}|\d{4}-\d{2})\s*(?:\n|$)/im);
+    if (mP) statement_period = mP[1].trim();
+  }
+
+  // Net Revenue Interest decimal
+  let net_revenue_interest: string | null = null;
+  const nriM = t.match(/(?:Net\s+Revenue\s+Interest|NRI|Decimal\s+Interest|Interest\s+Decimal)\s*[:\-–]?\s*(0\.\d{4,12}|\d{1,2}\.\d{4,12})/i);
+  if (nriM) net_revenue_interest = nriM[1].trim() || null;
+
+  // Net payment amount — final check/payment total
+  let net_payment_amount: number | null = null;
+  // Try labeled line first: "Net Amount: $1,250.40", "Total Payment: $...", "Check Amount:", "Net Check:"
+  const netAmtM = t.match(
+    /(?:Net\s+(?:Amount|Check|Payment)|Total\s+(?:Payment|Amount|Net)|Check\s+Amount|Amount\s+Paid|Your\s+Payment|Net\s+Due)\s*[:\-–]?\s*\$?\s*([\d,]+(?:\.\d{1,2})?)/i
+  );
+  if (netAmtM) {
+    const n = parseFloat(netAmtM[1].replace(/,/g, ""));
+    if (Number.isFinite(n) && n > 0) net_payment_amount = n;
+  }
+  if (net_payment_amount == null) {
+    // Look for a standalone dollar total at end of document (last $X.XX on a totals line)
+    const totalsLines = t.match(/(?:Total|Grand\s+Total|TOTAL)[^\n]*\$([\d,]+\.\d{2})/gi);
+    if (totalsLines?.length) {
+      const last = totalsLines[totalsLines.length - 1];
+      const dollarM = last.match(/\$([\d,]+\.\d{2})/);
+      if (dollarM) {
+        const n = parseFloat(dollarM[1].replace(/,/g, ""));
+        if (Number.isFinite(n) && n > 0) net_payment_amount = n;
+      }
+    }
+  }
+
+  // Payment / check date
+  let payment_date: string | null = null;
+  const payDateM = t.match(/(?:Check\s+Date|Payment\s+Date|Pay\s+Date|Date\s+Paid|Issue\s+Date)\s*[:\-–]\s*([^\n]{5,20})/i);
+  if (payDateM) payment_date = payDateM[1].trim() || null;
+
+  return { operator_name, statement_period, net_revenue_interest, net_payment_amount, payment_date };
+}
+
 export function extractHeuristicFields(
   normalizedText: string,
   opts?: { ocrText?: string | null; rawPdfText?: string | null }

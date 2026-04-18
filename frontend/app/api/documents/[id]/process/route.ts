@@ -1037,6 +1037,12 @@ export async function POST(
           dealScoreInput,
           royaltyRateStr: parsed.royalty_rate,
           county: parsed.county ?? doc.county,
+          royaltyStatementNetPayment:
+            typeof (parsed as any).net_payment_amount === "number" &&
+            Number.isFinite((parsed as any).net_payment_amount) &&
+            (parsed as any).net_payment_amount > 0
+              ? (parsed as any).net_payment_amount
+              : null,
         });
         const locationContext = buildLocationContext({
           county: parsed.county ?? doc.county,
@@ -1123,6 +1129,11 @@ export async function POST(
               document_type: typeof parsed.document_type === "string" ? parsed.document_type : null,
               effective_date: typeof parsed.effective_date === "string" ? parsed.effective_date : null,
               term_length: typeof parsed.term_length === "string" ? parsed.term_length : null,
+              operator_name: (parsed as any).operator_name ?? null,
+              statement_period: (parsed as any).statement_period ?? null,
+              net_revenue_interest: (parsed as any).net_revenue_interest ?? null,
+              net_payment_amount: (parsed as any).net_payment_amount ?? null,
+              payment_date: (parsed as any).payment_date ?? null,
             },
           });
         } catch (briefErr) {
@@ -1149,6 +1160,12 @@ export async function POST(
           acreage: parsed.acreage,
           mailing_address: parsed.mailing_address,
           extraction_status: parsed.extraction_status,
+          // Royalty statement fields
+          operator_name: (parsed as any).operator_name ?? null,
+          statement_period: (parsed as any).statement_period ?? null,
+          net_revenue_interest: (parsed as any).net_revenue_interest ?? null,
+          net_payment_amount: (parsed as any).net_payment_amount ?? null,
+          payment_date: (parsed as any).payment_date ?? null,
           extraction_confidence: extractionArtifacts?.extraction_confidence,
           confidence_by_field: extractionArtifacts?.confidence_by_field,
           text_quality_confidence: extractionArtifacts?.text_quality_confidence,

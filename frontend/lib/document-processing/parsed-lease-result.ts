@@ -39,6 +39,17 @@ export type ParsedLeaseResult = {
   mailing_address?: string | null;
   /** Set by structured extraction pipeline: complete | partial | low_confidence | failed | failed_no_ocr */
   extraction_status?: string | null;
+  // --- Royalty Statement fields (only populated when document_category === "royalty_statement") ---
+  /** Operator / payor name from a royalty statement (e.g. "Pioneer Natural Resources"). */
+  operator_name?: string | null;
+  /** Statement period, e.g. "January 2024" or "01/2024". */
+  statement_period?: string | null;
+  /** Net Revenue Interest decimal extracted from statement (e.g. 0.00390625). */
+  net_revenue_interest?: string | null;
+  /** Net check / payment amount in dollars from this statement (e.g. 1250.40). */
+  net_payment_amount?: number | null;
+  /** Payment / check date on the statement. */
+  payment_date?: string | null;
 };
 
 export function isConveyanceInstrumentHint(documentType: string | null, extractedText: string): boolean {
@@ -208,5 +219,10 @@ export function normalizeParsedLeaseResult(
     buyer: p.buyer ?? null,
     acreage: p.acreage ?? null,
     mailing_address: p.mailing_address ?? null,
+    operator_name: (p as any).operator_name ?? null,
+    statement_period: (p as any).statement_period ?? null,
+    net_revenue_interest: (p as any).net_revenue_interest ?? null,
+    net_payment_amount: (p as any).net_payment_amount ?? null,
+    payment_date: (p as any).payment_date ?? null,
   };
 }

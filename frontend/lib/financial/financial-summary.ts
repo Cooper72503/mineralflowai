@@ -432,6 +432,12 @@ export type BuildFinancialSummaryArgs = {
   royaltyRateStr: string | null | undefined;
   /** County from parsed extraction or document. */
   county: string | null | undefined;
+  /**
+   * Direct net payment amount from a royalty statement (e.g. $1,250.40).
+   * When provided and positive, treated as highest-priority monthly revenue signal —
+   * overrides text-pattern extraction. Use only when document_category === "royalty_statement".
+   */
+  royaltyStatementNetPayment?: number | null;
 };
 
 /**
@@ -446,6 +452,37 @@ export type BuildFinancialSummaryArgs = {
  * OCR/combined corpus, which would force deal_type → "unknown".
  */
 export function buildFinancialSummary(args: BuildFinancialSummaryArgs): FinancialSummary {
+  // Royalty statement: direct net payment amount takes highest priority
+  const directPayment = args.royaltyStatementNetPayment;
+  if (directPayment != null && Number.isFinite(directPayment) && directPayment > 0) {
+    const { vmin, vmax } = valuationFromMonthlyRange(directPayment, directPayment);
+    return {
+      has_financials: true,
+      confidence: "High",
+      confidence_percent: 95,
+      reason: "Net payment amount directly extracted from royalty statement",
+      financial_source: "direct_document_value",
+      financial_signals_evidence: "direct_document_evidence",
+      monthly_revenue_estimate_min: directPayment,
+      monthly_revenue_estimate_max: directPayment,
+      annual_revenue_estimate_min: directPayment * 12,
+      annual_revenue_estimate_max: directPayment * 12,
+      valuation_estimate_min: vmin,
+      valuation_estimate_max: vmax,
+      payback_context:
+        "Royalty statement income — buyer pays a multiple of annualized income. At market rates of 3x–6x annual income.",
+      methodology: uniqStrings([
+        "Net payment amount taken directly from royalty statement — highest confidence financial signal.",
+        "Annual income shown as monthly payment × 12.",
+        "Market value estimated at 3x–6x annualized royalty income (mineral buyer acquisition range).",
+      ]),
+      warnings: uniqStrings([...STANDARD_WARNINGS,
+        "Single-month payment may not represent average — verify multi-month history before relying on this figure.",
+      ]),
+      sources: { revenue_basis: "Royalty statement net check amount — direct document evidence." },
+    };
+  }
+
   const extracted = args.extractedText ?? "";
   const combined = typeof args.combinedText === "string" ? args.combinedText : "";
   // Prefer combinedText when it contains meaningfully more content than extractedText alone.

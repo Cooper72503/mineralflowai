@@ -29,6 +29,7 @@ import {
   extractCountyFromLegalFragment,
   extractHeuristicFields,
   extractLegalDescriptionHeuristic,
+  extractRoyaltyStatementFields,
   extractStateFromText,
   inferCountyFromTxCityLine,
   inferOwnerFromCapitalizedNameBlock,
@@ -1188,6 +1189,19 @@ export async function runStructuredExtraction(args: RunStructuredExtractionArgs)
     document_category: documentCategory,
     classification_score: earlyClassification.score,
   };
+
+  // Royalty statement heuristics — layer on top when category is royalty_statement
+  if (documentCategory === "royalty_statement") {
+    const rsFields = extractRoyaltyStatementFields(safeCombinedText || normalizedText);
+    (parsed as any).operator_name = (parsed as any).operator_name ?? rsFields.operator_name;
+    (parsed as any).statement_period = (parsed as any).statement_period ?? rsFields.statement_period;
+    (parsed as any).net_revenue_interest = (parsed as any).net_revenue_interest ?? rsFields.net_revenue_interest;
+    (parsed as any).net_payment_amount = (parsed as any).net_payment_amount ?? rsFields.net_payment_amount;
+    (parsed as any).payment_date = (parsed as any).payment_date ?? rsFields.payment_date;
+    if (!parsed.document_type?.trim() || parsed.document_type === "Unknown Document") {
+      parsed.document_type = "Royalty Statement";
+    }
+  }
 
   if (process.env.DEAL_SCORE_TRACE === "1") {
     console.log(

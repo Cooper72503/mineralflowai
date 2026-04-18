@@ -6,5 +6,16 @@
       "path": "/api/cron/lease-alerts",
       "schedule": "0 9 * * *"
     }
-  ]
+  ],
+  "experimentalServices": {
+    "frontend": {
+      "entrypoint": "frontend",
+      "routePrefix": "/",
+      "framework": "nextjs"
+    },
+    "backend": {
+      "entrypoint": "backend",
+      "routePrefix": "/_/backend"
+    }
+  }
 }
