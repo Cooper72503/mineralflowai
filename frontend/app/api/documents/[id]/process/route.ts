@@ -36,6 +36,8 @@ import { runPreUnderwritingValuation } from "@/lib/valuation";
 import type { DealValuationOutput } from "@/lib/valuation";
 import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
 import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
+import { generateDealBrief } from "@/lib/intelligence/deal-brief";
+import type { DealBrief } from "@/lib/intelligence/deal-brief";
 
 const LOG_PREFIX = "[process-document]";
 const BUCKET_NAME = "documents";
@@ -316,6 +318,7 @@ export async function POST(
       let dealAcreageForAlerts: number | null | undefined = undefined;
       let preUnderwritingValuation: DealValuationOutput | null = null;
       let productionSnapshot: ProductionSnapshot | null = null;
+      let dealBrief: DealBrief | null = null;
       /** Combined PDF + OCR + normalized text from structured extraction (valuation / location fallbacks). */
       let combinedPipelineText: string | null = null;
       /** Raw PDF text layer (same as extraction meta) — passed to valuation when distinct from extractedText. */
@@ -1102,6 +1105,30 @@ export async function POST(
           state: parsed.state ?? null,
         });
 
+        // Generate Deal Brief — AI interpretation layer. Non-blocking; falls back gracefully.
+        try {
+          dealBrief = await generateDealBrief({
+            county: typeof parsed.county === "string" ? parsed.county : null,
+            state: typeof parsed.state === "string" ? parsed.state : null,
+            acreage: typeof parsed.acreage === "number" ? parsed.acreage : null,
+            royalty_rate: typeof parsed.royalty_rate === "string" ? parsed.royalty_rate : null,
+            valuation: preUnderwritingValuation,
+            production_snapshot: productionSnapshot,
+            location_context: locationContext,
+            extracted: {
+              lessor: typeof parsed.lessor === "string" ? parsed.lessor : null,
+              lessee: typeof parsed.lessee === "string" ? parsed.lessee : null,
+              grantor: typeof parsed.grantor === "string" ? parsed.grantor : null,
+              grantee: typeof parsed.grantee === "string" ? parsed.grantee : null,
+              document_type: typeof parsed.document_type === "string" ? parsed.document_type : null,
+              effective_date: typeof parsed.effective_date === "string" ? parsed.effective_date : null,
+              term_length: typeof parsed.term_length === "string" ? parsed.term_length : null,
+            },
+          });
+        } catch (briefErr) {
+          console.warn("[deal-brief] failed to generate:", briefErr instanceof Error ? briefErr.message : briefErr);
+        }
+
         const structuredExtraction = {
           lessor: parsed.lessor,
           lessee: parsed.lessee,
@@ -1146,6 +1173,7 @@ export async function POST(
           location_context: locationContext,
           pre_underwriting_valuation: preUnderwritingValuation,
           production_snapshot: productionSnapshot,
+          deal_brief: dealBrief,
         };
 
         console.log(

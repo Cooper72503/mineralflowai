@@ -7,7 +7,9 @@ import type { LegalDescriptionParseResult } from "@/lib/location/legal-descripti
 import type { LocationContext } from "@/lib/location/location-context";
 import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
 import type { ParcelLookupResult } from "@/lib/parcels";
+import type { DealBrief } from "@/lib/intelligence/deal-brief";
 import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
+import { DealBriefCard } from "@/app/components/DealBriefCard";
 import { ParcelMapCard } from "@/app/components/ParcelMapCard";
 
 const EM_DASH = "—";
@@ -22,6 +24,7 @@ type ScreenResult = {
   production_snapshot?: ProductionSnapshot | null;
   producing_status?: "yes" | "no" | "unknown";
   parcel_data?: ParcelLookupResult | null;
+  deal_brief?: DealBrief | null;
 };
 
 function formatUsdCompact(n: number): string {
@@ -109,6 +112,9 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
           </div>
         )}
       </div>
+
+      {/* Deal Brief */}
+      {result.deal_brief && <DealBriefCard brief={result.deal_brief} />}
 
       {/* Resolved fields */}
       <div className="card" style={{ maxWidth: 560, marginBottom: "1rem" }}>

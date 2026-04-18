@@ -15,6 +15,7 @@ import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
 import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 import { inferStateFromCounty } from "@/lib/valuation/county-basin-activity";
 import { lookupParcel } from "@/lib/parcels";
+import { generateDealBrief } from "@/lib/intelligence/deal-brief";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -172,6 +173,17 @@ export async function POST(request: Request) {
       state,
     });
 
+    const dealBrief = await generateDealBrief({
+      county,
+      state,
+      acreage,
+      royalty_rate: body.royalty_rate ?? null,
+      producing_status: producingStatus,
+      valuation,
+      production_snapshot: productionSnapshot,
+      location_context: locationContext,
+    });
+
     return NextResponse.json({
       ok: true,
       county,
@@ -183,6 +195,7 @@ export async function POST(request: Request) {
       production_snapshot: productionSnapshot,
       producing_status: producingStatus,
       parcel_data: parcelData ?? undefined,
+      deal_brief: dealBrief,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
