@@ -12,22 +12,23 @@ export type ValueEstimateResult = {
   method: string;
 };
 
-const UNDEV_HIGH = { lo: 3000, hi: 10_000 };
-const UNDEV_MOD = { lo: 1000, hi: 3000 };
-const UNDEV_LOW = { lo: 0, hi: 1000 };
+// Per-acre comps for undeveloped mineral rights.
+// Midpoint anchored on basin market comps; ±20-25% band.
+// High: Permian, Utica core, SCOOP/STACK, Eagle Ford, Bakken — $4,500–$7,500
+// Moderate: active secondary plays — $1,500–$2,750
+// Low: mature/conventional — $300–$700
+// Unknown: insufficient location data — $200–$600
+const UNDEV_HIGH = { lo: 4_500, hi: 7_500 };
+const UNDEV_MOD  = { lo: 1_500, hi: 2_750 };
+const UNDEV_LOW  = { lo:   300, hi:   700 };
 
 function tierForUndeveloped(activity: DealValuationActivityLevel): { lo: number; hi: number } | null {
   switch (activity) {
-    case "high":
-      return UNDEV_HIGH;
-    case "moderate":
-      return UNDEV_MOD;
-    case "low":
-      return UNDEV_LOW;
-    case "unknown":
-      return { lo: 0, hi: 500 };
-    default:
-      return null;
+    case "high":    return UNDEV_HIGH;
+    case "moderate":return UNDEV_MOD;
+    case "low":     return UNDEV_LOW;
+    case "unknown": return { lo: 200, hi: 600 };
+    default:        return null;
   }
 }
 
@@ -80,9 +81,9 @@ export function estimateValueRange(args: {
 
   if (infraHeavy(input, dealType)) {
     if (annual) {
-      const multLo = 1.2;
-      const multHi = 3.5;
-      const method = "infrastructure / mixed (facilities): revenue-multiple band — wide";
+      const multLo = 2.0;
+      const multHi = 3.0;
+      const method = "infrastructure / mixed (facilities): revenue-multiple band (2x–3x)";
       logValuationDev("value_method", { method, dealType });
       return {
         value_per_acre_low: acres != null ? (annual.low * multLo) / acres : null,
@@ -92,9 +93,9 @@ export function estimateValueRange(args: {
         method,
       };
     }
-    const baseLow = acres != null ? acres * 500 : 25_000;
-    const baseHigh = acres != null ? acres * 8000 : 400_000;
-    const method = "infrastructure / mixed: broad strategic band when revenue is thin";
+    const baseLow = acres != null ? acres * 1_500 : 50_000;
+    const baseHigh = acres != null ? acres * 4_000 : 150_000;
+    const method = "infrastructure / mixed: strategic band ($1,500–$4,000/acre) — limited revenue data";
     logValuationDev("value_method", { method });
     return {
       value_per_acre_low: acres != null ? baseLow / acres : null,
@@ -113,13 +114,13 @@ export function estimateValueRange(args: {
       let multLo: number;
       let multHi: number;
       if (activity === "high") {
-        multLo = 4.0; multHi = 6.0;      // Permian, Eagle Ford, Utica core, SCOOP/STACK
+        multLo = 4.5; multHi = 5.5;      // Permian, Eagle Ford, Utica core, SCOOP/STACK
       } else if (activity === "moderate") {
-        multLo = 3.0; multHi = 4.5;      // Active basins, moderate development pipeline
+        multLo = 3.5; multHi = 4.5;      // Active basins, moderate development pipeline
       } else if (activity === "low") {
-        multLo = 2.0; multHi = 3.5;      // Low activity — conventional or mature fields
+        multLo = 2.5; multHi = 3.0;      // Low activity — conventional or mature fields
       } else {
-        multLo = 2.5; multHi = 4.0;      // Unknown activity — conservative band
+        multLo = 3.0; multHi = 4.0;      // Unknown activity — conservative band
       }
       const method = `producing: market income multiple (${multLo}x–${multHi}x annual royalty income, ${activity} basin activity)`;
       const low = annual.low * multLo;
@@ -138,15 +139,15 @@ export function estimateValueRange(args: {
     if (bopd != null && bopd > 0) {
       const roy = input.royalty_rate ?? 0.2;
       const netBopd = bopd * Math.min(1, Math.max(0.05, roy));
-      const annLo = netBopd * 40 * 30 * 12;
-      const annHi = netBopd * 70 * 30 * 12;
-      const method = "producing: BOPD × illustrative net-back × time — very wide band";
+      const annLo = netBopd * 58 * 30 * 12;
+      const annHi = netBopd * 68 * 30 * 12;
+      const method = "producing: BOPD × net-back ($58–$68/bbl) × market multiple (3.5x–4.5x)";
       logValuationDev("value_method", { method, bopd, roy });
       return {
-        value_per_acre_low: acres != null ? (annLo * 1.2) / acres : null,
-        value_per_acre_high: acres != null ? (annHi * 2.8) / acres : null,
-        estimated_total_value_low: annLo * 1.2,
-        estimated_total_value_high: annHi * 2.8,
+        value_per_acre_low: acres != null ? (annLo * 3.5) / acres : null,
+        value_per_acre_high: acres != null ? (annHi * 4.5) / acres : null,
+        estimated_total_value_low: annLo * 3.5,
+        estimated_total_value_high: annHi * 4.5,
         method,
       };
     }
