@@ -258,6 +258,12 @@ export function SignupForm() {
           {loading ? "Creating account…" : "Sign up"}
         </button>
       </form>
+      <p style={{ marginTop: "1rem", fontSize: "0.75rem", color: "#6b7280", lineHeight: 1.6, textAlign: "center" }}>
+        By creating an account you agree to our{" "}
+        <a href="/terms" style={{ color: "#C9A84C", textDecoration: "none" }}>Terms of Service</a>
+        {" "}and{" "}
+        <a href="/privacy" style={{ color: "#C9A84C", textDecoration: "none" }}>Privacy Policy</a>.
+      </p>
     </div>
   );
 }

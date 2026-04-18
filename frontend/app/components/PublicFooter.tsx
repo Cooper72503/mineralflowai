@@ -18,6 +18,8 @@ export function PublicFooter({ variant = "default" }: PublicFooterProps) {
           <Link href="/about">About</Link>
           <Link href="/login">Log in</Link>
           <Link href="/signup">Sign up</Link>
+          <Link href="/terms">Terms</Link>
+          <Link href="/privacy">Privacy</Link>
         </nav>
         <p className="public-footer-copy">
           © {new Date().getFullYear()} Mineral Flow AI. All rights reserved.

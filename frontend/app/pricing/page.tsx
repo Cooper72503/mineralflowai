@@ -202,8 +202,12 @@ export default function PricingPage() {
         {/* Footer note */}
         <div style={{ maxWidth: 420, margin: "3rem auto 0", textAlign: "center" }}>
           <p style={{ fontSize: "0.875rem", color: "#64748b", lineHeight: 1.7 }}>
-            7-day free trial. No charge until day 8 — we'll remind you before billing starts.
-            Payments processed securely by Stripe. Cancel anytime.
+            7-day free trial. No charge until day 8 — we&apos;ll remind you before billing starts.
+            Payments processed securely by Stripe. Cancel anytime.{" "}
+            By subscribing you agree to our{" "}
+            <a href="/terms" style={{ color: "#C9A84C", textDecoration: "none" }}>Terms of Service</a>
+            {" "}and{" "}
+            <a href="/privacy" style={{ color: "#C9A84C", textDecoration: "none" }}>Privacy Policy</a>.
             Questions?{" "}
             <a href="mailto:cbosher@mineralflowai.com" style={{ color: "#C9A84C", textDecoration: "none" }}>
               Contact us
