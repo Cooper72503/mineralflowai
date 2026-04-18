@@ -2,12 +2,14 @@ export { lookupNdicWells } from "./ndic-api";
 export { lookupTrrcWells } from "./trrc-api";
 export { lookupOccWells } from "./occ-api";
 export { lookupWvdepWells } from "./wvdep-api";
+export { lookupOdnrWells } from "./odnr-api";
 export type { WellSummary, WellLookupResult } from "./well-types";
 
 import { lookupNdicWells } from "./ndic-api";
 import { lookupTrrcWells } from "./trrc-api";
 import { lookupOccWells } from "./occ-api";
 import { lookupWvdepWells } from "./wvdep-api";
+import { lookupOdnrWells } from "./odnr-api";
 import type { WellLookupResult } from "./well-types";
 
 /**
@@ -47,6 +49,10 @@ export async function lookupWellsByLocation(args: {
     return lookupWvdepWells(args.county);
   }
 
+  if (stateNorm === "OH" || stateNorm === "OHIO") {
+    return lookupOdnrWells(args.county);
+  }
+
   // Stubs — coming soon
   const comingSoon: Record<string, string> = {
     CO: "Colorado COGCC",
@@ -55,8 +61,6 @@ export async function lookupWellsByLocation(args: {
     WYOMING: "Wyoming WOGCC",
     PA: "Pennsylvania DEP",
     PENNSYLVANIA: "Pennsylvania DEP",
-    OH: "Ohio DNR",
-    OHIO: "Ohio DNR",
     MT: "Montana BOGC",
     MONTANA: "Montana BOGC",
     NM: "New Mexico EMNRD",
@@ -74,6 +78,6 @@ export async function lookupWellsByLocation(args: {
     query_description: `${args.county} County, ${args.state}`,
     note: src
       ? `${src} integration coming soon. Live well data currently available for Texas (TRRC), North Dakota (NDIC), Oklahoma (OCC), and West Virginia (DEP).`
-      : `Live well data not yet available for ${args.state}. Currently supports: Texas (TRRC), North Dakota (NDIC), Oklahoma (OCC), and West Virginia (DEP).`,
+      : `Live well data not yet available for ${args.state}. Currently supports: Texas (TRRC), North Dakota (NDIC), Oklahoma (OCC), West Virginia (DEP), and Ohio (DNR).`,
   };
 }
