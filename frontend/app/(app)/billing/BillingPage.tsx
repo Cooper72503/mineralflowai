@@ -313,7 +313,14 @@ export default function BillingPage() {
                     marginBottom: 0,
                   }}
                 >
-                  Billing integration coming soon. All features are currently available on the free tier.
+                  Questions about upgrading?{" "}
+                  <a
+                    href="mailto:cbosher@mineralflowai.com?subject=Mineral%20Flow%20AI%20%E2%80%94%20Upgrade%20inquiry"
+                    style={{ color: "#C9A84C", textDecoration: "none" }}
+                  >
+                    Contact us
+                  </a>{" "}
+                  and we&apos;ll get you set up.
                 </p>
               )}
             </div>

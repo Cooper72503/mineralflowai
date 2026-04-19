@@ -333,6 +333,11 @@ export function LoginForm() {
         <button type="submit" className="btn btnPrimary auth-submit" disabled={loading}>
           {loading ? "Signing in…" : "Sign in"}
         </button>
+        <p style={{ marginTop: "0.875rem", textAlign: "center", fontSize: "0.875rem" }}>
+          <a href="/forgot-password" style={{ color: "#6b7280", textDecoration: "none" }}>
+            Forgot your password?
+          </a>
+        </p>
       </form>
     </div>
   );

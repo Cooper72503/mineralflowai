@@ -397,10 +397,24 @@ export function LandingPage() {
               </p>
             </div>
             <div className={styles.valCard}>
-              <strong>More states coming</strong>
+              <strong>Oklahoma OCC</strong>
               <p>
-                Oklahoma, Wyoming, New Mexico, and other major producing states
-                are on the roadmap. Request your state.
+                Well records from the Oklahoma Corporation Commission — SCOOP,
+                STACK, and Anadarko Basin coverage included.
+              </p>
+            </div>
+            <div className={styles.valCard}>
+              <strong>West Virginia DEP</strong>
+              <p>
+                Appalachian well data from the WV DEP — Marcellus and Utica
+                shale plays covered statewide.
+              </p>
+            </div>
+            <div className={styles.valCard}>
+              <strong>Ohio DNR</strong>
+              <p>
+                Ohio oil and gas well records via the Ohio DNR DOGRM —
+                Utica and conventional formations statewide.
               </p>
             </div>
           </div>

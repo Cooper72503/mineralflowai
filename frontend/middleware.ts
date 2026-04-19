@@ -16,7 +16,7 @@ const PROTECTED_PREFIXES = [
   "/offer",
 ];
 
-const AUTH_PATHS_EXACT = new Set(["/login", "/signup"]);
+const AUTH_PATHS_EXACT = new Set(["/login", "/signup", "/forgot-password"]);
 
 function isProtected(pathname: string) {
   return PROTECTED_PREFIXES.some(
