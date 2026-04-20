@@ -259,7 +259,7 @@ export function LandingPage() {
               caption="Drag-and-drop upload with instant processing."
             />
             <ProductFrame
-              title="AI extraction &amp; confidence"
+              title="AI extraction & confidence"
               caption="Structured fields with confidence on every value."
             />
             <ProductFrame
@@ -605,10 +605,7 @@ function IconPipeline() {
 function ProductFrame({ title, caption }: { title: string; caption: string }) {
   return (
     <div className={styles.showcaseFrame}>
-      <div
-        className={styles.showcaseCap}
-        dangerouslySetInnerHTML={{ __html: title }}
-      />
+      <div className={styles.showcaseCap}>{title}</div>
       <div className={styles.showcaseInner}>
         <div className={styles.placeholderUi} role="img" aria-label={title}>
           {caption}

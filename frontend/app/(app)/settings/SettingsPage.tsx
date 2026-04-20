@@ -128,8 +128,12 @@ export default function SettingsPage() {
   async function changePassword(e: React.FormEvent) {
     e.preventDefault();
     setPwMsg(null);
+    if (!currentPw) {
+      setPwMsg({ ok: false, text: "Enter your current password to confirm the change." });
+      return;
+    }
     if (newPw.length < 8) {
-      setPwMsg({ ok: false, text: "Password must be at least 8 characters." });
+      setPwMsg({ ok: false, text: "New password must be at least 8 characters." });
       return;
     }
     if (newPw !== confirmPw) {
@@ -137,7 +141,16 @@ export default function SettingsPage() {
       return;
     }
     setPwSaving(true);
-    // Supabase doesn't require current password for updateUser — it re-uses the session
+    // Re-authenticate with current password first to prevent session-hijacking
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password: currentPw,
+    });
+    if (signInError) {
+      setPwSaving(false);
+      setPwMsg({ ok: false, text: "Current password is incorrect." });
+      return;
+    }
     const { error } = await supabase.auth.updateUser({ password: newPw });
     setPwSaving(false);
     if (error) {
@@ -222,6 +235,16 @@ export default function SettingsPage() {
       {/* Security */}
       <SectionCard title="Security">
         <form onSubmit={changePassword}>
+          <FieldRow label="Current password">
+            <input
+              type="password"
+              value={currentPw}
+              onChange={(e) => setCurrentPw(e.target.value)}
+              placeholder="Your current password"
+              autoComplete="current-password"
+              style={inputStyle}
+            />
+          </FieldRow>
           <FieldRow label="New password">
             <input
               type="password"
@@ -245,7 +268,7 @@ export default function SettingsPage() {
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.25rem" }}>
             <button
               type="submit"
-              disabled={pwSaving || !newPw || !confirmPw}
+              disabled={pwSaving || !currentPw || !newPw || !confirmPw}
               style={{
                 padding: "0.45rem 1rem",
                 background: "#2563eb",
@@ -255,7 +278,7 @@ export default function SettingsPage() {
                 fontSize: "0.88rem",
                 fontWeight: 600,
                 cursor: pwSaving ? "wait" : "pointer",
-                opacity: !newPw || !confirmPw ? 0.5 : 1,
+                opacity: !currentPw || !newPw || !confirmPw ? 0.5 : 1,
               }}
             >
               {pwSaving ? "Updating…" : "Update password"}
