@@ -188,11 +188,6 @@ export async function POST(request: Request) {
       producing_status: producingStatus,
       parcel_data: parcelData ?? undefined,
       deal_brief: dealBrief,
-      _debug: {
-        producing_received: producingStatus,
-        deal_type_resolved: valuation.deal_type,
-        activity_level: valuation.activity_level,
-      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
