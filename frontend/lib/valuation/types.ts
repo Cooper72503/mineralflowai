@@ -96,4 +96,10 @@ export type RunPreUnderwritingValuationArgs = {
    * Ensures valuation fallbacks see the same corpus the extractor used.
    */
   combinedExtractionText?: string | null;
+  /**
+   * User-supplied producing status override from Quick Screen form.
+   * "yes" forces deal_type → "producing" even without income signals.
+   * "no"  forces deal_type away from "producing".
+   */
+  producingStatusOverride?: "yes" | "no" | "unknown";
 };

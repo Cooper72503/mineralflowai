@@ -122,6 +122,8 @@ export async function POST(request: Request) {
     const dealScoreCalculated = calculateDealScore(dealScoreInput);
     const dealScore = coerceDealScoreResult(dealScoreCalculated) ?? dealScoreCalculated;
 
+    const producingStatus = body.producing ?? "unknown";
+
     const valuation = runPreUnderwritingValuation({
       parsed,
       dealScoreInput,
@@ -132,31 +134,20 @@ export async function POST(request: Request) {
       extractedText: legalDescription,
       raw_text: null,
       combinedExtractionText: null,
+      producingStatusOverride: producingStatus,
     });
 
-    const producingStatus = body.producing ?? "unknown";
-
-    // Apply user-supplied producing override — prevents false "likely producing" outputs
-    if (producingStatus === "no") {
-      // User says not currently producing — reframe deal type but preserve basin activity level
-      // so the production snapshot can show nearby-comparable development potential
-      if (valuation.deal_type === "producing") {
-        valuation.deal_type = "undeveloped";
-      }
-      valuation.summary = valuation.summary
-        ? `[User confirmed: not currently producing] ${valuation.summary.replace(/likely producing|likely a producing|appears to be producing/gi, "not producing")}`
-        : "User confirmed this property is not currently producing.";
-      if (!valuation.risks) valuation.risks = [];
-      valuation.risks.unshift("User confirmed: not currently producing — production estimate based on nearby basin/county activity.");
-      if (valuation.confidence_reasoning?.present_signals) {
-        valuation.confidence_reasoning.present_signals = valuation.confidence_reasoning.present_signals
-          .filter((s: string) => !/producing|production|revenue|bopd/i.test(s));
-      }
-    } else if (producingStatus === "yes") {
-      // User confirms producing — note it explicitly
+    // Surface the producing override in confidence reasoning for transparency
+    if (producingStatus === "yes") {
       if (valuation.confidence_reasoning) {
         if (!valuation.confidence_reasoning.present_signals) valuation.confidence_reasoning.present_signals = [];
         valuation.confidence_reasoning.present_signals.unshift("User confirmed: currently producing");
+      }
+    } else if (producingStatus === "no") {
+      if (!valuation.risks) valuation.risks = [];
+      const alreadyTagged = valuation.risks.some((r: string) => /not currently producing/i.test(r));
+      if (!alreadyTagged) {
+        valuation.risks.unshift("User confirmed: not currently producing — estimate reflects development potential, not current income.");
       }
     }
 

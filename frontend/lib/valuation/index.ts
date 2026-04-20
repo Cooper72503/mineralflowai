@@ -90,6 +90,7 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       acreage: vIn.acreage ?? null,
       county: vIn.county ?? null,
       hasProduction,
+      producingStatusOverride: args.producingStatusOverride,
     });
 
     const activity = resolveActivityLevel({

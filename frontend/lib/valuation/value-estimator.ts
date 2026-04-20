@@ -152,7 +152,32 @@ export function estimateValueRange(args: {
       };
     }
 
-    return nullResult("producing: no annual revenue or BOPD usable for numeric screening");
+    // No income or BOPD data — use producing mineral rights comparable sales by basin tier.
+    // These are market comps for producing acres without verified income statements,
+    // typically 1.5–3x undeveloped comps reflecting the production premium.
+    // High:     $10,000–$15,000/acre (Permian, Eagle Ford, Utica core)
+    // Moderate: $4,500–$8,000/acre  (active secondary plays)
+    // Low:      $1,500–$3,500/acre  (mature/conventional)
+    // Unknown:  $3,000–$6,000/acre  (insufficient location data)
+    const PROD_COMP: Record<DealValuationActivityLevel, { lo: number; hi: number }> = {
+      high:     { lo: 10_000, hi: 15_000 },
+      moderate: { lo:  4_500, hi:  8_000 },
+      low:      { lo:  1_500, hi:  3_500 },
+      unknown:  { lo:  3_000, hi:  6_000 },
+    };
+    const comp = PROD_COMP[activity] ?? PROD_COMP.unknown;
+    if (acres == null) {
+      return nullResult("producing (no income): acreage required for comp-based range");
+    }
+    const method = `producing (no income): comparable sales per-acre band ($${comp.lo.toLocaleString()}–$${comp.hi.toLocaleString()}/acre, ${activity} basin activity)`;
+    logValuationDev("value_method", { method, activity, acres });
+    return {
+      value_per_acre_low: comp.lo,
+      value_per_acre_high: comp.hi,
+      estimated_total_value_low: comp.lo * acres,
+      estimated_total_value_high: comp.hi * acres,
+      method,
+    };
   }
 
   if (dealType === "undeveloped" || dealType === "lease" || dealType === "unknown") {

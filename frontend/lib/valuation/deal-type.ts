@@ -44,6 +44,8 @@ export function inferHasProductionSignals(
 
 /**
  * Rule-based deal typing from extracted fields + text cues — no ML.
+ * Pass producingStatusOverride="yes" to force "producing" when the user has confirmed it
+ * (e.g. Quick Screen form) even if no financial signals were extracted.
  */
 export function classifyDealType(args: {
   documentType: string | null;
@@ -53,6 +55,7 @@ export function classifyDealType(args: {
   acreage: number | null;
   county: string | null;
   hasProduction: boolean;
+  producingStatusOverride?: "yes" | "no" | "unknown";
 }): DealValuationDealType {
   const ocrAndLegal = `${args.legalDescription ?? ""}\n${args.extractedText ?? ""}`;
   const text = `${args.documentType ?? ""}\n${ocrAndLegal}`.slice(0, 120_000);
@@ -64,7 +67,21 @@ export function classifyDealType(args: {
     (Array.isArray(dev?.matched_signals) &&
       dev!.matched_signals!.some((s) => /infra|swd|disposal|injection|water/i.test(String(s))));
 
-  const prod = args.hasProduction;
+  // User-supplied override takes precedence over text-inferred production signals.
+  // "yes" means the user confirmed this property is currently producing — treat it as such
+  // even if no income/BOPD data was extracted from the bare legal description.
+  const override = args.producingStatusOverride;
+  if (override === "yes" && !infraDev) {
+    logValuationDev("deal_type_path", { result: "producing", note: "user_confirmed_producing" });
+    return "producing";
+  }
+  if (override === "no") {
+    logValuationDev("deal_type_path", { note: "user_confirmed_not_producing — suppressing producing classification" });
+    // fall through to non-producing paths below
+  }
+
+  // If override is "no", treat as if there's no production regardless of extracted signals
+  const prod = override === "no" ? false : args.hasProduction;
 
   if (infraDev && prod) {
     logValuationDev("deal_type_path", { result: "mixed", note: "infra+production" });
