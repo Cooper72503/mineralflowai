@@ -1,6 +1,8 @@
 "use client";
 
-import type { ProductionSnapshot, ProductionStatus, ProductionTrend } from "@/lib/production/production-snapshot";
+import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
+type ProductionStatus = ProductionSnapshot["status"];
+type ProductionTrend = ProductionSnapshot["trend"];
 
 const EM_DASH = "—";
 
@@ -28,7 +30,7 @@ function formatBopd(lo?: number | null, hi?: number | null): string {
 function statusLabel(s: ProductionStatus): string {
   switch (s) {
     case "producing": return "Producing";
-    case "likely_producing": return "Likely Producing";
+    case "near_active_area": return "Near Active Development";
     case "undeveloped": return "Undeveloped";
     case "unknown": return "Unknown";
   }
@@ -47,7 +49,7 @@ function statusBadge(s: ProductionStatus): { background: string; color: string; 
   switch (s) {
     case "producing":
       return { background: "#dcfce7", color: "#166534", borderColor: "#86efac" };
-    case "likely_producing":
+    case "near_active_area":
       return { background: "#dbeafe", color: "#1e40af", borderColor: "#93c5fd" };
     case "undeveloped":
       return { background: "#fef9c3", color: "#854d0e", borderColor: "#fde047" };
