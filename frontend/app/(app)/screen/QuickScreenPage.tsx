@@ -12,6 +12,8 @@ import type { DealBrief } from "@/lib/intelligence/deal-brief";
 import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard";
 import { DealBriefCard } from "@/app/components/DealBriefCard";
 import { ParcelMapCard } from "@/app/components/ParcelMapCard";
+import { NearbyWellsCard } from "@/app/components/NearbyWellsCard";
+import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
 import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
 
 // PDFDownloadLink must be loaded client-side only (no SSR)
@@ -38,6 +40,7 @@ type ScreenResult = {
   producing_status?: "yes" | "no" | "unknown";
   parcel_data?: ParcelLookupResult | null;
   deal_brief?: DealBrief | null;
+  nearby_well_intelligence?: NearbyWellIntelligence | null;
 };
 
 function formatUsdCompact(n: number): string {
@@ -133,6 +136,16 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
               : v.recommendation === "PASS"
               ? "Weak signals or high risk — likely not worth pursuing."
               : "Mixed signals — review carefully before committing."}
+            {result.nearby_well_intelligence && result.nearby_well_intelligence.total_count > 0 && (
+              <span style={{ display: "block", marginTop: "0.2rem", fontStyle: "italic", fontSize: "0.78rem" }}>
+                Production inferred from {result.nearby_well_intelligence.total_count} nearby well
+                {result.nearby_well_intelligence.total_count !== 1 ? "s" : ""}
+                {result.nearby_well_intelligence.geocode_source !== "none"
+                  ? ` within ${result.nearby_well_intelligence.radius_miles} mi`
+                  : " in county"}
+                {" "}— not confirmed on this tract.
+              </span>
+            )}
           </div>
         </div>
         {(v.estimated_total_value_low != null && v.estimated_total_value_high != null) && (
@@ -164,6 +177,13 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
           }
         </PDFDownloadLink>
       </div>
+
+      {/* Nearby Well Intelligence */}
+      {result.nearby_well_intelligence && (
+        <div style={{ maxWidth: 680, marginTop: "0.5rem", marginBottom: "0.5rem" }}>
+          <NearbyWellsCard data={result.nearby_well_intelligence} />
+        </div>
+      )}
 
       {/* Deal Brief */}
       {result.deal_brief && <DealBriefCard brief={result.deal_brief} />}

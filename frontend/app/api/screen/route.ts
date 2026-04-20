@@ -16,6 +16,9 @@ import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 import { inferStateFromCounty } from "@/lib/valuation/county-basin-activity";
 import { lookupParcel } from "@/lib/parcels";
 import { generateDealBrief } from "@/lib/intelligence/deal-brief";
+import { geocodeProperty } from "@/lib/location/property-geocode";
+import { lookupWellsByLocation } from "@/lib/wells";
+import { buildNearbyWellIntelligence } from "@/lib/wells/nearby-wells";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,13 +49,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "legal_description is required." }, { status: 400 });
     }
 
-    // Resolve county + state: prefer explicit inputs, fall back to inference from the legal description text
+    // Resolve county + state: prefer explicit inputs, fall back to inference
     const inferred = inferCountyAndStateFromTexts(legalDescription);
     const county = (body.county ?? "").trim() || inferred.county || null;
-    // If state is still null, try to infer from county name (works when county is unambiguous in basin map)
     const state = (body.state ?? "").trim() || inferred.state || inferStateFromCounty(county) || null;
 
-    // Resolve acreage: prefer explicit input, fall back to text extraction
+    // Resolve acreage
     let acreage: number | null = null;
     if (body.acreage != null) {
       const n = typeof body.acreage === "number" ? body.acreage : parseFloat(String(body.acreage).replace(/,/g, ""));
@@ -64,7 +66,7 @@ export async function POST(request: Request) {
 
     const legalParsed = parseLegalDescription(legalDescription);
 
-    // Parcel lookup — if a parcel ID was parsed and we know the state, fetch acreage + owner
+    // Parcel lookup (Ohio — fetches acreage + owner when parcel ID is parsed)
     let parcelData = null;
     if (legalParsed.parcel_id) {
       parcelData = await lookupParcel({
@@ -72,12 +74,39 @@ export async function POST(request: Request) {
         state: state,
         county,
       });
-      // Auto-fill acreage from parcel if not already provided
       if (acreage == null && parcelData?.acreage != null) {
         acreage = parcelData.acreage;
       }
-      // Auto-fill county from parcel if not already resolved
     }
+
+    // ── Geocode + nearby well lookup (run in parallel with valuation pipeline) ──
+    const [geocodeResult, wellLookupResult] = await Promise.all([
+      geocodeProperty({
+        township: legalParsed.plss_township,
+        range:    legalParsed.plss_range,
+        section:  legalParsed.section,
+        state,
+      }).catch(() => null),
+      (county && state)
+        ? lookupWellsByLocation({ county, state }).catch(() => ({
+            source: "unavailable" as const,
+            wells: [],
+            query_description: `${county}, ${state}`,
+            note: "Well lookup failed.",
+          }))
+        : Promise.resolve({
+            source: "unavailable" as const,
+            wells: [],
+            query_description: "Unknown location",
+            note: "County and state required for well lookup.",
+          }),
+    ]);
+
+    const nearbyWellIntelligence = buildNearbyWellIntelligence({
+      geocode: geocodeResult,
+      wellLookupResult,
+      radiusMiles: 3,
+    });
 
     // Build a minimal parsed / dealScoreInput — just enough for the valuation engine
     const parsed: Record<string, unknown> = {
@@ -137,6 +166,27 @@ export async function POST(request: Request) {
       producingStatusOverride: producingStatus,
     });
 
+    // Lift nearby-well signals into valuation confidence reasoning
+    if (nearbyWellIntelligence.total_count > 0) {
+      if (valuation.confidence_reasoning) {
+        if (!valuation.confidence_reasoning.present_signals) valuation.confidence_reasoning.present_signals = [];
+        valuation.confidence_reasoning.present_signals.push(
+          `${nearbyWellIntelligence.total_count} nearby well${nearbyWellIntelligence.total_count !== 1 ? "s" : ""} found` +
+          (nearbyWellIntelligence.geocode_source !== "none"
+            ? ` within ${nearbyWellIntelligence.radius_miles} miles`
+            : " in county") +
+          (nearbyWellIntelligence.median_bopd != null
+            ? ` (median ${nearbyWellIntelligence.median_bopd} BOPD)`
+            : "")
+        );
+      }
+    } else if (nearbyWellIntelligence.data_source && nearbyWellIntelligence.total_count === 0) {
+      if (valuation.confidence_reasoning) {
+        if (!valuation.confidence_reasoning.missing_signals) valuation.confidence_reasoning.missing_signals = [];
+        valuation.confidence_reasoning.missing_signals.push("No nearby wells found in county database");
+      }
+    }
+
     // Surface the producing override in confidence reasoning for transparency
     if (producingStatus === "yes") {
       if (valuation.confidence_reasoning) {
@@ -152,9 +202,9 @@ export async function POST(request: Request) {
     }
 
     const royaltyDecimal = normalizeRoyaltyToDecimal(body.royalty_rate ?? null);
-    // Always build a production snapshot — when user says "no" we force deal_type to "undeveloped"
-    // so the snapshot frames results as development potential based on nearby basin activity,
-    // not as current production. The actual basin activity_level is preserved so benchmarks are accurate.
+
+    // Build production snapshot — pass nearby well data so it can anchor estimates
+    // to real production rather than only static basin benchmarks.
     const productionSnapshot = buildProductionSnapshot({
       dealType: producingStatus === "no" ? "undeveloped" : valuation.deal_type,
       activityLevel: valuation.activity_level,
@@ -162,6 +212,7 @@ export async function POST(request: Request) {
       royalty_rate: royaltyDecimal,
       county,
       state,
+      nearbyWells: nearbyWellIntelligence,
     });
 
     const dealBrief = await generateDealBrief({
@@ -188,6 +239,7 @@ export async function POST(request: Request) {
       producing_status: producingStatus,
       parcel_data: parcelData ?? undefined,
       deal_brief: dealBrief,
+      nearby_well_intelligence: nearbyWellIntelligence,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
