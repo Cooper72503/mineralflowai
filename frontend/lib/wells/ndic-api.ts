@@ -6,6 +6,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
+import { estimateMonthlyOilFromCumulative } from "./bopd-estimate";
 
 // Layer 2 = oil/gas wells with location and status
 const NDIC_WELLS_URL =
@@ -41,20 +42,23 @@ function parseDateStr(v: unknown): string | null {
 
 function featureToWell(f: NdicFeature): WellSummary {
   const a = f.attributes;
+  const cumOil = safeNum(a.CUM_OIL ?? a.CUMULOIL ?? a.CUMULATIVE_OIL);
+  const spudDateStr = parseDateStr(a.SPUD_DATE ?? a.SPUDDATE);
+  const statusStr = safeStr(a.STATUS ?? a.WELL_STATUS ?? a.STATUS_CD);
   return {
     api:         safeStr(a.API_NO ?? a.API ?? a.FILE_NO) ?? "unknown",
     well_name:   safeStr(a.WELL_NAME ?? a.WELLNAME ?? a.NAME) ?? "Unknown Well",
     operator:    safeStr(a.CURRENT_OPERATOR ?? a.OPERATOR ?? a.OPER_NAME),
     county:      safeStr(a.COUNTY ?? a.COUNTY_NAME),
     state:       "North Dakota",
-    status:      safeStr(a.STATUS ?? a.WELL_STATUS ?? a.STATUS_CD),
+    status:      statusStr,
     formation:   safeStr(a.POOL ?? a.FORMATION ?? a.POOL_NAME ?? a.FORMATION_NAME),
-    spud_date:   parseDateStr(a.SPUD_DATE ?? a.SPUDDATE),
-    latest_monthly_oil_bbl:  null, // not in this layer; requires production layer
+    spud_date:   spudDateStr,
+    latest_monthly_oil_bbl:  estimateMonthlyOilFromCumulative(cumOil, spudDateStr, statusStr),
     latest_monthly_gas_mcf:  null,
     latest_monthly_water_bbl: null,
-    latest_production_month: null,
-    cum_oil_bbl: safeNum(a.CUM_OIL ?? a.CUMULOIL ?? a.CUMULATIVE_OIL),
+    latest_production_month: spudDateStr ? spudDateStr.slice(0, 7) : null,
+    cum_oil_bbl: cumOil,
     lat: f.geometry?.y ?? null,
     lng: f.geometry?.x ?? null,
   };

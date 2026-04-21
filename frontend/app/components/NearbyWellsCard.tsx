@@ -214,6 +214,11 @@ export function NearbyWellsCard({ data }: { data: NearbyWellIntelligence }) {
           {data.geocode_source === "none" ? " · Location: county-level only (no PLSS in description)" : ""}
         </p>
       )}
+      {data.data_source && data.data_source !== "trrc" && hasWells && data.avg_bopd != null && (
+        <p style={{ fontSize: "0.72rem", color: "#9ca3af", margin: "0.25rem 0 0" }}>
+          BOPD values derived from cumulative production ÷ age-adjusted decline model — directional estimate only.
+        </p>
+      )}
     </div>
   );
 }

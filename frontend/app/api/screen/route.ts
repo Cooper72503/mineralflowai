@@ -17,6 +17,7 @@ import { inferStateFromCounty } from "@/lib/valuation/county-basin-activity";
 import { lookupParcel } from "@/lib/parcels";
 import { generateDealBrief } from "@/lib/intelligence/deal-brief";
 import { geocodeProperty } from "@/lib/location/property-geocode";
+import { geocodeFromCountyCentroid } from "@/lib/location/county-geocode";
 import { lookupWellsByLocation } from "@/lib/wells";
 import { buildNearbyWellIntelligence } from "@/lib/wells/nearby-wells";
 
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
         range:    legalParsed.plss_range,
         section:  legalParsed.section,
         state,
-      }).catch(() => null),
+      }).catch(() => null).then(result => result ?? geocodeFromCountyCentroid(county, state)),
       (county && state)
         ? lookupWellsByLocation({ county, state }).catch(() => ({
             source: "unavailable" as const,

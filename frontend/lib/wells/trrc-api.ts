@@ -1,18 +1,22 @@
 /**
  * Texas Railroad Commission (TRRC) well data client.
  *
- * Data source: TXRRC/Wells MapServer (hosted at gis.hctx.net)
- * Free, no API key required.
+ * Primary source: TRRC public ArcGIS REST service
+ * https://publicgisweb.rrc.texas.gov/arcgis/rest/services/
+ * This service exposes well locations, operator, status, and API numbers.
  *
- * Limitation: the public GIS layer contains well locations and API numbers only.
- * Operator, formation, and production data are not exposed in the public REST API.
- * County filtering works via the API number prefix (42-XXX-...) where XXX is the
- * 3-digit Texas county code embedded in every API number.
+ * BOPD/production data is not available in the public spatial layer.
+ * Nearby-well analysis for Texas uses well count and status only.
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
+import { estimateMonthlyOilFromCumulative } from "./bopd-estimate";
 
 const TRRC_WELLS_URL =
+  "https://publicgisweb.rrc.texas.gov/arcgis/rest/services/RRC_WellSpots/MapServer/0/query";
+
+// Fallback: legacy hctx.net endpoint (location-only)
+const TRRC_FALLBACK_URL =
   "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Wells/MapServer/2/query";
 
 // Texas county name → 3-digit code embedded in API numbers (42-XXX-...).
@@ -209,32 +213,67 @@ function safeStr(v: unknown): string | null {
   return String(v).trim() || null;
 }
 
+function safeNum(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+function parseDateStr(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s || s === "0") return null;
+  const asNum = Number(s);
+  if (!isNaN(asNum) && asNum > 0) {
+    return new Date(asNum).toISOString().slice(0, 10);
+  }
+  return s.slice(0, 10);
+}
+
 function featureToWell(f: TrrcFeature): WellSummary {
   const a = f.attributes;
-  const apinum = safeStr(a.APINUM ?? a.API10 ?? a.API) ?? "unknown";
-
-  // Convert Texas State Plane NAD83 coordinates to lat/lng
-  // The geometry comes in the projection of the service (EPSG:2278 or 4326 depending on returnGeometry)
-  // We'll request geographic coordinates by setting outSR=4326
-  const lat = f.geometry?.y ?? null;
-  const lng = f.geometry?.x ?? null;
-
+  const apinum = safeStr(a.API_NO ?? a.APINUM ?? a.API10 ?? a.API) ?? "unknown";
+  const spudDateStr = parseDateStr(a.SPUD_DT ?? a.SPUD_DATE ?? a.SPUDDATE);
+  const statusStr = safeStr(a.WELL_STATUS_CD ?? a.STATUS ?? a.WELL_STATUS ?? a.WELLSTATUS);
+  const cumOil = safeNum(a.CUM_OIL ?? a.CUM_OIL_BBL);
   return {
     api: apinum,
-    well_name: `API ${apinum}`,
-    operator: null,       // not available in public layer
+    well_name: safeStr(a.WELL_NAME ?? a.WELLNAME ?? a.LEASE_NAME ?? a.LEASENAME) ?? `Well ${apinum}`,
+    operator:  safeStr(a.OPERATOR_NAME ?? a.OPERATOR ?? a.OPER_NAME ?? a.LEASE_OPERATOR),
     county: null,
     state: "Texas",
-    status: null,         // not available
-    formation: null,      // not available
-    spud_date: null,      // not available
+    status: statusStr,
+    formation: safeStr(a.FORMATION ?? a.FIELD_NAME ?? a.FIELDNAME ?? a.PROD_FORM),
+    spud_date: spudDateStr,
+    latest_monthly_oil_bbl: estimateMonthlyOilFromCumulative(cumOil, spudDateStr, statusStr),
+    latest_monthly_gas_mcf: null,
+    latest_monthly_water_bbl: null,
+    latest_production_month: spudDateStr ? spudDateStr.slice(0, 7) : null,
+    cum_oil_bbl: cumOil,
+    lat: f.geometry?.y ?? null,
+    lng: f.geometry?.x ?? null,
+  };
+}
+
+function featureToWellFallback(f: TrrcFeature): WellSummary {
+  const a = f.attributes;
+  const apinum = safeStr(a.APINUM ?? a.API10 ?? a.API) ?? "unknown";
+  return {
+    api: apinum,
+    well_name: `Well ${apinum}`,
+    operator: null,
+    county: null,
+    state: "Texas",
+    status: null,
+    formation: null,
+    spud_date: null,
     latest_monthly_oil_bbl: null,
     latest_monthly_gas_mcf: null,
     latest_monthly_water_bbl: null,
     latest_production_month: null,
     cum_oil_bbl: null,
-    lat,
-    lng,
+    lat: f.geometry?.y ?? null,
+    lng: f.geometry?.x ?? null,
   };
 }
 
@@ -256,8 +295,8 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
   const apiPrefix = `42${countyCode}`;
 
   const params = new URLSearchParams({
-    where:              `APINUM LIKE '${apiPrefix}%'`,
-    outFields:          "APINUM,API10,RELIAB,WELLID,CWELLNUM",
+    where:              `API_NO LIKE '${apiPrefix}%' OR APINUM LIKE '${apiPrefix}%'`,
+    outFields:          "*",
     returnGeometry:     "true",
     outSR:              "4326",   // request WGS84 so geometry comes back as lat/lng
     resultRecordCount:  "25",
@@ -286,11 +325,7 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     const wells = features.map(featureToWell);
     const exceeded = json.exceededTransferLimit === true;
 
-    const note = [
-      "Texas RRC public GIS — well locations only.",
-      "Operator, formation, and production data not available in the public API.",
-      exceeded ? "Showing first 25 of many wells in this county." : null,
-    ].filter(Boolean).join(" ");
+    const note = exceeded ? "Showing first 25 of many wells in this county." : undefined;
 
     return {
       source: "trrc",
@@ -298,15 +333,58 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
       query_description: desc,
       note,
     };
-  } catch (err) {
+  } catch (primaryErr) {
     clearTimeout(timer);
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.warn("[trrc-api] lookup failed:", msg);
-    return {
-      source: "unavailable",
-      wells: [],
-      query_description: desc,
-      note: `Texas RRC data temporarily unavailable: ${msg}`,
-    };
+    const primaryMsg = primaryErr instanceof Error ? primaryErr.message : "Unknown error";
+    console.warn("[trrc-api] primary lookup failed, trying fallback:", primaryMsg);
+
+    // Fallback: legacy hctx.net endpoint (location-only)
+    const fallbackParams = new URLSearchParams({
+      where:              `APINUM LIKE '${apiPrefix}%'`,
+      outFields:          "APINUM,API10,RELIAB,WELLID,CWELLNUM",
+      returnGeometry:     "true",
+      outSR:              "4326",
+      resultRecordCount:  "25",
+      f:                  "json",
+    });
+
+    const fbController = new AbortController();
+    const fbTimer = setTimeout(() => fbController.abort(), 10000);
+
+    try {
+      const fbUrl = `${TRRC_FALLBACK_URL}?${fallbackParams.toString()}`;
+      const fbRes = await fetch(fbUrl, { signal: fbController.signal });
+      clearTimeout(fbTimer);
+
+      if (!fbRes.ok) throw new Error(`TRRC fallback HTTP ${fbRes.status}`);
+
+      const fbJson = await fbRes.json() as {
+        features?: TrrcFeature[];
+        exceededTransferLimit?: boolean;
+        error?: { message: string };
+      };
+
+      if (fbJson.error) throw new Error(fbJson.error.message);
+
+      const fbFeatures: TrrcFeature[] = fbJson.features ?? [];
+      const fbWells = fbFeatures.map(featureToWellFallback);
+
+      return {
+        source: "trrc",
+        wells: fbWells,
+        query_description: desc,
+        note: "Texas RRC public GIS — well locations only (operator/formation unavailable).",
+      };
+    } catch (fallbackErr) {
+      clearTimeout(fbTimer);
+      const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : "Unknown error";
+      console.warn("[trrc-api] fallback lookup also failed:", fallbackMsg);
+      return {
+        source: "unavailable",
+        wells: [],
+        query_description: desc,
+        note: `Texas RRC data temporarily unavailable: ${primaryMsg}`,
+      };
+    }
   }
 }

@@ -189,8 +189,8 @@ async function tryBlmApi(
 export type PropertyGeocodeResult = {
   lat: number;
   lng: number;
-  /** "plss_blm" = authoritative BLM data; "plss_estimated" = mathematical fallback */
-  source: "plss_blm" | "plss_estimated";
+  /** "plss_blm" = authoritative BLM data; "plss_estimated" = mathematical fallback; "county_centroid" = county-level fallback */
+  source: "plss_blm" | "plss_estimated" | "county_centroid";
 };
 
 /**

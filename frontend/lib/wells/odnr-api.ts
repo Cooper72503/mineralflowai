@@ -6,6 +6,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
+import { estimateMonthlyOilFromCumulative } from "./bopd-estimate";
 
 const ODNR_WELLS_URL =
   "https://gis.ohiodnr.gov/arcgis/rest/services/OIT_Services/ODNR_Oil_Gas/MapServer/0/query";
@@ -40,6 +41,13 @@ function parseDateStr(v: unknown): string | null {
 
 function featureToWell(f: OdnrFeature): WellSummary {
   const a = f.attributes;
+  const cumOil = safeNum(
+    a.CUM_OIL ?? a.CUM_OIL_BBL ?? a.CUMULATIVE_OIL ?? a.CUM_PROD_OIL
+  );
+  const spudDateStr = parseDateStr(a.SPUD_DATE ?? a.SPUDDATE ?? a.SPUD_DT ?? a.DATE_SPUD);
+  const statusStr = safeStr(
+    a.WELL_STATUS ?? a.STATUS ?? a.CURRENT_STATUS ?? a.STATUS_CD ?? a.WLSTAT
+  );
   return {
     api: safeStr(
       a.API_NUMBER ?? a.API_NO ?? a.API ?? a.APINO ?? a.API_NUM
@@ -52,21 +60,16 @@ function featureToWell(f: OdnrFeature): WellSummary {
     ),
     county: safeStr(a.COUNTY ?? a.COUNTY_NAME ?? a.CNTY_NAME ?? a.CNTY),
     state: "Ohio",
-    status: safeStr(
-      a.WELL_STATUS ?? a.STATUS ?? a.CURRENT_STATUS ?? a.STATUS_CD ?? a.WLSTAT
-    ),
+    status: statusStr,
     formation: safeStr(
       a.FORMATION ?? a.PRODUCING_FORMATION ?? a.POOL ?? a.FORM_NAME ?? a.PROD_FORM
     ),
-    spud_date: parseDateStr(a.SPUD_DATE ?? a.SPUDDATE ?? a.SPUD_DT ?? a.DATE_SPUD),
-    // Ohio DNR DOGRM does not expose monthly production through this layer
-    latest_monthly_oil_bbl:   null,
+    spud_date: spudDateStr,
+    latest_monthly_oil_bbl:   estimateMonthlyOilFromCumulative(cumOil, spudDateStr, statusStr),
     latest_monthly_gas_mcf:   null,
     latest_monthly_water_bbl: null,
-    latest_production_month:  null,
-    cum_oil_bbl: safeNum(
-      a.CUM_OIL ?? a.CUM_OIL_BBL ?? a.CUMULATIVE_OIL ?? a.CUM_PROD_OIL
-    ),
+    latest_production_month:  spudDateStr ? spudDateStr.slice(0, 7) : null,
+    cum_oil_bbl: cumOil,
     lat: f.geometry?.y ?? null,
     lng: f.geometry?.x ?? null,
   };

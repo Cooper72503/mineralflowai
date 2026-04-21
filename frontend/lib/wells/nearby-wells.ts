@@ -188,7 +188,7 @@ export function buildNearbyWellIntelligence(args: {
     return {
       property_lat: geocode?.lat ?? null,
       property_lng: geocode?.lng ?? null,
-      geocode_source: geocode?.source ?? "none",
+      geocode_source: geocode?.source === "county_centroid" ? "none" : (geocode?.source ?? "none"),
       radius_miles: radiusMiles,
       total_count: 0,
       producing_count: 0,
@@ -206,15 +206,18 @@ export function buildNearbyWellIntelligence(args: {
     };
   }
 
+  // County centroid has low accuracy — treat as no geocode for distance filtering
+  const effectiveGeocode = geocode?.source === "county_centroid" ? null : geocode;
+
   // Filter by radius if geocode available; otherwise use all county wells
   const wellsWithCoords = allWells.filter(w => w.lat != null && w.lng != null);
   let candidates: Array<WellSummary & { distance_miles: number | null }>;
 
-  if (geocode) {
+  if (effectiveGeocode) {
     // Compute distance for all wells with coords, filter to radius
     const withDist = wellsWithCoords.map(w => ({
       ...w,
-      distance_miles: haversineDistanceMiles(geocode.lat, geocode.lng, w.lat!, w.lng!),
+      distance_miles: haversineDistanceMiles(effectiveGeocode.lat, effectiveGeocode.lng, w.lat!, w.lng!),
     }));
     let inRadius = withDist.filter(w => w.distance_miles <= radiusMiles);
 
@@ -271,7 +274,7 @@ export function buildNearbyWellIntelligence(args: {
 
   // Production confidence
   let productionConf: "high" | "medium" | "low";
-  const closeWellsWithBopd = geocode
+  const closeWellsWithBopd = effectiveGeocode
     ? candidates.filter(w => (w.distance_miles ?? Infinity) <= 1 && (w.latest_monthly_oil_bbl ?? 0) > 0).length
     : 0;
   if (closeWellsWithBopd >= 3) productionConf = "high";
@@ -285,15 +288,15 @@ export function buildNearbyWellIntelligence(args: {
     medianBopd,
     oldestYear,
     newestYear,
-    radiusMiles: geocode ? radiusMiles : 0,
-    hasGeocode: geocode != null,
+    radiusMiles: effectiveGeocode ? radiusMiles : 0,
+    hasGeocode: effectiveGeocode != null,
     unavailableNote: null,
   });
 
   return {
     property_lat: geocode?.lat ?? null,
     property_lng: geocode?.lng ?? null,
-    geocode_source: geocode?.source ?? "none",
+    geocode_source: geocode?.source === "county_centroid" ? "none" : (geocode?.source ?? "none"),
     radius_miles: radiusMiles,
     total_count: candidates.length,
     producing_count: producingCount,
@@ -305,7 +308,7 @@ export function buildNearbyWellIntelligence(args: {
     inferred_activity_level: activity,
     summary,
     confidence: {
-      location: geocode ? "high" : "low",
+      location: effectiveGeocode ? "high" : "low",
       production: productionConf,
       ownership: "low",
     },

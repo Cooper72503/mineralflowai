@@ -6,6 +6,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
+import { estimateMonthlyOilFromCumulative } from "./bopd-estimate";
 
 // Layer 0 = active oil/gas well spots
 const OCC_WELLS_URL =
@@ -40,20 +41,23 @@ function parseDateStr(v: unknown): string | null {
 
 function featureToWell(f: OccFeature): WellSummary {
   const a = f.attributes;
+  const cumOil = safeNum(a.CUM_OIL ?? a.CUMULATIVE_OIL ?? a.CUM_OIL_BBL);
+  const spudDateStr = parseDateStr(a.SPUD_DATE ?? a.SPUDDATE ?? a.SPUD_DT);
+  const statusStr = safeStr(a.WELL_STATUS ?? a.STATUS ?? a.WLSTAT ?? a.STATUS_CD);
   return {
     api:       safeStr(a.API ?? a.API_NO ?? a.APINO) ?? "unknown",
     well_name: safeStr(a.WELL_NAME ?? a.WELLNAME ?? a.WELL_LEGAL_NAME ?? a.LEGALNAME) ?? "Unknown Well",
     operator:  safeStr(a.OPERATOR ?? a.OPERATOR_NAME ?? a.OPER_NAME ?? a.CURRENT_OPERATOR),
     county:    safeStr(a.COUNTY ?? a.COUNTY_NAME ?? a.CNTY_NAME),
     state:     "Oklahoma",
-    status:    safeStr(a.WELL_STATUS ?? a.STATUS ?? a.WLSTAT ?? a.STATUS_CD),
+    status:    statusStr,
     formation: safeStr(a.FORMATION ?? a.PRODUCING_FORMATION ?? a.FORM_NAME ?? a.POOL ?? a.POOL_NAME),
-    spud_date: parseDateStr(a.SPUD_DATE ?? a.SPUDDATE ?? a.SPUD_DT),
-    latest_monthly_oil_bbl:   null,
+    spud_date: spudDateStr,
+    latest_monthly_oil_bbl:   estimateMonthlyOilFromCumulative(cumOil, spudDateStr, statusStr),
     latest_monthly_gas_mcf:   null,
     latest_monthly_water_bbl: null,
-    latest_production_month:  null,
-    cum_oil_bbl: safeNum(a.CUM_OIL ?? a.CUMULATIVE_OIL ?? a.CUM_OIL_BBL),
+    latest_production_month:  spudDateStr ? spudDateStr.slice(0, 7) : null,
+    cum_oil_bbl: cumOil,
     lat: f.geometry?.y ?? null,
     lng: f.geometry?.x ?? null,
   };
