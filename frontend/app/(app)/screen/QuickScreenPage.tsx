@@ -16,13 +16,12 @@ import { NearbyWellsCard } from "@/app/components/NearbyWellsCard";
 import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
 import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
 
-// PDFDownloadLink must be loaded client-side only (no SSR)
-const PDFDownloadLink = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFDownloadLink),
-  { ssr: false, loading: () => null }
-);
-const ScreenResultPdfDocument = dynamic(
-  () => import("@/app/components/ScreenResultPdf").then((m) => m.ScreenResultPdfDocument),
+// PdfDownloadButton imports both PDFDownloadLink and ScreenResultPdfDocument
+// in one module so they always load together — prevents white-screen crash
+// that occurs when PDFDownloadLink receives a null document prop while the
+// PDF component is still lazy-loading.
+const PdfDownloadButton = dynamic(
+  () => import("@/app/components/PdfDownloadButton").then((m) => m.PdfDownloadButton),
   { ssr: false, loading: () => null }
 );
 
@@ -160,22 +159,7 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
 
       {/* PDF Download */}
       <div style={{ maxWidth: 560, marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
-        {/* @ts-ignore — PDFDownloadLink is dynamically loaded */}
-        <PDFDownloadLink
-          document={<ScreenResultPdfDocument data={pdfData} />}
-          fileName={pdfFileName}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: "0.4rem",
-            padding: "0.45rem 0.9rem", borderRadius: 6, fontSize: "0.82rem",
-            fontWeight: 600, textDecoration: "none", cursor: "pointer",
-            background: "#f3f4f6", border: "1px solid #d1d5db", color: "#374151",
-            transition: "background 0.15s",
-          }}
-        >
-          {({ loading: pdfLoading }: { loading: boolean }) =>
-            pdfLoading ? "Preparing PDF…" : "⬇ Download PDF"
-          }
-        </PDFDownloadLink>
+        <PdfDownloadButton data={pdfData} fileName={pdfFileName} />
       </div>
 
       {/* Nearby Well Intelligence */}
