@@ -165,6 +165,7 @@ export async function POST(request: Request) {
       raw_text: null,
       combinedExtractionText: null,
       producingStatusOverride: producingStatus,
+      nearbyWells: nearbyWellIntelligence,
     });
 
     // Lift nearby-well signals into valuation confidence reasoning

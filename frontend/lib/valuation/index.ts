@@ -102,7 +102,7 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
     });
 
     const nriResult = estimateDirectionalNriProxy(vIn);
-    const value = estimateValueRange({ input: vIn, dealType, activity });
+    const value = estimateValueRange({ input: vIn, dealType, activity, nearbyWells: args.nearbyWells ?? null });
 
     const missingCritical = countMissingCritical(vIn);
     const hasNumericBand =
@@ -162,6 +162,8 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       value_per_acre_high: value.value_per_acre_high,
       estimated_total_value_low: value.estimated_total_value_low,
       estimated_total_value_high: value.estimated_total_value_high,
+      point_estimate: value.point_estimate,
+      point_estimate_basis: value.point_estimate_basis,
       recommendation,
       confidence,
       confidence_reasoning,

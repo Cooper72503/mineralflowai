@@ -3,6 +3,12 @@ import type { DealValuationDealType } from "./types";
 import type { DealValuationActivityLevel } from "./types";
 import type { ValueEstimateResult } from "./value-estimator";
 
+function formatUsdCompact(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
+  return `$${Math.round(n)}`;
+}
+
 export function buildValuationNarrative(args: {
   input: DealValuationInput;
   dealType: DealValuationDealType;
@@ -104,12 +110,20 @@ export function buildValuationNarrative(args: {
   const summaryParts: string[] = [];
   summaryParts.push(`Deal type: ${args.dealType.replace(/_/g, " ")}.`);
   summaryParts.push(`Activity tier: ${args.activity}.`);
-  if (args.value.estimated_total_value_low != null && args.value.estimated_total_value_high != null) {
+  if (args.value.point_estimate != null) {
+    const basis = args.value.point_estimate_basis === "bopd_anchored"
+      ? "anchored to nearby well production data"
+      : "based on basin-tier comparable sales";
+    const rangeStr = (args.value.estimated_total_value_low != null && args.value.estimated_total_value_high != null)
+      ? ` (range ${formatUsdCompact(args.value.estimated_total_value_low)}–${formatUsdCompact(args.value.estimated_total_value_high)})`
+      : "";
+    summaryParts.push(`Estimated value: ${formatUsdCompact(args.value.point_estimate)}${rangeStr} — ${basis}.`);
+  } else if (args.value.estimated_total_value_low != null && args.value.estimated_total_value_high != null) {
     summaryParts.push(
-      `Directional total value band (screening): ${Math.round(args.value.estimated_total_value_low)}–${Math.round(args.value.estimated_total_value_high)} USD.`
+      `Value band: ${formatUsdCompact(args.value.estimated_total_value_low)}–${formatUsdCompact(args.value.estimated_total_value_high)} (screening only).`
     );
   } else {
-    summaryParts.push("Insufficient numeric basis for a tight value band — rely on qualitative review.");
+    summaryParts.push("Insufficient numeric basis for a value estimate — rely on qualitative review.");
   }
 
   return {

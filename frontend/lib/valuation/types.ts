@@ -68,6 +68,16 @@ export type DealValuationOutput = {
   value_per_acre_high?: number | null;
   estimated_total_value_low?: number | null;
   estimated_total_value_high?: number | null;
+  /**
+   * Single-point value estimate (midpoint of the band, or BOPD-anchored income-cap value).
+   * Present whenever a numeric band is available.
+   */
+  point_estimate?: number | null;
+  /**
+   * "bopd_anchored" when derived from real nearby well production data;
+   * "basin_tier" when falling back to static county/basin comps.
+   */
+  point_estimate_basis?: "bopd_anchored" | "basin_tier" | null;
   recommendation: "PURSUE" | "REVIEW" | "PASS";
   confidence: "low" | "medium" | "high";
   /** Added with signal-based confidence; may be absent on older stored valuations. */
@@ -102,4 +112,11 @@ export type RunPreUnderwritingValuationArgs = {
    * "no"  forces deal_type away from "producing".
    */
   producingStatusOverride?: "yes" | "no" | "unknown";
+  /**
+   * Real nearby well intelligence from state APIs.
+   * When present, the value estimator anchors its formula to actual
+   * median BOPD instead of broad basin-tier comps — produces a tight
+   * ±10% band rather than a wide directional range.
+   */
+  nearbyWells?: import("@/lib/wells/nearby-wells").NearbyWellIntelligence | null;
 };
