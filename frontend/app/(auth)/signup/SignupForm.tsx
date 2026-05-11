@@ -157,7 +157,7 @@ export function SignupForm() {
       }
 
       if (data.session) {
-        router.replace("/dashboard?welcome=1");
+        router.replace("/onboarding");
         router.refresh();
         return;
       }

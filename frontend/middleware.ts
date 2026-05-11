@@ -14,6 +14,8 @@ const PROTECTED_PREFIXES = [
   "/screen",
   "/pipeline",
   "/offer",
+  "/onboarding",
+  "/trial-expired",
 ];
 
 const AUTH_PATHS_EXACT = new Set(["/login", "/signup", "/forgot-password"]);
@@ -136,6 +138,8 @@ export async function middleware(request: NextRequest) {
     );
   }
 
+  // Forward the current pathname so server components can read it
+  supabaseResponse.headers.set("x-pathname", pathname);
   return supabaseResponse;
 }
 
