@@ -290,6 +290,16 @@ export function gradeBadgeStyleForDeal(
   return { background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" };
 }
 
+/** Maps deal grade/score to a PURSUE / REVIEW / PASS recommendation string. */
+export function recommendationFromDealScore(
+  dealScore: DealScoreResult | null | undefined
+): "PURSUE" | "REVIEW" | "PASS" {
+  const letter = gradeLetterFromDealScore(dealScore);
+  if (letter === "A") return "PURSUE";
+  if (letter === "D") return "PASS";
+  return "REVIEW";
+}
+
 export function completedTimestampMs(
   completed_at: string | null | undefined,
   processed_at: string | null | undefined
