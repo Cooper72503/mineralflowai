@@ -20,6 +20,10 @@ import { geocodeProperty } from "@/lib/location/property-geocode";
 import { geocodeFromCountyCentroid } from "@/lib/location/county-geocode";
 import { lookupWellsByLocation } from "@/lib/wells";
 import { buildNearbyWellIntelligence } from "@/lib/wells/nearby-wells";
+import { runDeclineCurveAnalysis } from "@/lib/decline/decline-curve";
+import { computeMineralEconomics } from "@/lib/economics/mineral-economics";
+import { computePaLiability } from "@/lib/risk/pa-liability";
+import { identifyRiskFlags } from "@/lib/risk/risk-flags";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -217,6 +221,41 @@ export async function POST(request: Request) {
       nearbyWells: nearbyWellIntelligence,
     });
 
+    // ── New underwriting engines ───────────────────────────────────────────────
+    // Decline curve analysis from nearby well BOPD data
+    const declineAnalysis = runDeclineCurveAnalysis(nearbyWellIntelligence.wells);
+
+    // Mineral economics: net royalty income after severance + ad valorem
+    const mineralEconomics = computeMineralEconomics({
+      state,
+      royalty_rate: royaltyDecimal,
+      nearby_bopd: nearbyWellIntelligence.median_bopd ?? nearbyWellIntelligence.avg_bopd,
+      acreage,
+      point_estimate: valuation.point_estimate,
+    });
+
+    // P&A liability assessment from well statuses
+    const paLiability = computePaLiability({
+      wells: nearbyWellIntelligence.wells,
+      state,
+    });
+
+    // Risk flags — aggregates all signal sources
+    const riskFlags = identifyRiskFlags({
+      nearby: nearbyWellIntelligence,
+      decline: declineAnalysis,
+      pa: paLiability,
+      input: {
+        county,
+        state,
+        legal_description: body.legal_description,
+        legal_description_parsed: legalParsed,
+        acreage,
+        royalty_rate: royaltyDecimal,
+      },
+      activity: valuation.activity_level,
+    });
+
     const dealBrief = await generateDealBrief({
       county,
       state,
@@ -242,6 +281,10 @@ export async function POST(request: Request) {
       parcel_data: parcelData ?? undefined,
       deal_brief: dealBrief,
       nearby_well_intelligence: nearbyWellIntelligence,
+      decline_analysis: declineAnalysis,
+      mineral_economics: mineralEconomics,
+      pa_liability: paLiability,
+      risk_flags: riskFlags,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

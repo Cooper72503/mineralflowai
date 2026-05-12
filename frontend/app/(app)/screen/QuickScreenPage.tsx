@@ -13,7 +13,14 @@ import { ProductionSnapshotCard } from "@/app/components/ProductionSnapshotCard"
 import { DealBriefCard } from "@/app/components/DealBriefCard";
 import { ParcelMapCard } from "@/app/components/ParcelMapCard";
 import { NearbyWellsCard } from "@/app/components/NearbyWellsCard";
+import { DeclineAnalysisCard } from "@/app/components/DeclineAnalysisCard";
+import { OperatingEconomicsCard } from "@/app/components/OperatingEconomicsCard";
+import { RiskFlagsCard } from "@/app/components/RiskFlagsCard";
 import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
+import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
+import type { MineralEconomicsResult } from "@/lib/economics/mineral-economics";
+import type { RiskFlagsResult } from "@/lib/risk/risk-flags";
+import type { PaLiabilityResult } from "@/lib/risk/pa-liability";
 import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
 
 // PdfDownloadButton imports both PDFDownloadLink and ScreenResultPdfDocument
@@ -40,6 +47,10 @@ type ScreenResult = {
   parcel_data?: ParcelLookupResult | null;
   deal_brief?: DealBrief | null;
   nearby_well_intelligence?: NearbyWellIntelligence | null;
+  decline_analysis?: DeclineCurveResult | null;
+  mineral_economics?: MineralEconomicsResult | null;
+  risk_flags?: RiskFlagsResult | null;
+  pa_liability?: PaLiabilityResult | null;
 };
 
 function formatUsdCompact(n: number): string {
@@ -173,6 +184,27 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
       {result.nearby_well_intelligence && (
         <div style={{ maxWidth: 680, marginTop: "0.5rem", marginBottom: "0.5rem" }}>
           <NearbyWellsCard data={result.nearby_well_intelligence} />
+        </div>
+      )}
+
+      {/* Decline Curve Analysis */}
+      {result.decline_analysis && (
+        <div style={{ maxWidth: 680, marginBottom: "0.5rem" }}>
+          <DeclineAnalysisCard data={result.decline_analysis} />
+        </div>
+      )}
+
+      {/* Operating Economics */}
+      {result.mineral_economics && (
+        <div style={{ maxWidth: 680, marginBottom: "0.5rem" }}>
+          <OperatingEconomicsCard data={result.mineral_economics} />
+        </div>
+      )}
+
+      {/* Risk Assessment */}
+      {result.risk_flags && (
+        <div style={{ maxWidth: 680, marginBottom: "0.5rem" }}>
+          <RiskFlagsCard data={result.risk_flags} />
         </div>
       )}
 
