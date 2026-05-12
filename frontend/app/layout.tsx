@@ -1,12 +1,18 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-/** Avoid static page data collection hanging on any subtree that touches request-only behavior. */
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Mineral Flow AI",
-  description: "Find mineral ownership opportunities near drilling activity",
+  title: "MineralFlow AI",
+  description: "AI-powered mineral rights underwriting platform",
 };
 
 export default function RootLayout({
@@ -15,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <body>{children}</body>
     </html>
   );

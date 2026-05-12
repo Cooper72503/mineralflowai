@@ -10,21 +10,14 @@ export function SignOutButton() {
 
   async function handleSignOut() {
     if (isSigningOut) return;
-    console.log("LOGOUT START");
     setIsSigningOut(true);
     const supabase = createClient();
     try {
-      const response = await supabase.auth.signOut();
-      if (response.error) {
-        console.log("LOGOUT ERROR", response.error);
-        setIsSigningOut(false);
-        return;
-      }
-      console.log("LOGOUT RESPONSE", response);
+      const { error } = await supabase.auth.signOut();
+      if (error) { setIsSigningOut(false); return; }
       router.replace("/login");
       router.refresh();
-    } catch (err) {
-      console.log("LOGOUT ERROR", err);
+    } catch {
       setIsSigningOut(false);
     }
   }
@@ -37,7 +30,7 @@ export function SignOutButton() {
       className="btn btnSecondary"
       style={{ width: "100%", justifyContent: "center" }}
     >
-      Sign out
+      {isSigningOut ? "Signing out…" : "Sign out"}
     </button>
   );
 }

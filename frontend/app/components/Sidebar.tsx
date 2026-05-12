@@ -1,45 +1,187 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { SignOutButton } from "./SignOutButton";
+import { createClient } from "@/lib/supabase/client";
 
-const navItems = [
-  { href: "/dashboard",  label: "Dashboard"       },
-  { href: "/pipeline",   label: "Pipeline"         },
-  { href: "/screen",     label: "Quick Screen"     },
-  { href: "/offer",      label: "Offer Calculator" },
-  { href: "/upload",     label: "Upload"           },
-  { href: "/documents",  label: "Documents"        },
-  { href: "/leads",      label: "Leads"            },
-  { href: "/alerts",     label: "Alerts"           },
-  { href: "/settings",   label: "Settings"         },
-  { href: "/billing",    label: "Billing"          },
+// ── Icons ──────────────────────────────────────────────────────────────────
+function IconDashboard() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="1.5" width="5" height="5" rx="1.25"/>
+      <rect x="9.5" y="1.5" width="5" height="5" rx="1.25"/>
+      <rect x="1.5" y="9.5" width="5" height="5" rx="1.25"/>
+      <rect x="9.5" y="9.5" width="5" height="5" rx="1.25"/>
+    </svg>
+  );
+}
+function IconPipeline() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="2" width="3.5" height="12" rx="1"/>
+      <rect x="6.25" y="2" width="3.5" height="8.5" rx="1"/>
+      <rect x="11.5" y="2" width="3.5" height="5.5" rx="1"/>
+    </svg>
+  );
+}
+function IconScreen() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6.5" cy="6.5" r="4.5"/>
+      <path d="M10.5 10.5L14 14"/>
+    </svg>
+  );
+}
+function IconCalculator() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="1" width="12" height="14" rx="2"/>
+      <rect x="4" y="3.5" width="8" height="2.5" rx="0.75"/>
+      <circle cx="5" cy="9" r="0.75" fill="currentColor" stroke="none"/>
+      <circle cx="8" cy="9" r="0.75" fill="currentColor" stroke="none"/>
+      <circle cx="11" cy="9" r="0.75" fill="currentColor" stroke="none"/>
+      <circle cx="5" cy="12" r="0.75" fill="currentColor" stroke="none"/>
+      <circle cx="8" cy="12" r="0.75" fill="currentColor" stroke="none"/>
+      <circle cx="11" cy="12" r="0.75" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+}
+function IconUpload() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 11V4M5.5 6.5L8 4l2.5 2.5"/>
+      <path d="M2.5 11.5a3.5 3.5 0 0 1 .75-5.75 4.5 4.5 0 0 1 9.5 0 3.5 3.5 0 0 1 .75 5.75"/>
+      <path d="M5.5 14h5"/>
+    </svg>
+  );
+}
+function IconDocuments() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 14h8a1 1 0 0 0 1-1V5.5L9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1z"/>
+      <path d="M9.5 2v3.5H13"/>
+      <path d="M5.5 8.5h5M5.5 11h3"/>
+    </svg>
+  );
+}
+function IconLeads() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="5" r="2.75"/>
+      <path d="M1 14a5 5 0 0 1 10 0"/>
+      <path d="M11.5 6.5a2.5 2.5 0 0 1 0 4"/>
+      <path d="M13.5 14a4 4 0 0 0-2.5-3.5"/>
+    </svg>
+  );
+}
+function IconAlerts() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 1.5A4.5 4.5 0 0 1 12.5 6v3.5L14 12H2l1.5-2.5V6A4.5 4.5 0 0 1 8 1.5z"/>
+      <path d="M6.5 12.5a1.5 1.5 0 0 0 3 0"/>
+    </svg>
+  );
+}
+function IconSettings() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+      <circle cx="8" cy="8" r="2.25"/>
+      <path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/>
+    </svg>
+  );
+}
+function IconBilling() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="3.5" width="14" height="9" rx="1.75"/>
+      <path d="M1 7h14"/>
+      <path d="M4 10.5h3" strokeWidth="1.75"/>
+    </svg>
+  );
+}
+function IconSignOut() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>
+      <path d="M10.5 11L14 8l-3.5-3"/>
+      <path d="M14 8H6"/>
+    </svg>
+  );
+}
+function IconBrandMark() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path d="M8 1L14 5v6L8 15 2 11V5L8 1z" fill="rgba(255,255,255,0.9)" stroke="rgba(255,255,255,0.3)" strokeWidth="0.5"/>
+      <path d="M8 4L12 6.5v3L8 12 4 9.5v-3L8 4z" fill="rgba(96,165,250,0.8)"/>
+    </svg>
+  );
+}
+
+// ── Nav config ─────────────────────────────────────────────────────────────
+const primaryNav = [
+  { href: "/dashboard",  label: "Dashboard",       Icon: IconDashboard  },
+  { href: "/pipeline",   label: "Pipeline",         Icon: IconPipeline   },
+  { href: "/screen",     label: "Quick Screen",     Icon: IconScreen     },
+  { href: "/offer",      label: "Offer Calculator", Icon: IconCalculator },
 ] as const;
 
-export function Sidebar() {
-  const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
+const toolsNav = [
+  { href: "/upload",     label: "Upload",           Icon: IconUpload     },
+  { href: "/documents",  label: "Documents",        Icon: IconDocuments  },
+  { href: "/leads",      label: "Leads",            Icon: IconLeads      },
+  { href: "/alerts",     label: "Alerts",           Icon: IconAlerts     },
+] as const;
 
-  // Close mobile nav on route change
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+const accountNav = [
+  { href: "/settings",   label: "Settings",         Icon: IconSettings   },
+  { href: "/billing",    label: "Billing",          Icon: IconBilling    },
+] as const;
 
-  // Prevent body scroll when mobile nav is open
-  useEffect(() => {
-    if (mobileOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
+// ── SignOut (inside sidebar) ───────────────────────────────────────────────
+function SidebarSignOut() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  async function handleSignOut() {
+    if (loading) return;
+    setLoading(true);
+    const supabase = createClient();
+    try {
+      await supabase.auth.signOut();
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      setLoading(false);
     }
-    return () => { document.body.style.overflow = ""; };
-  }, [mobileOpen]);
+  }
 
-  const navLinks = (
-    <nav className="sidebar-nav">
-      {navItems.map(({ href, label }) => {
+  return (
+    <button
+      type="button"
+      onClick={handleSignOut}
+      disabled={loading}
+      className="sidebar-signout"
+    >
+      <IconSignOut />
+      {loading ? "Signing out…" : "Sign out"}
+    </button>
+  );
+}
+
+// ── Nav section renderer ───────────────────────────────────────────────────
+function NavGroup({
+  items,
+  pathname,
+  onClose,
+}: {
+  items: ReadonlyArray<{ href: string; label: string; Icon: () => JSX.Element }>;
+  pathname: string;
+  onClose?: () => void;
+}) {
+  return (
+    <>
+      {items.map(({ href, label, Icon }) => {
         const isActive =
           pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
         return (
@@ -47,32 +189,66 @@ export function Sidebar() {
             key={href}
             href={href}
             className={isActive ? "active" : undefined}
-            onClick={() => setMobileOpen(false)}
+            onClick={onClose}
           >
+            <Icon />
             {label}
           </Link>
         );
       })}
+    </>
+  );
+}
+
+// ── Main Sidebar ───────────────────────────────────────────────────────────
+export function Sidebar() {
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
+  useEffect(() => {
+    document.body.style.overflow = mobileOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [mobileOpen]);
+
+  const brandEl = (
+    <div className="sidebar-brand">
+      <Link href="/dashboard">
+        <span className="sidebar-brand-logo"><IconBrandMark /></span>
+        MineralFlow AI
+      </Link>
+    </div>
+  );
+
+  const navEl = (close?: () => void) => (
+    <nav className="sidebar-nav">
+      <NavGroup items={primaryNav} pathname={pathname} onClose={close} />
+      <div className="sidebar-section-label">Data</div>
+      <NavGroup items={toolsNav} pathname={pathname} onClose={close} />
+      <div className="sidebar-section-label">Account</div>
+      <NavGroup items={accountNav} pathname={pathname} onClose={close} />
     </nav>
+  );
+
+  const footerEl = (
+    <div className="sidebar-footer">
+      <SidebarSignOut />
+    </div>
   );
 
   return (
     <>
       {/* ── Desktop sidebar ── */}
       <aside className="sidebar sidebar-desktop">
-        <div className="sidebar-brand">
-          <Link href="/dashboard">Mineral Flow AI</Link>
-        </div>
-        {navLinks}
-        <div className="sidebar-footer">
-          <SignOutButton />
-        </div>
+        {brandEl}
+        {navEl()}
+        {footerEl}
       </aside>
 
       {/* ── Mobile top bar ── */}
       <div className="mobile-topbar">
         <Link href="/dashboard" className="mobile-topbar-brand">
-          Mineral Flow AI
+          MineralFlow AI
         </Link>
         <button
           className="mobile-hamburger"
@@ -91,31 +267,14 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* ── Mobile drawer overlay ── */}
+      {/* ── Mobile drawer ── */}
       {mobileOpen && (
-        <div
-          className="mobile-overlay"
-          onClick={() => setMobileOpen(false)}
-          aria-hidden
-        />
+        <div className="mobile-overlay" onClick={() => setMobileOpen(false)} aria-hidden />
       )}
       <aside className={`sidebar sidebar-mobile${mobileOpen ? " open" : ""}`}>
-        <div className="sidebar-brand" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <Link href="/dashboard" onClick={() => setMobileOpen(false)}>Mineral Flow AI</Link>
-          <button
-            onClick={() => setMobileOpen(false)}
-            aria-label="Close menu"
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", padding: "0.25rem" }}
-          >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M4 4l12 12M16 4L4 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          </button>
-        </div>
-        {navLinks}
-        <div className="sidebar-footer">
-          <SignOutButton />
-        </div>
+        {brandEl}
+        {navEl(() => setMobileOpen(false))}
+        {footerEl}
       </aside>
     </>
   );
