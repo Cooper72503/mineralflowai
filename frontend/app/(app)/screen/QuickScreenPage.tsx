@@ -166,7 +166,7 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
         {(v.point_estimate != null || (v.estimated_total_value_low != null && v.estimated_total_value_high != null)) && (
           <div style={{ marginLeft: "auto", textAlign: "right", flexShrink: 0 }}>
             <div style={{ fontSize: "0.72rem", color: recColors.text, opacity: 0.7, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Est. Value{v.point_estimate_basis === "bopd_anchored" ? " ·  Live Data" : ""}
+              Est. Value{v.point_estimate_basis === "full_underwriting" ? " · Full Analysis" : v.point_estimate_basis === "bopd_anchored" ? " · Live Data" : ""}
             </div>
             <div style={{ fontSize: "1.05rem", fontWeight: 800, color: recColors.text }}>
               {v.point_estimate != null ? formatUsdCompact(v.point_estimate) : formatUsdRange(v.estimated_total_value_low, v.estimated_total_value_high)}
@@ -367,8 +367,8 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
         {/* Point estimate — prominent single-value display */}
         {v.point_estimate != null && (
           <div style={{
-            background: v.point_estimate_basis === "bopd_anchored" ? "#f0fdf4" : "#f8fafc",
-            border: `1px solid ${v.point_estimate_basis === "bopd_anchored" ? "#86efac" : "#e2e8f0"}`,
+            background: (v.point_estimate_basis === "full_underwriting" || v.point_estimate_basis === "bopd_anchored") ? "#f0fdf4" : "#f8fafc",
+            border: `1px solid ${(v.point_estimate_basis === "full_underwriting" || v.point_estimate_basis === "bopd_anchored") ? "#86efac" : "#e2e8f0"}`,
             borderRadius: 10,
             padding: "0.85rem 1rem",
             marginBottom: "0.85rem",
@@ -380,6 +380,9 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
             <div>
               <div style={{ fontSize: "0.72rem", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.2rem" }}>
                 Estimated Value
+                {v.point_estimate_basis === "full_underwriting" && (
+                  <span style={{ marginLeft: "0.4rem", color: "#16a34a", fontWeight: 600 }}>· Decline + economics + risk adjusted</span>
+                )}
                 {v.point_estimate_basis === "bopd_anchored" && (
                   <span style={{ marginLeft: "0.4rem", color: "#16a34a", fontWeight: 600 }}>· Anchored to nearby well data</span>
                 )}

@@ -74,10 +74,11 @@ export type DealValuationOutput = {
    */
   point_estimate?: number | null;
   /**
+   * "full_underwriting" when all analysis engines contributed (economics + decline + risk);
    * "bopd_anchored" when derived from real nearby well production data;
    * "basin_tier" when falling back to static county/basin comps.
    */
-  point_estimate_basis?: "bopd_anchored" | "basin_tier" | null;
+  point_estimate_basis?: "full_underwriting" | "bopd_anchored" | "basin_tier" | null;
   recommendation: "PURSUE" | "REVIEW" | "PASS";
   confidence: "low" | "medium" | "high";
   /** Added with signal-based confidence; may be absent on older stored valuations. */
@@ -115,8 +116,29 @@ export type RunPreUnderwritingValuationArgs = {
   /**
    * Real nearby well intelligence from state APIs.
    * When present, the value estimator anchors its formula to actual
-   * median BOPD instead of broad basin-tier comps — produces a tight
-   * ±10% band rather than a wide directional range.
+   * median BOPD instead of broad basin-tier comps.
    */
   nearbyWells?: import("@/lib/wells/nearby-wells").NearbyWellIntelligence | null;
+  /**
+   * Decline curve analysis — informs economic life adjustment on value.
+   * Must be computed before calling runPreUnderwritingValuation.
+   */
+  declineAnalysis?: import("@/lib/decline/decline-curve").DeclineCurveResult | null;
+  /**
+   * Mineral economics (net royalty income) — primary income anchor for value.
+   * Must be computed before calling runPreUnderwritingValuation.
+   * Pass WITHOUT point_estimate; cap rate will be patched after valuation.
+   */
+  mineralEconomics?: import("@/lib/economics/mineral-economics").MineralEconomicsResult | null;
+  /**
+   * P&A liability — directly deducted from estimated value.
+   * Must be computed before calling runPreUnderwritingValuation.
+   */
+  paLiability?: import("@/lib/risk/pa-liability").PaLiabilityResult | null;
+  /**
+   * Risk flags — used as discount factor in value estimation.
+   * Can be passed in if pre-computed, otherwise the value estimator
+   * will run without a risk discount.
+   */
+  riskFlags?: import("@/lib/risk/risk-flags").RiskFlagsResult | null;
 };

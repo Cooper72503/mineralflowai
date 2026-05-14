@@ -58,9 +58,6 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       args.raw_text ||
       "";
 
-    console.log("[VALUATION DEBUG] fullText length:", fullText.length);
-    console.log("[VALUATION DEBUG] fullText sample:", fullText.slice(0, 300));
-
     const vIn = buildValuationInput({
       documentId: args.documentId ?? undefined,
       parsed: args.parsed,
@@ -102,7 +99,16 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
     });
 
     const nriResult = estimateDirectionalNriProxy(vIn);
-    const value = estimateValueRange({ input: vIn, dealType, activity, nearbyWells: args.nearbyWells ?? null });
+    const value = estimateValueRange({
+      input: vIn,
+      dealType,
+      activity,
+      nearbyWells:       args.nearbyWells ?? null,
+      declineAnalysis:   args.declineAnalysis ?? null,
+      mineralEconomics:  args.mineralEconomics ?? null,
+      riskFlags:         args.riskFlags ?? null,
+      paLiability:       args.paLiability ?? null,
+    });
 
     const missingCritical = countMissingCritical(vIn);
     const hasNumericBand =
@@ -153,6 +159,12 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       nriLine: nriResult.nri_basis,
     });
 
+    // Prepend valuation-adjustment reasoning lines (decline, risk, P&A)
+    // before the narrative's general reasoning bullets so they appear first.
+    const allReasoning = value.reasoning_additions.length > 0
+      ? [...value.reasoning_additions, ...narrative.reasoning]
+      : narrative.reasoning;
+
     const out: DealValuationOutput = {
       deal_type: dealType,
       activity_level: activity,
@@ -168,7 +180,7 @@ export function runPreUnderwritingValuation(args: RunPreUnderwritingValuationArg
       confidence,
       confidence_reasoning,
       summary: narrative.summary,
-      reasoning: narrative.reasoning,
+      reasoning: allReasoning,
       risks: narrative.risks,
       missing_data: narrative.missing_data,
       _value_method: value.method,

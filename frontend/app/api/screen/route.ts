@@ -113,6 +113,31 @@ export async function POST(request: Request) {
       radiusMiles: 3,
     });
 
+    const royaltyDecimal = normalizeRoyaltyToDecimal(body.royalty_rate ?? null);
+
+    // ── Run analysis engines BEFORE valuation ─────────────────────────────────
+    // These are pure functions that only need well + user inputs — no valuation dep.
+    // Their outputs feed directly into the holistic value estimate below.
+
+    // 1. Decline curve — fits Arps exponential model to nearby well BOPD data
+    const declineAnalysis = runDeclineCurveAnalysis(nearbyWellIntelligence.wells);
+
+    // 2. Mineral economics — actual net royalty income after severance + ad valorem
+    //    Run WITHOUT point_estimate here; implied_cap_rate will be patched below.
+    const mineralEconomics = computeMineralEconomics({
+      state,
+      royalty_rate: royaltyDecimal,
+      nearby_bopd: nearbyWellIntelligence.median_bopd ?? nearbyWellIntelligence.avg_bopd,
+      acreage,
+      point_estimate: null,
+    });
+
+    // 3. P&A liability — depth-based plugging cost exposure
+    const paLiability = computePaLiability({
+      wells: nearbyWellIntelligence.wells,
+      state,
+    });
+
     // Build a minimal parsed / dealScoreInput — just enough for the valuation engine
     const parsed: Record<string, unknown> = {
       county,
@@ -169,7 +194,10 @@ export async function POST(request: Request) {
       raw_text: null,
       combinedExtractionText: null,
       producingStatusOverride: producingStatus,
-      nearbyWells: nearbyWellIntelligence,
+      nearbyWells:       nearbyWellIntelligence,
+      declineAnalysis,
+      mineralEconomics,
+      paLiability,
     });
 
     // Lift nearby-well signals into valuation confidence reasoning
@@ -207,10 +235,14 @@ export async function POST(request: Request) {
       }
     }
 
-    const royaltyDecimal = normalizeRoyaltyToDecimal(body.royalty_rate ?? null);
+    // Patch implied_cap_rate now that we have the final point_estimate
+    if (mineralEconomics.annual_net_royalty != null && valuation.point_estimate != null && valuation.point_estimate > 0) {
+      mineralEconomics.implied_cap_rate = Math.round(
+        (mineralEconomics.annual_net_royalty / valuation.point_estimate) * 1000
+      ) / 10;
+    }
 
-    // Build production snapshot — pass nearby well data so it can anchor estimates
-    // to real production rather than only static basin benchmarks.
+    // Build production snapshot anchored to real BOPD
     const productionSnapshot = buildProductionSnapshot({
       dealType: producingStatus === "no" ? "undeveloped" : valuation.deal_type,
       activityLevel: valuation.activity_level,
@@ -221,26 +253,7 @@ export async function POST(request: Request) {
       nearbyWells: nearbyWellIntelligence,
     });
 
-    // ── New underwriting engines ───────────────────────────────────────────────
-    // Decline curve analysis from nearby well BOPD data
-    const declineAnalysis = runDeclineCurveAnalysis(nearbyWellIntelligence.wells);
-
-    // Mineral economics: net royalty income after severance + ad valorem
-    const mineralEconomics = computeMineralEconomics({
-      state,
-      royalty_rate: royaltyDecimal,
-      nearby_bopd: nearbyWellIntelligence.median_bopd ?? nearbyWellIntelligence.avg_bopd,
-      acreage,
-      point_estimate: valuation.point_estimate,
-    });
-
-    // P&A liability assessment from well statuses
-    const paLiability = computePaLiability({
-      wells: nearbyWellIntelligence.wells,
-      state,
-    });
-
-    // Risk flags — aggregates all signal sources
+    // Risk flags — run after valuation (needs activity_level from valuation output)
     const riskFlags = identifyRiskFlags({
       nearby: nearbyWellIntelligence,
       decline: declineAnalysis,
