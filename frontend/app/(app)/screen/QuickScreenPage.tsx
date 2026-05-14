@@ -104,6 +104,11 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
     valuation: result.valuation,
     production_snapshot: result.production_snapshot,
     deal_brief: result.deal_brief,
+    nearby_well_intelligence: result.nearby_well_intelligence,
+    decline_analysis: result.decline_analysis,
+    mineral_economics: result.mineral_economics,
+    risk_flags: result.risk_flags,
+    pa_liability: result.pa_liability,
     generatedAt: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
   };
 
