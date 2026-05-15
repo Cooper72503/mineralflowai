@@ -17,6 +17,7 @@ import { DeclineAnalysisCard } from "@/app/components/DeclineAnalysisCard";
 import { OperatingEconomicsCard } from "@/app/components/OperatingEconomicsCard";
 import { RiskFlagsCard } from "@/app/components/RiskFlagsCard";
 import { ProductionHistoryTable } from "@/app/components/ProductionHistoryTable";
+import { OfferCalculatorCard } from "@/app/components/OfferCalculatorCard";
 import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
 import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
 import type { MineralEconomicsResult } from "@/lib/economics/mineral-economics";
@@ -223,6 +224,23 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
           <RiskFlagsCard data={result.risk_flags} />
         </div>
       )}
+
+      {/* Offer Calculator */}
+      <div style={{ maxWidth: 680, marginBottom: "0.5rem" }}>
+        <OfferCalculatorCard
+          declineAnalysis={result.decline_analysis ?? null}
+          nearbyWellIntelligence={result.nearby_well_intelligence ?? null}
+          royaltyRate={normalizeRoyaltyToDecimal(result.royalty_rate)}
+          acreage={result.acreage ?? null}
+          activityLevel={(() => {
+            const lvl = result.nearby_well_intelligence?.inferred_activity_level;
+            if (lvl === "none" || lvl == null) return "unknown";
+            return lvl as "high" | "moderate" | "low";
+          })()}
+          county={result.county ?? null}
+          state={result.state ?? null}
+        />
+      </div>
 
       {/* Deal Brief */}
       {result.deal_brief && <DealBriefCard brief={result.deal_brief} />}

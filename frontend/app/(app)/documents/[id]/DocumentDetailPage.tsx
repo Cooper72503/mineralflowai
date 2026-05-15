@@ -54,6 +54,7 @@ import { DeclineAnalysisCard } from "@/app/components/DeclineAnalysisCard";
 import { OperatingEconomicsCard } from "@/app/components/OperatingEconomicsCard";
 import { RiskFlagsCard } from "@/app/components/RiskFlagsCard";
 import { ProductionHistoryTable } from "@/app/components/ProductionHistoryTable";
+import { OfferCalculatorCard } from "@/app/components/OfferCalculatorCard";
 import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
 // PdfDownloadButton uses @react-pdf/renderer which can't run during SSR
@@ -1427,6 +1428,24 @@ export default function DocumentDetailPage() {
       {riskFlags ? (
         <RiskFlagsCard data={riskFlags} />
       ) : null}
+
+      <OfferCalculatorCard
+        declineAnalysis={declineAnalysis ?? null}
+        nearbyWellIntelligence={nearbyWellIntelligence ?? null}
+        royaltyRate={normalizeRoyaltyToDecimal(extraction?.royalty_rate)}
+        acreage={
+          typeof (snapshotMerged as Record<string, unknown>)?.acreage === "number"
+            ? (snapshotMerged as Record<string, unknown>).acreage as number
+            : null
+        }
+        activityLevel={(() => {
+          const lvl = nearbyWellIntelligence?.inferred_activity_level;
+          if (lvl === "none" || lvl == null) return "unknown";
+          return lvl as "high" | "moderate" | "low";
+        })()}
+        county={extraction?.county ?? doc?.county ?? null}
+        state={extraction?.state ?? doc?.state ?? null}
+      />
 
       {doc && !nearbyWellIntelligence && (
         <WellDataCard

@@ -27,6 +27,12 @@ export type OfferCalculatorInput = {
   deal_type?: string | null;
   county?: string | null;
   state?: string | null;
+  /**
+   * Actual BOPD from a decline model or nearby-well intelligence.
+   * When provided, skips the basin benchmark lookup entirely — the
+   * calculation uses real production data instead of a generic NMA multiple.
+   */
+  bopd_actual?: number | null;
   oil_prices?: number[];          // default: [55, 65, 70, 75, 85, 95]
   multiples?: number[];           // default: [3, 5, 8, 12, 15]
 };
@@ -63,6 +69,8 @@ export type OfferCalculatorResult = {
   /** matrix[oil_price_index][multiple_index] = implied offer in USD. */
   matrix: number[][];
   caveats: string[];
+  /** True when BOPD came from real well data rather than a basin benchmark. */
+  using_actual_bopd: boolean;
 };
 
 /**
@@ -108,9 +116,23 @@ export function buildOfferScenarios(input: OfferCalculatorInput): OfferCalculato
   }
 
   const bench = BOPD_PER_NMA[activity] ?? BOPD_PER_NMA.unknown;
-  const bopd_mid = bench.mid * nma;
-  const bopd_lo  = bench.lo  * nma;
-  const bopd_hi  = bench.hi  * nma;
+
+  // If caller supplied actual BOPD from real well data, use it directly.
+  // Apply ±20% band for lo/hi (decline uncertainty). Otherwise fall back
+  // to the basin benchmark scaled by NMA.
+  let bopd_mid: number;
+  let bopd_lo: number;
+  let bopd_hi: number;
+  const usingActualBopd = input.bopd_actual != null && input.bopd_actual > 0;
+  if (usingActualBopd) {
+    bopd_mid = input.bopd_actual!;
+    bopd_lo  = bopd_mid * 0.80;
+    bopd_hi  = bopd_mid * 1.20;
+  } else {
+    bopd_mid = bench.mid * nma;
+    bopd_lo  = bench.lo  * nma;
+    bopd_hi  = bench.hi  * nma;
+  }
 
   // Annual royalty = BOPD_mid × 365 days × oil_price × royalty_rate
   const annualAt = (price: number) => bopd_mid * 365 * price * royalty_rate;
@@ -135,12 +157,14 @@ export function buildOfferScenarios(input: OfferCalculatorInput): OfferCalculato
   );
 
   const caveats: string[] = [
-    `BOPD estimate based on ${activity} activity tier benchmark (${bench.lo}–${bench.hi} BOPD/NMA). Confirm with actual well data.`,
+    usingActualBopd
+      ? `BOPD anchored to real well data (${bopd_mid.toFixed(2)} BOPD). ±20% band applied for uncertainty.`
+      : `BOPD estimated from ${activity} activity tier benchmark (${bench.lo}–${bench.hi} BOPD/NMA). Confirm with actual well data.`,
     "Does not account for existing production decline, royalty deductions, or operating expenses.",
     "Treat as directional first-pass only — not a reserve report or appraisal.",
   ];
 
-  if (activity === "unknown") {
+  if (!usingActualBopd && activity === "unknown") {
     caveats.unshift("Activity level unknown — using conservative fallback benchmark. Provide county/state for a tighter range.");
   }
 
@@ -161,5 +185,6 @@ export function buildOfferScenarios(input: OfferCalculatorInput): OfferCalculato
     multiples,
     matrix,
     caveats,
+    using_actual_bopd: usingActualBopd,
   };
 }
