@@ -15,7 +15,8 @@
 import { useState, useEffect, useMemo } from "react";
 import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
 import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
-import type { TrrcProductionResult } from "@/lib/wells/trrc-production";
+import type { StateProductionResult } from "@/lib/wells/production-types";
+import { SOURCE_LABELS } from "@/lib/wells/production-types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -34,7 +35,8 @@ export type ProductionMonthRow = {
 
 export type ProductionHistoryResult = {
   months: ProductionMonthRow[];
-  basis: "trrc_actual" | "decline_model" | "basin_estimate" | "insufficient";
+  basis: "state_actual" | "trrc_actual" | "decline_model" | "basin_estimate" | "insufficient";
+  source_label: string;  // e.g. "TRRC Actual", "WV DEP Actual"
   annual_decline_rate: number;
   current_bopd: number;
   total_oil_bbl: number;
@@ -65,51 +67,70 @@ function monthLabelAgo(monthsAgo: number): string {
   return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
-// ── Build from real TRRC data ─────────────────────────────────────────────────
+// ── Build from real state agency data ─────────────────────────────────────────
 
-export function buildProductionHistoryFromTrrc(args: {
-  trrcData:   TrrcProductionResult;
+export function buildProductionHistoryFromState(args: {
+  stateData:   StateProductionResult;
   royaltyRate: number | null;
   oilPrice?:   number;
 }): ProductionHistoryResult {
-  const { trrcData, royaltyRate } = args;
+  const { stateData, royaltyRate } = args;
   const oilPrice = args.oilPrice ?? DEFAULT_OIL_PRICE;
 
-  const months: ProductionMonthRow[] = trrcData.rows.map(row => {
-    const days         = daysInMonth(row.year, row.month);
-    const bopd         = row.oil_bbl / days;
-    const gross        = row.oil_bbl * oilPrice;
-    const net_royalty  = royaltyRate != null ? gross * royaltyRate : null;
+  const months: ProductionMonthRow[] = stateData.rows.map(row => {
+    const days        = daysInMonth(row.year, row.month);
+    const bopd        = row.oil_bbl > 0 ? row.oil_bbl / days : 0;
+    const gross       = row.oil_bbl * oilPrice;
+    const net_royalty = royaltyRate != null ? gross * royaltyRate : null;
     return {
       label:         monthLabel(row.year, row.month),
       bopd:          Math.round(bopd * 10) / 10,
       oil_bbl:       row.oil_bbl,
-      gross_revenue: Math.round(gross),
-      net_royalty:   net_royalty != null ? Math.round(net_royalty) : null,
+      gross_revenue: row.oil_bbl > 0 ? Math.round(gross) : null,
+      net_royalty:   net_royalty != null && row.oil_bbl > 0 ? Math.round(net_royalty) : null,
     };
   });
 
   // Most-recent month's BOPD as "current"
-  const lastRow  = trrcData.rows[trrcData.rows.length - 1];
-  const lastDays = lastRow ? daysInMonth(lastRow.year, lastRow.month) : 30;
-  const currentBopd = lastRow ? lastRow.oil_bbl / lastDays : 0;
+  const lastRow     = stateData.rows[stateData.rows.length - 1];
+  const lastDays    = lastRow ? daysInMonth(lastRow.year, lastRow.month) : 30;
+  const currentBopd = lastRow && lastRow.oil_bbl > 0 ? lastRow.oil_bbl / lastDays : 0;
 
-  const total_oil_bbl      = months.reduce((s, r) => s + r.oil_bbl, 0);
+  const total_oil_bbl       = months.reduce((s, r) => s + r.oil_bbl, 0);
   const total_gross_revenue = months.reduce((s, r) => s + (r.gross_revenue ?? 0), 0);
   const total_net_royalty   = royaltyRate != null
     ? months.reduce((s, r) => s + (r.net_royalty ?? 0), 0)
     : null;
 
+  const sourceLabel = SOURCE_LABELS[stateData.source] ?? stateData.source;
+
+  const noteBySource: Record<string, string> = {
+    trrc_actual:  `Actual reported production from Texas Railroad Commission${
+      stateData.lease_number ? ` (lease ${stateData.lease_number}, district ${stateData.district_code})` : ""
+    }. Oil price assumed at $${oilPrice}/BBL. Not a royalty statement.`,
+    wvdep_actual: `Actual reported production from WV Department of Environmental Protection (API ${stateData.api_number}). Oil price assumed at $${oilPrice}/BBL. Not a royalty statement.`,
+  };
+
   return {
     months,
-    basis:               "trrc_actual",
+    basis:               "state_actual",
+    source_label:        sourceLabel,
     annual_decline_rate: 0,
     current_bopd:        Math.round(currentBopd * 10) / 10,
     total_oil_bbl,
     total_gross_revenue,
     total_net_royalty,
-    note: `Actual reported production from Texas Railroad Commission (lease ${trrcData.lease_number}, district ${trrcData.district_code}). Oil price assumed at $${oilPrice}/BBL. Not a royalty statement.`,
+    note: noteBySource[stateData.source] ?? `Actual reported production from ${sourceLabel}. Oil price assumed at $${oilPrice}/BBL. Not a royalty statement.`,
   };
+}
+
+/** @deprecated Use buildProductionHistoryFromState instead */
+export function buildProductionHistoryFromTrrc(args: {
+  trrcData:    StateProductionResult;
+  royaltyRate: number | null;
+  oilPrice?:   number;
+}): ProductionHistoryResult {
+  return buildProductionHistoryFromState({ stateData: args.trrcData, royaltyRate: args.royaltyRate, oilPrice: args.oilPrice });
 }
 
 // ── Build from decline model / basin estimate (backcast) ─────────────────────
@@ -170,6 +191,7 @@ export function buildProductionHistory(args: {
   return {
     months,
     basis,
+    source_label:        basis === "decline_model" ? "Decline Model" : "Basin Estimate",
     annual_decline_rate: annualDi,
     current_bopd:        currentBopd,
     total_oil_bbl,
@@ -209,11 +231,11 @@ const basisMeta = {
 export function ProductionHistoryTable({
   declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice,
 }: Props) {
-  const [trrcData,      setTrrcData]      = useState<TrrcProductionResult | null>(null);
-  const [trrcLoading,   setTrrcLoading]   = useState(false);
-  const [trrcAttempted, setTrrcAttempted] = useState(false);
+  const [stateData,      setStateData]      = useState<StateProductionResult | null>(null);
+  const [prodLoading,    setProdLoading]    = useState(false);
+  const [prodAttempted,  setProdAttempted]  = useState(false);
 
-  // Gather real API numbers from nearby wells (skip synthetic ones)
+  // Gather real API numbers from nearby wells (skip synthetic/unknown)
   const realApiNumbers = useMemo(() => {
     if (!nearbyWellIntelligence?.wells) return [];
     return nearbyWellIntelligence.wells
@@ -221,32 +243,32 @@ export function ProductionHistoryTable({
       .filter(a => a && !a.startsWith("synthetic") && a !== "unknown");
   }, [nearbyWellIntelligence]);
 
-  // Attempt to fetch real TRRC production once we have API numbers
+  // Attempt to fetch real production data once we have API numbers
   useEffect(() => {
-    if (trrcAttempted || realApiNumbers.length === 0) return;
-    setTrrcAttempted(true);
-    setTrrcLoading(true);
+    if (prodAttempted || realApiNumbers.length === 0) return;
+    setProdAttempted(true);
+    setProdLoading(true);
 
     const params = realApiNumbers.slice(0, 5).join(",");
     fetch(`/api/wells/production?api=${encodeURIComponent(params)}`)
       .then(r => r.ok ? r.json() : null)
-      .then((data: TrrcProductionResult | null) => {
-        if (data?.rows?.length) setTrrcData(data);
+      .then((data: StateProductionResult | null) => {
+        if (data?.rows?.length) setStateData(data);
       })
       .catch(() => null)
-      .finally(() => setTrrcLoading(false));
-  }, [realApiNumbers, trrcAttempted]);
+      .finally(() => setProdLoading(false));
+  }, [realApiNumbers, prodAttempted]);
 
   // Resolve which history to display
   const history: ProductionHistoryResult | null = useMemo(() => {
-    if (trrcData) {
-      return buildProductionHistoryFromTrrc({ trrcData, royaltyRate, oilPrice });
+    if (stateData) {
+      return buildProductionHistoryFromState({ stateData, royaltyRate, oilPrice });
     }
     return buildProductionHistory({ declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice });
-  }, [trrcData, declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice]);
+  }, [stateData, declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice]);
 
   // ── empty state ─────────────────────────────────────────────────────────────
-  if (!history && !trrcLoading) {
+  if (!history && !prodLoading) {
     return (
       <div className="card" style={{ marginBottom: "1.5rem" }}>
         <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.5rem" }}>
@@ -259,14 +281,14 @@ export function ProductionHistoryTable({
     );
   }
 
-  if (trrcLoading && !history) {
+  if (prodLoading && !history) {
     return (
       <div className="card" style={{ marginBottom: "1.5rem" }}>
         <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.5rem" }}>
           Production Statement (36 Months)
         </h2>
         <p style={{ fontSize: "0.88rem", color: "#6b7280", margin: 0 }}>
-          Fetching TRRC production records…
+          Fetching production records…
         </p>
       </div>
     );
@@ -276,8 +298,8 @@ export function ProductionHistoryTable({
 
   const showRevenue = history.months[0]?.gross_revenue != null;
   const showRoyalty = history.months[0]?.net_royalty   != null;
-  const bs          = basisMeta[history.basis];
-  const isActual    = history.basis === "trrc_actual";
+  const isActual    = history.basis === "state_actual" || history.basis === "trrc_actual";
+  const bs          = isActual ? basisMeta.trrc_actual : basisMeta[history.basis as keyof typeof basisMeta] ?? basisMeta.insufficient;
 
   return (
     <div className="card" style={{ marginBottom: "1.5rem" }}>
@@ -295,15 +317,15 @@ export function ProductionHistoryTable({
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          {trrcLoading && (
-            <span style={{ fontSize: "0.72rem", color: "#6b7280" }}>checking TRRC…</span>
+          {prodLoading && (
+            <span style={{ fontSize: "0.72rem", color: "#6b7280" }}>checking records…</span>
           )}
           <span style={{
             fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase",
             padding: "0.2rem 0.55rem", borderRadius: 6,
             background: bs.bg, color: bs.text, border: `1px solid ${bs.border}`,
           }}>
-            {isActual ? "✓ " : ""}{bs.label}
+            {isActual ? "✓ " : ""}{isActual ? history.source_label : bs.label}
           </span>
         </div>
       </div>
