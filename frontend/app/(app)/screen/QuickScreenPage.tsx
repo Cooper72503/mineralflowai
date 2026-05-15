@@ -16,12 +16,14 @@ import { NearbyWellsCard } from "@/app/components/NearbyWellsCard";
 import { DeclineAnalysisCard } from "@/app/components/DeclineAnalysisCard";
 import { OperatingEconomicsCard } from "@/app/components/OperatingEconomicsCard";
 import { RiskFlagsCard } from "@/app/components/RiskFlagsCard";
+import { ProductionHistoryTable } from "@/app/components/ProductionHistoryTable";
 import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
 import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
 import type { MineralEconomicsResult } from "@/lib/economics/mineral-economics";
 import type { RiskFlagsResult } from "@/lib/risk/risk-flags";
 import type { PaLiabilityResult } from "@/lib/risk/pa-liability";
 import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
+import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 
 // PdfDownloadButton imports both PDFDownloadLink and ScreenResultPdfDocument
 // in one module so they always load together — prevents white-screen crash
@@ -205,6 +207,15 @@ function ValuationResult({ result, clientProducing }: { result: ScreenResult; cl
           <OperatingEconomicsCard data={result.mineral_economics} />
         </div>
       )}
+
+      {/* Production Statement */}
+      <div style={{ maxWidth: 680, marginBottom: "0.5rem" }}>
+        <ProductionHistoryTable
+          declineAnalysis={result.decline_analysis ?? null}
+          nearbyWellIntelligence={result.nearby_well_intelligence ?? null}
+          royaltyRate={normalizeRoyaltyToDecimal(result.royalty_rate)}
+        />
+      </div>
 
       {/* Risk Assessment */}
       {result.risk_flags && (

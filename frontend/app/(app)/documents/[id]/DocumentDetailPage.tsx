@@ -53,6 +53,8 @@ import { NearbyWellsCard } from "@/app/components/NearbyWellsCard";
 import { DeclineAnalysisCard } from "@/app/components/DeclineAnalysisCard";
 import { OperatingEconomicsCard } from "@/app/components/OperatingEconomicsCard";
 import { RiskFlagsCard } from "@/app/components/RiskFlagsCard";
+import { ProductionHistoryTable } from "@/app/components/ProductionHistoryTable";
+import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
 // PdfDownloadButton uses @react-pdf/renderer which can't run during SSR
 const PdfDownloadButton = dynamic(
@@ -1415,6 +1417,12 @@ export default function DocumentDetailPage() {
       {mineralEconomics ? (
         <OperatingEconomicsCard data={mineralEconomics} />
       ) : null}
+
+      <ProductionHistoryTable
+        declineAnalysis={declineAnalysis ?? null}
+        nearbyWellIntelligence={nearbyWellIntelligence ?? null}
+        royaltyRate={normalizeRoyaltyToDecimal(extraction?.royalty_rate)}
+      />
 
       {riskFlags ? (
         <RiskFlagsCard data={riskFlags} />

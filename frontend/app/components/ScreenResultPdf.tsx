@@ -17,6 +17,8 @@ import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
 import type { MineralEconomicsResult } from "@/lib/economics/mineral-economics";
 import type { RiskFlagsResult, RiskFlag } from "@/lib/risk/risk-flags";
 import type { PaLiabilityResult } from "@/lib/risk/pa-liability";
+import { buildProductionHistory } from "@/app/components/ProductionHistoryTable";
+import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
 
 // ─── Data type ───────────────────────────────────────────────────────────────
 
@@ -829,6 +831,86 @@ export function ScreenResultPdfDocument({ data }: { data: ScreenResultPdfData })
             )}
           </View>
         )}
+
+        {/* ════════════════════════════════════════════════════════════════
+            PRODUCTION STATEMENT (36 MONTHS)
+        ════════════════════════════════════════════════════════════════ */}
+        {(() => {
+          const ph = buildProductionHistory({
+            declineAnalysis: dec ?? null,
+            nearbyWellIntelligence: wells ?? null,
+            royaltyRate: normalizeRoyaltyToDecimal(data.royalty_rate),
+          });
+          if (!ph) return null;
+          const showRev = ph.months[0]?.gross_revenue != null;
+          const showRoy = ph.months[0]?.net_royalty != null;
+          const basisLabel = ph.basis === "decline_model" ? "Decline Model" : "Basin Estimate";
+          const fmtUsd = (n: number | null) =>
+            n == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+          const fmtBbl = (n: number) => n.toLocaleString("en-US");
+          // Show up to 12 most recent months in the PDF (condensed)
+          const rows = [...ph.months].reverse().slice(0, 12);
+          return (
+            <View style={S.section}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <Text style={S.sectionTitle}>Production Statement — Last 12 Months</Text>
+                <View style={{ backgroundColor: ph.basis === "decline_model" ? "#dbeafe" : "#fef9c3", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 7, fontFamily: "Helvetica-Bold", color: ph.basis === "decline_model" ? "#1e40af" : "#854d0e" }}>{basisLabel.toUpperCase()}</Text>
+                </View>
+              </View>
+
+              {/* Summary stats */}
+              <View style={[S.grid2, { marginBottom: 6 }]}>
+                <View style={S.gridCell}>
+                  <Text style={S.gridCellLabel}>36-Mo Oil Production</Text>
+                  <Text style={S.gridCellValue}>{fmtBbl(ph.total_oil_bbl)} BBL</Text>
+                </View>
+                {ph.total_gross_revenue != null && (
+                  <View style={S.gridCell}>
+                    <Text style={S.gridCellLabel}>36-Mo Gross Revenue</Text>
+                    <Text style={S.gridCellValue}>{fmtUsd(ph.total_gross_revenue)}</Text>
+                  </View>
+                )}
+                {ph.total_net_royalty != null && (
+                  <View style={S.gridCell}>
+                    <Text style={S.gridCellLabel}>36-Mo Net Royalty</Text>
+                    <Text style={[S.gridCellValue, { color: C.green }]}>{fmtUsd(ph.total_net_royalty)}</Text>
+                  </View>
+                )}
+                <View style={S.gridCell}>
+                  <Text style={S.gridCellLabel}>Annual Decline Rate</Text>
+                  <Text style={S.gridCellValue}>{(ph.annual_decline_rate * 100).toFixed(0)}%/yr</Text>
+                </View>
+              </View>
+
+              {/* Table header */}
+              <View style={{ flexDirection: "row", backgroundColor: C.lightBg, borderBottomWidth: 1, borderBottomColor: C.border, paddingVertical: 3, paddingHorizontal: 4 }}>
+                <Text style={{ flex: 2, fontSize: 7.5, fontFamily: "Helvetica-Bold", color: C.gray }}>Month</Text>
+                <Text style={{ flex: 1, fontSize: 7.5, fontFamily: "Helvetica-Bold", color: C.gray, textAlign: "right" }}>BOPD</Text>
+                <Text style={{ flex: 1.5, fontSize: 7.5, fontFamily: "Helvetica-Bold", color: C.gray, textAlign: "right" }}>Oil (BBL)</Text>
+                {showRev && <Text style={{ flex: 2, fontSize: 7.5, fontFamily: "Helvetica-Bold", color: C.gray, textAlign: "right" }}>Gross Rev.</Text>}
+                {showRoy && <Text style={{ flex: 2, fontSize: 7.5, fontFamily: "Helvetica-Bold", color: C.gray, textAlign: "right" }}>Net Royalty</Text>}
+              </View>
+
+              {/* Table rows */}
+              {rows.map((row, idx) => (
+                <View key={row.label} style={{ flexDirection: "row", backgroundColor: idx % 2 === 0 ? "#fff" : C.lightBg, paddingVertical: 2.5, paddingHorizontal: 4 }}>
+                  <Text style={{ flex: 2, fontSize: 7.5, color: C.darkGray }}>{row.label}</Text>
+                  <Text style={{ flex: 1, fontSize: 7.5, color: C.darkGray, textAlign: "right" }}>{row.bopd.toFixed(1)}</Text>
+                  <Text style={{ flex: 1.5, fontSize: 7.5, color: C.darkGray, textAlign: "right" }}>{fmtBbl(row.oil_bbl)}</Text>
+                  {showRev && <Text style={{ flex: 2, fontSize: 7.5, color: C.darkGray, textAlign: "right" }}>{fmtUsd(row.gross_revenue)}</Text>}
+                  {showRoy && <Text style={{ flex: 2, fontSize: 7.5, color: C.green, textAlign: "right" }}>{fmtUsd(row.net_royalty)}</Text>}
+                </View>
+              ))}
+              {rows.length < 36 && (
+                <Text style={{ fontSize: 7, color: C.gray, marginTop: 3, fontFamily: "Helvetica-Oblique" }}>
+                  Showing most recent 12 of 36 estimated months. Full history available in the web report.
+                </Text>
+              )}
+              <Text style={[S.footerText, { marginTop: 4, color: C.gray }]}>{ph.note}</Text>
+            </View>
+          );
+        })()}
 
         {/* ════════════════════════════════════════════════════════════════
             DEAL BRIEF
