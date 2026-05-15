@@ -3,17 +3,19 @@
 /**
  * Production Statement — Last 36 Months
  *
- * Reconstructs monthly production history by backcasting from the current
- * estimated rate using the Arps exponential decline model.
+ * Priority:
+ *   1. Real TRRC monthly production data (fetched from /api/wells/production)
+ *   2. Arps exponential backcast from decline-model current rate
+ *   3. Basin estimate backcast (county type-curve BOPD)
  *
- * When no decline model is available, falls back to the nearby-well median
- * BOPD with a conservative 20% annual decline assumption.
- *
- * All figures are estimates — this is not an operator royalty statement.
+ * Only option 1 represents actual reported production. Options 2 & 3 are
+ * mathematical projections and are clearly labelled as estimates.
  */
 
+import { useState, useEffect, useMemo } from "react";
 import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
 import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
+import type { TrrcProductionResult } from "@/lib/wells/trrc-production";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ export type ProductionMonthRow = {
   label: string;
   /** BOPD for that month */
   bopd: number;
-  /** Oil production in BBL (bopd × 30.44) */
+  /** Oil production in BBL */
   oil_bbl: number;
   /** Gross oil revenue ($) */
   gross_revenue: number | null;
@@ -32,159 +34,250 @@ export type ProductionMonthRow = {
 
 export type ProductionHistoryResult = {
   months: ProductionMonthRow[];
-  /** How the current rate was determined */
-  basis: "decline_model" | "basin_estimate" | "insufficient";
-  /** Annual decline rate used (fraction) */
+  basis: "trrc_actual" | "decline_model" | "basin_estimate" | "insufficient";
   annual_decline_rate: number;
-  /** BOPD at the most recent month */
   current_bopd: number;
-  /** Totals over the 36-month window */
   total_oil_bbl: number;
   total_gross_revenue: number | null;
   total_net_royalty: number | null;
   note: string;
 };
 
-// ── Calculation ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-const DEFAULT_OIL_PRICE = 70;
-const DEFAULT_DECLINE_RATE = 0.20; // 20% annual — conservative fallback
+const DEFAULT_OIL_PRICE   = 70;
+const DEFAULT_DECLINE_RATE = 0.20;
 
-function monthLabel(monthsAgo: number): string {
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+function monthLabel(year: number, month: number): string {
+  return new Date(year, month - 1, 1).toLocaleDateString("en-US", {
+    month: "short", year: "numeric",
+  });
+}
+
+function monthLabelAgo(monthsAgo: number): string {
   const d = new Date();
   d.setDate(1);
   d.setMonth(d.getMonth() - monthsAgo);
   return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
-export function buildProductionHistory(args: {
-  declineAnalysis: DeclineCurveResult | null;
-  nearbyWellIntelligence: NearbyWellIntelligence | null;
+// ── Build from real TRRC data ─────────────────────────────────────────────────
+
+export function buildProductionHistoryFromTrrc(args: {
+  trrcData:   TrrcProductionResult;
   royaltyRate: number | null;
-  oilPrice?: number;
+  oilPrice?:   number;
+}): ProductionHistoryResult {
+  const { trrcData, royaltyRate } = args;
+  const oilPrice = args.oilPrice ?? DEFAULT_OIL_PRICE;
+
+  const months: ProductionMonthRow[] = trrcData.rows.map(row => {
+    const days         = daysInMonth(row.year, row.month);
+    const bopd         = row.oil_bbl / days;
+    const gross        = row.oil_bbl * oilPrice;
+    const net_royalty  = royaltyRate != null ? gross * royaltyRate : null;
+    return {
+      label:         monthLabel(row.year, row.month),
+      bopd:          Math.round(bopd * 10) / 10,
+      oil_bbl:       row.oil_bbl,
+      gross_revenue: Math.round(gross),
+      net_royalty:   net_royalty != null ? Math.round(net_royalty) : null,
+    };
+  });
+
+  // Most-recent month's BOPD as "current"
+  const lastRow  = trrcData.rows[trrcData.rows.length - 1];
+  const lastDays = lastRow ? daysInMonth(lastRow.year, lastRow.month) : 30;
+  const currentBopd = lastRow ? lastRow.oil_bbl / lastDays : 0;
+
+  const total_oil_bbl      = months.reduce((s, r) => s + r.oil_bbl, 0);
+  const total_gross_revenue = months.reduce((s, r) => s + (r.gross_revenue ?? 0), 0);
+  const total_net_royalty   = royaltyRate != null
+    ? months.reduce((s, r) => s + (r.net_royalty ?? 0), 0)
+    : null;
+
+  return {
+    months,
+    basis:               "trrc_actual",
+    annual_decline_rate: 0,
+    current_bopd:        Math.round(currentBopd * 10) / 10,
+    total_oil_bbl,
+    total_gross_revenue,
+    total_net_royalty,
+    note: `Actual reported production from Texas Railroad Commission (lease ${trrcData.lease_number}, district ${trrcData.district_code}). Oil price assumed at $${oilPrice}/BBL. Not a royalty statement.`,
+  };
+}
+
+// ── Build from decline model / basin estimate (backcast) ─────────────────────
+
+export function buildProductionHistory(args: {
+  declineAnalysis:        DeclineCurveResult | null;
+  nearbyWellIntelligence: NearbyWellIntelligence | null;
+  royaltyRate:            number | null;
+  oilPrice?:              number;
 }): ProductionHistoryResult | null {
   const { declineAnalysis: dc, nearbyWellIntelligence: nw, royaltyRate } = args;
   const oilPrice = args.oilPrice ?? DEFAULT_OIL_PRICE;
 
-  // Resolve current BOPD and decline rate
   let currentBopd: number | null = null;
   let annualDi: number;
   let basis: ProductionHistoryResult["basis"];
 
   if (dc && dc.basis !== "insufficient_data" && dc.current_rate_bopd != null && dc.current_rate_bopd > 0) {
     currentBopd = dc.current_rate_bopd;
-    annualDi = dc.annual_decline_rate ?? DEFAULT_DECLINE_RATE;
-    basis = "decline_model";
+    annualDi    = dc.annual_decline_rate ?? DEFAULT_DECLINE_RATE;
+    basis       = "decline_model";
   } else if (nw && (nw.median_bopd ?? nw.avg_bopd) != null) {
     currentBopd = (nw.median_bopd ?? nw.avg_bopd)!;
-    annualDi = DEFAULT_DECLINE_RATE;
-    basis = "basin_estimate";
+    annualDi    = DEFAULT_DECLINE_RATE;
+    basis       = "basin_estimate";
   } else {
     return null;
   }
 
   const Di_monthly = annualDi / 12;
-
-  // Build 36 rows (month 36 ago → month 1 ago = most recent complete month)
   const months: ProductionMonthRow[] = [];
-  for (let monthsAgo = 36; monthsAgo >= 1; monthsAgo--) {
-    // Backcast: rate at `monthsAgo` months in the past
-    const bopd = currentBopd * Math.exp(Di_monthly * monthsAgo);
-    const oil_bbl = Math.round(bopd * 30.44);
-    const gross_revenue = oil_bbl * oilPrice;
-    const net_royalty = royaltyRate != null ? gross_revenue * royaltyRate : null;
 
+  for (let monthsAgo = 36; monthsAgo >= 1; monthsAgo--) {
+    const bopd         = currentBopd * Math.exp(Di_monthly * monthsAgo);
+    const oil_bbl      = Math.round(bopd * 30.44);
+    const gross        = oil_bbl * oilPrice;
+    const net_royalty  = royaltyRate != null ? gross * royaltyRate : null;
     months.push({
-      label: monthLabel(monthsAgo),
-      bopd: Math.round(bopd * 10) / 10,
+      label:         monthLabelAgo(monthsAgo),
+      bopd:          Math.round(bopd * 10) / 10,
       oil_bbl,
-      gross_revenue: Math.round(gross_revenue),
-      net_royalty: net_royalty != null ? Math.round(net_royalty) : null,
+      gross_revenue: Math.round(gross),
+      net_royalty:   net_royalty != null ? Math.round(net_royalty) : null,
     });
   }
 
-  const total_oil_bbl = months.reduce((s, r) => s + r.oil_bbl, 0);
+  const total_oil_bbl       = months.reduce((s, r) => s + r.oil_bbl, 0);
   const total_gross_revenue = months[0].gross_revenue != null
-    ? months.reduce((s, r) => s + (r.gross_revenue ?? 0), 0)
-    : null;
-  const total_net_royalty = months[0].net_royalty != null
-    ? months.reduce((s, r) => s + (r.net_royalty ?? 0), 0)
-    : null;
+    ? months.reduce((s, r) => s + (r.gross_revenue ?? 0), 0) : null;
+  const total_net_royalty   = months[0].net_royalty != null
+    ? months.reduce((s, r) => s + (r.net_royalty ?? 0), 0) : null;
 
-  const noteByBasis: Record<ProductionHistoryResult["basis"], string> = {
-    decline_model:
-      "Reconstructed from Arps exponential decline model anchored to nearby well production data. Figures are estimates — not operator statements.",
-    basin_estimate:
-      "Estimated using county basin type-curve BOPD (no specific well production data available). Figures are directional only.",
-    insufficient: "",
+  const noteByBasis: Record<string, string> = {
+    decline_model:  "Reconstructed from Arps exponential decline model anchored to nearby well data. Figures are estimates — not operator statements.",
+    basin_estimate: "Estimated using county basin type-curve BOPD (no specific well production data available). Figures are directional only.",
   };
 
   return {
     months,
     basis,
     annual_decline_rate: annualDi,
-    current_bopd: currentBopd,
+    current_bopd:        currentBopd,
     total_oil_bbl,
     total_gross_revenue,
     total_net_royalty,
-    note: noteByBasis[basis],
+    note: noteByBasis[basis] ?? "",
   };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Formatting ────────────────────────────────────────────────────────────────
 
-function fmtBbl(n: number): string {
-  return n.toLocaleString("en-US");
-}
+function fmtBbl(n: number): string { return n.toLocaleString("en-US"); }
 
 function fmtUsd(n: number | null): string {
   if (n == null) return "—";
   return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
+    style: "currency", currency: "USD", maximumFractionDigits: 0,
   }).format(n);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 type Props = {
-  declineAnalysis: DeclineCurveResult | null;
+  declineAnalysis:        DeclineCurveResult | null;
   nearbyWellIntelligence: NearbyWellIntelligence | null;
-  royaltyRate: number | null;
-  oilPrice?: number;
+  royaltyRate:            number | null;
+  oilPrice?:              number;
 };
 
-export function ProductionHistoryTable({ declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice }: Props) {
-  const history = buildProductionHistory({ declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice });
+const basisMeta = {
+  trrc_actual:    { label: "TRRC Actual",     bg: "#dcfce7", text: "#15803d", border: "#86efac" },
+  decline_model:  { label: "Decline Model",   bg: "#dbeafe", text: "#1e40af", border: "#93c5fd" },
+  basin_estimate: { label: "Basin Estimate",  bg: "#fef9c3", text: "#854d0e", border: "#fde047" },
+  insufficient:   { label: "",                bg: "#f3f4f6", text: "#6b7280", border: "#e5e7eb" },
+};
 
-  if (!history) {
+export function ProductionHistoryTable({
+  declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice,
+}: Props) {
+  const [trrcData,      setTrrcData]      = useState<TrrcProductionResult | null>(null);
+  const [trrcLoading,   setTrrcLoading]   = useState(false);
+  const [trrcAttempted, setTrrcAttempted] = useState(false);
+
+  // Gather real API numbers from nearby wells (skip synthetic ones)
+  const realApiNumbers = useMemo(() => {
+    if (!nearbyWellIntelligence?.wells) return [];
+    return nearbyWellIntelligence.wells
+      .map(w => w.api)
+      .filter(a => a && !a.startsWith("synthetic") && a !== "unknown");
+  }, [nearbyWellIntelligence]);
+
+  // Attempt to fetch real TRRC production once we have API numbers
+  useEffect(() => {
+    if (trrcAttempted || realApiNumbers.length === 0) return;
+    setTrrcAttempted(true);
+    setTrrcLoading(true);
+
+    const params = realApiNumbers.slice(0, 5).join(",");
+    fetch(`/api/wells/production?api=${encodeURIComponent(params)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: TrrcProductionResult | null) => {
+        if (data?.rows?.length) setTrrcData(data);
+      })
+      .catch(() => null)
+      .finally(() => setTrrcLoading(false));
+  }, [realApiNumbers, trrcAttempted]);
+
+  // Resolve which history to display
+  const history: ProductionHistoryResult | null = useMemo(() => {
+    if (trrcData) {
+      return buildProductionHistoryFromTrrc({ trrcData, royaltyRate, oilPrice });
+    }
+    return buildProductionHistory({ declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice });
+  }, [trrcData, declineAnalysis, nearbyWellIntelligence, royaltyRate, oilPrice]);
+
+  // ── empty state ─────────────────────────────────────────────────────────────
+  if (!history && !trrcLoading) {
     return (
       <div className="card" style={{ marginBottom: "1.5rem" }}>
         <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.5rem" }}>
           Production Statement (36 Months)
         </h2>
         <p style={{ fontSize: "0.88rem", color: "#6b7280", margin: 0 }}>
-          Insufficient production data to generate a 36-month history. Submit acreage, royalty rate, and county/state to enable this analysis.
+          Insufficient production data to generate a 36-month history.
         </p>
       </div>
     );
   }
 
-  const showRevenue = history.months[0].gross_revenue != null;
-  const showRoyalty = history.months[0].net_royalty != null;
+  if (trrcLoading && !history) {
+    return (
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        <h2 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+          Production Statement (36 Months)
+        </h2>
+        <p style={{ fontSize: "0.88rem", color: "#6b7280", margin: 0 }}>
+          Fetching TRRC production records…
+        </p>
+      </div>
+    );
+  }
 
-  const basisLabel: Record<ProductionHistoryResult["basis"], string> = {
-    decline_model:  "Decline Model",
-    basin_estimate: "Basin Estimate",
-    insufficient:   "",
-  };
-  const basisColor: Record<ProductionHistoryResult["basis"], { bg: string; text: string; border: string }> = {
-    decline_model:  { bg: "#dbeafe", text: "#1e40af", border: "#93c5fd" },
-    basin_estimate: { bg: "#fef9c3", text: "#854d0e", border: "#fde047" },
-    insufficient:   { bg: "#f3f4f6", text: "#6b7280", border: "#e5e7eb" },
-  };
-  const bs = basisColor[history.basis];
+  if (!history) return null;
+
+  const showRevenue = history.months[0]?.gross_revenue != null;
+  const showRoyalty = history.months[0]?.net_royalty   != null;
+  const bs          = basisMeta[history.basis];
+  const isActual    = history.basis === "trrc_actual";
 
   return (
     <div className="card" style={{ marginBottom: "1.5rem" }}>
@@ -195,49 +288,80 @@ export function ProductionHistoryTable({ declineAnalysis, nearbyWellIntelligence
             Production Statement
           </h2>
           <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: 0 }}>
-            Estimated — last 36 months · {history.months[history.months.length - 1]?.label} → {history.months[0] ? (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toLocaleDateString("en-US", { month: "short", year: "numeric" }); })() : ""}
+            {isActual ? "Actual reported · " : "Estimated · "}last {history.months.length} months
+            {history.months.length > 0 && (
+              <> · {history.months[0].label} → {history.months[history.months.length - 1].label}</>
+            )}
           </p>
         </div>
-        <span style={{
-          fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase",
-          padding: "0.2rem 0.55rem", borderRadius: 6,
-          background: bs.bg, color: bs.text, border: `1px solid ${bs.border}`,
-        }}>
-          {basisLabel[history.basis]}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          {trrcLoading && (
+            <span style={{ fontSize: "0.72rem", color: "#6b7280" }}>checking TRRC…</span>
+          )}
+          <span style={{
+            fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase",
+            padding: "0.2rem 0.55rem", borderRadius: 6,
+            background: bs.bg, color: bs.text, border: `1px solid ${bs.border}`,
+          }}>
+            {isActual ? "✓ " : ""}{bs.label}
+          </span>
+        </div>
       </div>
 
       {/* Summary stats */}
       <div style={{
-        display: "grid",
-        gridTemplateColumns: `repeat(auto-fit, minmax(140px, 1fr))`,
-        gap: "0.6rem",
-        marginBottom: "1rem",
-        padding: "0.75rem",
-        background: "#f8fafc",
-        borderRadius: 8,
-        border: "1px solid #e2e8f0",
+        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+        gap: "0.6rem", marginBottom: "1rem", padding: "0.75rem",
+        background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0",
       }}>
         <div>
-          <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>36-Mo Oil Production</div>
-          <div style={{ fontSize: "1rem", fontWeight: 700, color: "#111827" }}>{fmtBbl(history.total_oil_bbl)} BBL</div>
+          <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>
+            {history.months.length}-Mo Oil Production
+          </div>
+          <div style={{ fontSize: "1rem", fontWeight: 700, color: "#111827" }}>
+            {fmtBbl(history.total_oil_bbl)} BBL
+          </div>
         </div>
         {showRevenue && (
           <div>
-            <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>36-Mo Gross Revenue</div>
-            <div style={{ fontSize: "1rem", fontWeight: 700, color: "#111827" }}>{fmtUsd(history.total_gross_revenue)}</div>
+            <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>
+              Gross Revenue
+            </div>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: "#111827" }}>
+              {fmtUsd(history.total_gross_revenue)}
+            </div>
           </div>
         )}
         {showRoyalty && (
           <div>
-            <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>36-Mo Net Royalty</div>
-            <div style={{ fontSize: "1rem", fontWeight: 700, color: "#15803d" }}>{fmtUsd(history.total_net_royalty)}</div>
+            <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>
+              Net Royalty
+            </div>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: "#15803d" }}>
+              {fmtUsd(history.total_net_royalty)}
+            </div>
           </div>
         )}
-        <div>
-          <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>Annual Decline Rate</div>
-          <div style={{ fontSize: "1rem", fontWeight: 700, color: "#111827" }}>{(history.annual_decline_rate * 100).toFixed(0)}%/yr</div>
-        </div>
+        {!isActual && (
+          <div>
+            <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>
+              Annual Decline
+            </div>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: "#111827" }}>
+              {(history.annual_decline_rate * 100).toFixed(0)}%/yr
+            </div>
+          </div>
+        )}
+        {isActual && (
+          <div>
+            <div style={{ fontSize: "0.72rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.2rem" }}>
+              Latest Rate
+            </div>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: "#111827" }}>
+              {history.current_bopd.toFixed(1)} BOPD
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -245,55 +369,36 @@ export function ProductionHistoryTable({ declineAnalysis, nearbyWellIntelligence
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
           <thead>
             <tr style={{ background: "#f1f5f9", borderBottom: "2px solid #e2e8f0" }}>
-              <th style={{ padding: "0.45rem 0.65rem", textAlign: "left", fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>Month</th>
+              <th style={{ padding: "0.45rem 0.65rem", textAlign: "left",  fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>Month</th>
               <th style={{ padding: "0.45rem 0.65rem", textAlign: "right", fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>BOPD</th>
               <th style={{ padding: "0.45rem 0.65rem", textAlign: "right", fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>Oil (BBL)</th>
-              {showRevenue && (
-                <th style={{ padding: "0.45rem 0.65rem", textAlign: "right", fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>Gross Revenue</th>
-              )}
-              {showRoyalty && (
-                <th style={{ padding: "0.45rem 0.65rem", textAlign: "right", fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>Net Royalty</th>
-              )}
+              {showRevenue && <th style={{ padding: "0.45rem 0.65rem", textAlign: "right", fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>Gross Revenue</th>}
+              {showRoyalty && <th style={{ padding: "0.45rem 0.65rem", textAlign: "right", fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>Net Royalty</th>}
             </tr>
           </thead>
           <tbody>
             {[...history.months].reverse().map((row, idx) => (
-              <tr
-                key={row.label}
-                style={{
-                  borderBottom: "1px solid #f1f5f9",
-                  background: idx % 2 === 0 ? "#fff" : "#fafafa",
-                }}
-              >
+              <tr key={row.label} style={{ borderBottom: "1px solid #f1f5f9", background: idx % 2 === 0 ? "#fff" : "#fafafa" }}>
                 <td style={{ padding: "0.4rem 0.65rem", color: "#374151", fontWeight: 500, whiteSpace: "nowrap" }}>{row.label}</td>
                 <td style={{ padding: "0.4rem 0.65rem", textAlign: "right", color: "#111827" }}>{row.bopd.toFixed(1)}</td>
                 <td style={{ padding: "0.4rem 0.65rem", textAlign: "right", color: "#111827" }}>{fmtBbl(row.oil_bbl)}</td>
-                {showRevenue && (
-                  <td style={{ padding: "0.4rem 0.65rem", textAlign: "right", color: "#374151" }}>{fmtUsd(row.gross_revenue)}</td>
-                )}
-                {showRoyalty && (
-                  <td style={{ padding: "0.4rem 0.65rem", textAlign: "right", color: "#15803d", fontWeight: 500 }}>{fmtUsd(row.net_royalty)}</td>
-                )}
+                {showRevenue && <td style={{ padding: "0.4rem 0.65rem", textAlign: "right", color: "#374151" }}>{fmtUsd(row.gross_revenue)}</td>}
+                {showRoyalty && <td style={{ padding: "0.4rem 0.65rem", textAlign: "right", color: "#15803d", fontWeight: 500 }}>{fmtUsd(row.net_royalty)}</td>}
               </tr>
             ))}
-            {/* Totals row */}
             <tr style={{ borderTop: "2px solid #e2e8f0", background: "#f8fafc", fontWeight: 700 }}>
-              <td style={{ padding: "0.5rem 0.65rem", color: "#111827" }}>36-Month Total</td>
+              <td style={{ padding: "0.5rem 0.65rem", color: "#111827" }}>{history.months.length}-Month Total</td>
               <td style={{ padding: "0.5rem 0.65rem", textAlign: "right", color: "#6b7280" }}>—</td>
               <td style={{ padding: "0.5rem 0.65rem", textAlign: "right", color: "#111827" }}>{fmtBbl(history.total_oil_bbl)}</td>
-              {showRevenue && (
-                <td style={{ padding: "0.5rem 0.65rem", textAlign: "right", color: "#111827" }}>{fmtUsd(history.total_gross_revenue)}</td>
-              )}
-              {showRoyalty && (
-                <td style={{ padding: "0.5rem 0.65rem", textAlign: "right", color: "#15803d" }}>{fmtUsd(history.total_net_royalty)}</td>
-              )}
+              {showRevenue && <td style={{ padding: "0.5rem 0.65rem", textAlign: "right", color: "#111827" }}>{fmtUsd(history.total_gross_revenue)}</td>}
+              {showRoyalty && <td style={{ padding: "0.5rem 0.65rem", textAlign: "right", color: "#15803d" }}>{fmtUsd(history.total_net_royalty)}</td>}
             </tr>
           </tbody>
         </table>
       </div>
 
       <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: "0.75rem 0 0", lineHeight: 1.5 }}>
-        {history.note} Oil price assumed at ${oilPrice ?? DEFAULT_OIL_PRICE}/BBL. Not an operator royalty statement or reserve report.
+        {history.note}{!isActual ? ` Oil price assumed at $${oilPrice ?? DEFAULT_OIL_PRICE}/BBL.` : ""}
       </p>
     </div>
   );
