@@ -38,6 +38,21 @@ import { buildProductionSnapshot } from "@/lib/production/production-snapshot";
 import type { ProductionSnapshot } from "@/lib/production/production-snapshot";
 import { generateDealBrief } from "@/lib/intelligence/deal-brief";
 import type { DealBrief } from "@/lib/intelligence/deal-brief";
+import { geocodeProperty } from "@/lib/location/property-geocode";
+import { geocodeFromCountyCentroid } from "@/lib/location/county-geocode";
+import { lookupWellsByLocation } from "@/lib/wells";
+import { buildNearbyWellIntelligence } from "@/lib/wells/nearby-wells";
+import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
+import { runDeclineCurveAnalysis } from "@/lib/decline/decline-curve";
+import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
+import { computeMineralEconomics } from "@/lib/economics/mineral-economics";
+import type { MineralEconomicsResult } from "@/lib/economics/mineral-economics";
+import { computePaLiability } from "@/lib/risk/pa-liability";
+import type { PaLiabilityResult } from "@/lib/risk/pa-liability";
+import { identifyRiskFlags } from "@/lib/risk/risk-flags";
+import type { RiskFlagsResult } from "@/lib/risk/risk-flags";
+import { normalizeRoyaltyToDecimal } from "@/lib/valuation/normalize";
+import { parseLegalDescription } from "@/lib/location/legal-description-parser";
 
 const LOG_PREFIX = "[process-document]";
 const BUCKET_NAME = "documents";
@@ -319,6 +334,11 @@ export async function POST(
       let preUnderwritingValuation: DealValuationOutput | null = null;
       let productionSnapshot: ProductionSnapshot | null = null;
       let dealBrief: DealBrief | null = null;
+      let nearbyWellIntelligence: NearbyWellIntelligence | null = null;
+      let declineAnalysis: DeclineCurveResult | null = null;
+      let mineralEconomics: MineralEconomicsResult | null = null;
+      let paLiability: PaLiabilityResult | null = null;
+      let riskFlags: RiskFlagsResult | null = null;
       /** Combined PDF + OCR + normalized text from structured extraction (valuation / location fallbacks). */
       let combinedPipelineText: string | null = null;
       /** Raw PDF text layer (same as extraction meta) — passed to valuation when distinct from extractedText. */
@@ -1055,6 +1075,60 @@ export async function POST(
             (dealScoreInput.development_signals as DevelopmentSignalsSnapshot | null) ?? null,
         });
 
+        // ── Full underwriting analysis engines (run before valuation) ─────────
+        // These require county + state which are now resolved from extraction.
+        const resolvedCounty = parsed.county ?? doc.county ?? null;
+        const resolvedState  = parsed.state  ?? doc.state  ?? null;
+        const legalParsedForWells = parseLegalDescription(parsed.legal_description ?? extractedText ?? "");
+        const royaltyDecimalForEcon = normalizeRoyaltyToDecimal(parsed.royalty_rate ?? null);
+        const acreageForEcon = typeof parsed.acreage === "number" ? parsed.acreage : null;
+
+        try {
+          const [geocodeResult, wellLookupResult] = await Promise.all([
+            geocodeProperty({
+              township: legalParsedForWells.plss_township,
+              range:    legalParsedForWells.plss_range,
+              section:  legalParsedForWells.section,
+              state:    resolvedState,
+            }).catch(() => null).then(r => r ?? geocodeFromCountyCentroid(resolvedCounty, resolvedState)),
+            (resolvedCounty && resolvedState)
+              ? lookupWellsByLocation({ county: resolvedCounty, state: resolvedState }).catch(() => ({
+                  source: "unavailable" as const,
+                  wells: [],
+                  query_description: `${resolvedCounty}, ${resolvedState}`,
+                  note: "Well lookup failed.",
+                }))
+              : Promise.resolve({
+                  source: "unavailable" as const,
+                  wells: [],
+                  query_description: "Unknown location",
+                  note: "County and state required for well lookup.",
+                }),
+          ]);
+
+          nearbyWellIntelligence = buildNearbyWellIntelligence({
+            geocode: geocodeResult,
+            wellLookupResult,
+            radiusMiles: 3,
+          });
+
+          declineAnalysis  = runDeclineCurveAnalysis(nearbyWellIntelligence.wells);
+          mineralEconomics = computeMineralEconomics({
+            state:        resolvedState,
+            royalty_rate: royaltyDecimalForEcon,
+            nearby_bopd:  nearbyWellIntelligence.median_bopd ?? nearbyWellIntelligence.avg_bopd,
+            acreage:      acreageForEcon,
+            point_estimate: null,
+          });
+          paLiability = computePaLiability({
+            wells: nearbyWellIntelligence.wells,
+            state: resolvedState,
+          });
+        } catch (analysisErr) {
+          console.warn("[process-document] analysis engines failed (non-fatal):",
+            analysisErr instanceof Error ? analysisErr.message : String(analysisErr));
+        }
+
         console.log("[valuation-call-has-extractedText]", !!String(extractedText ?? "").trim());
         console.log(
           "[valuation-call-has-combinedExtractionText]",
@@ -1091,6 +1165,10 @@ export async function POST(
           extractedText,
           raw_text: rawPdfTextForValuation,
           combinedExtractionText: valuationCombinedPipelineText,
+          nearbyWells:       nearbyWellIntelligence,
+          declineAnalysis,
+          mineralEconomics,
+          paLiability,
         });
         console.log(`${LOG_PREFIX} PRE_UNDERWRITING_VALUATION`, {
           documentId,
@@ -1099,16 +1177,60 @@ export async function POST(
           confidence: preUnderwritingValuation.confidence,
         });
 
+        // Patch implied_cap_rate now that we have the final point_estimate
+        if (mineralEconomics && mineralEconomics.annual_net_royalty != null &&
+            preUnderwritingValuation.point_estimate != null && preUnderwritingValuation.point_estimate > 0) {
+          mineralEconomics.implied_cap_rate = Math.round(
+            (mineralEconomics.annual_net_royalty / preUnderwritingValuation.point_estimate) * 1000
+          ) / 10;
+        }
+
+        // Risk flags — run after valuation (needs activity_level)
+        if (nearbyWellIntelligence) {
+          try {
+            riskFlags = identifyRiskFlags({
+              nearby:   nearbyWellIntelligence,
+              decline:  declineAnalysis,
+              pa:       paLiability,
+              input: {
+                county:                   resolvedCounty,
+                state:                    resolvedState,
+                legal_description:        parsed.legal_description,
+                legal_description_parsed: legalParsedForWells,
+                acreage:                  acreageForEcon,
+                royalty_rate:             royaltyDecimalForEcon,
+              },
+              activity: preUnderwritingValuation.activity_level,
+            });
+          } catch (rfErr) {
+            console.warn("[process-document] risk flags failed (non-fatal):",
+              rfErr instanceof Error ? rfErr.message : String(rfErr));
+          }
+        }
+
+        // Lift nearby-well signals into valuation confidence reasoning
+        if (nearbyWellIntelligence && nearbyWellIntelligence.total_count > 0) {
+          if (preUnderwritingValuation.confidence_reasoning) {
+            if (!preUnderwritingValuation.confidence_reasoning.present_signals)
+              preUnderwritingValuation.confidence_reasoning.present_signals = [];
+            preUnderwritingValuation.confidence_reasoning.present_signals.push(
+              `${nearbyWellIntelligence.total_count} nearby well${nearbyWellIntelligence.total_count !== 1 ? "s" : ""} found` +
+              (nearbyWellIntelligence.median_bopd != null ? ` (median ${nearbyWellIntelligence.median_bopd} BOPD)` : "")
+            );
+          }
+        }
+
         productionSnapshot = buildProductionSnapshot({
-          dealType: preUnderwritingValuation.deal_type,
+          dealType:     preUnderwritingValuation.deal_type,
           activityLevel: preUnderwritingValuation.activity_level,
           bopd: typeof dealScoreInput.bopd === "number" ? dealScoreInput.bopd : null,
           monthly_revenue: financialSummary?.monthly_revenue_estimate_min ?? null,
-          annual_revenue: financialSummary?.annual_revenue_estimate_min ?? null,
-          acreage: typeof parsed.acreage === "number" ? parsed.acreage : null,
+          annual_revenue:  financialSummary?.annual_revenue_estimate_min  ?? null,
+          acreage:      typeof parsed.acreage === "number" ? parsed.acreage : null,
           royalty_rate: typeof dealScoreInput.royalty_rate === "number" ? dealScoreInput.royalty_rate : null,
-          county: parsed.county ?? null,
-          state: parsed.state ?? null,
+          county:       parsed.county ?? null,
+          state:        parsed.state  ?? null,
+          nearbyWells:  nearbyWellIntelligence ?? undefined,
         });
 
         // Generate Deal Brief — AI interpretation layer. Non-blocking; falls back gracefully.
@@ -1191,6 +1313,11 @@ export async function POST(
           pre_underwriting_valuation: preUnderwritingValuation,
           production_snapshot: productionSnapshot,
           deal_brief: dealBrief,
+          nearby_well_intelligence: nearbyWellIntelligence,
+          decline_analysis:         declineAnalysis,
+          mineral_economics:        mineralEconomics,
+          pa_liability:             paLiability,
+          risk_flags:               riskFlags,
         };
 
         console.log(
@@ -1810,8 +1937,14 @@ export async function POST(
               : null,
             county: parsed.county ?? null,
             state: parsed.state ?? null,
+            nearbyWells: nearbyWellIntelligence ?? undefined,
           });
         })(),
+        nearby_well_intelligence: nearbyWellIntelligence,
+        decline_analysis:         declineAnalysis,
+        mineral_economics:        mineralEconomics,
+        pa_liability:             paLiability,
+        risk_flags:               riskFlags,
       };
       const fallbackExtractionResponse: SavedExtraction = {
         id: documentId as string,
@@ -1867,6 +2000,14 @@ export async function POST(
             type: "lead" as const,
             reasons: [],
           } satisfies DealScoreResult),
+        // Full underwriting analysis — same shape as /api/screen response
+        nearby_well_intelligence: nearbyWellIntelligence,
+        decline_analysis:         declineAnalysis,
+        mineral_economics:        mineralEconomics,
+        pa_liability:             paLiability,
+        risk_flags:               riskFlags,
+        valuation:                preUnderwritingValuation,
+        production_snapshot:      productionSnapshot,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

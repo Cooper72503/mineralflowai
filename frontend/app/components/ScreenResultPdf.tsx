@@ -26,7 +26,8 @@ export type ScreenResultPdfData = {
   acreage: number | null;
   royalty_rate?: string | null;
   producing_status?: "yes" | "no" | "unknown";
-  location_context: LocationContext;
+  location_context?: LocationContext | null;
+  legal_description_parsed?: import("@/lib/location/legal-description-parser").LegalDescriptionParseResult | null;
   valuation: DealValuationOutput;
   production_snapshot?: ProductionSnapshot | null;
   deal_brief?: DealBrief | null;
@@ -485,7 +486,7 @@ export function ScreenResultPdfDocument({ data }: { data: ScreenResultPdfData })
             <View style={S.gridCell}>
               <Text style={S.gridCellLabel}>Location</Text>
               <Text style={[S.gridCellValue, { fontSize: 9 }]}>{location}</Text>
-              {loc.approximate_area !== location && (
+              {loc && loc.approximate_area !== location && (
                 <Text style={S.gridCellSub}>{loc.approximate_area}</Text>
               )}
             </View>
@@ -496,7 +497,7 @@ export function ScreenResultPdfDocument({ data }: { data: ScreenResultPdfData })
             </View>
             <View style={S.gridCell}>
               <Text style={S.gridCellLabel}>Activity Signal</Text>
-              <Text style={[S.gridCellValue, { fontSize: 8 }]}>{loc.nearby_activity_signal}</Text>
+              <Text style={[S.gridCellValue, { fontSize: 8 }]}>{loc?.nearby_activity_signal ?? v.activity_level}</Text>
             </View>
             <View style={S.gridCell}>
               <Text style={S.gridCellLabel}>Producing Status</Text>

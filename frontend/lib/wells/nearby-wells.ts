@@ -35,8 +35,10 @@ export type NearbyWell = {
   /** Latest monthly oil in BBL ÷ 30 — approximation of daily rate. */
   latest_bopd: number | null;
   latest_production_month: string | null;
-  lat: number;
-  lng: number;
+  /** null for county-level synthetic wells that have no specific location. */
+  lat: number | null;
+  /** null for county-level synthetic wells that have no specific location. */
+  lng: number | null;
 };
 
 export type NearbyWellIntelligence = {
@@ -280,8 +282,9 @@ export function buildNearbyWellIntelligence(args: {
 
     candidates = inRadius;
   } else {
-    // No geocode — use all county wells, sorted by BOPD descending
-    candidates = wellsWithCoords.map(w => ({ ...w, distance_miles: null }))
+    // No geocode — use ALL county wells (including coord-less synthetic estimates),
+    // sorted by BOPD descending so best data comes first.
+    candidates = allWells.map(w => ({ ...w, distance_miles: null }))
       .sort((a, b) => (b.latest_monthly_oil_bbl ?? 0) - (a.latest_monthly_oil_bbl ?? 0));
   }
 
@@ -297,8 +300,8 @@ export function buildNearbyWellIntelligence(args: {
     first_prod_year: firstProdYear(w),
     latest_bopd: toBopdFromMonthly(w.latest_monthly_oil_bbl),
     latest_production_month: w.latest_production_month,
-    lat: w.lat!,
-    lng: w.lng!,
+    lat: w.lat ?? null,
+    lng: w.lng ?? null,
   }));
 
   // Aggregates

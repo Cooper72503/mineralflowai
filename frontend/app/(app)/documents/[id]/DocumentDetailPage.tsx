@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { useMemo, useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -48,6 +49,21 @@ import { DealStageSelector } from "@/app/components/DealStageSelector";
 import { DealNotesSection } from "@/app/components/DealNotesSection";
 import { WellDataCard } from "@/app/components/WellDataCard";
 import { ParcelMapCard } from "@/app/components/ParcelMapCard";
+import { NearbyWellsCard } from "@/app/components/NearbyWellsCard";
+import { DeclineAnalysisCard } from "@/app/components/DeclineAnalysisCard";
+import { OperatingEconomicsCard } from "@/app/components/OperatingEconomicsCard";
+import { RiskFlagsCard } from "@/app/components/RiskFlagsCard";
+import type { ScreenResultPdfData } from "@/app/components/ScreenResultPdf";
+// PdfDownloadButton uses @react-pdf/renderer which can't run during SSR
+const PdfDownloadButton = dynamic(
+  () => import("@/app/components/PdfDownloadButton").then(m => m.PdfDownloadButton),
+  { ssr: false }
+);
+import type { NearbyWellIntelligence } from "@/lib/wells/nearby-wells";
+import type { DeclineCurveResult } from "@/lib/decline/decline-curve";
+import type { MineralEconomicsResult } from "@/lib/economics/mineral-economics";
+import type { PaLiabilityResult } from "@/lib/risk/pa-liability";
+import type { RiskFlagsResult } from "@/lib/risk/risk-flags";
 
 function readDealBrief(merged: Record<string, unknown>): DealBrief | null {
   const raw = merged.deal_brief;
@@ -77,6 +93,46 @@ function readPreUnderwritingValuation(merged: Record<string, unknown>): DealValu
   const o = raw as Record<string, unknown>;
   if (typeof o.summary !== "string" || typeof o.recommendation !== "string") return null;
   return raw as DealValuationOutput;
+}
+
+function readNearbyWellIntelligence(merged: Record<string, unknown>): NearbyWellIntelligence | null {
+  const raw = merged.nearby_well_intelligence;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.total_count !== "number") return null;
+  return raw as NearbyWellIntelligence;
+}
+
+function readDeclineAnalysis(merged: Record<string, unknown>): DeclineCurveResult | null {
+  const raw = merged.decline_analysis;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.basis !== "string") return null;
+  return raw as DeclineCurveResult;
+}
+
+function readMineralEconomics(merged: Record<string, unknown>): MineralEconomicsResult | null {
+  const raw = merged.mineral_economics;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.basis !== "string") return null;
+  return raw as MineralEconomicsResult;
+}
+
+function readPaLiability(merged: Record<string, unknown>): PaLiabilityResult | null {
+  const raw = merged.pa_liability;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.basis !== "string") return null;
+  return raw as PaLiabilityResult;
+}
+
+function readRiskFlags(merged: Record<string, unknown>): RiskFlagsResult | null {
+  const raw = merged.risk_flags;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.overall_risk !== "string") return null;
+  return raw as RiskFlagsResult;
 }
 
 function formatUsdCompact(n: number): string {
@@ -777,6 +833,31 @@ export default function DocumentDetailPage() {
     [snapshotMerged]
   );
 
+  const nearbyWellIntelligence = useMemo(
+    () => readNearbyWellIntelligence(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
+
+  const declineAnalysis = useMemo(
+    () => readDeclineAnalysis(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
+
+  const mineralEconomics = useMemo(
+    () => readMineralEconomics(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
+
+  const paLiability = useMemo(
+    () => readPaLiability(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
+
+  const riskFlags = useMemo(
+    () => readRiskFlags(snapshotMerged as Record<string, unknown>),
+    [snapshotMerged]
+  );
+
   /** Prefer persisted `development_signals`; otherwise derive from extracted text for display. */
   const resolvedDevelopmentSignals = useMemo((): DevelopmentSignalsSnapshot | null => {
     const fromMerged = readDevelopmentSignals(snapshotMerged as Record<string, unknown>);
@@ -1235,30 +1316,32 @@ export default function DocumentDetailPage() {
           <h1>Document details</h1>
           <p>{doc.file_name ?? "Document"}</p>
         </div>
-        <button
-          type="button"
-          className="no-print"
-          onClick={() => window.print()}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.4rem",
-            padding: "0.45rem 0.9rem",
-            background: "#fff",
-            border: "1px solid #d1d5db",
-            borderRadius: 6,
-            fontSize: "0.85rem",
-            fontWeight: 500,
-            color: "#374151",
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
-        >
-          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-            <path d="M3 4V1h9v3M3 11H1V6h13v5h-2M3 8h9v6H3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-          </svg>
-          Print / Save PDF
-        </button>
+        {isDocProcessed && preUnderwritingValuation ? (
+          <PdfDownloadButton
+            data={(() => {
+              const pdfData: ScreenResultPdfData = {
+                county:                extraction?.county ?? doc.county ?? null,
+                state:                 extraction?.state  ?? doc.state  ?? null,
+                acreage:               typeof (snapshotMerged as Record<string, unknown>).acreage === "number"
+                                         ? (snapshotMerged as Record<string, unknown>).acreage as number
+                                         : null,
+                royalty_rate:          extraction?.royalty_rate ?? null,
+                location_context:      resolvedLocationContext,
+                valuation:             preUnderwritingValuation,
+                production_snapshot:   productionSnapshot ?? undefined,
+                producing_status:      "unknown",
+                deal_brief:            dealBrief ?? undefined,
+                nearby_well_intelligence: nearbyWellIntelligence ?? undefined,
+                decline_analysis:      declineAnalysis ?? undefined,
+                mineral_economics:     mineralEconomics ?? undefined,
+                risk_flags:            riskFlags ?? undefined,
+                pa_liability:          paLiability ?? undefined,
+              };
+              return pdfData;
+            })()}
+            fileName={`underwriting-report-${doc.file_name?.replace(/\.[^.]+$/, "") ?? id}.pdf`}
+          />
+        ) : null}
       </div>
 
       {(doc.status === "processing" || doc.status === "queued" || processing) && (
@@ -1321,7 +1404,23 @@ export default function DocumentDetailPage() {
 
       {productionSnapshot ? <ProductionSnapshotCard snap={productionSnapshot} /> : null}
 
-      {doc && (
+      {nearbyWellIntelligence ? (
+        <NearbyWellsCard data={nearbyWellIntelligence} />
+      ) : null}
+
+      {declineAnalysis ? (
+        <DeclineAnalysisCard data={declineAnalysis} />
+      ) : null}
+
+      {mineralEconomics ? (
+        <OperatingEconomicsCard data={mineralEconomics} />
+      ) : null}
+
+      {riskFlags ? (
+        <RiskFlagsCard data={riskFlags} />
+      ) : null}
+
+      {doc && !nearbyWellIntelligence && (
         <WellDataCard
           county={extraction?.county ?? doc.county ?? null}
           state={extraction?.state ?? doc.state ?? null}
