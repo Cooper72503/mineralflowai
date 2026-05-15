@@ -6,7 +6,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
-import { estimateMonthlyOilFromCumulative } from "./bopd-estimate";
+
 
 // Layer 0 = active oil/gas well spots
 const OCC_WELLS_URL =
@@ -53,7 +53,7 @@ function featureToWell(f: OccFeature): WellSummary {
     status:    statusStr,
     formation: safeStr(a.FORMATION ?? a.PRODUCING_FORMATION ?? a.FORM_NAME ?? a.POOL ?? a.POOL_NAME),
     spud_date: spudDateStr,
-    latest_monthly_oil_bbl:   estimateMonthlyOilFromCumulative(cumOil, spudDateStr, statusStr),
+    latest_monthly_oil_bbl:   null,  // Monthly production not available from this state GIS layer
     latest_monthly_gas_mcf:   null,
     latest_monthly_water_bbl: null,
     latest_production_month:  spudDateStr ? spudDateStr.slice(0, 7) : null,

@@ -4,17 +4,15 @@
  * Primary source: TRRC public ArcGIS REST service
  * https://publicgisweb.rrc.texas.gov/arcgis/rest/services/
  *
- * The TRRC GIS well-spots layer provides locations, operator, status, and API
- * numbers but does NOT reliably include production volumes (CUM_OIL is often
- * null). To ensure Decline Curve Analysis and Operating Economics sections are
- * never empty, this module applies a Texas basin type-curve fallback:
- *   • Active wells that receive no CUM_OIL from the API get a county-keyed
- *     median BOPD estimate derived from published play type curves.
- *   • The estimate is tagged "estimated" so the UI can show appropriate labels.
+ * Returns only data that comes directly from the TRRC GIS API:
+ * well locations, API numbers, operator, status, spud date, cumulative oil.
+ *
+ * Monthly production (BOPD) is NOT derived here. Actual monthly production
+ * is fetched separately by the TRRC PDQ scraper (lib/wells/trrc-production.ts)
+ * and applied by the Production Statement component after page load.
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
-import { estimateMonthlyOilFromCumulative, isActiveStatus } from "./bopd-estimate";
 
 const TRRC_WELLS_URL =
   "https://publicgisweb.rrc.texas.gov/arcgis/rest/services/RRC_WellSpots/MapServer/0/query";
@@ -288,36 +286,6 @@ function parseDateStr(v: unknown): string | null {
   return s.slice(0, 10);
 }
 
-/**
- * Returns a county-keyed basin type-curve BOPD estimate for Texas.
- * Used as a last-resort fallback when the TRRC API returns no production data.
- * Returns null for unknown counties so callers stay honest about data provenance.
- */
-function getTexasBasinBopd(countyKey: string): number | null {
-  return TX_BASIN_BOPD[countyKey] ?? null;
-}
-
-/**
- * Applies a basin BOPD estimate to any active well missing production data.
- * Mutates wells in-place — call after building the well list from API features.
- */
-function injectBasinBopdFallback(wells: WellSummary[], countyKey: string): void {
-  const basinBopd = getTexasBasinBopd(countyKey);
-  if (basinBopd == null) return;
-
-  for (const w of wells) {
-    if (w.latest_monthly_oil_bbl != null) continue;  // already has data
-    if (!isActiveStatus(w.status) && w.status != null) continue;  // don't inject for P&A wells
-
-    // Convert BOPD → monthly BBL (BOPD × 30.44)
-    w.latest_monthly_oil_bbl = Math.round(basinBopd * 30.44);
-    // Tag as estimated so UI can show appropriate labels
-    if (!w.latest_production_month) {
-      w.latest_production_month = "estimated";
-    }
-  }
-}
-
 function featureToWell(f: TrrcFeature): WellSummary {
   const a = f.attributes;
   const apinum = safeStr(a.API_NO ?? a.APINUM ?? a.API10 ?? a.API) ?? "unknown";
@@ -325,18 +293,19 @@ function featureToWell(f: TrrcFeature): WellSummary {
   const statusStr = safeStr(a.WELL_STATUS_CD ?? a.STATUS ?? a.WELL_STATUS ?? a.WELLSTATUS);
   const cumOil = safeNum(a.CUM_OIL ?? a.CUM_OIL_BBL);
   return {
-    api: apinum,
+    api:       apinum,
     well_name: safeStr(a.WELL_NAME ?? a.WELLNAME ?? a.LEASE_NAME ?? a.LEASENAME) ?? `Well ${apinum}`,
     operator:  safeStr(a.OPERATOR_NAME ?? a.OPERATOR ?? a.OPER_NAME ?? a.LEASE_OPERATOR),
-    county: null,
-    state: "Texas",
-    status: statusStr,
+    county:    null,
+    state:     "Texas",
+    status:    statusStr,
     formation: safeStr(a.FORMATION ?? a.FIELD_NAME ?? a.FIELDNAME ?? a.PROD_FORM),
     spud_date: spudDateStr,
-    latest_monthly_oil_bbl: estimateMonthlyOilFromCumulative(cumOil, spudDateStr, statusStr),
-    latest_monthly_gas_mcf: null,
+    // Monthly production intentionally null — fetched separately via TRRC PDQ
+    latest_monthly_oil_bbl:   null,
+    latest_monthly_gas_mcf:   null,
     latest_monthly_water_bbl: null,
-    latest_production_month: spudDateStr ? spudDateStr.slice(0, 7) : null,
+    latest_production_month:  null,
     cum_oil_bbl: cumOil,
     lat: f.geometry?.y ?? null,
     lng: f.geometry?.x ?? null,
@@ -349,18 +318,18 @@ function featureToWellFallback(f: TrrcFeature): WellSummary {
   const statusStr = safeStr(a.STATUS ?? a.WELLSTATUS ?? a.WELL_STATUS);
   const spudDateStr = parseDateStr(a.SPUD_DT ?? a.SPUD_DATE ?? a.SPUDDATE);
   return {
-    api: apinum,
+    api:       apinum,
     well_name: safeStr(a.WELL_NAME ?? a.WELLNAME ?? a.LEASENAME) ?? `Well ${apinum}`,
-    operator: safeStr(a.OPERATOR ?? a.OPER_NAME ?? a.OPERATOR_NAME),
-    county: null,
-    state: "Texas",
-    status: statusStr,
+    operator:  safeStr(a.OPERATOR ?? a.OPER_NAME ?? a.OPERATOR_NAME),
+    county:    null,
+    state:     "Texas",
+    status:    statusStr,
     formation: null,
     spud_date: spudDateStr,
-    latest_monthly_oil_bbl: null,    // will be filled by injectBasinBopdFallback
-    latest_monthly_gas_mcf: null,
+    latest_monthly_oil_bbl:   null,
+    latest_monthly_gas_mcf:   null,
     latest_monthly_water_bbl: null,
-    latest_production_month: null,
+    latest_production_month:  null,
     cum_oil_bbl: null,
     lat: f.geometry?.y ?? null,
     lng: f.geometry?.x ?? null,
@@ -368,50 +337,21 @@ function featureToWellFallback(f: TrrcFeature): WellSummary {
 }
 
 export async function lookupTrrcWells(county: string): Promise<WellLookupResult> {
-  const countyKey = normalizeCounty(county);
+  const countyKey  = normalizeCounty(county);
   const countyCode = TX_COUNTY_CODES[countyKey];
-  const desc = `${county} County, TX`;
+  const desc       = `${county} County, TX`;
 
   if (!countyCode) {
-    // County not in API lookup table — still synthesize a single basin estimate
-    // so analysis engines have something to anchor to.
-    const basinBopd = getTexasBasinBopd(countyKey);
-    if (basinBopd != null) {
-      return {
-        source: "trrc",
-        wells: [
-          {
-            api: "synthetic-1",
-            well_name: `${county} County (basin estimate)`,
-            operator: null,
-            county,
-            state: "Texas",
-            status: "Active",
-            formation: null,
-            spud_date: null,
-            latest_monthly_oil_bbl: Math.round(basinBopd * 30.44),
-            latest_monthly_gas_mcf: null,
-            latest_monthly_water_bbl: null,
-            latest_production_month: "estimated",
-            cum_oil_bbl: null,
-            lat: null,
-            lng: null,
-          },
-        ],
-        query_description: desc,
-        note: `Texas county "${county}" not in TRRC API lookup table. Production estimated from basin type curves.`,
-      };
-    }
     return {
-      source: "trrc",
+      source: "unavailable",
       wells: [],
       query_description: desc,
-      note: `Texas county "${county}" not found in lookup table. Well data available for major producing counties.`,
+      note: `Texas county "${county}" not found in TRRC county code table. No well data available.`,
     };
   }
 
   // TRRC stores API numbers as "42-XXX-XXXXX-XX-XX" (dashed) in the GIS layer.
-  // Cover both dashed and un-dashed formats, plus a county-code field fallback.
+  // Cover both dashed and un-dashed formats, plus county-code fields.
   const apiPrefix     = `42${countyCode}`;
   const apiPrefixDash = `42-${countyCode}-`;
 
@@ -424,21 +364,19 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
       `COUNTY_NO = '${countyCode}'`,
       `COUNTY_CODE = '${countyCode}'`,
     ].join(" OR "),
-    outFields:          "*",
-    returnGeometry:     "true",
-    outSR:              "4326",
-    resultRecordCount:  "50",
-    f:                  "json",
+    outFields:         "*",
+    returnGeometry:    "true",
+    outSR:             "4326",
+    resultRecordCount: "50",
+    f:                 "json",
   });
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
+  const timer = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    const url = `${TRRC_WELLS_URL}?${params.toString()}`;
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(`${TRRC_WELLS_URL}?${params.toString()}`, { signal: controller.signal });
     clearTimeout(timer);
-
     if (!res.ok) throw new Error(`TRRC HTTP ${res.status}`);
 
     const json = await res.json() as {
@@ -446,60 +384,25 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
       exceededTransferLimit?: boolean;
       error?: { message: string };
     };
-
     if (json.error) throw new Error(json.error.message);
 
-    const features: TrrcFeature[] = json.features ?? [];
-    const wells = features.map(featureToWell);
-    const exceeded = json.exceededTransferLimit === true;
-
-    // Inject basin type-curve BOPD for active wells that came back without production data
-    injectBasinBopdFallback(wells, countyKey);
-
-    // If the API returned 0 wells, fall back to a county-level synthetic estimate
-    // so decline analysis and operating economics are never empty.
-    if (wells.length === 0) {
-      const basinBopd = getTexasBasinBopd(countyKey);
-      if (basinBopd != null) {
-        wells.push({
-          api: "synthetic-1",
-          well_name: `${county} County (basin estimate)`,
-          operator: null,
-          county,
-          state: "Texas",
-          status: "Active",
-          formation: null,
-          spud_date: null,
-          latest_monthly_oil_bbl: Math.round(basinBopd * 30.44),
-          latest_monthly_gas_mcf: null,
-          latest_monthly_water_bbl: null,
-          latest_production_month: "estimated",
-          cum_oil_bbl: null,
-          lat: null,
-          lng: null,
-        });
-      }
-    }
-
-    const bopdCount = wells.filter(w => w.latest_monthly_oil_bbl != null).length;
-    const noteBase = exceeded ? "Showing first 25 of many wells in this county." : undefined;
-    const bopdNote = bopdCount > 0 && wells.some(w => w.latest_production_month === "estimated")
-      ? "Production volumes estimated from Texas basin type curves where TRRC API data unavailable."
-      : undefined;
-    const note = [noteBase, bopdNote].filter(Boolean).join(" ") || undefined;
+    const wells = (json.features ?? []).map(featureToWell);
 
     return {
-      source: "trrc",
+      source:            "trrc",
       wells,
       query_description: desc,
-      note,
+      note: json.exceededTransferLimit
+        ? "Showing first 50 of many wells in this county."
+        : wells.length === 0
+          ? "No wells found via TRRC GIS for this county. Actual monthly production available via TRRC PDQ."
+          : "Well locations and status from Texas RRC GIS. Monthly production fetched separately via TRRC PDQ.",
     };
   } catch (primaryErr) {
     clearTimeout(timer);
-    const primaryMsg = primaryErr instanceof Error ? primaryErr.message : "Unknown error";
-    console.warn("[trrc-api] primary lookup failed, trying fallback:", primaryMsg);
+    console.warn("[trrc-api] primary lookup failed, trying fallback:", primaryErr);
 
-    // Fallback: legacy hctx.net endpoint (location + status only)
+    // Fallback: legacy hctx.net endpoint (location + status only, no production)
     const fallbackParams = new URLSearchParams({
       where: [
         `APINUM LIKE '${apiPrefixDash}%'`,
@@ -507,87 +410,39 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
         `API_NO LIKE '${apiPrefixDash}%'`,
         `API_NO LIKE '${apiPrefix}%'`,
       ].join(" OR "),
-      outFields:          "APINUM,API10,RELIAB,WELLID,CWELLNUM,STATUS,WELLSTATUS,SPUD_DT,WELL_NAME,WELLNAME,OPERATOR,OPER_NAME",
-      returnGeometry:     "true",
-      outSR:              "4326",
-      resultRecordCount:  "50",
-      f:                  "json",
+      outFields:         "APINUM,API10,STATUS,WELLSTATUS,SPUD_DT,WELL_NAME,WELLNAME,OPERATOR,OPER_NAME",
+      returnGeometry:    "true",
+      outSR:             "4326",
+      resultRecordCount: "50",
+      f:                 "json",
     });
 
     const fbController = new AbortController();
-    const fbTimer = setTimeout(() => fbController.abort(), 10000);
+    const fbTimer = setTimeout(() => fbController.abort(), 10_000);
 
     try {
-      const fbUrl = `${TRRC_FALLBACK_URL}?${fallbackParams.toString()}`;
-      const fbRes = await fetch(fbUrl, { signal: fbController.signal });
+      const fbRes = await fetch(`${TRRC_FALLBACK_URL}?${fallbackParams.toString()}`, { signal: fbController.signal });
       clearTimeout(fbTimer);
-
       if (!fbRes.ok) throw new Error(`TRRC fallback HTTP ${fbRes.status}`);
 
-      const fbJson = await fbRes.json() as {
-        features?: TrrcFeature[];
-        exceededTransferLimit?: boolean;
-        error?: { message: string };
-      };
-
+      const fbJson = await fbRes.json() as { features?: TrrcFeature[]; error?: { message: string } };
       if (fbJson.error) throw new Error(fbJson.error.message);
 
-      const fbFeatures: TrrcFeature[] = fbJson.features ?? [];
-      const fbWells = fbFeatures.map(featureToWellFallback);
-
-      // Always inject basin BOPD — fallback endpoint never has production volumes
-      injectBasinBopdFallback(fbWells, countyKey);
-
-      const hasBasin = getTexasBasinBopd(countyKey) != null;
+      const wells = (fbJson.features ?? []).map(featureToWellFallback);
       return {
-        source: "trrc",
-        wells: fbWells,
+        source:            "trrc",
+        wells,
         query_description: desc,
-        note: hasBasin
-          ? "Texas RRC public GIS — production volumes estimated from Texas basin type curves."
-          : "Texas RRC public GIS — well locations only (production data unavailable for this county).",
+        note: "Well locations from Texas RRC GIS (fallback endpoint). Monthly production fetched separately via TRRC PDQ.",
       };
     } catch (fallbackErr) {
       clearTimeout(fbTimer);
-      const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : "Unknown error";
-      console.warn("[trrc-api] fallback lookup also failed:", fallbackMsg);
-
-      // Both endpoints failed — return synthetic wells using only the county basin estimate
-      // so Decline Analysis and Operating Economics still have something to anchor to.
-      const basinBopd = getTexasBasinBopd(countyKey);
-      if (basinBopd != null) {
-        const syntheticWells: WellSummary[] = [
-          {
-            api: "synthetic-1",
-            well_name: `${county} County (basin estimate)`,
-            operator: null,
-            county,
-            state: "Texas",
-            status: "Active",
-            formation: null,
-            spud_date: null,
-            latest_monthly_oil_bbl: Math.round(basinBopd * 30.44),
-            latest_monthly_gas_mcf: null,
-            latest_monthly_water_bbl: null,
-            latest_production_month: "estimated",
-            cum_oil_bbl: null,
-            lat: null,
-            lng: null,
-          },
-        ];
-        return {
-          source: "trrc",
-          wells: syntheticWells,
-          query_description: desc,
-          note: `Texas RRC API temporarily unavailable. Values estimated from ${county} County basin type curves.`,
-        };
-      }
-
+      console.warn("[trrc-api] fallback lookup also failed:", fallbackErr);
       return {
-        source: "unavailable",
-        wells: [],
+        source:            "unavailable",
+        wells:             [],
         query_description: desc,
-        note: `Texas RRC data temporarily unavailable: ${primaryMsg}`,
+        note:              `Texas RRC data temporarily unavailable. Please try again.`,
       };
     }
   }

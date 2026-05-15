@@ -6,7 +6,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
-import { estimateMonthlyOilFromCumulative } from "./bopd-estimate";
+
 
 const ODNR_WELLS_URL =
   "https://gis.ohiodnr.gov/arcgis/rest/services/OIT_Services/ODNR_Oil_Gas/MapServer/0/query";
@@ -65,7 +65,7 @@ function featureToWell(f: OdnrFeature): WellSummary {
       a.FORMATION ?? a.PRODUCING_FORMATION ?? a.POOL ?? a.FORM_NAME ?? a.PROD_FORM
     ),
     spud_date: spudDateStr,
-    latest_monthly_oil_bbl:   estimateMonthlyOilFromCumulative(cumOil, spudDateStr, statusStr),
+    latest_monthly_oil_bbl:   null,  // Monthly production not available from this state GIS layer
     latest_monthly_gas_mcf:   null,
     latest_monthly_water_bbl: null,
     latest_production_month:  spudDateStr ? spudDateStr.slice(0, 7) : null,
