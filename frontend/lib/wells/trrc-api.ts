@@ -1,25 +1,21 @@
 /**
  * Texas Railroad Commission (TRRC) well data client.
  *
- * Primary source: TRRC public ArcGIS REST service
- * https://publicgisweb.rrc.texas.gov/arcgis/rest/services/
+ * Primary source: TRRC PDQ (Electronic Well Application) wellbore query
+ * https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do
  *
- * Returns only data that comes directly from the TRRC GIS API:
- * well locations, API numbers, operator, status, spud date, cumulative oil.
+ * The legacy publicgisweb.rrc.texas.gov ArcGIS endpoint was decommissioned
+ * as part of RRC's GIS Modernization Upgrades. The PDQ wellbore query
+ * is the official TRRC public data source for well records.
  *
- * Monthly production (BOPD) is NOT derived here. Actual monthly production
- * is fetched separately by the TRRC PDQ scraper (lib/wells/trrc-production.ts)
- * and applied by the Production Statement component after page load.
+ * Returns: API numbers, operator names, county — all real TRRC data.
+ * Monthly production is fetched separately via TRRC PDQ CSV export
+ * (lib/wells/trrc-production.ts).
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
 
-const TRRC_WELLS_URL =
-  "https://publicgisweb.rrc.texas.gov/arcgis/rest/services/RRC_WellSpots/MapServer/0/query";
-
-// Fallback: legacy hctx.net endpoint (location-only)
-const TRRC_FALLBACK_URL =
-  "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Wells/MapServer/2/query";
+const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
 // Texas county name → 3-digit code embedded in API numbers (42-XXX-...).
 // These are Texas FIPS county codes. All 254 Texas counties use odd codes 001–507.
@@ -205,81 +201,69 @@ function normalizeCounty(county: string): string {
   return COUNTY_ALIASES[lower] ?? lower.replace(/\s+/g, "_");
 }
 
-type TrrcFeature = {
-  attributes: Record<string, unknown>;
-  geometry?: { x: number; y: number } | null;
-};
-
-function safeStr(v: unknown): string | null {
-  if (v == null || v === "") return null;
-  return String(v).trim() || null;
+/** Unescape basic HTML entities in operator names from PDQ HTML. */
+function unescapeHtml(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
 }
 
-function safeNum(v: unknown): number | null {
-  if (v == null) return null;
-  const n = Number(v);
-  return isNaN(n) ? null : n;
-}
+/**
+ * Parse the PDQ wellbore query HTML result page into WellSummary objects.
+ *
+ * Each row contains:
+ *   • apiNo=XXXXXXXX&distCode=XX&leaseNo=XXXXXX  (in the lease detail href)
+ *   • Operator name in the link titled "Operator # XXXXXX"
+ *
+ * API numbers from PDQ are 8 digits (county 3 + well 5); we prepend "42"
+ * to produce the standard 10-digit TRRC API number.
+ */
+function parsePdqCountyWells(
+  html: string,
+  countyName: string,
+  maxWells = 30,
+): WellSummary[] {
+  // Each well has exactly one occurrence of apiNo=...&distCode=...&leaseNo=...
+  const apiMatches = Array.from(
+    html.matchAll(/apiNo=(\d+)&distCode=(\w+)&leaseNo=(\d+)/g),
+  );
+  // Operator links appear in the same order as the API rows
+  const opMatches = Array.from(
+    html.matchAll(/title="Operator # \d+">(.*?)<\/a>/g),
+  );
 
-function parseDateStr(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  if (!s || s === "0") return null;
-  const asNum = Number(s);
-  if (!isNaN(asNum) && asNum > 0) {
-    return new Date(asNum).toISOString().slice(0, 10);
+  const count = Math.min(apiMatches.length, opMatches.length, maxWells);
+  const wells: WellSummary[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const apiNo8 = apiMatches[i][1];            // 8-digit county+well
+    const operator = unescapeHtml(opMatches[i][1]);
+
+    wells.push({
+      api:      `42${apiNo8}`,                  // 10-digit TRRC API
+      well_name: `Well ${apiNo8}`,
+      operator,
+      county:   countyName,
+      state:    "Texas",
+      status:   "PRODUCING",
+      formation: null,
+      spud_date: null,
+      // Monthly production fetched separately via TRRC PDQ CSV export
+      latest_monthly_oil_bbl:   null,
+      latest_monthly_gas_mcf:   null,
+      latest_monthly_water_bbl: null,
+      latest_production_month:  null,
+      cum_oil_bbl: null,
+      lat: null,
+      lng: null,
+    });
   }
-  return s.slice(0, 10);
-}
 
-function featureToWell(f: TrrcFeature): WellSummary {
-  const a = f.attributes;
-  const apinum = safeStr(a.API_NO ?? a.APINUM ?? a.API10 ?? a.API) ?? "unknown";
-  const spudDateStr = parseDateStr(a.SPUD_DT ?? a.SPUD_DATE ?? a.SPUDDATE);
-  const statusStr = safeStr(a.WELL_STATUS_CD ?? a.STATUS ?? a.WELL_STATUS ?? a.WELLSTATUS);
-  const cumOil = safeNum(a.CUM_OIL ?? a.CUM_OIL_BBL);
-  return {
-    api:       apinum,
-    well_name: safeStr(a.WELL_NAME ?? a.WELLNAME ?? a.LEASE_NAME ?? a.LEASENAME) ?? `Well ${apinum}`,
-    operator:  safeStr(a.OPERATOR_NAME ?? a.OPERATOR ?? a.OPER_NAME ?? a.LEASE_OPERATOR),
-    county:    null,
-    state:     "Texas",
-    status:    statusStr,
-    formation: safeStr(a.FORMATION ?? a.FIELD_NAME ?? a.FIELDNAME ?? a.PROD_FORM),
-    spud_date: spudDateStr,
-    // Monthly production intentionally null — fetched separately via TRRC PDQ
-    latest_monthly_oil_bbl:   null,
-    latest_monthly_gas_mcf:   null,
-    latest_monthly_water_bbl: null,
-    latest_production_month:  null,
-    cum_oil_bbl: cumOil,
-    lat: f.geometry?.y ?? null,
-    lng: f.geometry?.x ?? null,
-  };
-}
-
-function featureToWellFallback(f: TrrcFeature): WellSummary {
-  const a = f.attributes;
-  const apinum = safeStr(a.APINUM ?? a.API10 ?? a.API) ?? "unknown";
-  const statusStr = safeStr(a.STATUS ?? a.WELLSTATUS ?? a.WELL_STATUS);
-  const spudDateStr = parseDateStr(a.SPUD_DT ?? a.SPUD_DATE ?? a.SPUDDATE);
-  return {
-    api:       apinum,
-    well_name: safeStr(a.WELL_NAME ?? a.WELLNAME ?? a.LEASENAME) ?? `Well ${apinum}`,
-    operator:  safeStr(a.OPERATOR ?? a.OPER_NAME ?? a.OPERATOR_NAME),
-    county:    null,
-    state:     "Texas",
-    status:    statusStr,
-    formation: null,
-    spud_date: spudDateStr,
-    latest_monthly_oil_bbl:   null,
-    latest_monthly_gas_mcf:   null,
-    latest_monthly_water_bbl: null,
-    latest_production_month:  null,
-    cum_oil_bbl: null,
-    lat: f.geometry?.y ?? null,
-    lng: f.geometry?.x ?? null,
-  };
+  return wells;
 }
 
 export async function lookupTrrcWells(county: string): Promise<WellLookupResult> {
@@ -290,106 +274,58 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
   if (!countyCode) {
     return {
       source: "unavailable",
-      wells: [],
+      wells:  [],
       query_description: desc,
-      note: `Texas county "${county}" not found in TRRC county code table. No well data available.`,
+      note: `Texas county "${county}" not found in county code table.`,
     };
   }
 
-  // TRRC stores API numbers as "42-XXX-XXXXX-XX-XX" (dashed) in the GIS layer.
-  // Cover both dashed and un-dashed formats, plus county-code fields.
-  const apiPrefix     = `42${countyCode}`;
-  const apiPrefixDash = `42-${countyCode}-`;
-
-  const params = new URLSearchParams({
-    where: [
-      `API_NO LIKE '${apiPrefixDash}%'`,
-      `API_NO LIKE '${apiPrefix}%'`,
-      `APINUM LIKE '${apiPrefixDash}%'`,
-      `APINUM LIKE '${apiPrefix}%'`,
-      `COUNTY_NO = '${countyCode}'`,
-      `COUNTY_CODE = '${countyCode}'`,
-    ].join(" OR "),
-    outFields:         "*",
-    returnGeometry:    "true",
-    outSR:             "4326",
-    resultRecordCount: "50",
-    f:                 "json",
-  });
-
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
+  const timer = setTimeout(() => controller.abort(), 15_000);
 
   try {
-    const res = await fetch(`${TRRC_WELLS_URL}?${params.toString()}`, { signal: controller.signal });
+    const body = new URLSearchParams({
+      methodToCall:                   "search",
+      "searchArgs.leaseTypeArg":      "",
+      "searchArgs.countyCodeArg":     countyCode,
+      "searchArgs.districtCodeArg":   "None Selected",
+      "searchArgs.wellTypeArg":       "PR",   // PRODUCING wells
+      "searchArgs.fieldNumbersArg":   "",
+      "searchArgs.operatorNumbersArg":"",
+      "searchArgs.apiNoSuffixArg":    "",
+      "searchArgs.leaseNumberArg":    "",
+    });
+
+    const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body:    body.toString(),
+      signal:  controller.signal,
+    });
     clearTimeout(timer);
-    if (!res.ok) throw new Error(`TRRC HTTP ${res.status}`);
 
-    const json = await res.json() as {
-      features?: TrrcFeature[];
-      exceededTransferLimit?: boolean;
-      error?: { message: string };
-    };
-    if (json.error) throw new Error(json.error.message);
+    if (!res.ok) throw new Error(`TRRC PDQ HTTP ${res.status}`);
+    const html = await res.text();
 
-    const wells = (json.features ?? []).map(featureToWell);
+    const wells = parsePdqCountyWells(html, county);
 
     return {
       source:            "trrc",
       wells,
       query_description: desc,
-      note: json.exceededTransferLimit
-        ? "Showing first 50 of many wells in this county."
-        : wells.length === 0
-          ? "No wells found via TRRC GIS for this county. Actual monthly production available via TRRC PDQ."
-          : "Well locations and status from Texas RRC GIS. Monthly production fetched separately via TRRC PDQ.",
+      note: wells.length === 0
+        ? "No producing wells found in this county via TRRC PDQ."
+        : `${wells.length} producing wells from Texas Railroad Commission PDQ. Monthly production fetched separately.`,
     };
-  } catch (primaryErr) {
+  } catch (err) {
     clearTimeout(timer);
-    console.warn("[trrc-api] primary lookup failed, trying fallback:", primaryErr);
-
-    // Fallback: legacy hctx.net endpoint (location + status only, no production)
-    const fallbackParams = new URLSearchParams({
-      where: [
-        `APINUM LIKE '${apiPrefixDash}%'`,
-        `APINUM LIKE '${apiPrefix}%'`,
-        `API_NO LIKE '${apiPrefixDash}%'`,
-        `API_NO LIKE '${apiPrefix}%'`,
-      ].join(" OR "),
-      outFields:         "APINUM,API10,STATUS,WELLSTATUS,SPUD_DT,WELL_NAME,WELLNAME,OPERATOR,OPER_NAME",
-      returnGeometry:    "true",
-      outSR:             "4326",
-      resultRecordCount: "50",
-      f:                 "json",
-    });
-
-    const fbController = new AbortController();
-    const fbTimer = setTimeout(() => fbController.abort(), 10_000);
-
-    try {
-      const fbRes = await fetch(`${TRRC_FALLBACK_URL}?${fallbackParams.toString()}`, { signal: fbController.signal });
-      clearTimeout(fbTimer);
-      if (!fbRes.ok) throw new Error(`TRRC fallback HTTP ${fbRes.status}`);
-
-      const fbJson = await fbRes.json() as { features?: TrrcFeature[]; error?: { message: string } };
-      if (fbJson.error) throw new Error(fbJson.error.message);
-
-      const wells = (fbJson.features ?? []).map(featureToWellFallback);
-      return {
-        source:            "trrc",
-        wells,
-        query_description: desc,
-        note: "Well locations from Texas RRC GIS (fallback endpoint). Monthly production fetched separately via TRRC PDQ.",
-      };
-    } catch (fallbackErr) {
-      clearTimeout(fbTimer);
-      console.warn("[trrc-api] fallback lookup also failed:", fallbackErr);
-      return {
-        source:            "unavailable",
-        wells:             [],
-        query_description: desc,
-        note:              `Texas RRC data temporarily unavailable. Please try again.`,
-      };
-    }
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.warn("[trrc-api] PDQ county lookup failed:", msg);
+    return {
+      source:            "unavailable",
+      wells:             [],
+      query_description: desc,
+      note:              `Texas RRC data temporarily unavailable: ${msg}`,
+    };
   }
 }
