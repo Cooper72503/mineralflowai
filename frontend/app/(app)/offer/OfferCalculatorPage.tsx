@@ -9,6 +9,214 @@ import {
 
 const EM_DASH = "—";
 
+// ── Payout Range Slider ────────────────────────────────────────────────────────
+
+const PAYOUT_YEARS = [1, 2, 3, 4, 5] as const;
+
+function PayoutRangeSection({ result }: { result: OfferCalculatorResult }) {
+  const [payoutMin, setPayoutMin] = useState(1);
+  const [payoutMax, setPayoutMax] = useState(5);
+  const [oilPrice, setOilPrice] = useState(70);
+
+  const annualAt = (price: number) =>
+    result.bopd_mid * 365 * price * result.royalty_rate;
+
+  const annual = annualAt(oilPrice);
+  const offerLow  = annual * payoutMin;
+  const offerHigh = annual * payoutMax;
+  const nmaLow    = result.nma > 0 ? offerLow  / result.nma : 0;
+  const nmaHigh   = result.nma > 0 ? offerHigh / result.nma : 0;
+
+  // Payout table: rows = oil prices $55–$95, columns = 1–5yr
+  const TABLE_PRICES = [55, 60, 65, 70, 75, 80, 85, 90, 95];
+
+  return (
+    <div className="card" style={{ maxWidth: 680 }}>
+      <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+        Payout Range Filter
+      </h2>
+
+      {/* Controls row */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
+        {/* Min payout */}
+        <div>
+          <label style={{ display: "block", fontSize: "0.78rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.3rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Min Payout (yr)
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="range" min={1} max={5} step={1}
+              value={payoutMin}
+              onChange={e => {
+                const v = Number(e.target.value);
+                setPayoutMin(v);
+                if (v > payoutMax) setPayoutMax(v);
+              }}
+              style={{ flex: 1, accentColor: "#2563eb" }}
+            />
+            <span style={{ fontSize: "0.9rem", fontWeight: 700, color: "#1e40af", minWidth: 28, textAlign: "right" }}>{payoutMin}yr</span>
+          </div>
+        </div>
+
+        {/* Max payout */}
+        <div>
+          <label style={{ display: "block", fontSize: "0.78rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.3rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Max Payout (yr)
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="range" min={1} max={5} step={1}
+              value={payoutMax}
+              onChange={e => {
+                const v = Number(e.target.value);
+                setPayoutMax(v);
+                if (v < payoutMin) setPayoutMin(v);
+              }}
+              style={{ flex: 1, accentColor: "#2563eb" }}
+            />
+            <span style={{ fontSize: "0.9rem", fontWeight: 700, color: "#1e40af", minWidth: 28, textAlign: "right" }}>{payoutMax}yr</span>
+          </div>
+        </div>
+
+        {/* Oil price */}
+        <div>
+          <label style={{ display: "block", fontSize: "0.78rem", color: "#6b7280", fontWeight: 600, marginBottom: "0.3rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Oil Price ($/bbl)
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="range" min={40} max={120} step={5}
+              value={oilPrice}
+              onChange={e => setOilPrice(Number(e.target.value))}
+              style={{ flex: 1, accentColor: oilPrice === 70 ? "#16a34a" : "#2563eb" }}
+            />
+            <span style={{
+              fontSize: "0.9rem", fontWeight: 700, minWidth: 38, textAlign: "right",
+              color: oilPrice === 70 ? "#15803d" : "#1e40af",
+            }}>
+              ${oilPrice}
+              {oilPrice === 70 ? <span style={{ fontSize: "0.65rem", marginLeft: 2, opacity: 0.75 }}>★</span> : null}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Live offer target */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+        gap: "0.75rem",
+        padding: "0.75rem 1rem",
+        background: "#f0f9ff",
+        borderRadius: 8,
+        border: "1px solid #bae6fd",
+        marginBottom: "1rem",
+      }}>
+        <div>
+          <div style={{ fontSize: "0.72rem", color: "#0369a1", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "0.2rem" }}>
+            Target Offer Range
+          </div>
+          <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0c4a6e" }}>
+            {payoutMin === payoutMax
+              ? fmt(offerLow)
+              : `${fmt(offerLow)} – ${fmt(offerHigh)}`}
+          </div>
+          <div style={{ fontSize: "0.72rem", color: "#0369a1", marginTop: "0.15rem" }}>
+            {payoutMin === payoutMax
+              ? `${payoutMin}-yr payout @ $${oilPrice}/bbl`
+              : `${payoutMin}–${payoutMax}-yr payout @ $${oilPrice}/bbl`}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: "0.72rem", color: "#0369a1", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "0.2rem" }}>
+            $/NMA
+          </div>
+          <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0c4a6e" }}>
+            {payoutMin === payoutMax
+              ? fmt(nmaLow)
+              : `${fmt(nmaLow)} – ${fmt(nmaHigh)}`}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: "0.72rem", color: "#0369a1", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "0.2rem" }}>
+            Annual Royalty
+          </div>
+          <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0c4a6e" }}>{fmt(annual)}</div>
+          <div style={{ fontSize: "0.72rem", color: "#0369a1", marginTop: "0.15rem" }}>@ ${oilPrice}/bbl</div>
+        </div>
+      </div>
+
+      {/* 1–5yr payout table */}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: "0.82rem", width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={{ padding: "0.4rem 0.6rem", textAlign: "left", color: "#6b7280", fontWeight: 500, borderBottom: "1px solid #e5e7eb" }}>
+                $/bbl ↓ · Payout →
+              </th>
+              {PAYOUT_YEARS.map(yr => {
+                const inRange = yr >= payoutMin && yr <= payoutMax;
+                return (
+                  <th key={yr} style={{
+                    padding: "0.4rem 0.6rem",
+                    textAlign: "right",
+                    fontWeight: inRange ? 700 : 400,
+                    color: inRange ? "#1e40af" : "#6b7280",
+                    borderBottom: "1px solid #e5e7eb",
+                    background: inRange ? "#eff6ff" : "transparent",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {yr}yr
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {TABLE_PRICES.map(price => {
+              const isMedian = price === 70;
+              const rowAnnual = annualAt(price);
+              return (
+                <tr key={price} style={{ background: isMedian ? "#fafafa" : "transparent" }}>
+                  <td style={{
+                    padding: "0.4rem 0.6rem",
+                    fontWeight: isMedian ? 700 : 400,
+                    color: isMedian ? "#111827" : "#374151",
+                    borderBottom: "1px solid #f3f4f6",
+                    whiteSpace: "nowrap",
+                  }}>
+                    ${price}/bbl{isMedian ? " ★" : ""}
+                  </td>
+                  {PAYOUT_YEARS.map(yr => {
+                    const inRange = yr >= payoutMin && yr <= payoutMax;
+                    const isHighlight = inRange && isMedian;
+                    return (
+                      <td key={yr} style={{
+                        padding: "0.4rem 0.6rem",
+                        textAlign: "right",
+                        fontWeight: isHighlight ? 700 : inRange ? 600 : 400,
+                        color: isHighlight ? "#1e3a8a" : inRange ? "#1e40af" : "#374151",
+                        background: isHighlight ? "#dbeafe" : inRange ? "#eff6ff" : "transparent",
+                        borderBottom: "1px solid #f3f4f6",
+                        whiteSpace: "nowrap",
+                      }}>
+                        {fmtK(rowAnnual * yr)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: "0.5rem 0 0", lineHeight: 1.4 }}>
+          ★ = $70/bbl median · Blue columns = selected payout range · Payout = offer ÷ annual royalty
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function fmt(n: number, digits = 0): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -144,6 +352,9 @@ function ResultView({ result }: { result: OfferCalculatorResult }) {
           </div>
         </div>
       </div>
+
+      {/* Payout range filter */}
+      <PayoutRangeSection result={result} />
 
       {/* Sensitivity table */}
       <div className="card" style={{ maxWidth: 680 }}>
