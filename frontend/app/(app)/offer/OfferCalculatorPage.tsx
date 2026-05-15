@@ -398,8 +398,8 @@ export default function OfferCalculatorPage() {
     }
 
     const rr = parseRoyaltyRate(royalty);
-    if (rr == null || rr <= 0 || rr > 0.5) {
-      setError("Enter a valid royalty rate (e.g. 3/16, 18.75%, or 0.1875).");
+    if (rr == null || rr <= 0 || rr > 1) {
+      setError("Enter a valid royalty rate (e.g. 3/16, 18.75%, 0.1875, or 80%).");
       return;
     }
 
