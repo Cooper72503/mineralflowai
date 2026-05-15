@@ -187,60 +187,6 @@ const TX_COUNTY_CODES: Record<string, string> = {
   williamson: "491",
 };
 
-/**
- * Texas basin type-curve BOPD estimates (monthly barrel/day medians).
- * Sources: EIA Drilling Productivity Reports, TRRC production summaries.
- * These are conservative median values across all well vintages; new wells
- * will out-produce this, older wells less — but the median is the right anchor
- * for a county-level screening estimate.
- *
- * Key: normalised county name (same as TX_COUNTY_CODES keys)
- * Value: estimated current BOPD for an "average active well" in that county
- */
-const TX_BASIN_BOPD: Record<string, number> = {
-  // ── Permian Basin (Midland + Delaware sub-basins) ──────────────────────────
-  midland: 42, ector: 38, martin: 45, howard: 35, glasscock: 48,
-  reagan: 40, upton: 38, crane: 32, ward: 35, reeves: 44,
-  loving: 55, winkler: 30, yoakum: 28, gaines: 30, dawson: 22,
-  andrews: 35, borden: 25, scurry: 18, mitchell: 15, nolan: 12,
-  crockett: 28, sutton: 22, pecos: 32, terrell: 18, presidio: 8,
-  irion: 30, sterling: 20, tom_green: 14, schleicher: 20,
-  // ── Eagle Ford (South Texas) ───────────────────────────────────────────────
-  karnes: 32, dewitt: 28, dimmit: 30, webb: 22, la_salle: 28,
-  lasalle: 28, frio: 24, mcmullen: 26, maverick: 18, zavala: 16,
-  atascosa: 22, bee: 18, live_oak: 20, liveoak: 20, wilson: 20,
-  medina: 16, gonzales: 25, lavaca: 18, victoria: 14, refugio: 12,
-  // ── Permian extension / Midland Basin fringe ──────────────────────────────
-  fisher: 10, runnels: 10, callahan: 8, jones: 8, taylor: 8,
-  shackelford: 8, stephens: 12, palo_pinto: 10, eastland: 10,
-  erath: 8, comanche: 6, brown: 8, kimble: 6, menard: 5,
-  mason: 5, mccullock: 7, san_patricio: 10,
-  // ── Barnett Shale (North Texas — predominantly gas, low oil) ──────────────
-  tarrant: 3, denton: 3, johnson: 4, hood: 4, parker: 4,
-  jack: 6, wise: 5, montague: 6, cooke: 5, dallas: 2,
-  somervell: 4, bosque: 4, young: 8,
-  // ── East Texas / Haynesville / Cotton Valley ──────────────────────────────
-  rusk: 10, gregg: 10, panola: 8, harrison: 8, shelby: 6,
-  nacogdoches: 6, smith: 8, upshur: 7, wood: 8, henderson: 6,
-  cherokee: 6, san_augustine: 5, sabine: 4, angelina: 5,
-  houston: 5, jasper: 5, cass: 6, camp: 5, marion: 5,
-  // ── Gulf Coast ────────────────────────────────────────────────────────────
-  harris: 14, brazoria: 16, galveston: 12, liberty: 10,
-  montgomery: 10, fort_bend: 12, chambers: 10, jefferson: 10,
-  orange: 6, hardin: 8, jackson: 12, matagorda: 14, wharton: 12,
-  aransas: 8,
-  // ── Texas Panhandle / Anadarko extension ──────────────────────────────────
-  hutchinson: 8, gray: 8, potter: 5, hemphill: 8, roberts: 8,
-  wheeler: 8, lipscomb: 7, ochiltree: 7, oldham: 5, carson: 7,
-  randall: 4, collingsworth: 5, moore: 6,
-  // ── Central Texas / Austin Chalk / Wilcox ─────────────────────────────────
-  burleson: 10, grimes: 8, robertson: 10, milam: 8, falls: 6,
-  lee: 8, bastrop: 6, caldwell: 8,
-  colorado: 10, fayette: 8,
-  washington: 8, waller: 8, travis: 4, hays: 4, williamson: 4,
-  blanco: 4, burnet: 5, leon: 8, madison: 6,
-};
-
 // Multi-word county aliases → normalized key
 const COUNTY_ALIASES: Record<string, string> = {
   "tom green": "tom_green",
