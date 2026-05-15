@@ -410,15 +410,24 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     };
   }
 
-  // API numbers are stored as "42XXX..." — filter by prefix
-  const apiPrefix = `42${countyCode}`;
+  // TRRC stores API numbers as "42-XXX-XXXXX-XX-XX" (dashed) in the GIS layer.
+  // Cover both dashed and un-dashed formats, plus a county-code field fallback.
+  const apiPrefix     = `42${countyCode}`;
+  const apiPrefixDash = `42-${countyCode}-`;
 
   const params = new URLSearchParams({
-    where:              `API_NO LIKE '${apiPrefix}%' OR APINUM LIKE '${apiPrefix}%'`,
+    where: [
+      `API_NO LIKE '${apiPrefixDash}%'`,
+      `API_NO LIKE '${apiPrefix}%'`,
+      `APINUM LIKE '${apiPrefixDash}%'`,
+      `APINUM LIKE '${apiPrefix}%'`,
+      `COUNTY_NO = '${countyCode}'`,
+      `COUNTY_CODE = '${countyCode}'`,
+    ].join(" OR "),
     outFields:          "*",
     returnGeometry:     "true",
-    outSR:              "4326",   // request WGS84 so geometry comes back as lat/lng
-    resultRecordCount:  "25",
+    outSR:              "4326",
+    resultRecordCount:  "50",
     f:                  "json",
   });
 
@@ -492,11 +501,16 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
 
     // Fallback: legacy hctx.net endpoint (location + status only)
     const fallbackParams = new URLSearchParams({
-      where:              `APINUM LIKE '${apiPrefix}%'`,
+      where: [
+        `APINUM LIKE '${apiPrefixDash}%'`,
+        `APINUM LIKE '${apiPrefix}%'`,
+        `API_NO LIKE '${apiPrefixDash}%'`,
+        `API_NO LIKE '${apiPrefix}%'`,
+      ].join(" OR "),
       outFields:          "APINUM,API10,RELIAB,WELLID,CWELLNUM,STATUS,WELLSTATUS,SPUD_DT,WELL_NAME,WELLNAME,OPERATOR,OPER_NAME",
       returnGeometry:     "true",
       outSR:              "4326",
-      resultRecordCount:  "25",
+      resultRecordCount:  "50",
       f:                  "json",
     });
 
