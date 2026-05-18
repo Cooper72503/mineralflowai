@@ -6,6 +6,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
+import { fetchWvdepProductionHistory } from "./wvdep-production";
 
 
 // Layer 0 = oil and gas wells
@@ -67,6 +68,41 @@ function normalizeCounty(county: string): string {
   return county.toLowerCase().replace(/\s+county\s*$/i, "").trim();
 }
 
+/**
+ * Enrich up to `maxEnrich` WV wells in-place with real monthly production
+ * from the WV DEP per-well HTML page.
+ */
+async function enrichWvWellsWithProduction(
+  wells: WellSummary[],
+  maxEnrich = 8,
+): Promise<void> {
+  const toEnrich = wells.filter(w => w.api && w.api !== "unknown").slice(0, maxEnrich);
+
+  const tasks = toEnrich.map(well =>
+    fetchWvdepProductionHistory(well.api, 12)
+      .then(result => {
+        if (!result || result.rows.length === 0) return;
+        // Find the most recent row with non-zero oil or gas
+        const rows = [...result.rows].reverse();
+        const latestOil = rows.find(r => r.oil_bbl > 0);
+        const latestGas = rows.find(r => (r.gas_mcf ?? 0) > 0);
+        const latest    = latestOil ?? latestGas;
+        if (!latest) return;
+
+        const monthStr = `${latest.year}-${String(latest.month).padStart(2, "0")}`;
+        well.latest_production_month  = monthStr;
+        well.latest_monthly_oil_bbl   = latestOil ? latestOil.oil_bbl  : 0;
+        well.latest_monthly_gas_mcf   = latestGas ? (latestGas.gas_mcf ?? null) : null;
+      })
+      .catch(() => { /* silently skip failures */ }),
+  );
+
+  await Promise.race([
+    Promise.allSettled(tasks),
+    new Promise<void>(resolve => setTimeout(resolve, 20_000)),
+  ]);
+}
+
 export async function lookupWvdepWells(county: string): Promise<WellLookupResult> {
   const countyKey = normalizeCounty(county);
   const countyUpper = countyKey.toUpperCase();
@@ -98,11 +134,22 @@ export async function lookupWvdepWells(county: string): Promise<WellLookupResult
     const features: WvdepFeature[] = json.features ?? [];
     const wells = features.map(featureToWell);
 
+    // Enrich up to 8 wells with real per-well monthly production from WV DEP
+    if (wells.length > 0) {
+      await enrichWvWellsWithProduction(wells, 8);
+    }
+
+    const withProduction = wells.filter(w => w.latest_monthly_oil_bbl != null).length;
+
     return {
       source: "wvdep",
       wells,
       query_description: desc,
-      note: wells.length === 0 ? "No wells found in this county via WV DEP public records." : undefined,
+      note: wells.length === 0
+        ? "No wells found in this county via WV DEP public records."
+        : withProduction > 0
+          ? `${wells.length} wells from WV DEP. ${withProduction} with real monthly production data.`
+          : undefined,
     };
   } catch (err) {
     clearTimeout(timer);

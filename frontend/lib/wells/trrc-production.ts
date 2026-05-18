@@ -425,7 +425,8 @@ export async function fetchTrrcLatestByLease(
     const endYear    = now.getFullYear();
     const endMonth   = now.getMonth() + 1;
     const startDate  = new Date(now);
-    startDate.setMonth(startDate.getMonth() - 6);
+    // 12-month window: TRRC data can lag 3–5 months; 6 months was too narrow
+    startDate.setMonth(startDate.getMonth() - 12);
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
@@ -433,14 +434,14 @@ export async function fetchTrrcLatestByLease(
     let rows = await fetchAllLeaseProduction(
       distCode, leaseNo, sessionCookie,
       startMonth, startYear, endMonth, endYear,
-      "O", 1, controller.signal,
+      "O", 2, controller.signal,
     );
 
     if (rows.length === 0) {
       rows = await fetchAllLeaseProduction(
         distCode, leaseNo, sessionCookie,
         startMonth, startYear, endMonth, endYear,
-        "G", 1, controller.signal,
+        "G", 2, controller.signal,
       );
     }
 
