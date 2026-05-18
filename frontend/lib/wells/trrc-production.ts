@@ -252,7 +252,8 @@ async function fetchLeaseProductionNextPage(
   const html = await res.text();
 
   const rows = parseTrrcHtmlRows(html, oilOrGas);
-  const nextMatch = html.match(/href="(\/EWA\/specificLeaseQueryAction\.do\?pager\.offset=\d+[^"]+)"\s*>\s*\[Next/i);
+  // Same regex as fetchLeaseProductionPage — URL format: /EWA/...?pager.pageSize=10&pager.offset=N&...
+  const nextMatch = html.match(/href="(\/EWA\/[^"]*pager\.[^"]*pager\.offset=\d+[^"]*)"\s*>\s*\[Next/i);
   return { rows, nextPagePath: nextMatch ? nextMatch[1] : null };
 }
 
