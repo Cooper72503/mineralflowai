@@ -310,6 +310,7 @@ async function getLeaseFromApiNumber(
   const body = new URLSearchParams({
     "searchArgs.apiNoPrefixArg": countyCode,
     "searchArgs.apiNoSuffixArg": wellNo,
+    "searchArgs.wellTypeArg":    "PR",   // Return production lease, not drill/completion lease
     "methodToCall":              "search",
   });
 
