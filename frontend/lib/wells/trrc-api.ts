@@ -284,19 +284,53 @@ async function enrichWithProduction(
   wells:   WellSummary[],
   maxEnrich = 5,
 ): Promise<void> {
-  const limit = Math.min(entries.length, wells.length, maxEnrich);
-  const tasks = entries.slice(0, limit).map((entry, i) =>
+  // TRRC stores production at the LEASE level, not the individual wellbore level.
+  // Multiple API numbers may share the same leaseNo — fetching the same lease
+  // multiple times triple-counts identical production data, inflating BOPD.
+  // Solution: fetch each unique lease once, then apply the result to every
+  // wellbore that belongs to that lease.
+
+  // Step 1: identify unique leases to enrich (respecting the maxEnrich budget)
+  const seenLeases = new Set<string>();
+  const uniqueEntries: Array<{ entry: PdqWellEntry; indices: number[] }> = [];
+
+  for (let i = 0; i < entries.length && i < wells.length; i++) {
+    const key = `${entries[i].distCode}:${entries[i].leaseNo}`;
+    if (seenLeases.has(key)) {
+      // This lease is already queued — find the queued group and add this index
+      const group = uniqueEntries.find(g => `${g.entry.distCode}:${g.entry.leaseNo}` === key);
+      if (group) group.indices.push(i);
+    } else {
+      seenLeases.add(key);
+      uniqueEntries.push({ entry: entries[i], indices: [i] });
+      if (uniqueEntries.length >= maxEnrich) break;
+    }
+  }
+
+  // Step 2: fetch production for each unique lease in parallel
+  const tasks = uniqueEntries.map(({ entry, indices }) =>
     fetchTrrcLatestByLease(entry.distCode, entry.leaseNo)
       .then(result => {
         if (result && result.oil_bbl > 0) {
-          wells[i].latest_monthly_oil_bbl  = result.oil_bbl;
-          wells[i].latest_production_month = result.month;
+          // Apply the lease production to the first wellbore only.
+          // Multi-wellbore leases report aggregate production — attributing the
+          // full lease total to every wellbore would overcount royalty income.
+          const primaryIdx = indices[0];
+          wells[primaryIdx].latest_monthly_oil_bbl  = result.oil_bbl;
+          wells[primaryIdx].latest_production_month = result.month;
+          // Mark sibling wellbores from the same lease with a zero-value sentinel
+          // so they don't appear as "no data" (they're part of the lease) but also
+          // don't contribute duplicate production to aggregate calculations.
+          for (let k = 1; k < indices.length; k++) {
+            wells[indices[k]].latest_production_month = result.month;
+            // latest_monthly_oil_bbl stays null on sibling wellbores
+          }
         }
       })
       .catch(() => { /* silently skip failures */ }),
   );
 
-  // Give production fetches up to 20 s (gas fallback adds a second CSV request per well)
+  // Give production fetches up to 20 s
   await Promise.race([
     Promise.allSettled(tasks),
     new Promise<void>(resolve => setTimeout(resolve, 20_000)),
@@ -347,9 +381,11 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     const entries = parsePdqCountyEntries(html);
     const wells   = entries.map(e => entryToWell(e, county));
 
-    // Enrich top wells with real monthly production (parallel CSV fetches, 12 s budget)
+    // Enrich up to 10 unique leases with real monthly production.
+    // maxEnrich=10 gives enough headroom for multi-wellbore leases to dedup
+    // and still land 5+ distinct lease data points.
     if (entries.length > 0) {
-      await enrichWithProduction(entries, wells);
+      await enrichWithProduction(entries, wells, 10);
     }
 
     const withProduction = wells.filter(w => w.latest_monthly_oil_bbl != null).length;
