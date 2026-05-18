@@ -352,9 +352,13 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  const timer = setTimeout(() => controller.abort(), 20_000);
 
   try {
+    // Request 100 results per page — TRRC defaults to 10, which gives a tiny
+    // non-representative sample for active counties (Fisher has 542 producers).
+    // Page size 100 keeps the HTML small enough to parse quickly while capturing
+    // a meaningful county-level cross-section in a single request.
     const body = new URLSearchParams({
       methodToCall:                   "search",
       "searchArgs.leaseTypeArg":      "",
@@ -365,6 +369,7 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
       "searchArgs.operatorNumbersArg":"",
       "searchArgs.apiNoSuffixArg":    "",
       "searchArgs.leaseNumberArg":    "",
+      "pager.pageSize":               "100",
     });
 
     const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
@@ -378,14 +383,15 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     if (!res.ok) throw new Error(`TRRC PDQ HTTP ${res.status}`);
     const html = await res.text();
 
-    const entries = parsePdqCountyEntries(html);
+    // Parse up to 100 entries; maxWells cap is a safety valve
+    const entries = parsePdqCountyEntries(html, 100);
     const wells   = entries.map(e => entryToWell(e, county));
 
-    // Enrich up to 10 unique leases with real monthly production.
-    // maxEnrich=10 gives enough headroom for multi-wellbore leases to dedup
-    // and still land 5+ distinct lease data points.
+    // Enrich up to 15 unique leases with real monthly production.
+    // With 100 wellbores in the sample pool, 15 leases gives better county
+    // coverage while staying within the 20-second enrichment timeout.
     if (entries.length > 0) {
-      await enrichWithProduction(entries, wells, 10);
+      await enrichWithProduction(entries, wells, 15);
     }
 
     const withProduction = wells.filter(w => w.latest_monthly_oil_bbl != null).length;
