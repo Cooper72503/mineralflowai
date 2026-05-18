@@ -14,6 +14,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
+import { fetchTrrcLatestByLease } from "./trrc-production";
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
@@ -212,8 +213,16 @@ function unescapeHtml(s: string): string {
     .trim();
 }
 
+type PdqWellEntry = {
+  api10:     string;   // full 10-digit TRRC API (42 + 8-digit)
+  apiNo8:    string;   // 8-digit county+well from PDQ
+  distCode:  string;
+  leaseNo:   string;
+  operator:  string;
+};
+
 /**
- * Parse the PDQ wellbore query HTML result page into WellSummary objects.
+ * Parse the PDQ wellbore query HTML result page.
  *
  * Each row contains:
  *   • apiNo=XXXXXXXX&distCode=XX&leaseNo=XXXXXX  (in the lease detail href)
@@ -222,48 +231,76 @@ function unescapeHtml(s: string): string {
  * API numbers from PDQ are 8 digits (county 3 + well 5); we prepend "42"
  * to produce the standard 10-digit TRRC API number.
  */
-function parsePdqCountyWells(
-  html: string,
-  countyName: string,
-  maxWells = 30,
-): WellSummary[] {
-  // Each well has exactly one occurrence of apiNo=...&distCode=...&leaseNo=...
+function parsePdqCountyEntries(html: string, maxWells = 30): PdqWellEntry[] {
   const apiMatches = Array.from(
     html.matchAll(/apiNo=(\d+)&distCode=(\w+)&leaseNo=(\d+)/g),
   );
-  // Operator links appear in the same order as the API rows
   const opMatches = Array.from(
     html.matchAll(/title="Operator # \d+">(.*?)<\/a>/g),
   );
 
   const count = Math.min(apiMatches.length, opMatches.length, maxWells);
-  const wells: WellSummary[] = [];
+  const entries: PdqWellEntry[] = [];
 
   for (let i = 0; i < count; i++) {
-    const apiNo8 = apiMatches[i][1];            // 8-digit county+well
-    const operator = unescapeHtml(opMatches[i][1]);
-
-    wells.push({
-      api:      `42${apiNo8}`,                  // 10-digit TRRC API
-      well_name: `Well ${apiNo8}`,
-      operator,
-      county:   countyName,
-      state:    "Texas",
-      status:   "PRODUCING",
-      formation: null,
-      spud_date: null,
-      // Monthly production fetched separately via TRRC PDQ CSV export
-      latest_monthly_oil_bbl:   null,
-      latest_monthly_gas_mcf:   null,
-      latest_monthly_water_bbl: null,
-      latest_production_month:  null,
-      cum_oil_bbl: null,
-      lat: null,
-      lng: null,
+    entries.push({
+      api10:    `42${apiMatches[i][1]}`,
+      apiNo8:   apiMatches[i][1],
+      distCode: apiMatches[i][2],
+      leaseNo:  apiMatches[i][3],
+      operator: unescapeHtml(opMatches[i][1]),
     });
   }
+  return entries;
+}
 
-  return wells;
+function entryToWell(entry: PdqWellEntry, countyName: string): WellSummary {
+  return {
+    api:       entry.api10,
+    well_name: `Well ${entry.apiNo8}`,
+    operator:  entry.operator,
+    county:    countyName,
+    state:     "Texas",
+    status:    "PRODUCING",
+    formation: null,
+    spud_date: null,
+    latest_monthly_oil_bbl:   null,
+    latest_monthly_gas_mcf:   null,
+    latest_monthly_water_bbl: null,
+    latest_production_month:  null,
+    cum_oil_bbl: null,
+    lat: null,
+    lng: null,
+  };
+}
+
+/**
+ * Enrich up to `maxEnrich` wells in-place with real TRRC monthly production.
+ * Uses only the CSV step (distCode + leaseNo already known) — no wellbore query needed.
+ * Runs requests in parallel, bounded by an overall timeout.
+ */
+async function enrichWithProduction(
+  entries: PdqWellEntry[],
+  wells:   WellSummary[],
+  maxEnrich = 5,
+): Promise<void> {
+  const limit = Math.min(entries.length, wells.length, maxEnrich);
+  const tasks = entries.slice(0, limit).map((entry, i) =>
+    fetchTrrcLatestByLease(entry.distCode, entry.leaseNo)
+      .then(result => {
+        if (result && result.oil_bbl > 0) {
+          wells[i].latest_monthly_oil_bbl  = result.oil_bbl;
+          wells[i].latest_production_month = result.month;
+        }
+      })
+      .catch(() => { /* silently skip failures */ }),
+  );
+
+  // Give production fetches up to 12 s; any that don't finish stay null
+  await Promise.race([
+    Promise.allSettled(tasks),
+    new Promise<void>(resolve => setTimeout(resolve, 12_000)),
+  ]);
 }
 
 export async function lookupTrrcWells(county: string): Promise<WellLookupResult> {
@@ -307,7 +344,15 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     if (!res.ok) throw new Error(`TRRC PDQ HTTP ${res.status}`);
     const html = await res.text();
 
-    const wells = parsePdqCountyWells(html, county);
+    const entries = parsePdqCountyEntries(html);
+    const wells   = entries.map(e => entryToWell(e, county));
+
+    // Enrich top wells with real monthly production (parallel CSV fetches, 12 s budget)
+    if (entries.length > 0) {
+      await enrichWithProduction(entries, wells);
+    }
+
+    const withProduction = wells.filter(w => w.latest_monthly_oil_bbl != null).length;
 
     return {
       source:            "trrc",
@@ -315,7 +360,7 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
       query_description: desc,
       note: wells.length === 0
         ? "No producing wells found in this county via TRRC PDQ."
-        : `${wells.length} producing wells from Texas Railroad Commission PDQ. Monthly production fetched separately.`,
+        : `${wells.length} producing wells from Texas Railroad Commission PDQ. ${withProduction > 0 ? `${withProduction} with real monthly production data.` : "Monthly production data unavailable."}`,
     };
   } catch (err) {
     clearTimeout(timer);

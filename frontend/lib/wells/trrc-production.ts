@@ -224,6 +224,32 @@ export async function fetchTrrcProductionHistory(
 }
 
 /**
+ * Fetch the most recent month of production for a known lease (distCode + leaseNo).
+ * Skips the wellbore-query step — use this when you already have the lease identifiers
+ * (e.g. from a PDQ county wellbore search result).
+ *
+ * Returns null if the lease has no production data or the request fails.
+ */
+export async function fetchTrrcLatestByLease(
+  distCode: string,
+  leaseNo:  string,
+): Promise<{ oil_bbl: number; month: string } | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const rows = await getLeaseProductionCsv(distCode, leaseNo, 3, controller.signal);
+    if (rows.length === 0) return null;
+    const latest = rows[rows.length - 1]; // rows are sorted ascending
+    const month  = `${latest.year}-${String(latest.month).padStart(2, "0")}`;
+    return { oil_bbl: latest.oil_bbl, month };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Try each API number in order, return the first one that yields production data.
  * Useful when we have a list of nearby wells and want the best available data.
  */

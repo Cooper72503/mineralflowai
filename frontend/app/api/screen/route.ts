@@ -27,6 +27,8 @@ import { identifyRiskFlags } from "@/lib/risk/risk-flags";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Well lookup now includes parallel TRRC production fetches — allow up to 55 s
+export const maxDuration = 55;
 
 export async function POST(request: Request) {
   try {
