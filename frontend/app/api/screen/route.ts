@@ -20,6 +20,8 @@ import { geocodeProperty } from "@/lib/location/property-geocode";
 import { geocodeFromCountyCentroid } from "@/lib/location/county-geocode";
 import { lookupWellsByLocation } from "@/lib/wells";
 import { buildNearbyWellIntelligence } from "@/lib/wells/nearby-wells";
+import { fetchBestTrrcProduction, normalizeApiNumber } from "@/lib/wells/trrc-production";
+import type { WellLookupResult } from "@/lib/wells";
 import { runDeclineCurveAnalysis } from "@/lib/decline/decline-curve";
 import { computeMineralEconomics } from "@/lib/economics/mineral-economics";
 import { computePaLiability } from "@/lib/risk/pa-liability";
@@ -49,6 +51,8 @@ export async function POST(request: Request) {
       royalty_rate?: string;
       document_type?: string;
       producing?: "yes" | "no" | "unknown";
+      /** Specific TRRC API number(s) for this property — overrides county well sampling */
+      api_numbers?: string | string[];
     };
 
     const legalDescription = (body.legal_description ?? "").trim();
@@ -86,7 +90,21 @@ export async function POST(request: Request) {
       }
     }
 
+    // Parse any explicit API numbers provided by the caller
+    const rawApiInput = body.api_numbers;
+    const explicitApis: string[] = (
+      Array.isArray(rawApiInput)
+        ? rawApiInput
+        : typeof rawApiInput === "string"
+          ? rawApiInput.split(/[\s,;]+/)
+          : []
+    )
+      .map(a => normalizeApiNumber(a.trim()))
+      .filter((a): a is string => a !== null);
+
     // ── Geocode + nearby well lookup (run in parallel with valuation pipeline) ──
+    // When explicit API numbers are provided, fetch their production directly and
+    // build a synthetic WellLookupResult so the rest of the pipeline is unchanged.
     const [geocodeResult, wellLookupResult] = await Promise.all([
       geocodeProperty({
         township: legalParsed.plss_township,
@@ -94,19 +112,63 @@ export async function POST(request: Request) {
         section:  legalParsed.section,
         state,
       }).catch(() => null).then(result => result ?? geocodeFromCountyCentroid(county, state)),
-      (county && state)
-        ? lookupWellsByLocation({ county, state }).catch(() => ({
+
+      explicitApis.length > 0
+        ? fetchBestTrrcProduction(explicitApis, 36).then((prod): WellLookupResult => {
+            if (!prod) {
+              return {
+                source: "unavailable" as const,
+                wells: [],
+                query_description: `API ${explicitApis.join(", ")}`,
+                note: "No production data found for the provided API number(s).",
+              };
+            }
+            // Build a minimal WellSummary from the production result so the
+            // downstream pipeline (nearby-wells, decline, economics) can use it.
+            const latestRow = prod.rows[prod.rows.length - 1];
+            return {
+              source: "trrc" as const,
+              wells: [{
+                api:       prod.api_number,
+                well_name: `Lease ${prod.lease_number ?? "unknown"} (District ${prod.district_code ?? "?"})`,
+                operator:  null,
+                county,
+                state:     "Texas",
+                status:    "PRODUCING",
+                formation: null,
+                spud_date: null,
+                latest_monthly_oil_bbl:   latestRow?.oil_bbl ?? null,
+                latest_monthly_gas_mcf:   latestRow?.gas_mcf ?? null,
+                latest_monthly_water_bbl: null,
+                latest_production_month:  latestRow
+                  ? `${latestRow.year}-${String(latestRow.month).padStart(2, "0")}`
+                  : null,
+                cum_oil_bbl: prod.rows.reduce((s, r) => s + r.oil_bbl, 0),
+                lat: null,
+                lng: null,
+              }],
+              query_description: `API ${prod.api_number} (lease ${prod.lease_number})`,
+              note: `Specific well data from TRRC: API ${prod.api_number}, lease ${prod.lease_number}, district ${prod.district_code}. ${prod.months_count} months of actual production.`,
+            };
+          }).catch((): WellLookupResult => ({
             source: "unavailable" as const,
             wells: [],
-            query_description: `${county}, ${state}`,
-            note: "Well lookup failed.",
+            query_description: `API ${explicitApis.join(", ")}`,
+            note: "TRRC lookup failed for provided API numbers.",
           }))
-        : Promise.resolve({
-            source: "unavailable" as const,
-            wells: [],
-            query_description: "Unknown location",
-            note: "County and state required for well lookup.",
-          }),
+        : (county && state)
+          ? lookupWellsByLocation({ county, state }).catch((): WellLookupResult => ({
+              source: "unavailable" as const,
+              wells: [],
+              query_description: `${county}, ${state}`,
+              note: "Well lookup failed.",
+            }))
+          : Promise.resolve<WellLookupResult>({
+              source: "unavailable" as const,
+              wells: [],
+              query_description: "Unknown location",
+              note: "County and state required for well lookup.",
+            }),
     ]);
 
     const nearbyWellIntelligence = buildNearbyWellIntelligence({

@@ -559,6 +559,7 @@ export default function QuickScreenPage() {
   const [state, setState] = useState("");
   const [acreage, setAcreage] = useState("");
   const [royaltyRate, setRoyaltyRate] = useState("");
+  const [apiNumbers, setApiNumbers] = useState("");
   const [producing, setProducing] = useState<"yes" | "no" | "unknown">("unknown");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -596,6 +597,7 @@ export default function QuickScreenPage() {
           acreage: acreage.trim() ? parseFloat(acreage.trim().replace(/,/g, "")) : undefined,
           royalty_rate: royaltyRate.trim() || undefined,
           producing,
+          api_numbers: apiNumbers.trim() || undefined,
         }),
       });
 
@@ -758,6 +760,25 @@ export default function QuickScreenPage() {
                 disabled={loading}
               />
             </div>
+          </div>
+
+          {/* API numbers — optional, bypasses county sampling for exact well match */}
+          <div>
+            <label htmlFor="qs-api" style={{ display: "block", marginBottom: "0.35rem", fontSize: "0.9rem", color: "#555" }}>
+              API number(s) <span style={{ fontSize: "0.8rem", color: "#888" }}>(optional — paste from your run statement for exact data)</span>
+            </label>
+            <input
+              id="qs-api"
+              type="text"
+              value={apiNumbers}
+              onChange={(e) => setApiNumbers(e.target.value)}
+              placeholder="e.g. 42-151-00161 or 4215100161, 4215100165"
+              style={{
+                width: "100%", boxSizing: "border-box", padding: "0.45rem 0.6rem",
+                border: "1px solid #d1d5db", borderRadius: 6, fontSize: "0.88rem",
+              }}
+              disabled={loading}
+            />
           </div>
 
           {error ? (
