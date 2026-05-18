@@ -296,10 +296,10 @@ async function enrichWithProduction(
       .catch(() => { /* silently skip failures */ }),
   );
 
-  // Give production fetches up to 12 s; any that don't finish stay null
+  // Give production fetches up to 20 s (gas fallback adds a second CSV request per well)
   await Promise.race([
     Promise.allSettled(tasks),
-    new Promise<void>(resolve => setTimeout(resolve, 12_000)),
+    new Promise<void>(resolve => setTimeout(resolve, 20_000)),
   ]);
 }
 

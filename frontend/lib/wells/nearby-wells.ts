@@ -252,14 +252,19 @@ export function buildNearbyWellIntelligence(args: {
   // County centroid has low accuracy — treat as no geocode for distance filtering
   const effectiveGeocode = geocode?.source === "county_centroid" ? null : geocode;
 
-  // Filter by radius if geocode available; otherwise use all county wells
+  // Filter by radius if geocode available AND wells have coordinates.
+  // Many state data sources (TRRC PDQ, NDIC county, etc.) return wells without
+  // lat/lng — in that case radius filtering produces zero candidates, so we
+  // fall back to the county-level set regardless of geocode quality.
   const wellsWithCoords = allWells.filter(w => w.lat != null && w.lng != null);
+  const canRadiusFilter  = effectiveGeocode != null && wellsWithCoords.length > 0;
+
   let candidates: Array<WellSummary & { distance_miles: number | null }>;
 
   let nearestOutsideMiles: number | null = null;
   let nearestOutsideBopd: number | null = null;
 
-  if (effectiveGeocode) {
+  if (canRadiusFilter) {
     // Compute distance for all wells with coords, filter to radius
     const withDist = wellsWithCoords.map(w => ({
       ...w,
@@ -282,8 +287,8 @@ export function buildNearbyWellIntelligence(args: {
 
     candidates = inRadius;
   } else {
-    // No geocode — use ALL county wells (including coord-less synthetic estimates),
-    // sorted by BOPD descending so best data comes first.
+    // No geocode, county-centroid geocode, or wells have no coordinates —
+    // use ALL county wells sorted by BOPD descending so best data comes first.
     candidates = allWells.map(w => ({ ...w, distance_miles: null }))
       .sort((a, b) => (b.latest_monthly_oil_bbl ?? 0) - (a.latest_monthly_oil_bbl ?? 0));
   }
@@ -365,8 +370,9 @@ export function buildNearbyWellIntelligence(args: {
     nearestMiles: nearestWellMiles,
     nearestOutsideMiles,
     nearestOutsideBopd,
-    radiusMiles: effectiveGeocode ? radiusMiles : 0,
-    hasGeocode: effectiveGeocode != null,
+    // Only report radius-based language when we actually did radius filtering
+    radiusMiles: canRadiusFilter ? radiusMiles : 0,
+    hasGeocode: canRadiusFilter,
     unavailableNote: null,
   });
 
