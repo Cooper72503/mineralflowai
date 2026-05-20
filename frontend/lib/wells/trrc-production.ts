@@ -43,9 +43,11 @@ export type TrrcProductionResult = {
 export function normalizeApiNumber(raw: string): string | null {
   if (!raw || raw.startsWith("synthetic")) return null;
   const digits = raw.replace(/[-\s]/g, "").replace(/^0+/, "");
-  // Must start with 42 and be at least 10 digits
-  if (!digits.startsWith("42") || digits.length < 10) return null;
-  return digits.slice(0, 10);
+  // Full 10-digit format: 42XXXXXXXX
+  if (digits.startsWith("42") && digits.length >= 10) return digits.slice(0, 10);
+  // 8-digit TRRC format (county 3 + well 5, no TX prefix): prepend "42"
+  if (digits.length === 8 && !digits.startsWith("42")) return `42${digits}`;
+  return null;
 }
 
 /** Parse "MM/YYYY" or "YYYY-MM" → { year, month } */

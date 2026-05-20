@@ -362,12 +362,19 @@ export async function lookupTrrcLeasesByApis(
   const countyCode = TX_COUNTY_CODES[countyKey];
   if (!countyCode) return empty;
 
-  // Convert to the 8-digit format the PDQ uses (strip "42" prefix)
+  // Convert to the 8-digit format the PDQ uses.
+  // Accept both:
+  //   10-digit with TX prefix: "4215131926" → "15131926"
+  //   8-digit TRRC format:     "15131926"   → "15131926"  (user omitted "42" prefix)
   const target8 = new Set(
     targetApis
       .map(a => a.replace(/\D/g, ""))
-      .filter(d => d.length === 10 && d.startsWith("42"))
-      .map(d => d.slice(2)),   // "4215100161" → "15100161"
+      .map(d => {
+        if (d.length === 10 && d.startsWith("42")) return d.slice(2);
+        if (d.length === 8) return d;   // already 8-digit TRRC county+well format
+        return null;
+      })
+      .filter((d): d is string => d !== null),
   );
   if (target8.size === 0) return empty;
 
