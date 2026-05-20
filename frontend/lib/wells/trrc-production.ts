@@ -459,6 +459,57 @@ export async function fetchTrrcLatestByLease(
 }
 
 /**
+ * Fetch recent monthly production for a lease identified by its TRRC identifiers
+ * (distCode + leaseNo).  Returns up to `monthsBack` months of rows, or null on error.
+ *
+ * Use this when distCode + leaseNo are already known (e.g. resolved via
+ * `lookupTrrcLeasesByApis`).  It skips the wellbore-query step entirely, which
+ * is the step that incorrectly returns county-level results when queried by API number.
+ */
+export async function fetchTrrcProductionByLease(
+  distCode:  string,
+  leaseNo:   string,
+  monthsBack = 6,
+): Promise<{ rows: TrrcMonthlyRow[]; distCode: string; leaseNo: string } | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    const sessionCookie = await initTrrcSession(controller.signal);
+    if (!sessionCookie) { clearTimeout(timer); return null; }
+
+    const now       = new Date();
+    const endYear   = now.getFullYear();
+    const endMonth  = now.getMonth() + 1;
+    const startDate = new Date(now);
+    startDate.setMonth(startDate.getMonth() - monthsBack);
+    const startYear  = startDate.getFullYear();
+    const startMonth = startDate.getMonth() + 1;
+
+    // Try oil first; fall back to gas for gas-only leases
+    let rows = await fetchAllLeaseProduction(
+      distCode, leaseNo, sessionCookie,
+      startMonth, startYear, endMonth, endYear,
+      "O", 2, controller.signal,
+    );
+    if (rows.length === 0) {
+      rows = await fetchAllLeaseProduction(
+        distCode, leaseNo, sessionCookie,
+        startMonth, startYear, endMonth, endYear,
+        "G", 2, controller.signal,
+      );
+    }
+
+    clearTimeout(timer);
+    if (rows.length === 0) return null;
+    return { rows, distCode, leaseNo };
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+/**
  * Try each API number in order, return the first one that yields production data.
  * Useful when we have a list of nearby wells and want the best available data.
  */

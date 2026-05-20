@@ -48,6 +48,7 @@ function Row({ label, value, sub, bold, color, borderTop }: RowProps) {
 export function OperatingEconomicsCard({ data }: { data: MineralEconomicsResult }) {
   const se = data.state_economics;
   const basisLabel: Record<MineralEconomicsResult["basis"], string> = {
+    tract_production: "Verified TRRC lease production on this tract",
     bopd_anchored: "Anchored to nearby well BOPD data",
     revenue_document: "From document-extracted royalty revenue",
     production_snapshot: "From production snapshot estimates",

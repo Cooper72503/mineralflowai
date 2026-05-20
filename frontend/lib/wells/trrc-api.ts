@@ -337,6 +337,90 @@ async function enrichWithProduction(
   ]);
 }
 
+/**
+ * Given a county name and a set of 10-digit TRRC API numbers, return a map from
+ * each API number that was found in the PDQ county wellbore query to its
+ * { distCode, leaseNo, operator } identifiers.
+ *
+ * This is the authoritative way to resolve abstract-lookup API numbers to TRRC
+ * lease identifiers.  The county wellbore query HTML reliably embeds
+ * `apiNo=XXXXXXXX&distCode=XX&leaseNo=XXXXXX` in every result row — the same
+ * pattern parsePdqCountyEntries already uses — so we never have to guess or
+ * rely on the TRRC API-number search endpoint (which returns county-level results).
+ *
+ * `targetApis` should be 10-digit strings ("4215100161").
+ * Returns an empty map on network errors (never throws).
+ */
+export async function lookupTrrcLeasesByApis(
+  county: string,
+  targetApis: string[],
+): Promise<Map<string, { distCode: string; leaseNo: string; operator: string }>> {
+  const empty = new Map<string, { distCode: string; leaseNo: string; operator: string }>();
+  if (!county || targetApis.length === 0) return empty;
+
+  const countyKey  = normalizeCounty(county);
+  const countyCode = TX_COUNTY_CODES[countyKey];
+  if (!countyCode) return empty;
+
+  // Convert to the 8-digit format the PDQ uses (strip "42" prefix)
+  const target8 = new Set(
+    targetApis
+      .map(a => a.replace(/\D/g, ""))
+      .filter(d => d.length === 10 && d.startsWith("42"))
+      .map(d => d.slice(2)),   // "4215100161" → "15100161"
+  );
+  if (target8.size === 0) return empty;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    // Use a large page size so county wells beyond the first 100 aren't missed.
+    // Most Texas tract abstracts have fewer than 10 producing wellbores, but
+    // they may not appear in the first page of a high-density county like Midland.
+    const body = new URLSearchParams({
+      methodToCall:                    "search",
+      "searchArgs.leaseTypeArg":       "",
+      "searchArgs.countyCodeArg":      countyCode,
+      "searchArgs.districtCodeArg":    "None Selected",
+      "searchArgs.wellTypeArg":        "PR",
+      "searchArgs.fieldNumbersArg":    "",
+      "searchArgs.operatorNumbersArg": "",
+      "searchArgs.apiNoSuffixArg":     "",
+      "searchArgs.leaseNumberArg":     "",
+      "pager.pageSize":                "500",  // grab more to improve odds of finding our wells
+    });
+
+    const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body:    body.toString(),
+      signal:  controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return empty;
+
+    const html    = await res.text();
+    const entries = parsePdqCountyEntries(html, 500);
+    const result  = new Map<string, { distCode: string; leaseNo: string; operator: string }>();
+
+    for (const entry of entries) {
+      if (target8.has(entry.apiNo8)) {
+        result.set(entry.api10, {
+          distCode: entry.distCode,
+          leaseNo:  entry.leaseNo,
+          operator: entry.operator,
+        });
+      }
+    }
+
+    return result;
+  } catch {
+    clearTimeout(timer);
+    return empty;
+  }
+}
+
 export async function lookupTrrcWells(county: string): Promise<WellLookupResult> {
   const countyKey  = normalizeCounty(county);
   const countyCode = TX_COUNTY_CODES[countyKey];

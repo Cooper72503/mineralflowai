@@ -192,7 +192,9 @@ export async function generateDealBrief(args: DealBriefArgs): Promise<DealBrief>
   if (!apiKey) return fallbackBrief(args);
 
   try {
-    const client = new OpenAI({ apiKey });
+    // Hard 12-second timeout so a slow OpenAI response can't push the
+    // route past Vercel's 55-second function limit.
+    const client = new OpenAI({ apiKey, timeout: 12_000 });
     const model = process.env.OPENAI_BRIEF_MODEL ?? process.env.OPENAI_OCR_MODEL ?? "gpt-4o-mini";
 
     const completion = await client.chat.completions.create({

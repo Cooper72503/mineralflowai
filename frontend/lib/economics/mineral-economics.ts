@@ -52,7 +52,7 @@ export type MineralEconomicsResult = {
   /** State economics parameters used. */
   state_economics: StateEconomics;
   /** How royalty income was derived. */
-  basis: "bopd_anchored" | "revenue_document" | "production_snapshot" | "insufficient";
+  basis: "tract_production" | "bopd_anchored" | "revenue_document" | "production_snapshot" | "insufficient";
   /** Revenue-to-value ratio (cap rate implied by point estimate). */
   implied_cap_rate: number | null;
   /** LOE (operator cost) — informational only for mineral owners, hard burden for WI. */
@@ -165,14 +165,31 @@ export function computeMineralEconomics(args: {
   royalty_rate: number | null;
   /** Estimated current BOPD from nearby well analysis. */
   nearby_bopd: number | null;
-  /** Acreage for well-equivalent scaling. */
+  /** Acreage for well-equivalent scaling (only used when tract_monthly_bbl unavailable). */
   acreage: number | null;
   /** Document-extracted monthly royalty revenue (highest trust). */
   monthly_royalty_document?: number | null;
+  /**
+   * Verified actual monthly gross oil production (BBL) from all distinct TRRC leases
+   * on this specific tract — the highest-trust production input.
+   * When provided, bypasses the well-equivalent × median-BOPD estimation entirely
+   * and computes royalty income directly from real lease production data.
+   */
+  tract_monthly_bbl?: number | null;
+  /** Number of distinct TRRC leases contributing to tract_monthly_bbl (informational). */
+  tract_lease_count?: number | null;
   /** Point estimate from valuation engine (for cap rate calc). */
   point_estimate?: number | null;
 }): MineralEconomicsResult {
-  const se = STATE_ECONOMICS[args.state?.toUpperCase() ?? ""] ?? STATE_ECONOMICS.DEFAULT;
+  // Normalize state to 2-letter abbreviation for lookup
+  const STATE_NAME_TO_ABBR: Record<string, string> = {
+    texas: "TX", "north dakota": "ND", oklahoma: "OK",
+    "west virginia": "WV", ohio: "OH", montana: "MT",
+    wyoming: "WY", colorado: "CO",
+  };
+  const stateRaw = (args.state ?? "").trim().toLowerCase();
+  const stateKey = (stateRaw.length === 2 ? stateRaw.toUpperCase() : STATE_NAME_TO_ABBR[stateRaw]) ?? stateRaw.toUpperCase();
+  const se = STATE_ECONOMICS[stateKey] ?? STATE_ECONOMICS.DEFAULT;
   const royalty = args.royalty_rate ?? 0.125;
   const WELL_SPACING = 160;
 
@@ -180,13 +197,21 @@ export function computeMineralEconomics(args: {
   let annual_gross_oil: number | null = null;
   let basis: MineralEconomicsResult["basis"] = "insufficient";
 
-  // Priority 1: Document-extracted revenue (most accurate)
-  if (args.monthly_royalty_document != null && args.monthly_royalty_document > 0) {
+  // Priority 1: Verified tract-level production (most accurate — actual TRRC lease data)
+  // annual royalty = monthly_bbl × 12 × oil_price × royalty_rate
+  // No well-equivalent scaling needed — this IS the total production on this tract.
+  if (args.tract_monthly_bbl != null && args.tract_monthly_bbl > 0) {
+    annual_gross_oil = args.tract_monthly_bbl * 12 * se.oil_price_per_bbl;
+    annual_royalty_gross = annual_gross_oil * royalty;
+    basis = "tract_production";
+  }
+  // Priority 2: Document-extracted royalty revenue
+  else if (args.monthly_royalty_document != null && args.monthly_royalty_document > 0) {
     annual_royalty_gross = args.monthly_royalty_document * 12;
     annual_gross_oil = annual_royalty_gross / royalty;
     basis = "revenue_document";
   }
-  // Priority 2: BOPD-anchored from nearby wells
+  // Priority 3: BOPD-anchored from nearby wells (estimation fallback)
   else if (args.nearby_bopd != null && args.nearby_bopd > 0 && args.acreage != null) {
     const well_equivalents = Math.max(0.25, args.acreage / WELL_SPACING);
     const daily_gross_bbl = well_equivalents * args.nearby_bopd;
@@ -246,8 +271,12 @@ export function computeMineralEconomics(args: {
   const taxStr = `${(se.oil_severance_rate * 100).toFixed(1)}% severance + ${(se.ad_valorem_rate * 100).toFixed(1)}% ad valorem`;
   const royaltyPct = `${(royalty * 100).toFixed(1)}% royalty`;
   const capStr = implied_cap_rate != null ? ` Implied cap rate: ${implied_cap_rate}%.` : "";
+  const basisNote = basis === "tract_production"
+    ? ` Based on ${args.tract_monthly_bbl?.toFixed(0)} BBL/mo actual lease production` +
+      (args.tract_lease_count ? ` (${args.tract_lease_count} lease${args.tract_lease_count > 1 ? "s" : ""})` : "") + `.`
+    : basis === "revenue_document" ? " Based on document-extracted revenue." : "";
 
-  const summary = `${netStr} after ${taxStr} (${royaltyPct}, ${se.state}).${capStr}`;
+  const summary = `${netStr} after ${taxStr} (${royaltyPct}, ${se.state}).${basisNote}${capStr}`;
 
   return {
     annual_gross_oil_revenue: Math.round(annual_gross_oil),

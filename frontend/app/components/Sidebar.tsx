@@ -83,6 +83,15 @@ function IconAlerts() {
     </svg>
   );
 }
+function IconUnderwriting() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="12" height="12" rx="2"/>
+      <path d="M5 6h6M5 8.5h4M5 11h5"/>
+      <circle cx="11.5" cy="10.5" r="1.5" fill="currentColor" stroke="none" opacity="0.6"/>
+    </svg>
+  );
+}
 function IconSettings() {
   return (
     <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -127,10 +136,11 @@ const primaryNav = [
 ] as const;
 
 const toolsNav = [
-  { href: "/upload",     label: "Upload",           Icon: IconUpload     },
-  { href: "/documents",  label: "Documents",        Icon: IconDocuments  },
-  { href: "/leads",      label: "Leads",            Icon: IconLeads      },
-  { href: "/alerts",     label: "Alerts",           Icon: IconAlerts     },
+  { href: "/upload",        label: "Upload",              Icon: IconUpload        },
+  { href: "/documents",     label: "Documents",           Icon: IconDocuments     },
+  { href: "/leads",         label: "Leads",               Icon: IconLeads         },
+  { href: "/alerts",        label: "Alerts",              Icon: IconAlerts        },
+  { href: "/underwriting",  label: "Underwriting",        Icon: IconUnderwriting  },
 ] as const;
 
 const accountNav = [
