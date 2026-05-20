@@ -50,6 +50,8 @@ import type { TrrcInjectionRecord } from "./trrc-injection";
 import { runDca } from "./decline-curve";
 import { runEconomics, DEFAULT_PRICE_DECKS } from "./economics-engine";
 import { scoreRisk } from "./risk-engine";
+import type { FinancialContext } from "./financial-lookup";
+import type { BasinBenchmark } from "./benchmarks";
 
 // ─── TRRC production well (from existing well lookup) ─────────────────────────
 
@@ -97,6 +99,8 @@ export type BuildReportArgs = {
   trrcWells: TrrcWellProduction[];
   trrcViolations: TrrcViolation[];
   trrcInjection: TrrcInjectionRecord[];
+  financialContext?: FinancialContext;
+  benchmark?: BasinBenchmark;
   processingTimeMs: number;
   aiModel: string;
 };
@@ -108,6 +112,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     trrcWells,
     trrcViolations,
     trrcInjection,
+    financialContext,
+    benchmark,
     processingTimeMs,
     aiModel,
   } = args;
@@ -319,13 +325,29 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     ? loePeriods.reduce((s, v) => s + (v.net_income_usd ?? 0), 0) / loePeriods.filter(s => s.net_income_usd != null).length
     : null;
 
-  // LOE per BOE
+  // LOE per BOE — from statements, then EDGAR public company data, then basin benchmark
   let loePerBoe: number | null = null;
+  let avgLoeEffective = avgLoe;
+  let loeSource: DataSource = "loe_statement";
+  let loeNote: string | undefined;
+
   if (avgLoe != null && totalOil > 0) {
     loePerBoe = avgLoe / totalOil;
+  } else if (financialContext?.edgar?.loe_per_boe != null) {
+    // Public company data from SEC EDGAR (company-level, not well-specific)
+    loePerBoe      = financialContext.edgar.loe_per_boe;
+    avgLoeEffective = totalOil > 0 ? loePerBoe * totalOil : null;
+    loeSource       = "uploaded_doc"; // repurpose as external public source
+    loeNote         = `SEC EDGAR 10-K (${financialContext.edgar.company_name}, FY${financialContext.edgar.fiscal_year}) — company average, not well-specific`;
+  } else if (benchmark != null && totalOil > 0) {
+    // Basin benchmark fallback (EIA regional average)
+    loePerBoe      = benchmark.loe_median_per_boe;
+    avgLoeEffective = loePerBoe * totalOil;
+    loeSource       = "inferred";
+    loeNote         = `EIA basin benchmark — ${benchmark.basin} median $${benchmark.loe_median_per_boe}/BOE (range $${benchmark.loe_low_per_boe}–$${benchmark.loe_high_per_boe}/BOE). Not well-specific.`;
   }
 
-  // Oil price received (from run tickets / LOE statements)
+  // Oil price — from run tickets, then LOE statements, then EIA current price + differential
   const runMonths = (extracted?.production_months ?? []).filter(m => m.oil_price_per_bbl != null);
   const avgOilPrice = runMonths.length > 0
     ? runMonths.reduce((s, m) => s + (m.oil_price_per_bbl ?? 0), 0) / runMonths.length
@@ -334,13 +356,32 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   const avgLoeOilPrice = loeOilPrice.length > 0
     ? loeOilPrice.reduce((s, v) => s + (v.oil_price_per_bbl ?? 0), 0) / loeOilPrice.length
     : null;
-  const oilPriceValue = avgOilPrice ?? avgLoeOilPrice;
+
+  // EIA + basin differential fallback for oil price
+  const eiaWti = financialContext?.oil_price?.wti_spot_usd ?? null;
+  const basinDiff = benchmark?.oil_differential_per_bbl ?? -4.00;
+  const eiaWellheadPrice = eiaWti != null ? eiaWti + basinDiff : null;
+
+  const oilPriceValue = avgOilPrice ?? avgLoeOilPrice ?? eiaWellheadPrice;
+  const oilPriceSource: DataSource = avgOilPrice ? "run_statement"
+    : avgLoeOilPrice ? "loe_statement"
+    : eiaWellheadPrice ? "inferred"
+    : "missing";
+  const oilPriceNote = oilPriceSource === "inferred"
+    ? `EIA WTI spot $${eiaWti?.toFixed(2)}/bbl ${basinDiff >= 0 ? "+" : ""}${basinDiff.toFixed(2)} ${benchmark?.basin ?? "TX"} differential = est. $${eiaWellheadPrice?.toFixed(2)}/bbl wellhead (${financialContext?.oil_price?.source ?? "hardcoded"})`
+    : undefined;
+
+  // EIA gas price fallback
+  const eiaHh = financialContext?.oil_price?.henry_hub_usd ?? null;
+  const gasDiff = benchmark?.gas_differential_per_mmbtu ?? -0.35;
 
   const economicsSection: EconomicsSection = {
     loe_statements: loeStatements,
     loe_months_available: loePeriods.length,
-    avg_monthly_loe_usd: avgLoe != null
-      ? dp(avgLoe, "loe_statement", loePeriods.length >= 12 ? "high" : "medium", `${loePeriods.length} months of LOE data`)
+    avg_monthly_loe_usd: avgLoeEffective != null
+      ? dp(avgLoeEffective, loeSource,
+          loePeriods.length >= 12 ? "high" : loePeriods.length > 0 ? "medium" : "low",
+          loePeriods.length > 0 ? `${loePeriods.length} months of LOE data` : loeNote)
       : missingDp<number>("LOE statements not provided — critical for WI valuation"),
     avg_monthly_revenue_usd: avgRev != null
       ? dp(avgRev, "loe_statement", loePeriods.length >= 12 ? "high" : "medium")
@@ -367,13 +408,20 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       ? dp(extracted.compression_cost_monthly, "loe_statement", "medium")
       : missingDp<number>(),
     oil_price_received: oilPriceValue != null
-      ? dp(oilPriceValue, "run_statement", "medium", "Avg from run tickets / LOE statements")
+      ? dp(oilPriceValue, oilPriceSource,
+          oilPriceSource === "run_statement" || oilPriceSource === "loe_statement" ? "medium" : "low",
+          oilPriceNote ?? "Avg from run tickets / LOE statements")
       : missingDp<number>("Needs run tickets or purchaser statements"),
     gas_price_received: (() => {
       const loeGas = loePeriods.filter(s => s.gas_price_per_mcf != null);
       if (loeGas.length > 0) {
         const avg = loeGas.reduce((s, v) => s + (v.gas_price_per_mcf ?? 0), 0) / loeGas.length;
         return dp(avg, "loe_statement", "medium");
+      }
+      if (eiaHh != null) {
+        const wellheadGasPrice = eiaHh + gasDiff;
+        return dp(wellheadGasPrice, "inferred", "low",
+          `EIA Henry Hub $${eiaHh.toFixed(2)}/MMBtu ${gasDiff >= 0 ? "+" : ""}${gasDiff.toFixed(2)} ${benchmark?.basin ?? "TX"} diff = est. $${wellheadGasPrice.toFixed(2)}/MCF wellhead`);
       }
       return missingDp<number>("Needs run tickets or purchaser statements");
     })(),
@@ -551,10 +599,10 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         well_name: w.well_name,
         status: "Shut-In / No Recent Production",
         inactive_since: w.latest_production_month,
-        estimated_plug_cost_usd: null,
+        estimated_plug_cost_usd: benchmark?.plug_cost_per_well ?? null,
         rrc_plugging_order: false,
-        source: "trrc" as DataSource,
-        confidence: "medium" as DataConfidence,
+        source: benchmark ? "inferred" as DataSource : "trrc" as DataSource,
+        confidence: benchmark ? "low" as DataConfidence : "medium" as DataConfidence,
       })),
   ];
 
@@ -885,11 +933,23 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     return r?.decimal_interest ?? 1.0;
   })();
 
-  const monthlyLoe = avgLoe ?? 0;
+  // Use effective LOE (from statements → EDGAR → benchmark)
+  const monthlyLoe = avgLoeEffective ?? 0;
   const dcaMonthlyDecline = dcaResult
     ? dcaResult.model.Di
     : (declineRate != null ? Math.abs(declineRate) / 100 : 0.012);
   const bFactor = dcaResult?.model.b ?? 0;
+
+  // Build price decks — anchor Base deck to current EIA price if available
+  const baseDeckOil = eiaWti != null ? eiaWti : 65;
+  const baseDeckGas = eiaHh  != null ? eiaHh  : 2.50;
+  const diff        = basinDiff;
+  const customDecks = [
+    { label: "Stress",  oil_usd_bbl: Math.max(baseDeckOil - 20, 35), gas_usd_mcf: Math.max(baseDeckGas - 0.60, 1.50), differential_bbl: diff - 1.00 },
+    { label: "Base",    oil_usd_bbl: baseDeckOil,                     gas_usd_mcf: baseDeckGas,                         differential_bbl: diff },
+    { label: "Strip",   oil_usd_bbl: baseDeckOil + 7,                 gas_usd_mcf: baseDeckGas + 0.50,                  differential_bbl: diff + 0.75 },
+    { label: "Upside",  oil_usd_bbl: baseDeckOil + 20,                gas_usd_mcf: baseDeckGas + 1.00,                  differential_bbl: diff + 1.50 },
+  ];
 
   const econResult = (totalOil > 0 || monthlyLoe > 0)
     ? runEconomics({
@@ -903,7 +963,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         eur_bbl:                   dcaResult?.eur_bbl ?? 0,
         remaining_reserves_bbl:    dcaResult?.remaining_reserves_bbl ?? 0,
         cum_production_bbl:        dcaResult?.cum_oil_bbl ?? 0,
-        price_decks:               DEFAULT_PRICE_DECKS,
+        price_decks:               customDecks,
       })
     : null;
 
@@ -1076,6 +1136,11 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       trrc_injection_attempted: trrcInjection.length >= 0,
       ai_extraction_model: aiModel,
       processing_time_ms: processingTimeMs,
-    },
+      eia_price_source: financialContext?.oil_price?.source ?? null,
+      eia_wti_usd: financialContext?.oil_price?.wti_spot_usd ?? null,
+      edgar_operator: financialContext?.edgar?.company_name ?? null,
+      edgar_loe_per_boe: financialContext?.edgar?.loe_per_boe ?? null,
+      basin: benchmark?.basin ?? null,
+    } as DDReport["_meta"],
   };
 }

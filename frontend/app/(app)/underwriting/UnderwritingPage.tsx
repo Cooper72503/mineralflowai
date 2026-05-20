@@ -1640,6 +1640,17 @@ export default function UnderwritingPage() {
               <span>Processing: {(report._meta.processing_time_ms / 1000).toFixed(1)}s</span>
               <span>TRRC match: {report._meta.trrc_match_tier.replace(/_/g, " ")}</span>
               <span>Documents: {report.input_documents.length}</span>
+              {report._meta.basin && <span>Basin: {report._meta.basin}</span>}
+              {report._meta.eia_wti_usd && (
+                <span style={{ color: COLORS.accent }}>
+                  EIA WTI: ${report._meta.eia_wti_usd.toFixed(2)}/bbl ({report._meta.eia_price_source})
+                </span>
+              )}
+              {report._meta.edgar_operator && (
+                <span style={{ color: COLORS.accent }}>
+                  EDGAR: {report._meta.edgar_operator} LOE ${report._meta.edgar_loe_per_boe?.toFixed(2)}/BOE
+                </span>
+              )}
             </div>
           </>
         )}

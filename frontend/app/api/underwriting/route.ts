@@ -25,6 +25,8 @@ import { fetchTrrcInjectionByApi, fetchTrrcInjectionByOperator } from "@/lib/und
 import { buildDDReport, type TrrcWellProduction } from "@/lib/underwriting/report-builder";
 import { lookupTrrcLeasesByApis }           from "@/lib/wells/trrc-api";
 import { fetchTrrcProductionByLease }       from "@/lib/wells/trrc-production";
+import { fetchFinancialContext }            from "@/lib/underwriting/financial-lookup";
+import { getBenchmarkFromApi, getBenchmarkFromCounty } from "@/lib/underwriting/benchmarks";
 import type { UnderwritingInput, UnderwritingResponse } from "@/lib/underwriting/types";
 
 export const runtime    = "nodejs";
@@ -84,7 +86,16 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
 
     const lookupDeadline = new Promise<null>(r => setTimeout(() => r(null), 18_000));
 
-    const [trrcResult, complianceResult, injectionResult] = await Promise.all([
+    // Basin benchmarks — synchronous, no network call
+    const api8ForBenchmark = allApis
+      .map(a => a.replace(/\D/g, ""))
+      .map(d => d.startsWith("42") && d.length >= 10 ? d.slice(2, 10) : d.slice(0, 8))
+      .find(d => d.length === 8);
+    const benchmark = api8ForBenchmark
+      ? getBenchmarkFromApi(api8ForBenchmark)
+      : (resolvedCounty ? getBenchmarkFromCounty(resolvedCounty) : null);
+
+    const [trrcResult, complianceResult, injectionResult, financialContext] = await Promise.all([
       // TRRC production
       (async (): Promise<TrrcWellProduction[]> => {
         if (!isTexas) return [];
@@ -229,6 +240,12 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
         }
         return [];
       })(),
+
+      // EIA prices + EDGAR operator financials (parallel, 12 s cap)
+      Promise.race([
+        fetchFinancialContext(resolvedOperator),
+        new Promise<null>(r => setTimeout(() => r(null), 12_000)),
+      ]),
     ]);
 
     // ── Phase 3: Build report ─────────────────────────────────────────────
@@ -248,6 +265,8 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       trrcWells: trrcResult,
       trrcViolations: complianceResult,
       trrcInjection: injectionResult,
+      financialContext: financialContext ?? undefined,
+      benchmark: benchmark ?? undefined,
       processingTimeMs: Date.now() - t0,
       aiModel: model,
     });

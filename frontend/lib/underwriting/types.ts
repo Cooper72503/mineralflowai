@@ -410,6 +410,11 @@ export type DDReport = {
     trrc_injection_attempted: boolean;
     ai_extraction_model: string;
     processing_time_ms: number;
+    eia_price_source?: string | null;
+    eia_wti_usd?: number | null;
+    edgar_operator?: string | null;
+    edgar_loe_per_boe?: number | null;
+    basin?: string | null;
   };
 };
 
