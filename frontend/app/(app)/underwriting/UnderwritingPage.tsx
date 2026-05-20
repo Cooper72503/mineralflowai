@@ -1011,14 +1011,14 @@ export default function UnderwritingPage() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 1.5rem" }}>
               <InputBlock
                 label="API Number(s)"
-                hint="10-digit, comma or newline separated"
-                placeholder="42-123-45678-00-00"
+                hint="Any format — 8, 10, or hyphenated. Comma or newline separated. Texas (42-xxx) auto-detected."
+                placeholder="42-151-31926-00-00"
                 {...field("apiNumbers")}
               />
               <InputBlock
                 label="RRC Lease Number(s)"
-                hint="format: distCode:leaseNo"
-                placeholder="06:123456"
+                hint="Just the lease number (e.g. 29126) — district code is optional"
+                placeholder="29126"
                 {...field("rrcLeases")}
               />
               <InputBlock
@@ -1028,16 +1028,17 @@ export default function UnderwritingPage() {
               />
               <InputBlock
                 label="Lease Name"
-                placeholder="Smith A #1H"
+                placeholder="Bomar"
                 {...field("leaseName")}
               />
               <InputBlock
                 label="County"
-                placeholder="Midland"
+                placeholder="Fisher"
                 {...field("county")}
               />
               <InputBlock
                 label="State"
+                hint="Optional for Texas — inferred from API prefix 42"
                 placeholder="TX"
                 {...field("state")}
               />

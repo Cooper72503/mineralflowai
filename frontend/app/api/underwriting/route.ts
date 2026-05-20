@@ -52,7 +52,11 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
     const state        = (body.state ?? "").trim() || null;
     const documents    = body.documents ?? [];
 
-    const isTexas = !!state && /^texas$|^tx$/i.test(state.trim());
+    // Texas if state explicitly says so, OR if any API number starts with "42"
+    // (the Texas state code). This lets users get TRRC data without filling in state.
+    const isTexas =
+      (!!state && /^texas$|^tx$/i.test(state.trim())) ||
+      apiNumbers.some(a => a.replace(/\D/g, "").startsWith("42"));
 
     // ── Phase 1: AI document extraction (up to 40 s) ──────────────────────
 
@@ -84,47 +88,46 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       // TRRC production
       (async (): Promise<TrrcWellProduction[]> => {
         if (!isTexas) return [];
-        if (allLeases.length > 0) {
-          // Direct lease lookup
-          const wells: TrrcWellProduction[] = [];
-          await Promise.allSettled(
-            allLeases.slice(0, 5).map(async lease => {
-              const [distCode, leaseNo] = lease.split(":");
-              if (!distCode || !leaseNo) return;
-              const result = await fetchTrrcProductionByLease(distCode, leaseNo, 12);
-              if (!result || result.rows.length === 0) return;
-              const sorted = [...result.rows].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
-              const recentRows = sorted.slice(-3).filter(r => r.oil_bbl > 0);
-              const avgBbl = recentRows.length > 0
-                ? recentRows.reduce((s, r) => s + r.oil_bbl, 0) / recentRows.length
-                : 0;
-              const latest = sorted[sorted.length - 1];
-              wells.push({
-                api: `42000000000`,  // placeholder when only lease known
-                well_name: `Lease ${leaseNo} (District ${distCode})`,
-                lease_number: leaseNo,
-                district_code: distCode,
-                operator: resolvedOperator,
-                latest_monthly_oil_bbl: avgBbl,
-                latest_production_month: latest ? `${latest.year}-${String(latest.month).padStart(2, "0")}` : null,
-                cum_oil_bbl: sorted.reduce((s, r) => s + r.oil_bbl, 0),
-                monthly_rows: sorted.map(r => ({
-                  year: r.year, month: r.month,
-                  oil_bbl: r.oil_bbl,
-                  gas_mcf: r.gas_mcf ?? 0,
-                  water_bbl: 0,
-                })),
-              });
-            })
-          );
-          return wells;
-        }
 
+        // Helper: fetch production for a resolved lease entry
+        const fetchWell = async (
+          api: string,
+          distCode: string,
+          leaseNo: string,
+          operator: string | null,
+        ): Promise<TrrcWellProduction | null> => {
+          const result = await fetchTrrcProductionByLease(distCode, leaseNo, 12);
+          if (!result || result.rows.length === 0) return null;
+          const sorted = [...result.rows].sort((a, b) =>
+            a.year !== b.year ? a.year - b.year : a.month - b.month
+          );
+          const recentRows = sorted.slice(-3).filter(r => r.oil_bbl > 0);
+          const avgBbl = recentRows.length > 0
+            ? recentRows.reduce((s, r) => s + r.oil_bbl, 0) / recentRows.length
+            : 0;
+          const latest = sorted[sorted.length - 1];
+          return {
+            api,
+            well_name: `Lease ${leaseNo} (District ${distCode})`,
+            lease_number: leaseNo,
+            district_code: distCode,
+            operator: operator || resolvedOperator,
+            latest_monthly_oil_bbl: avgBbl,
+            latest_production_month: latest ? `${latest.year}-${String(latest.month).padStart(2, "0")}` : null,
+            cum_oil_bbl: sorted.reduce((s, r) => s + r.oil_bbl, 0),
+            monthly_rows: sorted.map(r => ({
+              year: r.year, month: r.month,
+              oil_bbl: r.oil_bbl,
+              gas_mcf: r.gas_mcf ?? 0,
+              water_bbl: 0,
+            })),
+          };
+        };
+
+        // ── Path A: API numbers supplied (primary path) ───────────────────
+        // Always try this first — API number carries its own county code so
+        // no state/county input is needed from the user.
         if (allApis.length > 0) {
-          // API → lease resolution. County is optional — the function derives
-          // the FIPS county code from the API number itself (first 3 digits of
-          // the 8-digit form), so any Texas well can be looked up with just its
-          // API number, no county name required.
           const leaseRace = await Promise.race([
             lookupTrrcLeasesByApis(resolvedCounty, allApis),
             new Promise<Map<string, { distCode: string; leaseNo: string; operator: string }>>(
@@ -140,33 +143,45 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
               const key = `${distCode}:${leaseNo}`;
               if (seenLeases.has(key)) return;
               seenLeases.add(key);
+              const w = await fetchWell(api, distCode, leaseNo, operator);
+              if (w) wells.push(w);
+            })
+          );
+          if (wells.length > 0) return wells;
+          // fall through to lease path if API lookup yielded no production
+        }
 
-              const result = await fetchTrrcProductionByLease(distCode, leaseNo, 12);
-              if (!result || result.rows.length === 0) return;
+        // ── Path B: RRC lease numbers supplied ────────────────────────────
+        // Accepts two formats:
+        //   "7B:29126"  → distCode=7B, leaseNo=29126  (explicit)
+        //   "29126"     → leaseNo only; we try common district codes
+        if (allLeases.length > 0) {
+          const wells: TrrcWellProduction[] = [];
+          const seenLeases = new Set<string>();
+          const DISTRICT_CODES = ["1","2","3","4","5","6","7B","7C","8","8A","9","10"];
 
-              const sorted = [...result.rows].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
-              const recentRows = sorted.slice(-3).filter(r => r.oil_bbl > 0);
-              const avgBbl = recentRows.length > 0
-                ? recentRows.reduce((s, r) => s + r.oil_bbl, 0) / recentRows.length
-                : 0;
-              const latest = sorted[sorted.length - 1];
-
-              wells.push({
-                api,
-                well_name: `Lease ${leaseNo} (District ${distCode})`,
-                lease_number: leaseNo,
-                district_code: distCode,
-                operator: operator || resolvedOperator,
-                latest_monthly_oil_bbl: avgBbl,
-                latest_production_month: latest ? `${latest.year}-${String(latest.month).padStart(2, "0")}` : null,
-                cum_oil_bbl: sorted.reduce((s, r) => s + r.oil_bbl, 0),
-                monthly_rows: sorted.map(r => ({
-                  year: r.year, month: r.month,
-                  oil_bbl: r.oil_bbl,
-                  gas_mcf: r.gas_mcf ?? 0,
-                  water_bbl: 0,
-                })),
-              });
+          await Promise.allSettled(
+            allLeases.slice(0, 5).map(async lease => {
+              const parts = lease.split(":");
+              if (parts.length >= 2) {
+                // Explicit distCode:leaseNo
+                const [distCode, leaseNo] = parts;
+                const key = `${distCode}:${leaseNo}`;
+                if (seenLeases.has(key)) return;
+                seenLeases.add(key);
+                const w = await fetchWell(`42000000000`, distCode, leaseNo, null);
+                if (w) wells.push(w);
+              } else {
+                // Raw lease number — try all district codes and take the first hit
+                const leaseNo = lease.trim();
+                for (const distCode of DISTRICT_CODES) {
+                  const key = `${distCode}:${leaseNo}`;
+                  if (seenLeases.has(key)) continue;
+                  seenLeases.add(key);
+                  const w = await fetchWell(`42000000000`, distCode, leaseNo, null);
+                  if (w) { wells.push(w); break; }
+                }
+              }
             })
           );
           return wells;
