@@ -120,8 +120,11 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
           return wells;
         }
 
-        if (allApis.length > 0 && resolvedCounty) {
-          // API → lease resolution via county PDQ query (same proven path as screen route)
+        if (allApis.length > 0) {
+          // API → lease resolution. County is optional — the function derives
+          // the FIPS county code from the API number itself (first 3 digits of
+          // the 8-digit form), so any Texas well can be looked up with just its
+          // API number, no county name required.
           const leaseRace = await Promise.race([
             lookupTrrcLeasesByApis(resolvedCounty, allApis),
             new Promise<Map<string, { distCode: string; leaseNo: string; operator: string }>>(

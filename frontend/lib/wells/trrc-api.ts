@@ -352,21 +352,17 @@ async function enrichWithProduction(
  * Returns an empty map on network errors (never throws).
  */
 export async function lookupTrrcLeasesByApis(
-  county: string,
+  county: string | null,
   targetApis: string[],
 ): Promise<Map<string, { distCode: string; leaseNo: string; operator: string }>> {
   const empty = new Map<string, { distCode: string; leaseNo: string; operator: string }>();
-  if (!county || targetApis.length === 0) return empty;
-
-  const countyKey  = normalizeCounty(county);
-  const countyCode = TX_COUNTY_CODES[countyKey];
-  if (!countyCode) return empty;
+  if (targetApis.length === 0) return empty;
 
   // Normalise each incoming API to the canonical 8-digit TRRC form (no "42" prefix).
   // Accept:
-  //   "4215131926"  (10-digit, TX prefix)  → "15131926"
-  //   "15131926"    (8-digit, no prefix)   → "15131926"
-  //   "42-151-31926-00-00" (hyphenated)    → "15131926" (strip dashes, then slice)
+  //   "4215131926"        → "15131926"  (10-digit TX prefix form)
+  //   "15131926"          → "15131926"  (8-digit TRRC-native, no prefix)
+  //   "42-151-31926-00-00"→ "15131926"  (hyphenated full form, strip & slice)
   const target8List = targetApis
     .map(a => a.replace(/\D/g, ""))
     .map(d => {
@@ -375,6 +371,18 @@ export async function lookupTrrcLeasesByApis(
       return null;
     })
     .filter((d): d is string => d !== null);
+
+  // The county code is the first 3 digits of the 8-digit API form.
+  // e.g. "15131926" → county code "151" (Fisher County, TX).
+  // This means we NEVER need the caller to supply a county name — we derive
+  // the 3-digit FIPS code directly from the API, so any well in Texas can be
+  // looked up with just its API number.
+  //
+  // If a county name WAS provided, resolve it to a code and use it as a
+  // cross-check (helps catch typos in the API number).
+  const countyCodeFromName: string | null = county
+    ? (TX_COUNTY_CODES[normalizeCounty(county)] ?? null)
+    : null;
 
   if (target8List.length === 0) return empty;
 
@@ -390,7 +398,16 @@ export async function lookupTrrcLeasesByApis(
 
   const directResults = await Promise.allSettled(
     target8List.map(async (api8) => {
-      const wellSuffix = api8.slice(3); // last 5 digits: "15131926" → "31926"
+      // Derive county code from the API number itself (first 3 digits of 8-digit form).
+      // "15131926" → county "151" (Fisher).  This works for any Texas well — no
+      // county name needed from the caller.
+      const apiCountyCode = api8.slice(0, 3);
+      const wellSuffix    = api8.slice(3); // last 5 digits: "15131926" → "31926"
+
+      // If the caller supplied a county name AND it resolves to a different code,
+      // prefer the caller-supplied code (in case the user knows something we don't).
+      const resolvedCountyCode = countyCodeFromName ?? apiCountyCode;
+
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10_000);
 
@@ -398,7 +415,7 @@ export async function lookupTrrcLeasesByApis(
         const body = new URLSearchParams({
           methodToCall:                    "search",
           "searchArgs.leaseTypeArg":       "",
-          "searchArgs.countyCodeArg":      countyCode,
+          "searchArgs.countyCodeArg":      resolvedCountyCode,
           "searchArgs.districtCodeArg":    "None Selected",
           "searchArgs.wellTypeArg":        "",
           "searchArgs.fieldNumbersArg":    "",
@@ -449,52 +466,65 @@ export async function lookupTrrcLeasesByApis(
 
   // ── Strategy 2 (fallback): county-wide scan for any still-missing APIs ───
   //
-  // Only runs for APIs that weren't found via direct query.
-  // Handles edge cases where the suffix-only search doesn't narrow things enough.
+  // Group remaining APIs by their derived county code and run one county scan
+  // per distinct county.  Each API's county code comes from its own first 3
+  // digits, so this works with no caller-supplied county name.
 
   const target8Remaining = new Set(notFound);
 
-  const controller2 = new AbortController();
-  const timer2 = setTimeout(() => controller2.abort(), 12_000);
+  // Group by county code
+  const byCounty = new Map<string, string[]>();
+  for (const api8 of notFound) {
+    const cc = countyCodeFromName ?? api8.slice(0, 3);
+    const list = byCounty.get(cc) ?? [];
+    list.push(api8);
+    byCounty.set(cc, list);
+  }
 
-  try {
-    const body = new URLSearchParams({
-      methodToCall:                    "search",
-      "searchArgs.leaseTypeArg":       "",
-      "searchArgs.countyCodeArg":      countyCode,
-      "searchArgs.districtCodeArg":    "None Selected",
-      "searchArgs.wellTypeArg":        "PR",
-      "searchArgs.fieldNumbersArg":    "",
-      "searchArgs.operatorNumbersArg": "",
-      "searchArgs.apiNoSuffixArg":     "",
-      "searchArgs.leaseNumberArg":     "",
-      "pager.pageSize":                "500",
-    });
+  await Promise.allSettled(Array.from(byCounty.entries()).map(async ([cc, apis8]) => {
+    const controller2 = new AbortController();
+    const timer2 = setTimeout(() => controller2.abort(), 12_000);
 
-    const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body:    body.toString(),
-      signal:  controller2.signal,
-    });
-    clearTimeout(timer2);
+    try {
+      const body = new URLSearchParams({
+        methodToCall:                    "search",
+        "searchArgs.leaseTypeArg":       "",
+        "searchArgs.countyCodeArg":      cc,
+        "searchArgs.districtCodeArg":    "None Selected",
+        "searchArgs.wellTypeArg":        "PR",
+        "searchArgs.fieldNumbersArg":    "",
+        "searchArgs.operatorNumbersArg": "",
+        "searchArgs.apiNoSuffixArg":     "",
+        "searchArgs.leaseNumberArg":     "",
+        "pager.pageSize":                "500",
+      });
 
-    if (res.ok) {
-      const html    = await res.text();
-      const entries = parsePdqCountyEntries(html, 500);
-      for (const entry of entries) {
-        if (target8Remaining.has(entry.apiNo8) && !result.has(entry.api10)) {
-          result.set(entry.api10, {
-            distCode: entry.distCode,
-            leaseNo:  entry.leaseNo,
-            operator: entry.operator,
-          });
+      const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body:    body.toString(),
+        signal:  controller2.signal,
+      });
+      clearTimeout(timer2);
+
+      if (res.ok) {
+        const html    = await res.text();
+        const entries = parsePdqCountyEntries(html, 500);
+        const missing8 = new Set(apis8);
+        for (const entry of entries) {
+          if (missing8.has(entry.apiNo8) && !result.has(entry.api10)) {
+            result.set(entry.api10, {
+              distCode: entry.distCode,
+              leaseNo:  entry.leaseNo,
+              operator: entry.operator,
+            });
+          }
         }
       }
+    } catch {
+      clearTimeout(timer2);
     }
-  } catch {
-    clearTimeout(timer2);
-  }
+  }));
 
   return result;
 }
