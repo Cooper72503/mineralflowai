@@ -362,29 +362,102 @@ export async function lookupTrrcLeasesByApis(
   const countyCode = TX_COUNTY_CODES[countyKey];
   if (!countyCode) return empty;
 
-  // Convert to the 8-digit format the PDQ uses.
-  // Accept both:
-  //   10-digit with TX prefix: "4215131926" → "15131926"
-  //   8-digit TRRC format:     "15131926"   → "15131926"  (user omitted "42" prefix)
-  const target8 = new Set(
-    targetApis
-      .map(a => a.replace(/\D/g, ""))
-      .map(d => {
-        if (d.length === 10 && d.startsWith("42")) return d.slice(2);
-        if (d.length === 8) return d;   // already 8-digit TRRC county+well format
-        return null;
-      })
-      .filter((d): d is string => d !== null),
-  );
-  if (target8.size === 0) return empty;
+  // Normalise each incoming API to the canonical 8-digit TRRC form (no "42" prefix).
+  // Accept:
+  //   "4215131926"  (10-digit, TX prefix)  → "15131926"
+  //   "15131926"    (8-digit, no prefix)   → "15131926"
+  //   "42-151-31926-00-00" (hyphenated)    → "15131926" (strip dashes, then slice)
+  const target8List = targetApis
+    .map(a => a.replace(/\D/g, ""))
+    .map(d => {
+      if (d.length === 10 && d.startsWith("42")) return d.slice(2);
+      if (d.length === 8) return d;
+      return null;
+    })
+    .filter((d): d is string => d !== null);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  if (target8List.length === 0) return empty;
+
+  const result = new Map<string, { distCode: string; leaseNo: string; operator: string }>();
+
+  // ── Strategy 1 (preferred): query county + apiNoSuffix for each API ──────
+  //
+  // This bypasses county-wide pagination (Fisher County has 542+ wells) by
+  // sending TRRC a county code + the 5-digit well-number suffix for each API
+  // individually.  TRRC returns only the matching wellbore(s), so no page-size
+  // limit is ever hit.  This is the same HTML/link pattern that parsePdqCountyEntries
+  // already parses reliably.
+
+  const directResults = await Promise.allSettled(
+    target8List.map(async (api8) => {
+      const wellSuffix = api8.slice(3); // last 5 digits: "15131926" → "31926"
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+
+      try {
+        const body = new URLSearchParams({
+          methodToCall:                    "search",
+          "searchArgs.leaseTypeArg":       "",
+          "searchArgs.countyCodeArg":      countyCode,
+          "searchArgs.districtCodeArg":    "None Selected",
+          "searchArgs.wellTypeArg":        "",
+          "searchArgs.fieldNumbersArg":    "",
+          "searchArgs.operatorNumbersArg": "",
+          "searchArgs.apiNoSuffixArg":     wellSuffix,
+          "searchArgs.leaseNumberArg":     "",
+          "pager.pageSize":                "25",
+        });
+
+        const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body:    body.toString(),
+          signal:  controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) return { api8, entries: [] as PdqWellEntry[] };
+
+        const html    = await res.text();
+        const entries = parsePdqCountyEntries(html, 25);
+        return { api8, entries };
+      } catch {
+        clearTimeout(timer);
+        return { api8, entries: [] as PdqWellEntry[] };
+      }
+    })
+  );
+
+  const notFound: string[] = [];
+
+  for (const settled of directResults) {
+    if (settled.status !== "fulfilled") continue;
+    const { api8, entries } = settled.value;
+    // Find the entry whose apiNo8 matches exactly
+    const match = entries.find(e => e.apiNo8 === api8);
+    if (match) {
+      result.set(match.api10, {
+        distCode: match.distCode,
+        leaseNo:  match.leaseNo,
+        operator: match.operator,
+      });
+    } else {
+      notFound.push(api8);
+    }
+  }
+
+  if (notFound.length === 0 || result.size === target8List.length) return result;
+
+  // ── Strategy 2 (fallback): county-wide scan for any still-missing APIs ───
+  //
+  // Only runs for APIs that weren't found via direct query.
+  // Handles edge cases where the suffix-only search doesn't narrow things enough.
+
+  const target8Remaining = new Set(notFound);
+
+  const controller2 = new AbortController();
+  const timer2 = setTimeout(() => controller2.abort(), 12_000);
 
   try {
-    // Use a large page size so county wells beyond the first 100 aren't missed.
-    // Most Texas tract abstracts have fewer than 10 producing wellbores, but
-    // they may not appear in the first page of a high-density county like Midland.
     const body = new URLSearchParams({
       methodToCall:                    "search",
       "searchArgs.leaseTypeArg":       "",
@@ -395,37 +468,35 @@ export async function lookupTrrcLeasesByApis(
       "searchArgs.operatorNumbersArg": "",
       "searchArgs.apiNoSuffixArg":     "",
       "searchArgs.leaseNumberArg":     "",
-      "pager.pageSize":                "500",  // grab more to improve odds of finding our wells
+      "pager.pageSize":                "500",
     });
 
     const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
       method:  "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body:    body.toString(),
-      signal:  controller.signal,
+      signal:  controller2.signal,
     });
-    clearTimeout(timer);
-    if (!res.ok) return empty;
+    clearTimeout(timer2);
 
-    const html    = await res.text();
-    const entries = parsePdqCountyEntries(html, 500);
-    const result  = new Map<string, { distCode: string; leaseNo: string; operator: string }>();
-
-    for (const entry of entries) {
-      if (target8.has(entry.apiNo8)) {
-        result.set(entry.api10, {
-          distCode: entry.distCode,
-          leaseNo:  entry.leaseNo,
-          operator: entry.operator,
-        });
+    if (res.ok) {
+      const html    = await res.text();
+      const entries = parsePdqCountyEntries(html, 500);
+      for (const entry of entries) {
+        if (target8Remaining.has(entry.apiNo8) && !result.has(entry.api10)) {
+          result.set(entry.api10, {
+            distCode: entry.distCode,
+            leaseNo:  entry.leaseNo,
+            operator: entry.operator,
+          });
+        }
       }
     }
-
-    return result;
   } catch {
-    clearTimeout(timer);
-    return empty;
+    clearTimeout(timer2);
   }
+
+  return result;
 }
 
 export async function lookupTrrcWells(county: string): Promise<WellLookupResult> {
