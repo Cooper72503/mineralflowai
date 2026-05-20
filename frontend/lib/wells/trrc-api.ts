@@ -388,25 +388,28 @@ export async function lookupTrrcLeasesByApis(
 
   const result = new Map<string, { distCode: string; leaseNo: string; operator: string }>();
 
-  // ── Strategy 1 (preferred): query county + apiNoSuffix for each API ──────
+  // ── Strategy 1 (primary): apiNoPrefixArg + apiNoSuffixArg ───────────────
   //
-  // This bypasses county-wide pagination (Fisher County has 542+ wells) by
-  // sending TRRC a county code + the 5-digit well-number suffix for each API
-  // individually.  TRRC returns only the matching wellbore(s), so no page-size
-  // limit is ever hit.  This is the same HTML/link pattern that parsePdqCountyEntries
-  // already parses reliably.
+  // PROVEN via live debug (2026-05-20):
+  //   apiNoPrefixArg = county3 (first 3 digits of 8-digit API, e.g. "151")
+  //   apiNoSuffixArg = well5   (last  5 digits of 8-digit API, e.g. "31926")
+  //
+  // TRRC returns ONLY wells matching that exact API number (2 rows for Fisher/Bomar).
+  // This bypasses all county pagination issues — no county scan, no page size limit.
+  //
+  // Contrast:
+  //   countyCodeArg + apiNoSuffixArg (Strategy A) → TRRC ignores suffix, returns
+  //   all county wells sorted by API — does NOT filter.
+  //
+  //   apiNoPrefixArg alone (no suffix) → county-level results (all wells in county).
+  //
+  // The county name passed by the caller is NOT needed — county code is always
+  // derived from the API number's first 3 digits.
 
   const directResults = await Promise.allSettled(
     target8List.map(async (api8) => {
-      // Derive county code from the API number itself (first 3 digits of 8-digit form).
-      // "15131926" → county "151" (Fisher).  This works for any Texas well — no
-      // county name needed from the caller.
-      const apiCountyCode = api8.slice(0, 3);
-      const wellSuffix    = api8.slice(3); // last 5 digits: "15131926" → "31926"
-
-      // If the caller supplied a county name AND it resolves to a different code,
-      // prefer the caller-supplied code (in case the user knows something we don't).
-      const resolvedCountyCode = countyCodeFromName ?? apiCountyCode;
+      const county3    = api8.slice(0, 3); // "15131926" → "151"
+      const wellSuffix = api8.slice(3);    // "15131926" → "31926"
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10_000);
@@ -414,13 +417,13 @@ export async function lookupTrrcLeasesByApis(
       try {
         const body = new URLSearchParams({
           methodToCall:                    "search",
+          "searchArgs.apiNoPrefixArg":     county3,     // ← KEY: not countyCodeArg
+          "searchArgs.apiNoSuffixArg":     wellSuffix,  // ← KEY: well serial number
           "searchArgs.leaseTypeArg":       "",
-          "searchArgs.countyCodeArg":      resolvedCountyCode,
           "searchArgs.districtCodeArg":    "None Selected",
           "searchArgs.wellTypeArg":        "",
           "searchArgs.fieldNumbersArg":    "",
           "searchArgs.operatorNumbersArg": "",
-          "searchArgs.apiNoSuffixArg":     wellSuffix,
           "searchArgs.leaseNumberArg":     "",
           "pager.pageSize":                "25",
         });
@@ -486,12 +489,14 @@ export async function lookupTrrcLeasesByApis(
     const timer2 = setTimeout(() => controller2.abort(), 12_000);
 
     try {
+      // Use apiNoPrefixArg=county (no suffix) for county-wide fallback.
+      // This is Strategy D from debug — returns all wells in county sorted by API.
       const body = new URLSearchParams({
         methodToCall:                    "search",
+        "searchArgs.apiNoPrefixArg":     cc,
         "searchArgs.leaseTypeArg":       "",
-        "searchArgs.countyCodeArg":      cc,
         "searchArgs.districtCodeArg":    "None Selected",
-        "searchArgs.wellTypeArg":        "PR",
+        "searchArgs.wellTypeArg":        "",
         "searchArgs.fieldNumbersArg":    "",
         "searchArgs.operatorNumbersArg": "",
         "searchArgs.apiNoSuffixArg":     "",
@@ -554,7 +559,7 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     const body = new URLSearchParams({
       methodToCall:                   "search",
       "searchArgs.leaseTypeArg":      "",
-      "searchArgs.countyCodeArg":     countyCode,
+      "searchArgs.apiNoPrefixArg":    countyCode,   // county code only = county scan
       "searchArgs.districtCodeArg":   "None Selected",
       "searchArgs.wellTypeArg":       "PR",   // PRODUCING wells
       "searchArgs.fieldNumbersArg":   "",
