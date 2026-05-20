@@ -39,10 +39,17 @@ import type {
   MissingItem,
   NextQuestion,
   DDReportConfidence,
+  DcaSection,
+  AcquisitionEconomicsSection,
+  EconomicsScenario,
+  RiskSection,
 } from "./types";
 import type { DocumentExtractionResult } from "./document-extraction";
 import type { TrrcViolation } from "./trrc-compliance";
 import type { TrrcInjectionRecord } from "./trrc-injection";
+import { runDca } from "./decline-curve";
+import { runEconomics, DEFAULT_PRICE_DECKS } from "./economics-engine";
+import { scoreRisk } from "./risk-engine";
 
 // ─── TRRC production well (from existing well lookup) ─────────────────────────
 
@@ -815,6 +822,205 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     directed_at: "title_attorney",
   });
 
+  // ── Decline Curve Analysis ────────────────────────────────────────────────
+
+  // Aggregate all monthly rows across TRRC wells
+  const allMonthlyRows = trrcWells.flatMap(w => w.monthly_rows ?? []);
+  const dcaResult = allMonthlyRows.length >= 3 ? runDca(allMonthlyRows) : null;
+
+  const dcaSection: DcaSection = {
+    model_type: dcaResult
+      ? dp(dcaResult.model.type, "trrc", "medium", "Arps DCA fit to TRRC production history")
+      : missingDp<"exponential"|"hyperbolic"|"harmonic">("Insufficient production history for DCA (need 3+ months)"),
+    decline_rate_monthly_pct: dcaResult
+      ? dp(dcaResult.decline_rate_monthly_pct, "trrc", dcaResult.months_of_data >= 12 ? "high" : "medium",
+          `${dcaResult.months_of_data} months of data, R²=${dcaResult.model.r_squared.toFixed(2)}`)
+      : (declineRate != null
+          ? dp(Math.abs(declineRate), "trrc", "low", "Simple 6/12-month average — insufficient data for Arps fit")
+          : missingDp<number>("No production data for decline analysis")),
+    decline_rate_annual_pct: dcaResult
+      ? dp(dcaResult.decline_rate_annual_pct, "trrc", "medium")
+      : missingDp<number>(),
+    b_factor: dcaResult
+      ? dp(dcaResult.model.b, "inferred", "medium", `Arps b-factor (${dcaResult.model.type})`)
+      : missingDp<number>(),
+    r_squared: dcaResult
+      ? dp(dcaResult.model.r_squared, "inferred", "medium", "DCA curve fit quality")
+      : missingDp<number>(),
+    eur_bbl: dcaResult
+      ? dp(dcaResult.eur_bbl, "inferred", dcaResult.model.r_squared > 0.8 ? "medium" : "low",
+          `Arps EUR to 5 BBL/mo economic limit`)
+      : missingDp<number>("Requires 3+ months of production history"),
+    remaining_reserves_bbl: dcaResult
+      ? dp(dcaResult.remaining_reserves_bbl, "inferred", "low", "EUR minus historical cum — unaudited")
+      : missingDp<number>(),
+    economic_life_months: dcaResult
+      ? dp(dcaResult.economic_life_months, "inferred", "low")
+      : missingDp<number>(),
+    current_rate_bbl: dcaResult
+      ? dp(dcaResult.current_bbl, "trrc", "high", "Most recent TRRC monthly production")
+      : (totalOil > 0 ? dp(totalOil, "trrc", "high") : missingDp<number>()),
+    peak_rate_bbl: dcaResult
+      ? dp(dcaResult.peak_bbl, "trrc", "high")
+      : missingDp<number>(),
+    cum_oil_bbl: dcaResult
+      ? dp(dcaResult.cum_oil_bbl, "trrc", "high", "Total TRRC-reported cumulative production")
+      : (trrcWells.length > 0 ? dp(trrcWells.reduce((s, w) => s + w.cum_oil_bbl, 0), "trrc", "high") : missingDp<number>()),
+    projections: dcaResult?.projections ?? [],
+    notes: dcaResult
+      ? [`${dcaResult.model.type} model, R²=${dcaResult.model.r_squared.toFixed(2)}, b=${dcaResult.model.b.toFixed(2)}, Di=${(dcaResult.model.Di * 100).toFixed(2)}%/mo nominal`]
+      : ["Decline curve analysis requires TRRC production history. Provide API number for automatic lookup."],
+  };
+
+  // ── Acquisition Economics ─────────────────────────────────────────────────
+
+  const nriDecimal  = (() => {
+    const r = ownershipRecords.find(r => r.nri_decimal != null);
+    return r?.nri_decimal ?? 0.75;
+  })();
+  const wiDecimal  = (() => {
+    const r = ownershipRecords.find(r =>
+      r.interest_type.toLowerCase().includes("wi") || r.interest_type.toLowerCase().includes("working")
+    );
+    return r?.decimal_interest ?? 1.0;
+  })();
+
+  const monthlyLoe = avgLoe ?? 0;
+  const dcaMonthlyDecline = dcaResult
+    ? dcaResult.model.Di
+    : (declineRate != null ? Math.abs(declineRate) / 100 : 0.012);
+  const bFactor = dcaResult?.model.b ?? 0;
+
+  const econResult = (totalOil > 0 || monthlyLoe > 0)
+    ? runEconomics({
+        monthly_oil_bbl:           totalOil,
+        monthly_gas_mcf:           totalGas,
+        monthly_loe_usd:           monthlyLoe,
+        nri_decimal:               nriDecimal,
+        wi_decimal:                wiDecimal,
+        decline_rate_monthly:      dcaMonthlyDecline,
+        b_factor:                  bFactor,
+        eur_bbl:                   dcaResult?.eur_bbl ?? 0,
+        remaining_reserves_bbl:    dcaResult?.remaining_reserves_bbl ?? 0,
+        cum_production_bbl:        dcaResult?.cum_oil_bbl ?? 0,
+        price_decks:               DEFAULT_PRICE_DECKS,
+      })
+    : null;
+
+  const econNriSource: DataSource = ownershipRecords.some(r => r.nri_decimal != null) ? "uploaded_doc" : "inferred";
+  const econWiSource: DataSource  = ownershipRecords.some(r => r.interest_type.toLowerCase().includes("wi")) ? "uploaded_doc" : "inferred";
+
+  const acquisitionEconomicsSection: AcquisitionEconomicsSection = {
+    nri_decimal: dp(nriDecimal, econNriSource, econNriSource === "uploaded_doc" ? "high" : "low",
+      econNriSource === "inferred" ? "Assumed 75% NRI — provide division orders to confirm" : undefined),
+    wi_decimal:  dp(wiDecimal,  econWiSource,  econWiSource  === "uploaded_doc" ? "high" : "low",
+      econWiSource  === "inferred" ? "Assumed 100% WI — provide JOA to confirm" : undefined),
+    monthly_net_income_usd: econResult
+      ? dp(econResult.monthly_net_income_usd, totalOil > 0 ? "trrc" : "loe_statement", totalOil > 0 ? "medium" : "low",
+          "TRRC production × base price deck − LOE")
+      : missingDp<number>("Requires production and LOE data"),
+    annual_net_income_usd: econResult
+      ? dp(econResult.annual_net_income_usd, "inferred", "medium")
+      : missingDp<number>(),
+    npv10_usd: econResult
+      ? dp(econResult.npv10_base_usd, "inferred", "low", "10% discount rate, base price deck, Arps decline. Unaudited.")
+      : missingDp<number>(),
+    offer_range_low:  econResult ? dp(econResult.offer_range_low,  "inferred", "low", "3× annual NCF") : missingDp<number>(),
+    offer_range_mid:  econResult ? dp(econResult.offer_range_mid,  "inferred", "low", "4.5× annual NCF") : missingDp<number>(),
+    offer_range_high: econResult ? dp(econResult.offer_range_high, "inferred", "low", "6× annual NCF, capped at 85% NPV10") : missingDp<number>(),
+    breakeven_oil_price: econResult
+      ? dp(econResult.breakeven_oil_price, "inferred", "medium", "Oil price at which net income = 0")
+      : missingDp<number>(),
+    months_remaining: econResult
+      ? dp(econResult.months_of_production_remaining, "inferred", "low")
+      : missingDp<number>(),
+    scenarios: econResult
+      ? econResult.scenarios.map((s): EconomicsScenario => ({
+          deck_label:              s.deck.label,
+          oil_price_usd:           s.deck.oil_usd_bbl,
+          gas_price_usd:           s.deck.gas_usd_mcf,
+          monthly_gross_revenue:   s.monthly_gross_revenue_usd,
+          monthly_net_revenue:     s.monthly_net_revenue_usd,
+          monthly_net_income:      s.monthly_net_income_usd,
+          loe_per_boe:             s.loe_per_boe,
+          annual_net_income:       s.annual_net_income_usd,
+          npv10_usd:               s.npv10_usd,
+          npv15_usd:               s.npv15_usd,
+          offer_low_usd:           s.offer_low_usd,
+          offer_mid_usd:           s.offer_mid_usd,
+          offer_high_usd:          s.offer_high_usd,
+          irr_pct:                 s.irr_pct,
+          payout_months:           s.payout_months,
+        }))
+      : [],
+    notes: econResult
+      ? [
+          `NRI: ${(nriDecimal * 100).toFixed(2)}% (${econNriSource}), WI: ${(wiDecimal * 100).toFixed(0)}% (${econWiSource})`,
+          "Offer ranges based on 3×–6× annual NCF multiples. LOE from " + (monthlyLoe > 0 ? "provided statements" : "assumed $0 — provide LOE for accurate underwriting"),
+          "All economics preliminary — not a substitute for a petroleum engineer's reserve report.",
+        ]
+      : ["Economics unavailable — provide API numbers for TRRC production and LOE statements for cost data."],
+  };
+
+  // ── Risk scoring ──────────────────────────────────────────────────────────
+
+  const riskInput = {
+    decline_rate_monthly_pct: dcaResult?.decline_rate_monthly_pct ?? (declineRate != null ? Math.abs(declineRate) : null),
+    water_cut_pct:            waterCutValue,
+    months_producing:         allMonthlyRows.length > 0 ? allMonthlyRows.length : null,
+    last_production_date:     wellRows[0]?.latest_production_month ?? null,
+    trend:                    wellRows[0]?.production_trend?.value ?? null,
+    monthly_oil_bbl:          totalOil > 0 ? totalOil : null,
+    eur_bbl:                  dcaResult?.eur_bbl ?? null,
+    loe_per_boe:              loePerBoe,
+    monthly_net_income_usd:   econResult?.monthly_net_income_usd ?? null,
+    loe_statements_count:     loePeriods.length,
+    run_tickets_present:      extracted?.run_tickets_present ?? false,
+    breakeven_oil_price:      econResult?.breakeven_oil_price ?? null,
+    offer_mid_usd:            econResult?.offer_range_mid ?? null,
+    open_violations:          openViolations.length,
+    total_violations:         allViolations.length,
+    inactive_well_count:      plugWells.length,
+    total_plug_cost_usd:      totalPlugCost > 0 ? totalPlugCost : null,
+    orphan_risk:              orphanRisk,
+    operator_name:            operatorName,
+    has_bond:                 extracted?.bond_amount_usd != null,
+    bond_amount_usd:          extracted?.bond_amount_usd ?? null,
+    match_tier:               matchTier,
+    documents_provided:       (args.input.documents ?? []).length,
+    has_reserve_report:       reservePresent,
+    acquisition_cost_usd:     null,
+    payout_months:            econResult?.scenarios.find(s => s.deck.label === "Base")?.payout_months ?? null,
+  };
+
+  const riskResult = scoreRisk(riskInput);
+
+  const riskSection: RiskSection = {
+    overall_score: dp(riskResult.overall_score, "inferred", "medium", "Weighted across 6 risk categories"),
+    recommendation: dp(riskResult.recommendation, "inferred", riskResult.confidence, riskResult.recommendation_rationale),
+    recommendation_rationale: riskResult.recommendation_rationale,
+    confidence: riskResult.confidence,
+    categories: riskResult.categories,
+    red_flags:    riskResult.red_flags,
+    yellow_flags: riskResult.yellow_flags,
+    green_flags:  riskResult.green_flags,
+    diligence_checklist: riskResult.diligence_checklist,
+  };
+
+  // Update missing items from risk checklist
+  for (const item of riskResult.diligence_checklist) {
+    if (item.status === "pending" && item.priority === "critical") {
+      if (!missingItems.some(m => m.field.toLowerCase().includes(item.item.toLowerCase().slice(0, 15)))) {
+        missingItems.push({
+          section: "Diligence",
+          field: item.item,
+          importance: "critical",
+          note: "From risk-engine diligence checklist",
+        });
+      }
+    }
+  }
+
   // ── Overall confidence ────────────────────────────────────────────────────
 
   const criticalMissing = missingItems.filter(m => m.importance === "critical").length;
@@ -846,6 +1052,9 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     overall_confidence_note: overallNote,
     subject,
     production: productionSection,
+    dca: dcaSection,
+    acquisition_economics: acquisitionEconomicsSection,
+    risk: riskSection,
     economics: economicsSection,
     workovers: workoverSection,
     equipment: equipmentSection,

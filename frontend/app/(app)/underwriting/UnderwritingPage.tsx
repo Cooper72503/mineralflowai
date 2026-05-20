@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { DDReport, DataPoint, DataConfidence, DataSource, MissingItem, NextQuestion } from "@/lib/underwriting/types";
+import type {
+  DDReport, DataPoint, DataConfidence, DataSource, MissingItem, NextQuestion,
+  EconomicsScenario, RiskCategoryResult, DiligenceCheckItem,
+} from "@/lib/underwriting/types";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -216,7 +219,10 @@ const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 // ─── Tab types ────────────────────────────────────────────────────────────────
 
 type TabId =
+  | "recommendation"
   | "production"
+  | "dca"
+  | "acq_economics"
   | "economics"
   | "workovers"
   | "equipment"
@@ -228,16 +234,19 @@ type TabId =
   | "questions";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: "production",  label: "Production",       icon: "⛽" },
-  { id: "economics",   label: "Economics / LOE",  icon: "📊" },
-  { id: "workovers",   label: "Workovers",         icon: "🔧" },
-  { id: "equipment",   label: "Equipment",         icon: "⚙️" },
-  { id: "compliance",  label: "Compliance",        icon: "📋" },
-  { id: "plugging",    label: "Plugging Liability",icon: "🔌" },
-  { id: "injection",   label: "SWD / Injection",   icon: "💧" },
-  { id: "ownership",   label: "Ownership",         icon: "📜" },
-  { id: "missing",     label: "Missing Items",     icon: "⚠️" },
-  { id: "questions",   label: "Next Questions",    icon: "❓" },
+  { id: "recommendation", label: "Recommendation",   icon: "🎯" },
+  { id: "production",     label: "Production",       icon: "⛽" },
+  { id: "dca",            label: "Decline Curves",   icon: "📉" },
+  { id: "acq_economics",  label: "Acq. Economics",   icon: "💰" },
+  { id: "economics",      label: "Economics / LOE",  icon: "📊" },
+  { id: "workovers",      label: "Workovers",        icon: "🔧" },
+  { id: "equipment",      label: "Equipment",        icon: "⚙️" },
+  { id: "compliance",     label: "Compliance",       icon: "📋" },
+  { id: "plugging",       label: "Plugging Liability",icon: "🔌" },
+  { id: "injection",      label: "SWD / Injection",  icon: "💧" },
+  { id: "ownership",      label: "Ownership",        icon: "📜" },
+  { id: "missing",        label: "Missing Items",    icon: "⚠️" },
+  { id: "questions",      label: "Next Steps",       icon: "❓" },
 ];
 
 // ─── Report sections ──────────────────────────────────────────────────────────
@@ -711,6 +720,361 @@ function NextQuestionsTab({ questions }: { questions: NextQuestion[] }) {
   );
 }
 
+// ─── Recommendation Tab ───────────────────────────────────────────────────────
+
+function RecommendationTab({ report }: { report: DDReport }) {
+  const risk = report.risk;
+  const rec = risk.recommendation.value;
+  const score = risk.overall_score.value ?? 0;
+
+  const recColors: Record<string, string> = {
+    pursue: COLORS.green,
+    review: COLORS.yellow,
+    pass:   COLORS.red,
+  };
+  const recColor = recColors[rec ?? "review"] ?? COLORS.yellow;
+
+  const catOrder: (keyof typeof risk.categories)[] = [
+    "production", "financial", "compliance", "plugging", "operator", "data_quality",
+  ];
+
+  function ScoreBar({ score, weight }: { score: number; weight: number }) {
+    const color = score <= 3 ? COLORS.green : score <= 6 ? COLORS.yellow : COLORS.red;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ flex: 1, height: 6, background: COLORS.surfaceAlt, borderRadius: 3, overflow: "hidden" }}>
+          <div style={{ width: `${score * 10}%`, height: "100%", background: color, borderRadius: 3, transition: "width 0.5s" }} />
+        </div>
+        <span style={{ fontSize: "0.75rem", fontWeight: 700, color, minWidth: 24 }}>{score}</span>
+        <span style={{ fontSize: "0.68rem", color: COLORS.textFaint }}>({(weight * 100).toFixed(0)}%)</span>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Hero recommendation banner */}
+      <div style={{
+        background: COLORS.surface,
+        border: `2px solid ${recColor}`,
+        borderRadius: 12,
+        padding: "1.5rem 2rem",
+        marginBottom: "1rem",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: "1rem",
+      }}>
+        <div>
+          <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
+            Acquisition Recommendation
+          </div>
+          <div style={{ fontSize: "2.5rem", fontWeight: 900, color: recColor, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            {rec ?? "REVIEW"}
+          </div>
+          <div style={{ fontSize: "0.85rem", color: COLORS.textMuted, marginTop: 6, maxWidth: 500 }}>
+            {risk.recommendation_rationale}
+          </div>
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+            Risk Score
+          </div>
+          <div style={{ fontSize: "3rem", fontWeight: 900, color: recColor, lineHeight: 1 }}>
+            {score.toFixed(1)}
+          </div>
+          <div style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>out of 10</div>
+        </div>
+        {report.acquisition_economics.offer_range_mid.value && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+              Estimated Offer Range
+            </div>
+            <div style={{ fontSize: "1.1rem", fontWeight: 800, color: COLORS.green }}>
+              {fmt$(report.acquisition_economics.offer_range_low.value ?? 0)} –{" "}
+              {fmt$(report.acquisition_economics.offer_range_high.value ?? 0)}
+            </div>
+            <div style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>base price deck</div>
+          </div>
+        )}
+      </div>
+
+      {/* Flag summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
+        {[
+          { title: "🚩 Red Flags", items: risk.red_flags, color: COLORS.red, bg: COLORS.redDim },
+          { title: "🟡 Yellow Flags", items: risk.yellow_flags, color: COLORS.yellow, bg: COLORS.yellowDim },
+          { title: "✅ Green Flags", items: risk.green_flags, color: COLORS.green, bg: COLORS.greenDim },
+        ].map(({ title, items, color, bg }) => (
+          <div key={title} style={{
+            background: COLORS.surface,
+            border: `1px solid ${color}40`,
+            borderRadius: 10,
+            padding: "1rem",
+          }}>
+            <div style={{ fontWeight: 700, color, fontSize: "0.8rem", marginBottom: 8 }}>{title}</div>
+            {items.length === 0
+              ? <div style={{ color: COLORS.textFaint, fontSize: "0.78rem" }}>None identified</div>
+              : items.map((f, i) => (
+                  <div key={i} style={{ fontSize: "0.78rem", color: COLORS.text, padding: "0.3rem 0", borderTop: i > 0 ? `1px solid ${COLORS.border}` : "none" }}>
+                    {f}
+                  </div>
+                ))
+            }
+          </div>
+        ))}
+      </div>
+
+      {/* Category scores */}
+      <Section title="Risk Category Breakdown" icon="📊">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+          {catOrder.map(key => {
+            const cat: RiskCategoryResult = risk.categories[key];
+            return (
+              <div key={key} style={{
+                background: COLORS.surfaceAlt,
+                borderRadius: 8,
+                padding: "0.9rem 1rem",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: "0.8rem", fontWeight: 600, color: COLORS.text }}>{cat.name}</span>
+                </div>
+                <ScoreBar score={cat.score} weight={cat.weight} />
+                {cat.flags.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    {cat.flags.map((f, i) => (
+                      <div key={i} style={{ fontSize: "0.72rem", color: COLORS.red, padding: "0.2rem 0" }}>• {f}</div>
+                    ))}
+                  </div>
+                )}
+                {cat.mitigants.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    {cat.mitigants.map((m, i) => (
+                      <div key={i} style={{ fontSize: "0.72rem", color: COLORS.green, padding: "0.2rem 0" }}>✓ {m}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
+      {/* Diligence checklist */}
+      <Section title="Diligence Checklist" icon="✅">
+        <DdTable
+          headers={["Priority", "Item", "Status"]}
+          rows={risk.diligence_checklist.map((item: DiligenceCheckItem) => [
+            <span key="p" style={{
+              fontSize: "0.68rem",
+              fontWeight: 700,
+              color: item.priority === "critical" ? COLORS.red : item.priority === "important" ? COLORS.yellow : COLORS.textMuted,
+              textTransform: "uppercase",
+            }}>
+              {item.priority.replace("_", " ")}
+            </span>,
+            item.item,
+            <span key="s" style={{
+              fontSize: "0.72rem",
+              color: item.status === "complete" ? COLORS.green : item.status === "pending" ? COLORS.yellow : COLORS.textFaint,
+            }}>
+              {item.status === "complete" ? "✓ Complete" : item.status === "pending" ? "⟳ Pending" : "N/A"}
+            </span>,
+          ])}
+        />
+      </Section>
+    </div>
+  );
+}
+
+// ─── Decline Curve Tab ────────────────────────────────────────────────────────
+
+function DcaTab({ report }: { report: DDReport }) {
+  const dca = report.dca;
+
+  // Mini sparkline via SVG
+  function ProjectionChart({ projections }: { projections: { month: number; rate_bbl: number }[] }) {
+    if (projections.length === 0) return <p style={{ color: COLORS.textFaint, fontSize: "0.8rem" }}>No projection data</p>;
+    const maxRate = Math.max(...projections.map(p => p.rate_bbl), 1);
+    const w = 500, h = 120, padL = 40, padB = 20, padT = 10, padR = 10;
+    const innerW = w - padL - padR;
+    const innerH = h - padT - padB;
+
+    const pts = projections.filter((_, i) => i % 3 === 0); // every 3 months
+    const pathD = pts.map((p, i) => {
+      const x = padL + (p.month / 60) * innerW;
+      const y = padT + innerH - (p.rate_bbl / maxRate) * innerH;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+
+    return (
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", maxWidth: 500, height: "auto" }}>
+        {/* Axes */}
+        <line x1={padL} y1={padT} x2={padL} y2={padT + innerH} stroke={COLORS.border} strokeWidth={1} />
+        <line x1={padL} y1={padT + innerH} x2={padL + innerW} y2={padT + innerH} stroke={COLORS.border} strokeWidth={1} />
+        {/* Labels */}
+        <text x={padL - 5} y={padT + 5}      fill={COLORS.textFaint} fontSize="9" textAnchor="end">{Math.round(maxRate)}</text>
+        <text x={padL - 5} y={padT + innerH} fill={COLORS.textFaint} fontSize="9" textAnchor="end">0</text>
+        <text x={padL} y={h - 3}             fill={COLORS.textFaint} fontSize="9">0</text>
+        <text x={padL + innerW} y={h - 3}    fill={COLORS.textFaint} fontSize="9" textAnchor="end">60mo</text>
+        {/* Curve */}
+        <path d={pathD} fill="none" stroke={COLORS.accent} strokeWidth={2} />
+        {/* Area fill */}
+        <path d={`${pathD} L${padL + innerW},${padT + innerH} L${padL},${padT + innerH} Z`}
+          fill={COLORS.accent} fillOpacity={0.08} />
+      </svg>
+    );
+  }
+
+  return (
+    <div>
+      <Section title="Decline Curve Model" icon="📉">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 2rem", marginBottom: "1rem" }}>
+          <KvRow label="Model Type"><DataCell dp={dca.model_type} format={v => v.charAt(0).toUpperCase() + v.slice(1)} /></KvRow>
+          <KvRow label="Monthly Decline %"><DataCell dp={dca.decline_rate_monthly_pct} format={fmtPct} /></KvRow>
+          <KvRow label="Annual Decline %"><DataCell dp={dca.decline_rate_annual_pct} format={fmtPct} /></KvRow>
+          <KvRow label="Arps b-Factor"><DataCell dp={dca.b_factor} format={v => v.toFixed(3)} /></KvRow>
+          <KvRow label="R² (fit quality)"><DataCell dp={dca.r_squared} format={v => v.toFixed(3)} /></KvRow>
+          <KvRow label="Current Rate (BBL/mo)"><DataCell dp={dca.current_rate_bbl} format={v => fmtN(v)} /></KvRow>
+          <KvRow label="Peak Rate (BBL/mo)"><DataCell dp={dca.peak_rate_bbl} format={v => fmtN(v)} /></KvRow>
+          <KvRow label="Cum. Production (BBL)"><DataCell dp={dca.cum_oil_bbl} format={v => fmtN(v)} /></KvRow>
+          <KvRow label="EUR (BBL)"><DataCell dp={dca.eur_bbl} format={v => fmtN(v)} /></KvRow>
+          <KvRow label="Remaining Reserves (BBL)"><DataCell dp={dca.remaining_reserves_bbl} format={v => fmtN(v)} /></KvRow>
+          <KvRow label="Economic Life (months)"><DataCell dp={dca.economic_life_months} format={v => `${v} months`} /></KvRow>
+        </div>
+        {dca.notes.length > 0 && (
+          <div style={{ background: COLORS.surfaceAlt, borderRadius: 6, padding: "0.6rem 0.9rem", fontSize: "0.78rem", color: COLORS.textMuted }}>
+            {dca.notes.map((n, i) => <div key={i}>{n}</div>)}
+          </div>
+        )}
+      </Section>
+
+      {dca.projections.length > 0 && (
+        <Section title="60-Month Production Projection (Arps Decline)" icon="📈">
+          <ProjectionChart projections={dca.projections} />
+          <div style={{ marginTop: "0.75rem", overflowX: "auto" }}>
+            <DdTable
+              headers={["Month", "1", "6", "12", "18", "24", "36", "48", "60"]}
+              rows={[[
+                "BBL/mo (projected)",
+                ...([1, 6, 12, 18, 24, 36, 48, 60].map(m => {
+                  const p = dca.projections.find(p => p.month === m);
+                  return p ? fmtN(Math.round(p.rate_bbl)) : "—";
+                })),
+              ]]}
+            />
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+// ─── Acquisition Economics Tab ────────────────────────────────────────────────
+
+function AcqEconomicsTab({ report }: { report: DDReport }) {
+  const econ = report.acquisition_economics;
+
+  return (
+    <div>
+      {/* Key metrics */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
+        {[
+          { label: "Monthly Net Income", dp: econ.monthly_net_income_usd, fmt: fmt$ },
+          { label: "Annual Net Income",  dp: econ.annual_net_income_usd,  fmt: fmt$ },
+          { label: "NPV10 (Base)",       dp: econ.npv10_usd,              fmt: fmt$ },
+          { label: "Breakeven Oil",      dp: econ.breakeven_oil_price,    fmt: (v: number) => `$${v.toFixed(2)}/bbl` },
+        ].map(({ label, dp, fmt }) => (
+          <div key={label} style={{
+            background: COLORS.surface,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 10,
+            padding: "1rem",
+          }}>
+            <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+              {label}
+            </div>
+            <div style={{ fontSize: "1.1rem", fontWeight: 800, color: COLORS.text }}>
+              {dp.value != null
+                ? <><span>{fmt(dp.value)}</span> <SourceBadge source={dp.source} /></>
+                : <span style={{ color: COLORS.textFaint, fontSize: "0.8rem", fontStyle: "italic" }}>{dp.note ?? "—"}</span>
+              }
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Offer range */}
+      {econ.offer_range_mid.value && (
+        <Section title="Estimated Offer Range (Base Case)" icon="💰">
+          <div style={{ display: "flex", gap: "1.5rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+            {[
+              { label: "Conservative (3× NCF)", dp: econ.offer_range_low, color: COLORS.yellow },
+              { label: "Mid (4.5× NCF)", dp: econ.offer_range_mid, color: COLORS.green },
+              { label: "Aggressive (6× NCF)", dp: econ.offer_range_high, color: COLORS.accent },
+            ].map(({ label, dp, color }) => (
+              <div key={label} style={{
+                background: COLORS.surfaceAlt,
+                borderRadius: 8,
+                padding: "0.75rem 1.25rem",
+                flex: 1,
+                minWidth: 160,
+              }}>
+                <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: "1.25rem", fontWeight: 800, color }}>
+                  {dp.value != null ? fmt$(dp.value) : "—"}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: "0.72rem", color: COLORS.textFaint, margin: "0.5rem 0 0 0" }}>
+            ⚠️ Preliminary estimates only. Based on TRRC production × price decks minus operator LOE.
+            Assumes NRI {((econ.nri_decimal.value ?? 0.75) * 100).toFixed(0)}%, WI {((econ.wi_decimal.value ?? 1) * 100).toFixed(0)}%.
+            Not a substitute for a reserve engineer's valuation.
+          </p>
+        </Section>
+      )}
+
+      {/* Scenario table */}
+      {econ.scenarios.length > 0 && (
+        <Section title="Price Deck Scenarios" icon="📊">
+          <DdTable
+            headers={["Deck", "Oil Price", "Monthly Gross Rev", "Monthly Net Rev", "Monthly Net Income", "LOE/BOE", "NPV10", "Offer Mid", "IRR", "Payout"]}
+            rows={econ.scenarios.map((s: EconomicsScenario) => [
+              <strong key="d">{s.deck_label}</strong>,
+              `$${s.oil_price_usd}/bbl`,
+              fmt$(s.monthly_gross_revenue),
+              fmt$(s.monthly_net_revenue),
+              <span key="ni" style={{ color: s.monthly_net_income >= 0 ? COLORS.green : COLORS.red }}>
+                {fmt$(s.monthly_net_income)}
+              </span>,
+              `$${s.loe_per_boe.toFixed(2)}/BOE`,
+              fmt$(s.npv10_usd),
+              fmt$(s.offer_mid_usd),
+              s.irr_pct != null ? `${s.irr_pct.toFixed(1)}%` : "—",
+              s.payout_months != null ? `${s.payout_months} mo` : "—",
+            ])}
+          />
+        </Section>
+      )}
+
+      {/* Interest details */}
+      <Section title="Interest Structure" icon="📜">
+        <KvRow label="Net Revenue Interest (NRI)"><DataCell dp={econ.nri_decimal} format={v => `${(v * 100).toFixed(4)}%`} /></KvRow>
+        <KvRow label="Working Interest (WI)"><DataCell dp={econ.wi_decimal} format={v => `${(v * 100).toFixed(2)}%`} /></KvRow>
+        <KvRow label="Economic Life Remaining"><DataCell dp={econ.months_remaining} format={v => `${v} months (~${(v / 12).toFixed(1)} yrs)`} /></KvRow>
+      </Section>
+
+      {econ.notes.length > 0 && (
+        <div style={{ background: COLORS.surfaceAlt, borderRadius: 6, padding: "0.75rem 1rem", fontSize: "0.78rem", color: COLORS.textMuted }}>
+          {econ.notes.map((n, i) => <div key={i} style={{ padding: "0.2rem 0" }}>• {n}</div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Input form ───────────────────────────────────────────────────────────────
 
 type FormState = {
@@ -851,24 +1215,47 @@ function ReportHeader({ report }: { report: DDReport }) {
           {report.overall_confidence_note}
         </div>
       </div>
-      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "1.25rem", flexWrap: "wrap", alignItems: "flex-start" }}>
+        {/* Recommendation pill */}
+        {report.risk.recommendation.value && (() => {
+          const recColors: Record<string, string> = { pursue: COLORS.green, review: COLORS.yellow, pass: COLORS.red };
+          const rc = recColors[report.risk.recommendation.value] ?? COLORS.yellow;
+          return (
+            <div style={{ textAlign: "center" }}>
+              <div style={{
+                fontSize: "0.95rem", fontWeight: 900, color: "#fff",
+                background: rc, borderRadius: 6,
+                padding: "0.25rem 0.75rem", textTransform: "uppercase", letterSpacing: "0.06em",
+              }}>
+                {report.risk.recommendation.value}
+              </div>
+              <div style={{ fontSize: "0.6rem", color: COLORS.textMuted, textTransform: "uppercase", marginTop: 3 }}>Recommendation</div>
+            </div>
+          );
+        })()}
+        {/* Risk score */}
+        {report.risk.overall_score.value != null && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: "1.2rem", fontWeight: 800, color: COLORS.yellow }}>
+              {report.risk.overall_score.value.toFixed(1)}<span style={{ fontSize: "0.7rem", color: COLORS.textFaint }}>/10</span>
+            </div>
+            <div style={{ fontSize: "0.6rem", color: COLORS.textMuted, textTransform: "uppercase" }}>Risk Score</div>
+          </div>
+        )}
+        {/* Offer range */}
+        {report.acquisition_economics.offer_range_mid.value && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: "0.85rem", fontWeight: 700, color: COLORS.green }}>
+              {fmt$(report.acquisition_economics.offer_range_low.value ?? 0)} – {fmt$(report.acquisition_economics.offer_range_high.value ?? 0)}
+            </div>
+            <div style={{ fontSize: "0.6rem", color: COLORS.textMuted, textTransform: "uppercase" }}>Offer Range</div>
+          </div>
+        )}
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: "1.2rem", fontWeight: 800, color: COLORS.red }}>
             {report.missing_items.filter(m => m.importance === "critical").length}
           </div>
           <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, textTransform: "uppercase" }}>Critical Missing</div>
-        </div>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "1.2rem", fontWeight: 800, color: COLORS.yellow }}>
-            {report.missing_items.filter(m => m.importance === "important").length}
-          </div>
-          <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, textTransform: "uppercase" }}>Important Missing</div>
-        </div>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "1.2rem", fontWeight: 800, color: COLORS.accent }}>
-            {report.next_questions.length}
-          </div>
-          <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, textTransform: "uppercase" }}>Next Questions</div>
         </div>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: "0.85rem", fontWeight: 600, color: COLORS.textMuted }}>
@@ -911,7 +1298,7 @@ export default function UnderwritingPage() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [report, setReport]       = useState<DDReport | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("production");
+  const [activeTab, setActiveTab] = useState<TabId>("recommendation");
   const [fileText, setFileText]   = useState<{ name: string; text: string } | null>(null);
 
   const field = useCallback((key: keyof FormState) => ({
@@ -965,7 +1352,7 @@ export default function UnderwritingPage() {
         return;
       }
       setReport(data.report);
-      setActiveTab("production");
+      setActiveTab("recommendation");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error");
     } finally {
@@ -985,14 +1372,41 @@ export default function UnderwritingPage() {
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "2rem 1.5rem" }}>
 
         {/* Header */}
-        <div style={{ marginBottom: "2rem" }}>
-          <h1 style={{ margin: "0 0 0.35rem 0", fontSize: "1.5rem", fontWeight: 800 }}>
-            Operator Due Diligence
-          </h1>
-          <p style={{ margin: 0, color: COLORS.textMuted, fontSize: "0.875rem" }}>
-            Structured underwriting report — production, LOE, compliance, plugging, SWD, and ownership.
-            Every field carries source and confidence labels. County-level data is never used as subject-well production.
-          </p>
+        <div style={{ marginBottom: "2rem", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.75rem" }}>
+          <div>
+            <h1 style={{ margin: "0 0 0.35rem 0", fontSize: "1.5rem", fontWeight: 800 }}>
+              Acquisition Due Diligence
+            </h1>
+            <p style={{ margin: 0, color: COLORS.textMuted, fontSize: "0.875rem" }}>
+              Autonomous underwriting — DCA, economics, risk scoring, offer ranges, and diligence tracking.
+              Every metric is source-labeled: TRRC, uploaded docs, or inferred.
+            </p>
+          </div>
+          {report && (
+            <button
+              onClick={() => {
+                const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `dd-report-${report.subject.lease_name ?? report.report_id.slice(0, 8)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              style={{
+                background: COLORS.surfaceAlt,
+                color: COLORS.textMuted,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 8,
+                padding: "0.55rem 1.1rem",
+                fontSize: "0.8rem",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ⬇ Export JSON
+            </button>
+          )}
         </div>
 
         {/* Input form */}
@@ -1193,16 +1607,19 @@ export default function UnderwritingPage() {
 
             {/* Tab content */}
             <div>
-              {activeTab === "production"  && <ProductionTab  report={report} />}
-              {activeTab === "economics"   && <EconomicsTab   report={report} />}
-              {activeTab === "workovers"   && <WorkoversTab   report={report} />}
-              {activeTab === "equipment"   && <EquipmentTab   report={report} />}
-              {activeTab === "compliance"  && <ComplianceTab  report={report} />}
-              {activeTab === "plugging"    && <PluggingTab    report={report} />}
-              {activeTab === "injection"   && <InjectionTab   report={report} />}
-              {activeTab === "ownership"   && <OwnershipTab   report={report} />}
-              {activeTab === "missing"     && <MissingItemsTab items={report.missing_items} />}
-              {activeTab === "questions"   && <NextQuestionsTab questions={report.next_questions} />}
+              {activeTab === "recommendation" && <RecommendationTab report={report} />}
+              {activeTab === "production"     && <ProductionTab     report={report} />}
+              {activeTab === "dca"            && <DcaTab            report={report} />}
+              {activeTab === "acq_economics"  && <AcqEconomicsTab   report={report} />}
+              {activeTab === "economics"      && <EconomicsTab      report={report} />}
+              {activeTab === "workovers"      && <WorkoversTab      report={report} />}
+              {activeTab === "equipment"      && <EquipmentTab      report={report} />}
+              {activeTab === "compliance"     && <ComplianceTab     report={report} />}
+              {activeTab === "plugging"       && <PluggingTab       report={report} />}
+              {activeTab === "injection"      && <InjectionTab      report={report} />}
+              {activeTab === "ownership"      && <OwnershipTab      report={report} />}
+              {activeTab === "missing"        && <MissingItemsTab   items={report.missing_items} />}
+              {activeTab === "questions"      && <NextQuestionsTab  questions={report.next_questions} />}
             </div>
 
             {/* Meta footer */}

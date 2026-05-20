@@ -279,6 +279,95 @@ export type NextQuestion = {
   directed_at: "operator" | "seller" | "title_attorney" | "engineer" | "state_agency";
 };
 
+// ─── Decline Curve Analysis ───────────────────────────────────────────────────
+
+export type DcaSection = {
+  model_type: DataPoint<"exponential" | "hyperbolic" | "harmonic">;
+  decline_rate_monthly_pct: DataPoint<number>;
+  decline_rate_annual_pct: DataPoint<number>;
+  b_factor: DataPoint<number>;
+  r_squared: DataPoint<number>;
+  eur_bbl: DataPoint<number>;
+  remaining_reserves_bbl: DataPoint<number>;
+  economic_life_months: DataPoint<number>;
+  current_rate_bbl: DataPoint<number>;
+  peak_rate_bbl: DataPoint<number>;
+  cum_oil_bbl: DataPoint<number>;
+  // Monthly projections: month 1–60 from current
+  projections: { month: number; rate_bbl: number }[];
+  notes: string[];
+};
+
+// ─── Acquisition Economics ────────────────────────────────────────────────────
+
+export type EconomicsScenario = {
+  deck_label: string;
+  oil_price_usd: number;
+  gas_price_usd: number;
+  monthly_gross_revenue: number;
+  monthly_net_revenue: number;
+  monthly_net_income: number;
+  loe_per_boe: number;
+  annual_net_income: number;
+  npv10_usd: number;
+  npv15_usd: number;
+  offer_low_usd: number;
+  offer_mid_usd: number;
+  offer_high_usd: number;
+  irr_pct: number | null;
+  payout_months: number | null;
+};
+
+export type AcquisitionEconomicsSection = {
+  nri_decimal: DataPoint<number>;
+  wi_decimal: DataPoint<number>;
+  monthly_net_income_usd: DataPoint<number>;
+  annual_net_income_usd: DataPoint<number>;
+  npv10_usd: DataPoint<number>;
+  offer_range_low: DataPoint<number>;
+  offer_range_mid: DataPoint<number>;
+  offer_range_high: DataPoint<number>;
+  breakeven_oil_price: DataPoint<number>;
+  months_remaining: DataPoint<number>;
+  scenarios: EconomicsScenario[];
+  notes: string[];
+};
+
+// ─── Risk & Recommendation ────────────────────────────────────────────────────
+
+export type RiskCategoryResult = {
+  name: string;
+  score: number;
+  weight: number;
+  flags: string[];
+  mitigants: string[];
+};
+
+export type DiligenceCheckItem = {
+  item: string;
+  status: "complete" | "pending" | "na";
+  priority: "critical" | "important" | "nice_to_have";
+};
+
+export type RiskSection = {
+  overall_score: DataPoint<number>;
+  recommendation: DataPoint<"pursue" | "review" | "pass">;
+  recommendation_rationale: string;
+  confidence: DataConfidence;
+  categories: {
+    production:   RiskCategoryResult;
+    financial:    RiskCategoryResult;
+    compliance:   RiskCategoryResult;
+    plugging:     RiskCategoryResult;
+    operator:     RiskCategoryResult;
+    data_quality: RiskCategoryResult;
+  };
+  red_flags:    string[];
+  yellow_flags: string[];
+  green_flags:  string[];
+  diligence_checklist: DiligenceCheckItem[];
+};
+
 // ─── Full DD Report ───────────────────────────────────────────────────────────
 
 export type DDReportConfidence = "high" | "medium" | "low" | "very_low";
@@ -291,8 +380,11 @@ export type DDReport = {
 
   subject: SubjectIdentity;
 
-  // The ten sections
+  // Core sections
   production: ProductionSection;
+  dca: DcaSection;
+  acquisition_economics: AcquisitionEconomicsSection;
+  risk: RiskSection;
   economics: EconomicsSection;
   workovers: WorkoverSection;
   equipment: EquipmentSection;
