@@ -232,14 +232,19 @@ type PdqWellEntry = {
  * to produce the standard 10-digit TRRC API number.
  */
 function parsePdqCountyEntries(html: string, maxWells = 30): PdqWellEntry[] {
+  // Primary: extract apiNo + distCode + leaseNo from wellboreQueryAction links.
+  // These are always present and self-contained — no pairing with operator needed.
   const apiMatches = Array.from(
     html.matchAll(/apiNo=(\d+)&distCode=(\w+)&leaseNo=(\d+)/g),
   );
+  // Operator links are supplemental — may be fewer than apiNo links (e.g. when
+  // two leases share the same operator HTML block). We never limit apiNo results
+  // by operator count; if no operator match is found we just leave it empty.
   const opMatches = Array.from(
     html.matchAll(/title="Operator # \d+">(.*?)<\/a>/g),
   );
 
-  const count = Math.min(apiMatches.length, opMatches.length, maxWells);
+  const count = Math.min(apiMatches.length, maxWells);
   const entries: PdqWellEntry[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -248,7 +253,7 @@ function parsePdqCountyEntries(html: string, maxWells = 30): PdqWellEntry[] {
       apiNo8:   apiMatches[i][1],
       distCode: apiMatches[i][2],
       leaseNo:  apiMatches[i][3],
-      operator: unescapeHtml(opMatches[i][1]),
+      operator: i < opMatches.length ? unescapeHtml(opMatches[i][1]) : "",
     });
   }
   return entries;

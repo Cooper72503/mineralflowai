@@ -6,6 +6,8 @@
  */
 import { NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
+import { fetchTrrcProductionByLease } from "@/lib/wells/trrc-production";
+import { lookupTrrcLeasesByApis } from "@/lib/wells/trrc-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +59,12 @@ async function queryTrrc(params: Record<string, string>, label: string) {
 }
 
 export async function GET(request: Request) {
+  // Quick version check — no auth needed
+  const url0 = new URL(request.url);
+  if (url0.searchParams.get("v") === "1") {
+    return NextResponse.json({ version: "2026-05-20-v4", strategy: "apiNoPrefixArg+apiNoSuffixArg" });
+  }
+
   const supabase = await createSupabaseFromRouteRequest(request);
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -124,8 +132,41 @@ export async function GET(request: Request) {
     }, `F: suffix=${well5} only (no county)`),
   ]);
 
+  // ── End-to-end pipeline test using the actual production functions ──────
+  const pipelineStart = Date.now();
+  let leaseMap: Record<string, { distCode: string; leaseNo: string; operator: string }> = {};
+  let productionRows: { distCode: string; leaseNo: string; rowCount: number; latestBbl: number | null } | null = null;
+  let pipelineError: string | null = null;
+
+  try {
+    const map = await lookupTrrcLeasesByApis(null, [rawApi]);
+    leaseMap = Object.fromEntries(Array.from(map.entries()).map(([k, v]) => [k, v]));
+
+    const firstEntry = Array.from(map.values())[0];
+    if (firstEntry) {
+      const prod = await fetchTrrcProductionByLease(firstEntry.distCode, firstEntry.leaseNo, 6);
+      if (prod) {
+        const latest = prod.rows[prod.rows.length - 1];
+        productionRows = {
+          distCode: prod.distCode,
+          leaseNo: prod.leaseNo,
+          rowCount: prod.rows.length,
+          latestBbl: latest?.oil_bbl ?? null,
+        };
+      }
+    }
+  } catch (err) {
+    pipelineError = String(err);
+  }
+
   return NextResponse.json({
     input: { rawApi, api8, county3, well5, prefix5 },
-    results,
+    pipeline: {
+      elapsed_ms: Date.now() - pipelineStart,
+      lease_map: leaseMap,
+      production: productionRows,
+      error: pipelineError,
+    },
+    trrc_query_strategies: results,
   }, { status: 200 });
 }
