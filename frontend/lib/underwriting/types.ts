@@ -518,6 +518,96 @@ export type RiskSection = {
   diligence_checklist: DiligenceCheckItem[];
 };
 
+// ─── Data Provenance ─────────────────────────────────────────────────────────
+//
+// Full audit trail for every value shown in a DDReport.
+// Answers: where did this number come from, what was the raw value,
+// what transformation was applied, and is it in conflict with another source?
+
+export type DocProductionRow = {
+  period: string;
+  oil_bbl: number | null;
+  gas_mcf: number | null;
+  water_bbl: number | null;
+  oil_price_per_bbl: number | null;
+  gross_revenue_usd: number | null;
+  source_detail: string;
+};
+
+export type ProductionConflict = {
+  period: string;
+  doc_bbl: number;
+  trrc_bbl: number;
+  abs_diff: number;
+  pct_diff: number;   // (trrc_bbl - doc_bbl) / doc_bbl * 100
+};
+
+export type ProductionLineage = {
+  // ── Source A: document-extracted ────────────────────────────────────────
+  doc_months: DocProductionRow[];
+  doc_month_count: number;
+  doc_date_range: string | null;
+
+  // ── Source B: TRRC ───────────────────────────────────────────────────────
+  trrc_months: { period: string; oil_bbl: number; gas_mcf: number | null }[];
+  trrc_month_count: number;
+  trrc_date_range: string | null;
+  /** "distCode:leaseNo" format, e.g. "06:123456" */
+  trrc_lease_id: string | null;
+
+  // ── Authoritative selection ──────────────────────────────────────────────
+  authoritative_source: "trrc" | "document" | "none";
+  selection_reason: string;
+  /** true when TRRC data was chosen and document data also existed */
+  trrc_overrides_document: boolean;
+
+  // ── Period-by-period conflict analysis ──────────────────────────────────
+  overlapping_periods: string[];
+  conflicting_periods: ProductionConflict[];
+  /** true if any period differs by ≥20% between doc and TRRC */
+  has_critical_mismatch: boolean;
+  mismatch_summary: string | null;
+
+  // ── Dataset used at each pipeline stage ─────────────────────────────────
+  dca_source: "trrc" | "document" | "none";
+  dca_row_count: number;
+  dca_rate_bbl_used: number | null;
+
+  economics_source: "trrc" | "document" | "none";
+  economics_rate_bbl: number | null;
+  economics_rate_basis: string;
+
+  offer_range_rate_bbl: number | null;
+
+  // ── Warnings ─────────────────────────────────────────────────────────────
+  warnings: string[];
+};
+
+export type ProvenanceRecord = {
+  field: string;
+  category: "production" | "economics" | "ownership" | "market" | "calculated";
+  /** Human-readable source label, e.g. "Run statement (3 months)" */
+  source_label: string;
+  /** Exact raw value as returned from source before any transformation */
+  raw_value: string;
+  /** What was done to convert raw → final, or null if no transformation */
+  transformation: string | null;
+  /** Value as shown in the report */
+  final_value: string;
+  confidence: "high" | "medium" | "low" | "none";
+  /** Non-null when another source had a different value and was NOT used */
+  conflict: {
+    alt_source: string;
+    alt_value: string;
+    why_not_used: string;
+  } | null;
+};
+
+export type DataProvenanceReport = {
+  production_lineage: ProductionLineage;
+  key_inputs: ProvenanceRecord[];
+};
+
 // ─── Production Audit ────────────────────────────────────────────────────────
 //
 // Captures every step from raw TRRC fetch through classification so discrepancies
@@ -637,6 +727,12 @@ export type DDReport = {
     doc_type: string;
     char_count: number;
   }[];
+
+  /**
+   * Full data provenance — production lineage, source conflicts, key-input audit.
+   * Use this to verify every value in the report before trusting any calculation.
+   */
+  data_provenance: DataProvenanceReport | null;
 
   /**
    * Production audit trail — raw TRRC rows, identity resolution, classification.

@@ -312,9 +312,11 @@ type TabId =
   | "missing_diligence"
   | "ic_memo"
   | "export_center"
-  | "production_audit";
+  | "production_audit"
+  | "data_provenance";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: "data_provenance",     label: "Data Provenance",        icon: "🔍" },
   { id: "executive_summary",   label: "Executive Summary",      icon: "📋" },
   { id: "asset_overview",      label: "Asset Overview",         icon: "🪨" },
   { id: "production_decline",  label: "Production & Decline",   icon: "⛽" },
@@ -1531,6 +1533,480 @@ function RecommendationTab({ report }: { report: DDReport }) {
           ])}
         />
       </Section>
+    </div>
+  );
+}
+
+// ─── Data Provenance Tab ──────────────────────────────────────────────────────
+//
+// Full source audit for every value in the report.
+// This is the verification screen — nothing else should be trusted until this
+// is reviewed and the production lineage is confirmed.
+
+import type { DataProvenanceReport, ProductionLineage, ProvenanceRecord } from "@/lib/underwriting/types";
+
+function DataProvenanceTab({ report }: { report: DDReport }) {
+  const prov = report.data_provenance;
+
+  const T = {
+    surface:    "#181c25",
+    surfaceAlt: "#1e2333",
+    border:     "rgba(255,255,255,0.08)",
+    text:       "#e2e8f0",
+    muted:      "#8892a4",
+    faint:      "#5a6478",
+    accent:     "#4f8ef7",
+    accentDim:  "rgba(79,142,247,0.12)",
+    green:      "#22c55e",
+    greenDim:   "rgba(34,197,94,0.12)",
+    yellow:     "#f59e0b",
+    yellowDim:  "rgba(245,158,11,0.12)",
+    red:        "#ef4444",
+    redDim:     "rgba(239,68,68,0.12)",
+  };
+
+  const card: React.CSSProperties = {
+    background: T.surface,
+    border: `1px solid ${T.border}`,
+    borderRadius: 12,
+    padding: "1rem 1.15rem",
+    marginBottom: "1rem",
+  };
+
+  const mono: React.CSSProperties = {
+    fontFamily: "monospace", fontSize: "0.78rem",
+  };
+
+  const sectionHead = (text: string, color = T.text) => (
+    <div style={{ fontSize: "0.92rem", fontWeight: 700, color, marginBottom: "0.6rem" }}>{text}</div>
+  );
+
+  if (!prov) {
+    return (
+      <div style={card}>
+        <p style={{ color: T.muted, margin: 0 }}>
+          Data provenance not available. Run a full underwriting analysis to generate the audit trail.
+        </p>
+      </div>
+    );
+  }
+
+  const lin = prov.production_lineage;
+  const hasCritical = lin.has_critical_mismatch;
+  const docHasData  = lin.doc_month_count > 0;
+  const trrcHasData = lin.trrc_month_count > 0;
+  const trrcOverrides = lin.trrc_overrides_document;
+
+  return (
+    <div style={{ paddingBottom: "2.5rem" }}>
+
+      {/* ── Red banner: critical mismatch ── */}
+      {hasCritical && (
+        <div style={{
+          background: T.redDim,
+          border: `1.5px solid ${T.red}`,
+          borderRadius: 10,
+          padding: "1rem 1.15rem",
+          marginBottom: "1.25rem",
+        }}>
+          <div style={{ fontSize: "1rem", fontWeight: 800, color: T.red, marginBottom: "0.35rem" }}>
+            🚨 CRITICAL: Production Data Mismatch
+          </div>
+          <div style={{ fontSize: "0.85rem", color: T.red, lineHeight: 1.6, marginBottom: "0.5rem" }}>
+            {lin.mismatch_summary}
+          </div>
+          <div style={{ fontSize: "0.82rem", color: T.red, opacity: 0.85, fontWeight: 600 }}>
+            Decline curves, reserve estimates, economics, and offer range CANNOT be trusted until this is resolved.
+            Verify the TRRC lease number (Dist:Lease {lin.trrc_lease_id ?? "unknown"}) matches the lease on your run statement.
+          </div>
+        </div>
+      )}
+
+      {/* ── Yellow banner: TRRC overrides doc ── */}
+      {!hasCritical && trrcOverrides && (
+        <div style={{
+          background: T.yellowDim,
+          border: `1px solid rgba(245,158,11,0.35)`,
+          borderRadius: 10,
+          padding: "0.85rem 1.15rem",
+          marginBottom: "1rem",
+          fontSize: "0.84rem",
+          color: T.yellow,
+          lineHeight: 1.55,
+        }}>
+          ⚠️ <strong>TRRC data overrides uploaded document production.</strong> {lin.overlapping_periods.length > 0
+            ? `${lin.overlapping_periods.length} overlapping period(s) found — no critical divergence detected, but verify the TRRC lease matches your run statement.`
+            : `No overlapping periods to compare — cannot confirm TRRC and document data describe the same property.`}
+        </div>
+      )}
+
+      {/* ── Green banner: clean, no doc data ── */}
+      {!hasCritical && !trrcOverrides && docHasData && trrcHasData && (
+        <div style={{
+          background: T.greenDim, border: `1px solid rgba(34,197,94,0.25)`,
+          borderRadius: 10, padding: "0.7rem 1rem", marginBottom: "1rem",
+          fontSize: "0.82rem", color: T.green,
+        }}>
+          ✓ No critical divergence found across {lin.overlapping_periods.length} overlapping period(s).
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 1: Production Lineage
+      ══════════════════════════════════════════════════════════════════════ */}
+      <div style={card}>
+        {sectionHead("Section 1 — Production Lineage")}
+
+        {/* Authoritative source */}
+        <div style={{
+          background: T.surfaceAlt,
+          borderRadius: 8, padding: "0.75rem 1rem", marginBottom: "0.85rem",
+          display: "flex", gap: "1.5rem", flexWrap: "wrap",
+        }}>
+          <div>
+            <div style={{ fontSize: "0.68rem", color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Authoritative Source</div>
+            <div style={{
+              fontWeight: 700, fontSize: "0.95rem",
+              color: lin.authoritative_source === "trrc" ? T.accent
+                   : lin.authoritative_source === "document" ? T.green : T.red,
+            }}>
+              {lin.authoritative_source === "trrc" ? "TRRC (public record)"
+               : lin.authoritative_source === "document" ? "Uploaded document"
+               : "None — no production data"}
+            </div>
+          </div>
+          {lin.trrc_lease_id && (
+            <div>
+              <div style={{ fontSize: "0.68rem", color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>TRRC Dist:Lease</div>
+              <div style={{ ...mono, color: T.accent, fontWeight: 700 }}>{lin.trrc_lease_id}</div>
+            </div>
+          )}
+          <div style={{ flex: 1, fontSize: "0.8rem", color: T.muted, lineHeight: 1.5 }}>
+            {lin.selection_reason}
+          </div>
+        </div>
+
+        {/* Side-by-side sources */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "0.85rem" }}>
+
+          {/* Document data */}
+          <div style={{
+            background: T.surfaceAlt,
+            border: `1px solid ${docHasData && trrcOverrides ? "rgba(245,158,11,0.3)" : T.border}`,
+            borderRadius: 8, padding: "0.75rem",
+          }}>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: docHasData ? T.green : T.faint, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "0.4rem" }}>
+              📄 Document-Extracted Production
+              {trrcOverrides && docHasData && <span style={{ color: T.yellow, marginLeft: 6 }}>⚠️ overridden by TRRC</span>}
+            </div>
+            {docHasData ? (
+              <>
+                <div style={{ fontSize: "0.82rem", color: T.text, marginBottom: 2 }}>{lin.doc_month_count} months</div>
+                <div style={{ ...mono, color: T.faint, marginBottom: "0.5rem" }}>{lin.doc_date_range}</div>
+                <div style={{ overflowX: "auto", maxHeight: 220, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }}>
+                    <thead>
+                      <tr>
+                        {["Period", "Oil BBL", "Gas MCF", "Price", "Revenue"].map(h => (
+                          <th key={h} style={{ textAlign: h === "Period" ? "left" : "right", padding: "3px 6px", color: T.faint, fontSize: "0.7rem", borderBottom: `1px solid ${T.border}` }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...lin.doc_months].sort((a, b) => a.period.localeCompare(b.period)).map((r, i) => {
+                        // Check if this period has a conflict with TRRC
+                        const trrcBbl = lin.trrc_months.find(t => t.period === r.period)?.oil_bbl;
+                        const hasConflict = trrcBbl != null && r.oil_bbl != null && Math.abs(trrcBbl - r.oil_bbl) / Math.max(r.oil_bbl, 1) * 100 >= 20;
+                        return (
+                          <tr key={i} style={{ borderBottom: `1px solid ${T.border}`, background: hasConflict ? T.redDim : "transparent" }}>
+                            <td style={{ padding: "3px 6px", ...mono, color: hasConflict ? T.red : T.text }}>{r.period}</td>
+                            <td style={{ padding: "3px 6px", textAlign: "right", fontWeight: 600, color: hasConflict ? T.red : T.text }}>
+                              {r.oil_bbl != null ? r.oil_bbl.toLocaleString() : "—"}
+                              {hasConflict && trrcBbl != null && (
+                                <span style={{ fontSize: "0.65rem", color: T.red, marginLeft: 4 }}>≠TRRC:{trrcBbl}</span>
+                              )}
+                            </td>
+                            <td style={{ padding: "3px 6px", textAlign: "right", color: T.muted }}>{r.gas_mcf != null && r.gas_mcf > 0 ? r.gas_mcf.toLocaleString() : "—"}</td>
+                            <td style={{ padding: "3px 6px", textAlign: "right", color: T.muted }}>{r.oil_price_per_bbl != null ? `$${r.oil_price_per_bbl.toFixed(2)}` : "—"}</td>
+                            <td style={{ padding: "3px 6px", textAlign: "right", color: T.muted }}>{r.gross_revenue_usd != null ? `$${Math.round(r.gross_revenue_usd).toLocaleString()}` : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: "0.82rem", color: T.faint }}>No document production data extracted.</div>
+            )}
+          </div>
+
+          {/* TRRC data */}
+          <div style={{
+            background: T.surfaceAlt,
+            border: `1px solid ${hasCritical ? "rgba(239,68,68,0.4)" : trrcHasData ? "rgba(79,142,247,0.25)" : T.border}`,
+            borderRadius: 8, padding: "0.75rem",
+          }}>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: trrcHasData ? T.accent : T.faint, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "0.4rem" }}>
+              🏛️ TRRC Public Record
+              {lin.trrc_lease_id && <span style={{ color: T.faint, fontWeight: 400, marginLeft: 6 }}>{lin.trrc_lease_id}</span>}
+            </div>
+            {trrcHasData ? (
+              <>
+                <div style={{ fontSize: "0.82rem", color: T.text, marginBottom: 2 }}>{lin.trrc_month_count} months</div>
+                <div style={{ ...mono, color: T.faint, marginBottom: "0.5rem" }}>{lin.trrc_date_range}</div>
+                <div style={{ overflowX: "auto", maxHeight: 220, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }}>
+                    <thead>
+                      <tr>
+                        {["Period", "Oil BBL", "Gas MCF"].map(h => (
+                          <th key={h} style={{ textAlign: h === "Period" ? "left" : "right", padding: "3px 6px", color: T.faint, fontSize: "0.7rem", borderBottom: `1px solid ${T.border}` }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lin.trrc_months.map((r, i) => {
+                        const docBbl = lin.doc_months.find(d => d.period === r.period)?.oil_bbl;
+                        const hasConflict = docBbl != null && docBbl > 0 && Math.abs(r.oil_bbl - docBbl) / docBbl * 100 >= 20;
+                        return (
+                          <tr key={i} style={{ borderBottom: `1px solid ${T.border}`, background: hasConflict ? T.redDim : "transparent" }}>
+                            <td style={{ padding: "3px 6px", ...mono, color: hasConflict ? T.red : T.text }}>{r.period}</td>
+                            <td style={{ padding: "3px 6px", textAlign: "right", fontWeight: 600, color: hasConflict ? T.red : T.text }}>
+                              {r.oil_bbl > 0 ? r.oil_bbl.toLocaleString() : "—"}
+                              {hasConflict && docBbl != null && (
+                                <span style={{ fontSize: "0.65rem", color: T.red, marginLeft: 4 }}>≠Doc:{docBbl}</span>
+                              )}
+                            </td>
+                            <td style={{ padding: "3px 6px", textAlign: "right", color: T.muted }}>{r.gas_mcf != null && r.gas_mcf > 0 ? r.gas_mcf.toLocaleString() : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: "0.82rem", color: T.faint }}>No TRRC data returned. API may not have resolved to a TRRC lease.</div>
+            )}
+          </div>
+        </div>
+
+        {/* Conflict summary */}
+        {lin.conflicting_periods.length > 0 && (
+          <div style={{
+            background: hasCritical ? T.redDim : T.yellowDim,
+            border: `1px solid ${hasCritical ? "rgba(239,68,68,0.35)" : "rgba(245,158,11,0.3)"}`,
+            borderRadius: 8, padding: "0.75rem 0.9rem",
+          }}>
+            <div style={{ fontSize: "0.8rem", fontWeight: 700, color: hasCritical ? T.red : T.yellow, marginBottom: "0.45rem" }}>
+              {hasCritical ? "🚨" : "⚠️"} Period-by-Period Conflicts ({lin.conflicting_periods.length} of {lin.overlapping_periods.length} overlapping)
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.76rem" }}>
+                <thead>
+                  <tr>
+                    {["Period", "Doc BBL", "TRRC BBL", "Diff BBL", "Diff %", "Severity"].map(h => (
+                      <th key={h} style={{ textAlign: h === "Period" ? "left" : "right", padding: "4px 8px", color: T.faint, fontSize: "0.7rem", borderBottom: `1px solid ${T.border}` }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lin.conflicting_periods.map((c, i) => {
+                    const isCrit = Math.abs(c.pct_diff) >= 20;
+                    return (
+                      <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td style={{ padding: "4px 8px", ...mono, color: T.text }}>{c.period}</td>
+                        <td style={{ padding: "4px 8px", textAlign: "right", color: T.muted }}>{c.doc_bbl.toLocaleString()}</td>
+                        <td style={{ padding: "4px 8px", textAlign: "right", color: T.text, fontWeight: 600 }}>{c.trrc_bbl.toLocaleString()}</td>
+                        <td style={{ padding: "4px 8px", textAlign: "right", color: isCrit ? T.red : T.yellow }}>
+                          {c.trrc_bbl > c.doc_bbl ? "+" : ""}{Math.round(c.trrc_bbl - c.doc_bbl).toLocaleString()}
+                        </td>
+                        <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 700, color: isCrit ? T.red : T.yellow }}>
+                          {c.pct_diff >= 0 ? "+" : ""}{c.pct_diff.toFixed(1)}%
+                        </td>
+                        <td style={{ padding: "4px 8px", textAlign: "right" }}>
+                          <span style={{
+                            fontSize: "0.68rem", fontWeight: 700, padding: "1px 5px", borderRadius: 4,
+                            background: isCrit ? T.redDim : T.yellowDim,
+                            color: isCrit ? T.red : T.yellow,
+                          }}>{isCrit ? "CRITICAL" : "MINOR"}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 2: Dataset Used at Each Stage
+      ══════════════════════════════════════════════════════════════════════ */}
+      <div style={card}>
+        {sectionHead("Section 2 — Dataset Used at Each Pipeline Stage")}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.6rem" }}>
+          {[
+            {
+              stage: "Decline Curve Analysis",
+              source: lin.dca_source,
+              detail: `${lin.dca_row_count} row(s) used as DCA input`,
+              rate: lin.dca_rate_bbl_used,
+              rateLabel: "DCA anchor rate",
+            },
+            {
+              stage: "Economics Engine",
+              source: lin.economics_source,
+              detail: lin.economics_rate_basis,
+              rate: lin.economics_rate_bbl,
+              rateLabel: "Rate used",
+            },
+            {
+              stage: "Offer Range",
+              source: lin.authoritative_source,
+              detail: "Same as economics",
+              rate: lin.offer_range_rate_bbl,
+              rateLabel: "Rate used",
+            },
+          ].map(({ stage, source, detail, rate, rateLabel }) => (
+            <div key={stage} style={{
+              background: T.surfaceAlt,
+              border: `1px solid ${hasCritical ? "rgba(239,68,68,0.25)" : T.border}`,
+              borderRadius: 8, padding: "0.7rem 0.85rem",
+            }}>
+              <div style={{ fontSize: "0.72rem", color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>{stage}</div>
+              <div style={{
+                fontSize: "0.82rem", fontWeight: 700,
+                color: source === "trrc" ? T.accent : source === "document" ? T.green : T.red,
+                marginBottom: 2,
+              }}>
+                {source === "trrc" ? "TRRC" : source === "document" ? "Document" : "None"}
+                {hasCritical && source !== "none" && (
+                  <span style={{ color: T.red, fontWeight: 700, marginLeft: 6, fontSize: "0.72rem" }}>⚠️ mismatch</span>
+                )}
+              </div>
+              {rate != null && (
+                <div style={{ fontSize: "0.8rem", color: T.text, fontWeight: 600, marginBottom: 2 }}>
+                  {rate.toLocaleString()} BBL/mo
+                  <span style={{ color: T.faint, fontWeight: 400, fontSize: "0.7rem", marginLeft: 4 }}>{rateLabel}</span>
+                </div>
+              )}
+              <div style={{ fontSize: "0.73rem", color: T.faint, lineHeight: 1.4 }}>{detail}</div>
+            </div>
+          ))}
+        </div>
+        {hasCritical && (
+          <div style={{ marginTop: "0.75rem", fontSize: "0.82rem", color: T.red, lineHeight: 1.5, padding: "0.55rem 0.75rem", background: T.redDim, borderRadius: 7 }}>
+            🚨 All three stages above used TRRC data that conflicts with uploaded document production.
+            Verify the TRRC lease identity before trusting any calculated value in this report.
+          </div>
+        )}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 3: Key Inputs Provenance Table
+      ══════════════════════════════════════════════════════════════════════ */}
+      <div style={card}>
+        {sectionHead("Section 3 — Key Input Provenance")}
+        <p style={{ fontSize: "0.8rem", color: T.faint, margin: "0 0 0.85rem", lineHeight: 1.5 }}>
+          Every value used in this report — source, raw value returned, transformation applied, and final value displayed.
+          Conflicts flag when another source had a different value and was not used.
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.79rem" }}>
+            <thead>
+              <tr>
+                {["Field", "Source", "Raw Value", "Transformation", "Final Value", "Confidence", "Conflict"].map(h => (
+                  <th key={h} style={{
+                    textAlign: "left", padding: "6px 10px",
+                    color: T.faint, fontWeight: 600,
+                    borderBottom: `1px solid ${T.border}`,
+                    fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.04em",
+                    whiteSpace: "nowrap",
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {prov.key_inputs.map((rec, i) => {
+                const confColor = rec.confidence === "high" ? T.green
+                  : rec.confidence === "medium" ? T.yellow
+                  : rec.confidence === "low" ? T.red : T.faint;
+                const isWarning = rec.conflict != null;
+                return (
+                  <tr key={i} style={{ borderBottom: `1px solid ${T.border}`, background: isWarning ? "rgba(239,68,68,0.04)" : "transparent" }}>
+                    <td style={{ padding: "6px 10px", fontWeight: 700, color: T.text, whiteSpace: "nowrap" }}>
+                      {rec.field}
+                    </td>
+                    <td style={{ padding: "6px 10px", color: T.muted, fontSize: "0.76rem", maxWidth: 160, lineHeight: 1.3 }}>
+                      {rec.source_label}
+                    </td>
+                    <td style={{ padding: "6px 10px", ...mono, color: T.muted, maxWidth: 200, lineHeight: 1.35 }}>
+                      {rec.raw_value}
+                    </td>
+                    <td style={{ padding: "6px 10px", color: T.faint, fontSize: "0.74rem", maxWidth: 200, lineHeight: 1.35 }}>
+                      {rec.transformation ?? "—"}
+                    </td>
+                    <td style={{ padding: "6px 10px", fontWeight: 700, color: T.text, whiteSpace: "nowrap" }}>
+                      {rec.final_value}
+                    </td>
+                    <td style={{ padding: "6px 10px" }}>
+                      <span style={{
+                        display: "inline-block",
+                        fontSize: "0.68rem", fontWeight: 700,
+                        padding: "1px 6px", borderRadius: 4,
+                        background: rec.confidence === "high" ? T.greenDim
+                          : rec.confidence === "medium" ? T.yellowDim
+                          : rec.confidence === "low" ? T.redDim
+                          : T.surfaceAlt,
+                        color: confColor,
+                      }}>
+                        {rec.confidence.toUpperCase()}
+                      </span>
+                    </td>
+                    <td style={{ padding: "6px 10px", maxWidth: 220 }}>
+                      {rec.conflict ? (
+                        <div style={{ fontSize: "0.73rem", lineHeight: 1.4 }}>
+                          <div style={{ color: T.red, fontWeight: 700, marginBottom: 2 }}>⚠️ Conflict</div>
+                          <div style={{ color: T.muted }}>{rec.conflict.alt_source}: <span style={{ color: T.yellow }}>{rec.conflict.alt_value}</span></div>
+                          <div style={{ color: T.faint, marginTop: 2 }}>{rec.conflict.why_not_used}</div>
+                        </div>
+                      ) : (
+                        <span style={{ color: T.faint, fontSize: "0.72rem" }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 4: Warnings
+      ══════════════════════════════════════════════════════════════════════ */}
+      {lin.warnings.length > 0 && (
+        <div style={card}>
+          {sectionHead("Section 4 — Lineage Warnings", T.yellow)}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+            {lin.warnings.map((w, i) => (
+              <div key={i} style={{
+                background: w.startsWith("CRITICAL") ? T.redDim : T.yellowDim,
+                border: `1px solid ${w.startsWith("CRITICAL") ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.25)"}`,
+                borderRadius: 7, padding: "0.55rem 0.8rem",
+                fontSize: "0.82rem",
+                color: w.startsWith("CRITICAL") ? T.red : T.yellow,
+                lineHeight: 1.5,
+              }}>
+                {w}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -5498,6 +5974,7 @@ export default function UnderwritingPage() {
 
             {/* Tab content */}
             <div>
+              {activeTab === "data_provenance"       && <DataProvenanceTab      report={report} />}
               {activeTab === "executive_summary"    && <ExecutiveSummaryTab    report={report} />}
               {activeTab === "asset_overview"        && <AssetOverviewTab       report={report} />}
               {activeTab === "production_decline"    && <ProductionDeclineTab   report={report} />}

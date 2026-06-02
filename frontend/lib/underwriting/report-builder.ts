@@ -52,6 +52,9 @@ import type {
   OperationalTimelineEvent,
   DiligenceStatusItem,
   ProductionAudit,
+  DataProvenanceReport,
+  ProductionLineage,
+  ProvenanceRecord,
 } from "./types";
 import type { DocumentExtractionResult } from "./document-extraction";
 import type { NormalizedApi } from "./types";
@@ -3007,6 +3010,326 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
 
   const underwritingNarrative = [para1, para2, para3, para4].filter(p => p.trim().length > 0);
 
+  // ── Data Provenance Report ────────────────────────────────────────────────
+  // Built last, after all computation, so every final value is available.
+
+  const dataProvenance: DataProvenanceReport = (() => {
+    // ── Production Lineage ────────────────────────────────────────────────
+
+    // Raw doc months (before aggregation — use extracted directly for max fidelity)
+    const docRawMonths = (extracted?.production_months ?? []).map(m => ({
+      period:           m.period,
+      oil_bbl:          m.oil_bbl,
+      gas_mcf:          m.gas_mcf ?? null,
+      water_bbl:        m.water_bbl ?? null,
+      oil_price_per_bbl: m.oil_price_per_bbl ?? null,
+      gross_revenue_usd: m.gross_revenue_usd ?? null,
+      source_detail:    m.source_detail,
+    }));
+    const docSorted = [...docRawMonths].sort((a, b) => a.period.localeCompare(b.period));
+
+    // TRRC months (flat)
+    const trrcSorted = trrcMonthlyRows
+      .map(r => ({
+        period: `${r.year}-${String(r.month).padStart(2, "0")}`,
+        oil_bbl: r.oil_bbl,
+        gas_mcf: r.gas_mcf ?? null,
+      }))
+      .sort((a, b) => a.period.localeCompare(b.period));
+
+    const docRange = docSorted.length > 0
+      ? `${docSorted[0].period} → ${docSorted[docSorted.length - 1].period}` : null;
+    const trrcRange = trrcSorted.length > 0
+      ? `${trrcSorted[0].period} → ${trrcSorted[trrcSorted.length - 1].period}` : null;
+
+    const trrcLeaseId = trrcWells.length > 0
+      ? trrcWells.map(w => `${w.district_code ?? "?"}:${w.lease_number ?? "?"}`).join(", ")
+      : null;
+
+    // Authoritative source selection
+    const authSource: "trrc" | "document" | "none" =
+      trrcSorted.length > 0 ? "trrc"
+      : docSorted.length > 0 ? "document"
+      : "none";
+
+    const trrcOverridesDoc = authSource === "trrc" && docSorted.length > 0;
+
+    const selectionReason = authSource === "trrc"
+      ? `TRRC data selected as authoritative (${trrcSorted.length} months, Dist:Lease ${trrcLeaseId ?? "unknown"}).` +
+        (trrcOverridesDoc ? ` Document data also present (${docRawMonths.length} months) — TRRC takes precedence.` : "")
+      : authSource === "document"
+      ? `Document-extracted data used — no TRRC match resolved for provided API number(s).`
+      : "No production data from any source.";
+
+    // Period-by-period conflict analysis
+    const trrcByPeriod = new Map(trrcSorted.map(r => [r.period, r.oil_bbl]));
+    const docByPeriod  = new Map(
+      docSorted
+        .filter(r => r.oil_bbl != null && r.oil_bbl > 0)
+        .map(r => [r.period, r.oil_bbl as number])
+    );
+
+    const overlappingPeriods = Array.from(trrcByPeriod.keys()).filter(p => docByPeriod.has(p));
+
+    const CONFLICT_THRESHOLD_PCT = 20; // flag if diff ≥ 20%
+    const conflicts = overlappingPeriods.flatMap(period => {
+      const tBbl = trrcByPeriod.get(period)!;
+      const dBbl = docByPeriod.get(period)!;
+      if (dBbl === 0) return [];
+      const absDiff  = Math.abs(tBbl - dBbl);
+      const pctDiff  = ((tBbl - dBbl) / dBbl) * 100;
+      if (absDiff > 0) {
+        return [{ period, doc_bbl: dBbl, trrc_bbl: tBbl, abs_diff: absDiff, pct_diff: pctDiff }];
+      }
+      return [];
+    }).sort((a, b) => Math.abs(b.pct_diff) - Math.abs(a.pct_diff));
+
+    const criticalConflicts = conflicts.filter(c => Math.abs(c.pct_diff) >= CONFLICT_THRESHOLD_PCT);
+    const hasCriticalMismatch = criticalConflicts.length > 0;
+
+    let mismatchSummary: string | null = null;
+    if (conflicts.length > 0) {
+      const avgAbsDiff = conflicts.reduce((s, c) => s + Math.abs(c.pct_diff), 0) / conflicts.length;
+      mismatchSummary =
+        `${conflicts.length} of ${overlappingPeriods.length} overlapping period(s) differ ` +
+        `(avg ${avgAbsDiff.toFixed(1)}% difference, max ${Math.abs(conflicts[0].pct_diff).toFixed(1)}% on ${conflicts[0].period}). ` +
+        (hasCriticalMismatch
+          ? `${criticalConflicts.length} period(s) exceed the ≥${CONFLICT_THRESHOLD_PCT}% critical threshold.`
+          : "No period exceeds the critical threshold.");
+    }
+
+    // Lineage warnings
+    const lineageWarnings: string[] = [];
+    if (trrcOverridesDoc) {
+      lineageWarnings.push(
+        `TRRC data overrides ${docRawMonths.length} months of document-extracted production. ` +
+        "Verify that the TRRC lease resolves to the same property as the uploaded run statements."
+      );
+    }
+    if (hasCriticalMismatch) {
+      lineageWarnings.push(
+        `CRITICAL: ${criticalConflicts.length} month(s) show ≥${CONFLICT_THRESHOLD_PCT}% divergence between ` +
+        "document production and TRRC production. " +
+        "Decline curves, economics, and offer range CANNOT be trusted until this is resolved. " +
+        `Worst divergence: ${conflicts[0].period} — doc ${conflicts[0].doc_bbl} BBL vs TRRC ${conflicts[0].trrc_bbl} BBL (${Math.abs(conflicts[0].pct_diff).toFixed(1)}% diff).`
+      );
+    }
+    if (authSource === "none") {
+      lineageWarnings.push(
+        "No production data from any source. All economic calculations use $0 revenue. " +
+        "Provide API numbers, RRC lease numbers, or upload run statements/LOE reports."
+      );
+    }
+    if (authSource === "trrc" && trrcSorted.length < 6) {
+      lineageWarnings.push(
+        `Only ${trrcSorted.length} month(s) of TRRC production — insufficient for reliable decline analysis. ` +
+        "DCA and EUR estimates carry low confidence."
+      );
+    }
+
+    const productionLineage: ProductionLineage = {
+      doc_months:          docRawMonths,
+      doc_month_count:     docRawMonths.length,
+      doc_date_range:      docRange,
+      trrc_months:         trrcSorted,
+      trrc_month_count:    trrcSorted.length,
+      trrc_date_range:     trrcRange,
+      trrc_lease_id:       trrcLeaseId,
+      authoritative_source: authSource,
+      selection_reason:    selectionReason,
+      trrc_overrides_document: trrcOverridesDoc,
+      overlapping_periods: overlappingPeriods,
+      conflicting_periods: conflicts,
+      has_critical_mismatch: hasCriticalMismatch,
+      mismatch_summary:    mismatchSummary,
+      dca_source:          dcaDataSource as "trrc" | "document" | "none",
+      dca_row_count:       dcaInputRows.length,
+      dca_rate_bbl_used:   prodIntel?.current_stabilized_bbl ?? null,
+      economics_source:    dcaDataSource as "trrc" | "document" | "none",
+      economics_rate_bbl:  econOil > 0 ? Math.round(econOil) : null,
+      economics_rate_basis: prodIntel?.current_stabilized_source ?? "raw last month",
+      offer_range_rate_bbl: econOil > 0 ? Math.round(econOil) : null,
+      warnings: lineageWarnings,
+    };
+
+    // ── Key Inputs Provenance ─────────────────────────────────────────────
+
+    const fmt$ = (n: number | null | undefined) =>
+      n == null ? "—" : n >= 1_000_000 ? `$${(n/1_000_000).toFixed(2)}M` : n >= 1_000 ? `$${Math.round(n/1_000)}K` : `$${n.toFixed(2)}`;
+    const fmtN = (n: number | null | undefined) =>
+      n == null ? "—" : Math.round(n).toLocaleString();
+    const fmtPct = (n: number | null | undefined, decimals = 1) =>
+      n == null ? "—" : `${(n * 100).toFixed(decimals)}%`;
+
+    const keyInputs: ProvenanceRecord[] = [];
+
+    // 1. Current production rate
+    keyInputs.push({
+      field: "Current Production Rate",
+      category: "production",
+      source_label: authSource === "trrc"
+        ? `TRRC Specific Lease Query (Dist:Lease ${trrcLeaseId ?? "unknown"})`
+        : authSource === "document" ? "Document extraction (run statements / LOE)" : "No source",
+      raw_value: authSource === "trrc"
+        ? `${trrcSorted.length} monthly rows (${trrcRange ?? "no dates"})`
+        : authSource === "document"
+        ? `${docRawMonths.length} monthly rows (${docRange ?? "no dates"})`
+        : "None",
+      transformation: prodIntel
+        ? `Production engine: classified ${prodIntel.classified_months.length} months → ` +
+          `${prodIntel.active_months} active · ${prodIntel.classified_months.filter(r => r.classification === "downtime").length} downtime · ` +
+          `${prodIntel.classified_months.filter(r => r.classification === "incomplete").length} incomplete excluded. ` +
+          `${prodIntel.current_stabilized_source}.`
+        : "No production engine run (< 3 months of data)",
+      final_value: econOil > 0 ? `${Math.round(econOil).toLocaleString()} BBL/mo` : "—",
+      confidence: prodIntel?.production_confidence === "VERIFIED" ? "high"
+        : prodIntel?.production_confidence === "PARTIAL" ? "medium" : "low",
+      conflict: trrcOverridesDoc && docRawMonths.length > 0 ? {
+        alt_source: "Document extraction",
+        alt_value: `${docRawMonths.length} months (${docRange ?? "?"}), latest ${docSorted.length > 0 && docSorted[docSorted.length-1].oil_bbl != null ? `${docSorted[docSorted.length-1].oil_bbl} BBL` : "?"}`,
+        why_not_used: "TRRC public record data takes precedence over document extraction when available.",
+      } : null,
+    });
+
+    // 2. NRI decimal
+    const nriFromDoc = ownershipRecords.find(r => r.nri_decimal != null);
+    keyInputs.push({
+      field: "NRI Decimal",
+      category: "ownership",
+      source_label: nriOverride != null ? "User input (override)"
+        : nriFromDoc != null ? "Document extraction (division order / deed)"
+        : "Default assumption",
+      raw_value: nriOverride != null ? `${(nriOverride * 100).toFixed(4)}% (user-entered)`
+        : nriFromDoc != null ? `${(nriFromDoc.nri_decimal! * 100).toFixed(4)}% (extracted)`
+        : "Not provided",
+      transformation: nriOverride != null ? "Used as-is (user override)"
+        : nriFromDoc != null ? "Used as-is (document extraction)"
+        : `Defaulted to 75.000% — UNVERIFIED. Provide a division order to confirm.`,
+      final_value: fmtPct(nriDecimal, 4),
+      confidence: nriOverride != null ? "high" : nriFromDoc != null ? "high" : "none",
+      conflict: null,
+    });
+
+    // 3. LOE / month
+    const loeRawStr = avgLoe != null
+      ? `$${Math.round(avgLoe).toLocaleString()}/mo from ${loePeriods.length} LOE statement(s)`
+      : financialContext?.edgar?.loe_per_boe != null
+      ? `SEC EDGAR 10-K: $${financialContext.edgar.loe_per_boe.toFixed(2)}/BOE`
+      : benchmark != null
+      ? `Basin benchmark: $${benchmark.loe_median_per_boe}/BOE`
+      : "Not available";
+
+    keyInputs.push({
+      field: "LOE / Month",
+      category: "economics",
+      source_label: avgLoe != null ? `LOE statements (${loePeriods.length} months)`
+        : financialContext?.edgar != null ? `SEC EDGAR 10-K — ${financialContext.edgar.company_name}`
+        : benchmark != null ? `Basin benchmark — ${benchmark.basin}`
+        : "No source",
+      raw_value: loeRawStr,
+      transformation: avgLoe != null
+        ? `Average of ${loePeriods.length} monthly LOE periods`
+        : financialContext?.edgar?.loe_per_boe != null
+        ? `$${financialContext.edgar.loe_per_boe.toFixed(2)}/BOE × ${Math.round(totalOil + totalGas/6)} BOE/mo = $${Math.round((financialContext.edgar.loe_per_boe) * (totalOil + totalGas/6)).toLocaleString()}/mo`
+        : benchmark != null ? `$${benchmark.loe_median_per_boe}/BOE × BOE/mo = estimated` : null,
+      final_value: avgLoeEffective != null ? `$${Math.round(avgLoeEffective).toLocaleString()}/mo` : "—",
+      confidence: avgLoe != null ? (loePeriods.length >= 12 ? "high" : "medium") : "low",
+      conflict: null,
+    });
+
+    // 4. Oil price deck
+    const runPriceRaw = avgOilPrice != null
+      ? `$${avgOilPrice.toFixed(2)}/BBL avg from ${runMonths.length} run statement month(s)`
+      : null;
+    const eiaPriceRaw = eiaWellheadPrice != null
+      ? `EIA WTI $${eiaWti?.toFixed(2)} ${basinDiff >= 0 ? "+" : ""}${basinDiff.toFixed(2)} differential = $${eiaWellheadPrice.toFixed(2)}/BBL`
+      : null;
+
+    keyInputs.push({
+      field: "Oil Price Deck (Base)",
+      category: "market",
+      source_label: avgOilPrice ? `Run statements (${runMonths.length} months avg)`
+        : avgLoeOilPrice ? `LOE statements (${loeOilPrice.length} months avg)`
+        : eiaWellheadPrice ? `EIA WTI + ${benchmark?.basin ?? "TX"} differential (${financialContext?.oil_price?.source ?? "hardcoded"})`
+        : "No source — hardcoded fallback",
+      raw_value: runPriceRaw ?? eiaPriceRaw ?? `Hardcoded fallback $${baseDeckOil.toFixed(2)}/BBL`,
+      transformation: avgOilPrice
+        ? `Simple average across ${runMonths.length} run-statement month(s)`
+        : eiaPriceRaw
+        ? `WTI spot + basin differential ($${basinDiff.toFixed(2)}/BBL)`
+        : "No transformation — hardcoded default used",
+      final_value: oilPriceValue != null ? `$${oilPriceValue.toFixed(2)}/BBL` : `$${baseDeckOil.toFixed(2)}/BBL (hardcoded)`,
+      confidence: avgOilPrice ? "high" : avgLoeOilPrice ? "medium" : eiaWellheadPrice ? "medium" : "low",
+      conflict: avgOilPrice && eiaWellheadPrice && Math.abs(avgOilPrice - eiaWellheadPrice) > 5 ? {
+        alt_source: `EIA WTI + differential`,
+        alt_value: `$${eiaWellheadPrice.toFixed(2)}/BBL`,
+        why_not_used: "Run-statement price preferred over EIA estimate when available.",
+      } : null,
+    });
+
+    // 5. Monthly NCF
+    const monthlyNcf = econResult?.monthly_net_income_usd ?? null;
+    keyInputs.push({
+      field: "Monthly Net Cash Flow",
+      category: "calculated",
+      source_label: "Calculated",
+      raw_value: econOil > 0 || econGas > 0
+        ? `${fmtN(econOil)} BBL/mo @ ${oilPriceValue != null ? `$${oilPriceValue.toFixed(2)}` : "$?"}/BBL × NRI ${fmtPct(nriDecimal)} − LOE ${fmt$(avgLoeEffective)}`
+        : "No production",
+      transformation: econResult
+        ? `runEconomics(): gross revenue × NRI − severance (${isTexasState ? "TX 4.6% oil" : "0%"}) − LOE − transport − workover reserve`
+        : "No economics run (insufficient data)",
+      final_value: monthlyNcf != null ? fmt$(monthlyNcf) : "—",
+      confidence: monthlyNcf != null ? (econNriSource === "uploaded_doc" && avgLoe != null ? "medium" : "low") : "none",
+      conflict: null,
+    });
+
+    // 6. NPV10 base
+    const npv10 = econResult?.npv10_base_usd ?? null;
+    keyInputs.push({
+      field: "NPV10 (Base Case)",
+      category: "calculated",
+      source_label: "Calculated",
+      raw_value: dcaResult
+        ? `DCA EUR ${fmtN(dcaResult.eur_bbl)} BBL · ${dcaResult.economic_life_months} months economic life · R²=${dcaResult.model.r_squared.toFixed(2)}`
+        : "No DCA result",
+      transformation: "Discounted cash flow at 10% annual rate over DCA economic life",
+      final_value: npv10 != null ? fmt$(npv10) : "—",
+      confidence: npv10 != null ? (dcaResult?.model.r_squared != null && dcaResult.model.r_squared > 0.8 ? "medium" : "low") : "none",
+      conflict: null,
+    });
+
+    // 7. Offer range
+    const offerLow  = econResult?.offer_range_low  ?? null;
+    const offerMid  = econResult?.offer_range_mid  ?? null;
+    const offerHigh = econResult?.offer_range_high ?? null;
+    keyInputs.push({
+      field: "Offer Range",
+      category: "calculated",
+      source_label: "Calculated",
+      raw_value: monthlyNcf != null
+        ? `Annual NCF ${fmt$(monthlyNcf * 12)} · NPV10 ${fmt$(npv10)}`
+        : "No NCF available",
+      transformation: "Low: 2.5–3.5× annual NCF  ·  Mid: 4–5× annual NCF or 75–80% NPV10  ·  High: 5.5–7× annual NCF or 80–85% NPV10",
+      final_value: offerLow != null && offerHigh != null
+        ? `${fmt$(offerLow)} – ${fmt$(offerHigh)} (mid ${fmt$(offerMid)})`
+        : "—",
+      confidence: offerMid != null
+        ? (econNriSource === "uploaded_doc" && avgLoe != null && (prodIntel?.production_confidence ?? "INFERRED") !== "INFERRED" ? "medium" : "low")
+        : "none",
+      conflict: hasCriticalMismatch ? {
+        alt_source: "⚠️ Production data conflict",
+        alt_value: `Doc production vs TRRC differs on ${criticalConflicts.length} period(s)`,
+        why_not_used: "Offer range uses TRRC-based production. If TRRC diverges from run-statement actuals, this value is unreliable.",
+      } : null,
+    });
+
+    return {
+      production_lineage: productionLineage,
+      key_inputs: keyInputs,
+    };
+  })();
+
   // ── Assemble report ───────────────────────────────────────────────────────
 
   return {
@@ -3042,6 +3365,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       doc_type: d.doc_type ?? "Unknown",
       char_count: d.text.length,
     })),
+    data_provenance: dataProvenance,
     production_audit: productionAudit,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,
