@@ -518,6 +518,68 @@ export type RiskSection = {
   diligence_checklist: DiligenceCheckItem[];
 };
 
+// ─── Production Audit ────────────────────────────────────────────────────────
+//
+// Captures every step from raw TRRC fetch through classification so discrepancies
+// between MineralFlow output and run-statement/purchaser-statement values can be
+// traced to their exact source.
+
+export type ProductionAuditRawRow = {
+  period: string;           // "YYYY-MM"
+  oil_bbl: number;
+  gas_mcf: number | null;
+  source: "trrc_actual" | "doc_extracted";
+};
+
+export type ProductionAuditClassifiedRow = {
+  period: string;
+  oil_bbl: number;
+  gas_mcf: number | null;
+  classification: "active" | "downtime" | "restart" | "flush" | "incomplete";
+  classification_note: string | null;
+  used_in_stabilized_avg: boolean;
+  used_in_dca: boolean;
+};
+
+export type ProductionAudit = {
+  // ── Identity resolution ─────────────────────────────────────────────────
+  /** API numbers exactly as entered by the user */
+  input_apis: string[];
+  /** Normalized 10-digit API numbers (e.g. "42-151-01734") */
+  resolved_apis: string[];
+  /** TRRC distCode:leaseNo pairs actually queried (e.g. ["06:123456"]) */
+  resolved_leases: string[];
+  /** TRRC district codes */
+  trrc_districts: string[];
+  /** Step-by-step trail from user input → lease query */
+  resolution_steps: string[];
+  /** URL queried for the production data */
+  trrc_production_url: string | null;
+
+  // ── Raw data ─────────────────────────────────────────────────────────────
+  /** Every row as returned from TRRC or doc extraction, before any filtering */
+  raw_rows: ProductionAuditRawRow[];
+  raw_row_count: number;
+  raw_date_range: string | null;  // "YYYY-MM → YYYY-MM"
+
+  // ── Classification output ────────────────────────────────────────────────
+  /** Each month tagged with what the production engine did to it */
+  classified_rows: ProductionAuditClassifiedRow[];
+  months_active: number;
+  months_downtime: number;
+  months_restart: number;
+  months_flush: number;
+  months_incomplete: number;
+
+  // ── Final values used ────────────────────────────────────────────────────
+  stabilized_rate_bbl: number | null;
+  stabilized_rate_basis: string;    // e.g. "3-month stabilized average (active months only)"
+  dca_input_row_count: number;
+
+  // ── Audit notes ──────────────────────────────────────────────────────────
+  notes: string[];
+};
+
 // ─── Full DD Report ───────────────────────────────────────────────────────────
 
 export type DDReportConfidence = "high" | "medium" | "low" | "very_low";
@@ -575,6 +637,12 @@ export type DDReport = {
     doc_type: string;
     char_count: number;
   }[];
+
+  /**
+   * Production audit trail — raw TRRC rows, identity resolution, classification.
+   * Use this to diagnose divergence between MineralFlow output and run statements.
+   */
+  production_audit: ProductionAudit | null;
 
   /** Debug / audit trail */
   _meta: {

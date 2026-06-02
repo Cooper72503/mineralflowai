@@ -311,12 +311,14 @@ type TabId =
   | "documents_sources"
   | "missing_diligence"
   | "ic_memo"
-  | "export_center";
+  | "export_center"
+  | "production_audit";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "executive_summary",   label: "Executive Summary",      icon: "📋" },
   { id: "asset_overview",      label: "Asset Overview",         icon: "🪨" },
-  { id: "production_decline",  label: "Production & Decline-Support",   icon: "⛽" },
+  { id: "production_decline",  label: "Production & Decline",   icon: "⛽" },
+  { id: "production_audit",    label: "Production Audit",       icon: "🔬" },
   { id: "economics_valuation", label: "Economics & Valuation",  icon: "💰" },
   { id: "operations_workovers",label: "Operations & Workovers", icon: "🔧" },
   { id: "compliance_risk",     label: "Compliance & Risk",      icon: "🔒" },
@@ -1529,6 +1531,407 @@ function RecommendationTab({ report }: { report: DDReport }) {
           ])}
         />
       </Section>
+    </div>
+  );
+}
+
+// ─── Production Audit Tab ─────────────────────────────────────────────────────
+//
+// Shows every raw TRRC row before and after classification so analysts can
+// verify production numbers against run statements and identify divergence.
+
+function ProductionAuditTab({ report }: { report: DDReport }) {
+  const audit = report.production_audit;
+  const [showRaw, setShowRaw]            = useState(true);
+  const [showClassified, setShowClassified] = useState(true);
+
+  const T = {
+    surface:    "#181c25",
+    surfaceAlt: "#1e2333",
+    border:     "rgba(255,255,255,0.08)",
+    text:       "#e2e8f0",
+    muted:      "#8892a4",
+    faint:      "#5a6478",
+    accent:     "#4f8ef7",
+    green:      "#22c55e",
+    yellow:     "#f59e0b",
+    red:        "#ef4444",
+    greenDim:   "rgba(34,197,94,0.12)",
+    yellowDim:  "rgba(245,158,11,0.12)",
+    redDim:     "rgba(239,68,68,0.12)",
+    accentDim:  "rgba(79,142,247,0.12)",
+  };
+
+  const classColor = (c: string) => {
+    if (c === "active")     return { bg: T.greenDim,  color: T.green,  label: "ACTIVE"     };
+    if (c === "downtime")   return { bg: T.redDim,    color: T.red,    label: "DOWNTIME"   };
+    if (c === "restart")    return { bg: T.yellowDim, color: T.yellow, label: "RESTART"    };
+    if (c === "flush")      return { bg: T.accentDim, color: T.accent, label: "FLUSH"      };
+    if (c === "incomplete") return { bg: T.yellowDim, color: T.yellow, label: "INCOMPLETE" };
+    return                         { bg: T.surfaceAlt, color: T.muted, label: c.toUpperCase() };
+  };
+
+  const card: React.CSSProperties = {
+    background: T.surface,
+    border: `1px solid ${T.border}`,
+    borderRadius: 12,
+    padding: "1rem 1.1rem",
+    marginBottom: "1rem",
+  };
+
+  const sectionTitle: React.CSSProperties = {
+    fontSize: "0.9rem", fontWeight: 700, color: T.text, marginBottom: "0.65rem",
+  };
+
+  const mono: React.CSSProperties = {
+    fontFamily: "monospace", fontSize: "0.78rem", color: T.muted,
+  };
+
+  if (!audit) {
+    return (
+      <div style={card}>
+        <p style={{ color: T.muted, fontSize: "0.88rem", margin: 0 }}>
+          Production audit data not available — run a full underwriting analysis to generate audit trail.
+        </p>
+      </div>
+    );
+  }
+
+  const totalExcluded =
+    audit.months_downtime + audit.months_restart + audit.months_flush + audit.months_incomplete;
+
+  return (
+    <div style={{ paddingBottom: "2rem" }}>
+
+      {/* ── Warning banner if no raw rows ── */}
+      {audit.raw_row_count === 0 && (
+        <div style={{
+          background: T.redDim, border: `1px solid rgba(239,68,68,0.3)`,
+          borderRadius: 10, padding: "0.85rem 1rem", marginBottom: "1rem",
+          color: T.red, fontSize: "0.88rem", lineHeight: 1.5,
+        }}>
+          ⚠️ <strong>No production rows returned.</strong> TRRC could not resolve a lease from the provided API number(s),
+          or the lease returned zero rows. Verify that the API number is correct and that a TRRC production record exists.
+        </div>
+      )}
+
+      {/* ── Audit notes (if any) ── */}
+      {audit.notes.length > 0 && (
+        <div style={{ marginBottom: "1rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          {audit.notes.map((n, i) => (
+            <div key={i} style={{
+              background: T.yellowDim,
+              border: `1px solid rgba(245,158,11,0.25)`,
+              borderRadius: 8, padding: "0.55rem 0.85rem",
+              fontSize: "0.82rem", color: T.yellow, lineHeight: 1.5,
+            }}>
+              {n}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Identity Resolution ── */}
+      <div style={card}>
+        <div style={sectionTitle}>Identity Resolution</div>
+        <dl style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <dt style={{ ...mono, minWidth: 160, color: T.faint }}>Input API(s)</dt>
+            <dd style={{ margin: 0, ...mono, color: T.text }}>
+              {audit.input_apis.length > 0 ? audit.input_apis.join(", ") : <span style={{ color: T.faint }}>None provided</span>}
+            </dd>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <dt style={{ ...mono, minWidth: 160, color: T.faint }}>Resolved API(s)</dt>
+            <dd style={{ margin: 0, ...mono, color: T.text }}>
+              {audit.resolved_apis.length > 0 ? audit.resolved_apis.join(", ") : <span style={{ color: T.faint }}>—</span>}
+            </dd>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <dt style={{ ...mono, minWidth: 160, color: T.faint }}>TRRC Lease(s)</dt>
+            <dd style={{ margin: 0, ...mono, color: T.text }}>
+              {audit.resolved_leases.length > 0
+                ? audit.resolved_leases.map(l => (
+                    <span key={l} style={{ marginRight: "0.75rem" }}>
+                      Dist:Lease <strong style={{ color: T.accent }}>{l}</strong>
+                    </span>
+                  ))
+                : <span style={{ color: T.faint }}>—</span>}
+            </dd>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <dt style={{ ...mono, minWidth: 160, color: T.faint }}>TRRC District(s)</dt>
+            <dd style={{ margin: 0, ...mono, color: T.text }}>
+              {audit.trrc_districts.length > 0 ? audit.trrc_districts.join(", ") : <span style={{ color: T.faint }}>—</span>}
+            </dd>
+          </div>
+          {audit.trrc_production_url && (
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <dt style={{ ...mono, minWidth: 160, color: T.faint }}>Production URL</dt>
+              <dd style={{ margin: 0 }}>
+                <a href={audit.trrc_production_url} target="_blank" rel="noopener noreferrer"
+                   style={{ ...mono, color: T.accent, textDecoration: "underline" }}>
+                  {audit.trrc_production_url}
+                </a>
+              </dd>
+            </div>
+          )}
+        </dl>
+
+        {/* Resolution steps */}
+        {audit.resolution_steps.length > 0 && (
+          <div style={{ marginTop: "0.85rem" }}>
+            <div style={{ fontSize: "0.75rem", color: T.faint, marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Resolution steps
+            </div>
+            <ol style={{ margin: 0, paddingLeft: "1.2rem", display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+              {audit.resolution_steps.map((s, i) => (
+                <li key={i} style={{ fontSize: "0.8rem", color: T.muted, lineHeight: 1.45 }}>{s}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </div>
+
+      {/* ── Production summary strip ── */}
+      <div style={{
+        ...card,
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
+        gap: "0.75rem",
+        textAlign: "center",
+      }}>
+        {[
+          { label: "Raw Rows",   value: audit.raw_row_count,        color: T.text   },
+          { label: "Active",     value: audit.months_active,        color: T.green  },
+          { label: "Downtime",   value: audit.months_downtime,      color: T.red    },
+          { label: "Restart",    value: audit.months_restart,       color: T.yellow },
+          { label: "Flush",      value: audit.months_flush,         color: T.accent },
+          { label: "Incomplete", value: audit.months_incomplete,    color: T.yellow },
+          { label: "Excluded",   value: totalExcluded,              color: totalExcluded > 0 ? T.red : T.faint },
+          { label: "DCA Input",  value: audit.dca_input_row_count,  color: T.text   },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div style={{ fontSize: "1.35rem", fontWeight: 800, color }}>{value}</div>
+            <div style={{ fontSize: "0.68rem", color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Stabilized rate used ── */}
+      {audit.stabilized_rate_bbl != null && (
+        <div style={{ ...card, display: "flex", alignItems: "center", gap: "1.5rem" }}>
+          <div>
+            <div style={{ fontSize: "0.68rem", color: T.faint, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>
+              Rate Used in Economics
+            </div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: T.green }}>
+              {audit.stabilized_rate_bbl.toLocaleString()} <span style={{ fontSize: "0.85rem", fontWeight: 400, color: T.muted }}>BBL/mo</span>
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: "0.72rem", color: T.muted, lineHeight: 1.5 }}>
+              Basis: {audit.stabilized_rate_basis}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Raw TRRC / doc rows ── */}
+      <div style={card}>
+        <button
+          type="button"
+          onClick={() => setShowRaw(v => !v)}
+          style={{
+            background: "none", border: "none", cursor: "pointer", padding: 0,
+            display: "flex", alignItems: "center", gap: "0.5rem", width: "100%",
+          }}
+        >
+          <span style={sectionTitle}>{showRaw ? "▼" : "▶"} Raw Production Records ({audit.raw_row_count} rows)</span>
+          <span style={{ fontSize: "0.72rem", color: T.faint, fontWeight: 400 }}>
+            {audit.raw_rows[0]?.source === "trrc_actual" ? "Source: TRRC Specific Lease Query" : "Source: Document extraction"}
+            {audit.raw_date_range ? ` · ${audit.raw_date_range}` : ""}
+          </span>
+        </button>
+        {showRaw && (
+          <>
+            <p style={{ fontSize: "0.8rem", color: T.faint, margin: "0.35rem 0 0.75rem", lineHeight: 1.5 }}>
+              These are the exact values returned from TRRC before any classification, filtering, or stabilization.
+              Compare directly to run-statement purchaser values to identify source of divergence.
+            </p>
+            {audit.raw_row_count === 0
+              ? <p style={{ color: T.red, fontSize: "0.82rem" }}>No rows returned.</p>
+              : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+                    <thead>
+                      <tr>
+                        {["Period", "Oil BBL", "Gas MCF", "Source"].map(h => (
+                          <th key={h} style={{
+                            textAlign: h === "Period" || h === "Source" ? "left" : "right",
+                            padding: "5px 9px",
+                            color: T.faint, fontWeight: 600,
+                            borderBottom: `1px solid ${T.border}`,
+                            fontSize: "0.75rem",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                          }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {audit.raw_rows.map((r, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                          <td style={{ padding: "5px 9px", ...mono, color: T.text }}>{r.period}</td>
+                          <td style={{ padding: "5px 9px", textAlign: "right", fontWeight: 600, color: r.oil_bbl > 0 ? T.text : T.faint }}>
+                            {r.oil_bbl > 0 ? r.oil_bbl.toLocaleString() : "—"}
+                          </td>
+                          <td style={{ padding: "5px 9px", textAlign: "right", color: r.gas_mcf != null && r.gas_mcf > 0 ? T.green : T.faint }}>
+                            {r.gas_mcf != null && r.gas_mcf > 0 ? r.gas_mcf.toLocaleString() : "—"}
+                          </td>
+                          <td style={{ padding: "5px 9px", ...mono, color: T.faint }}>
+                            {r.source === "trrc_actual" ? "TRRC" : "Doc"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
+          </>
+        )}
+      </div>
+
+      {/* ── Classified rows ── */}
+      <div style={card}>
+        <button
+          type="button"
+          onClick={() => setShowClassified(v => !v)}
+          style={{
+            background: "none", border: "none", cursor: "pointer", padding: 0,
+            display: "flex", alignItems: "center", gap: "0.5rem", width: "100%",
+          }}
+        >
+          <span style={sectionTitle}>{showClassified ? "▼" : "▶"} Classification Detail ({audit.classified_rows.length} rows)</span>
+          {totalExcluded > 0 && (
+            <span style={{ fontSize: "0.72rem", color: T.yellow, fontWeight: 500 }}>
+              {totalExcluded} month{totalExcluded !== 1 ? "s" : ""} excluded from economics
+            </span>
+          )}
+        </button>
+        {showClassified && (
+          <>
+            <p style={{ fontSize: "0.8rem", color: T.faint, margin: "0.35rem 0 0.75rem", lineHeight: 1.5 }}>
+              Months marked <strong style={{ color: T.green }}>ACTIVE</strong> are used in stabilized averages and economics.
+              <strong style={{ color: T.red }}> DOWNTIME</strong> = zero/sub-threshold production.
+              <strong style={{ color: T.yellow }}> INCOMPLETE</strong> = within TRRC 3-month lag window and below 55% of trend — excluded to avoid partial-month bias.
+              <strong style={{ color: T.yellow }}> RESTART</strong> = first 2 months after a shut-in — excluded as transitional.
+              <strong style={{ color: T.accent }}> FLUSH</strong> = &gt;2.5× running median — post-stimulation spike.
+            </p>
+            {audit.classified_rows.length === 0
+              ? <p style={{ color: T.faint, fontSize: "0.82rem" }}>No classified rows available.</p>
+              : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.79rem" }}>
+                    <thead>
+                      <tr>
+                        {["Period", "Oil BBL", "Gas MCF", "Classification", "In Stabilized?", "In DCA?", "Note"].map(h => (
+                          <th key={h} style={{
+                            textAlign: h === "Period" || h === "Classification" || h === "Note" ? "left" : "right",
+                            padding: "5px 9px",
+                            color: T.faint, fontWeight: 600,
+                            borderBottom: `1px solid ${T.border}`,
+                            fontSize: "0.72rem",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                            whiteSpace: "nowrap",
+                          }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {audit.classified_rows.map((r, i) => {
+                        const cl = classColor(r.classification);
+                        return (
+                          <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                            <td style={{ padding: "5px 9px", ...mono, color: T.text }}>{r.period}</td>
+                            <td style={{ padding: "5px 9px", textAlign: "right", fontWeight: 600, color: r.oil_bbl > 0 ? T.text : T.faint }}>
+                              {r.oil_bbl > 0 ? r.oil_bbl.toLocaleString() : "—"}
+                            </td>
+                            <td style={{ padding: "5px 9px", textAlign: "right", color: r.gas_mcf != null && r.gas_mcf > 0 ? T.green : T.faint }}>
+                              {r.gas_mcf != null && r.gas_mcf > 0 ? r.gas_mcf.toLocaleString() : "—"}
+                            </td>
+                            <td style={{ padding: "5px 9px" }}>
+                              <span style={{
+                                display: "inline-block",
+                                background: cl.bg, color: cl.color,
+                                fontSize: "0.68rem", fontWeight: 700,
+                                padding: "1px 6px", borderRadius: 4,
+                                textTransform: "uppercase", letterSpacing: "0.04em",
+                              }}>
+                                {cl.label}
+                              </span>
+                            </td>
+                            <td style={{ padding: "5px 9px", textAlign: "right" }}>
+                              <span style={{ color: r.used_in_stabilized_avg ? T.green : T.red, fontWeight: 700, fontSize: "0.78rem" }}>
+                                {r.used_in_stabilized_avg ? "✓" : "✗"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "5px 9px", textAlign: "right" }}>
+                              <span style={{ color: r.used_in_dca ? T.green : T.faint, fontWeight: 700, fontSize: "0.78rem" }}>
+                                {r.used_in_dca ? "✓" : "—"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "5px 9px", color: T.faint, fontSize: "0.74rem", maxWidth: 260, lineHeight: 1.4 }}>
+                              {r.classification_note ?? ""}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
+          </>
+        )}
+      </div>
+
+      {/* ── Aggregation logic ── */}
+      <div style={card}>
+        <div style={sectionTitle}>Aggregation Logic</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.82rem", color: T.muted, lineHeight: 1.55 }}>
+          <p style={{ margin: 0 }}>
+            <strong style={{ color: T.text }}>Step 1 — Fetch:</strong> TRRC Specific Lease Query returns monthly production for the resolved TRRC lease number.
+            Production is <em>lease-level</em> (all wells on the lease aggregated). Individual well allocations are not available from TRRC public records.
+          </p>
+          <p style={{ margin: 0 }}>
+            <strong style={{ color: T.text }}>Step 2 — Sort &amp; calendar-index:</strong> Rows are sorted chronologically and assigned a calendar_t (elapsed months from first row).
+            This preserves downtime gaps so the DCA time axis is not artificially compressed.
+          </p>
+          <p style={{ margin: 0 }}>
+            <strong style={{ color: T.text }}>Step 3 — Classify:</strong> Each month is tagged as active / downtime / restart / flush / incomplete.
+            <em> Incomplete</em>: within 3-month TRRC lag window AND &lt;55% of prior 6-month trend.
+            <em> Restart</em>: first 2 months after any downtime period.
+            <em> Flush</em>: &gt;2.5× running median.
+            <em> Downtime</em>: oil_bbl &lt;5 BBL.
+          </p>
+          <p style={{ margin: 0 }}>
+            <strong style={{ color: T.text }}>Step 4 — Stabilize:</strong> Stabilized averages (3-mo, 6-mo, 12-mo) are computed from <em>active months only</em>,
+            using a trailing calendar window. The best available stabilized rate (preferring 3-mo) is used as the economics input.
+          </p>
+          <p style={{ margin: 0 }}>
+            <strong style={{ color: T.text }}>Step 5 — DCA:</strong> Arps hyperbolic/exponential fit runs on active + flush months with calendar time preserved.
+            Decline projections are anchored to the current stabilized rate.
+          </p>
+          <p style={{ margin: 0, padding: "0.5rem 0.75rem", background: T.surfaceAlt, borderRadius: 6, color: T.yellow, fontSize: "0.8rem" }}>
+            ⚠️ <strong>Divergence diagnostic:</strong> If the Raw Production Records above already differ from your run-statement values,
+            the issue is at the TRRC fetch level — TRRC may have resolved a different lease than the purchaser used.
+            Verify the resolved Dist:Lease above against the lease number shown on your run statement.
+            If the raw rows match but the economics output differs, the divergence is in the classification step — check the Classification Detail above for excluded months.
+          </p>
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -5098,6 +5501,7 @@ export default function UnderwritingPage() {
               {activeTab === "executive_summary"    && <ExecutiveSummaryTab    report={report} />}
               {activeTab === "asset_overview"        && <AssetOverviewTab       report={report} />}
               {activeTab === "production_decline"    && <ProductionDeclineTab   report={report} />}
+              {activeTab === "production_audit"      && <ProductionAuditTab     report={report} />}
               {activeTab === "economics_valuation"   && <EconomicsValuationTab  report={report} />}
               {activeTab === "operations_workovers"  && <OperationsWorkoverTab  report={report} />}
               {activeTab === "compliance_risk"       && <ComplianceRiskTab      report={report} />}

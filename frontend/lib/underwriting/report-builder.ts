@@ -51,6 +51,7 @@ import type {
   ExecutiveSummarySection,
   OperationalTimelineEvent,
   DiligenceStatusItem,
+  ProductionAudit,
 } from "./types";
 import type { DocumentExtractionResult } from "./document-extraction";
 import type { NormalizedApi } from "./types";
@@ -84,6 +85,10 @@ export type TrrcWellProduction = {
   // water_bbl is null for TRRC rows — TRRC production reports do not include water volumes.
   monthly_rows?: { year: number; month: number; oil_bbl: number; gas_mcf: number; water_bbl: number | null }[];
 };
+
+// Number of post-restart transition months excluded from stabilized averages
+// (mirrors RESTART_TRANSITION_MONTHS in production-engine.ts)
+const RESTART_TRANSITION_MONTHS_AUDIT = 2;
 
 // ─── Known TRRC source URLs (for audit trail) ─────────────────────────────────
 
@@ -1309,6 +1314,125 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   if (prodIntel?.warnings?.length) {
     productionSection.notes.push(...prodIntel.warnings);
   }
+
+  // ── Production Audit ──────────────────────────────────────────────────────
+  // Captures raw TRRC rows, identity resolution, and classification so every
+  // divergence from run-statement values can be traced to its exact source.
+
+  const auditNotes: string[] = [];
+
+  // Determine raw rows and their source
+  const auditRawRows = trrcMonthlyRows.length > 0
+    ? trrcMonthlyRows.map(r => ({
+        period: `${r.year}-${String(r.month).padStart(2, "0")}`,
+        oil_bbl: r.oil_bbl,
+        gas_mcf: r.gas_mcf ?? null,
+        source: "trrc_actual" as const,
+      }))
+    : docMonthlyRows.map(r => ({
+        period: `${r.year}-${String(r.month).padStart(2, "0")}`,
+        oil_bbl: r.oil_bbl,
+        gas_mcf: r.gas_mcf ?? null,
+        source: "doc_extracted" as const,
+      }));
+
+  auditRawRows.sort((a, b) => a.period.localeCompare(b.period));
+
+  const auditDateRange = auditRawRows.length > 0
+    ? `${auditRawRows[0].period} → ${auditRawRows[auditRawRows.length - 1].period}`
+    : null;
+
+  // Build classified rows from prodIntel output
+  const auditClassifiedRows = prodIntel
+    ? prodIntel.classified_months.map(cm => ({
+        period: cm.period,
+        oil_bbl: cm.oil_bbl,
+        gas_mcf: cm.gas_mcf,
+        classification: cm.classification,
+        classification_note: cm.classification_note,
+        used_in_stabilized_avg: cm.classification === "active",
+        used_in_dca: cm.classification === "active" || cm.classification === "flush",
+      }))
+    : auditRawRows.map(r => ({
+        period: r.period,
+        oil_bbl: r.oil_bbl,
+        gas_mcf: r.gas_mcf,
+        classification: "active" as const,
+        classification_note: null,
+        used_in_stabilized_avg: true,
+        used_in_dca: true,
+      }));
+
+  // Resolution steps from subject identity
+  const auditResolutionSteps = [...subject.match_path];
+  if (trrcMonthlyRows.length === 0 && docMonthlyRows.length === 0) {
+    auditResolutionSteps.push("⚠️ No production rows returned from any source");
+  } else if (trrcMonthlyRows.length > 0) {
+    auditResolutionSteps.push(
+      `TRRC raw rows: ${trrcMonthlyRows.length} month(s) returned before classification`
+    );
+  }
+
+  // Audit notes
+  if (trrcWells.length > 0) {
+    const leaseStr = trrcWells
+      .map(w => `Dist ${w.district_code ?? "?"}:Lease ${w.lease_number ?? "?"}`)
+      .join(", ");
+    auditNotes.push(
+      `Production is LEASE-LEVEL from TRRC (${leaseStr}). ` +
+      "If multiple wells share this lease, TRRC reports their combined output — not per-well. " +
+      "Run statements from the purchaser allocate royalties on a per-well basis, which may not match the TRRC lease aggregate."
+    );
+  }
+  if (trrcMonthlyRows.length > 0 && docMonthlyRows.length === 0) {
+    const gasRows = trrcMonthlyRows.filter(r => (r.gas_mcf ?? 0) > 0);
+    if (gasRows.length > 0 && trrcMonthlyRows.filter(r => r.oil_bbl > 0).length === 0) {
+      auditNotes.push(
+        "⚠️ TRRC returned gas-only production. oil_bbl values shown are gas-converted to BOE (÷6). " +
+        "Run-statement values in BBL reflect liquid condensate volumes which may differ significantly."
+      );
+    }
+  }
+  if (prodIntel && prodIntel.incomplete_months_excluded > 0) {
+    auditNotes.push(
+      `${prodIntel.incomplete_months_excluded} month(s) classified as INCOMPLETE (within TRRC 3-month lag window ` +
+      "and below 55% of prior trend) were excluded from stabilized averages. " +
+      "If these months have confirmed run statement values, the incomplete threshold may be too aggressive."
+    );
+  }
+  if (prodIntel && prodIntel.restart_event_count > 0) {
+    auditNotes.push(
+      `${prodIntel.restart_event_count} restart event(s) detected. ` +
+      `${RESTART_TRANSITION_MONTHS_AUDIT} post-restart transition month(s) per event are excluded from stabilized averages.`
+    );
+  }
+
+  const resolvedLeases = trrcWells
+    .map(w => [w.district_code, w.lease_number].filter(Boolean).join(":"))
+    .filter(Boolean);
+  const trrcDistricts = Array.from(new Set(trrcWells.map(w => w.district_code).filter((d): d is string => !!d)));
+
+  const productionAudit: ProductionAudit = {
+    input_apis: input.api_numbers ?? [],
+    resolved_apis: subject.normalized_apis.map(n => n.api_formatted),
+    resolved_leases: resolvedLeases,
+    trrc_districts: trrcDistricts,
+    resolution_steps: auditResolutionSteps,
+    trrc_production_url: trrcMonthlyRows.length > 0 ? TRRC_URLS.production : null,
+    raw_rows: auditRawRows,
+    raw_row_count: auditRawRows.length,
+    raw_date_range: auditDateRange,
+    classified_rows: auditClassifiedRows,
+    months_active:     auditClassifiedRows.filter(r => r.classification === "active").length,
+    months_downtime:   auditClassifiedRows.filter(r => r.classification === "downtime").length,
+    months_restart:    auditClassifiedRows.filter(r => r.classification === "restart").length,
+    months_flush:      auditClassifiedRows.filter(r => r.classification === "flush").length,
+    months_incomplete: auditClassifiedRows.filter(r => r.classification === "incomplete").length,
+    stabilized_rate_bbl: prodIntel?.current_stabilized_bbl ?? null,
+    stabilized_rate_basis: prodIntel?.current_stabilized_source ?? "raw last month",
+    dca_input_row_count: (prodIntel?.dca_rows ?? []).length,
+    notes: auditNotes,
+  };
 
   // ── Stabilized rate for economics & DCA ──────────────────────────────────
   // Use the stabilized current rate (not raw last month) for all economic inputs.
@@ -2918,6 +3042,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       doc_type: d.doc_type ?? "Unknown",
       char_count: d.text.length,
     })),
+    production_audit: productionAudit,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,
       trrc_match_tier: matchTier,
