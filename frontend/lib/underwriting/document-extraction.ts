@@ -143,6 +143,38 @@ export type DocumentExtractionResult = {
 
   // Water cut (from production summary docs)
   water_cut_pct: number | null;
+
+  // Formation & completion data (from W-1/W-2, completion reports, well records)
+  completion_data: {
+    formation_name: string | null;
+    total_depth_ft: number | null;
+    completion_type: "vertical" | "horizontal" | "deviated" | null;
+    completion_date: string | null;          // "YYYY-MM-DD" or "YYYY-MM" or "YYYY"
+    artificial_lift_type: string | null;     // "Rod Pump" | "Gas Lift" | "ESP" | "Plunger" | "Flowing"
+    producing_zone: string | null;
+    injection_zone: string | null;
+    perforations: {
+      top_ft: number | null;
+      bottom_ft: number | null;
+      formation: string | null;
+      status: string | null;
+    }[];
+    casing: {
+      type: string;                          // "Surface" | "Intermediate" | "Production"
+      size_inches: number | null;
+      weight_lbs_ft: number | null;
+      grade: string | null;
+      depth_set_ft: number | null;
+    }[];
+    tubing: {
+      size_inches: number | null;
+      depth_ft: number | null;
+      material: string | null;
+    }[];
+  } | null;
+
+  // Operator notes / commentary extracted from documents
+  operator_notes: string[];
 };
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -152,16 +184,18 @@ const SYSTEM_PROMPT = `You are a senior petroleum engineer and mineral rights an
 Extract every structured field listed below. Be specific — pull exact dollar amounts, dates, API numbers, and volumes from the text. Do not fabricate values you cannot find. Return null for any field not present.
 
 IMPORTANT RULES:
-1. For LOE statements: extract EACH monthly period as a separate entry. Include all cost line items by category.
-2. For production: extract each month separately with well-level granularity if available.
-3. For API numbers: use 10-digit format (42-XXX-XXXXX) if possible. Include all you find.
-4. For RRC lease numbers: format as "distCode:leaseNo" (e.g. "06:123456") if the district is known.
-5. For workover events: include every repair, recompletion, artificial lift change, or stimulation mentioned.
-6. For equipment: be specific — "14 HP Rod Pump Unit" not just "pump."
-7. For ownership: extract decimals precisely (0.125, not "1/8").
-8. For plugging liability: flag any well described as inactive, shut-in, or with a pending H-15.
-9. For water cut: compute it if oil_bbl and water_bbl are both present (water_bbl / (oil_bbl + water_bbl) × 100).
-10. Document types to look for: LOE Statement, Joint Interest Billing, Run Ticket, Division Order, Purchaser Statement, Workover AFE, Equipment List, Well Test, Completion Report, Reserve Summary, Compliance Notice, Bond Certificate, Injection Permit, MIT Test Report, H-15 Plugging Form.
+1. For LOE statements: extract EACH monthly period as a separate entry with ALL cost line items by category.
+2. For production: extract each month separately. Include well-level data if available.
+3. For API numbers: use 10-digit format (42-XXX-XXXXX). Include ALL you find.
+4. For RRC lease numbers: format as "distCode:leaseNo" (e.g. "06:123456") if district is known.
+5. For workover events: include every repair, recompletion, artificial lift change, stimulation, or intervention.
+6. For equipment: be specific — "14 HP Rod Pump Unit on 2-3/8 tubing" not just "pump."
+7. For ownership: extract decimals precisely (0.125000, not "1/8").
+8. For plugging liability: flag ANY well described as inactive, shut-in, P&A candidate, or with a pending H-15.
+9. For water cut: compute from oil_bbl and water_bbl if both present (water/(oil+water) × 100).
+10. For completion data: extract from W-1, W-2, completion reports, or any well record showing formation, depth, perforations, casing, or tubing specs.
+11. For operator notes: capture key qualitative statements operators made about production, workovers, equipment condition, or future plans.
+12. Document types to look for: LOE Statement, Joint Interest Billing, Run Ticket, Division Order, Purchaser Statement, Workover AFE, Equipment List, Well Test, Completion Report, W-1, W-2, Reserve Summary, Compliance Notice, Bond Certificate, Injection Permit, MIT Test Report, H-15 Plugging Form, P&A Report, Well Log.
 
 Return ONLY valid JSON with this exact structure (no markdown, no commentary):
 {
@@ -192,13 +226,26 @@ Return ONLY valid JSON with this exact structure (no markdown, no commentary):
   "reserve_pv10": number | null,
   "run_tickets_present": boolean,
   "purchaser_statements_present": boolean,
-  "water_cut_pct": number | null
+  "water_cut_pct": number | null,
+  "completion_data": {
+    "formation_name": string|null,
+    "total_depth_ft": number|null,
+    "completion_type": "vertical"|"horizontal"|"deviated"|null,
+    "completion_date": string|null,
+    "artificial_lift_type": string|null,
+    "producing_zone": string|null,
+    "injection_zone": string|null,
+    "perforations": [{"top_ft": number|null, "bottom_ft": number|null, "formation": string|null, "status": string|null}],
+    "casing": [{"type": string, "size_inches": number|null, "weight_lbs_ft": number|null, "grade": string|null, "depth_set_ft": number|null}],
+    "tubing": [{"size_inches": number|null, "depth_ft": number|null, "material": string|null}]
+  } | null,
+  "operator_notes": string[]
 }`;
 
 // ─── Main extraction function ─────────────────────────────────────────────────
 
-const MAX_CHARS_PER_DOC = 12_000;
-const MAX_TOTAL_CHARS   = 40_000;
+const MAX_CHARS_PER_DOC = 24_000;
+const MAX_TOTAL_CHARS   = 96_000;
 
 export async function extractUnderwritingDataFromDocuments(
   documents: { filename: string; text: string; doc_type?: string }[],
@@ -224,7 +271,7 @@ export async function extractUnderwritingDataFromDocuments(
     const completion = await client.chat.completions.create({
       model,
       temperature: 0.1,
-      max_tokens: 3000,
+      max_tokens: 8000,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
@@ -271,6 +318,8 @@ export async function extractUnderwritingDataFromDocuments(
       run_tickets_present: !!parsed.run_tickets_present,
       purchaser_statements_present: !!parsed.purchaser_statements_present,
       water_cut_pct: parsed.water_cut_pct ?? null,
+      completion_data: parsed.completion_data ?? null,
+      operator_notes: Array.isArray(parsed.operator_notes) ? parsed.operator_notes : [],
     };
   } catch (err) {
     console.warn("[underwriting-extraction] failed:", err instanceof Error ? err.message : err);

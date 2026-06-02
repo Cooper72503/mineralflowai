@@ -211,8 +211,20 @@ function nominalToEffectiveMonthly(Di: number, b: number): number {
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
+/**
+ * Run Arps DCA on monthly production rows.
+ *
+ * Accepts rows with an optional `calendar_t` field. When present, calendar_t
+ * (months elapsed from the first row in the original full series) is used as
+ * the time axis. This correctly models calendar gaps — shut-in periods expand
+ * the time axis instead of being silently removed, preventing artificially
+ * steepened decline rates.
+ *
+ * Without calendar_t, falls back to sequential 0-indexed time (legacy behaviour).
+ * Use the production-engine.ts `dca_rows` output for calendar-correct inputs.
+ */
 export function runDca(
-  monthlyRows: { year: number; month: number; oil_bbl: number }[],
+  monthlyRows: { year: number; month: number; oil_bbl: number; calendar_t?: number }[],
   economicLimitBbl = 5,
 ): DcaResult | null {
   // Sort chronologically and filter to positive months
@@ -224,7 +236,14 @@ export function runDca(
   if (positive.length < 3) return null;
 
   const rates = positive.map(r => r.oil_bbl);
-  const times = positive.map((_, i) => i);   // t = 0, 1, 2, ...
+  // Use calendar_t when available (preserves gaps) — otherwise use sequential index
+  const hasCalendarT = positive.every(r => r.calendar_t != null);
+  const rawTimes = hasCalendarT
+    ? positive.map(r => r.calendar_t!)
+    : positive.map((_, i) => i);
+  // Normalize times to start at 0 so qi is the initial rate at the start of the fit window
+  const t0 = rawTimes[0];
+  const times = rawTimes.map(t => t - t0);
 
   // Fit all three model families
   const expModel  = fitExponential(rates, times);

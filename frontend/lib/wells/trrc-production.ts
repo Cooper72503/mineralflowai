@@ -488,17 +488,18 @@ export async function fetchTrrcProductionByLease(
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
-    // Try oil first; fall back to gas for gas-only leases
+    // Try oil first; fall back to gas for gas-only leases.
+    // maxPages=5 → up to 50 rows ≈ 4+ years of monthly data (TRRC pages at 10 rows each).
     let rows = await fetchAllLeaseProduction(
       distCode, leaseNo, sessionCookie,
       startMonth, startYear, endMonth, endYear,
-      "O", 2, controller.signal,
+      "O", 5, controller.signal,
     );
     if (rows.length === 0) {
       rows = await fetchAllLeaseProduction(
         distCode, leaseNo, sessionCookie,
         startMonth, startYear, endMonth, endYear,
-        "G", 2, controller.signal,
+        "G", 5, controller.signal,
       );
     }
 

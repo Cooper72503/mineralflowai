@@ -92,6 +92,17 @@ function IconUnderwriting() {
     </svg>
   );
 }
+function IconAcreage() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 13L6 5l3 5 2.5-3.5L14 13"/>
+      <path d="M1.5 13h13"/>
+      <circle cx="6" cy="5" r="0.8" fill="currentColor" stroke="none"/>
+      <circle cx="9" cy="10" r="0.8" fill="currentColor" stroke="none"/>
+      <circle cx="11.5" cy="6.5" r="0.8" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+}
 function IconSettings() {
   return (
     <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -129,23 +140,13 @@ function IconBrandMark() {
 
 // ── Nav config ─────────────────────────────────────────────────────────────
 const primaryNav = [
-  { href: "/dashboard",  label: "Dashboard",       Icon: IconDashboard  },
-  { href: "/pipeline",   label: "Pipeline",         Icon: IconPipeline   },
-  { href: "/screen",     label: "Quick Screen",     Icon: IconScreen     },
-  { href: "/offer",      label: "Offer Calculator", Icon: IconCalculator },
-] as const;
-
-const toolsNav = [
-  { href: "/upload",        label: "Upload",              Icon: IconUpload        },
-  { href: "/documents",     label: "Documents",           Icon: IconDocuments     },
-  { href: "/leads",         label: "Leads",               Icon: IconLeads         },
-  { href: "/alerts",        label: "Alerts",              Icon: IconAlerts        },
-  { href: "/underwriting",  label: "Underwriting",        Icon: IconUnderwriting  },
+  { href: "/underwriting", label: "MineralFlow Underwriting", Icon: IconUnderwriting },
+  { href: "/acreage",      label: "Acreage Valuation",        Icon: IconAcreage      },
 ] as const;
 
 const accountNav = [
-  { href: "/settings",   label: "Settings",         Icon: IconSettings   },
-  { href: "/billing",    label: "Billing",          Icon: IconBilling    },
+  { href: "/settings",     label: "Settings",                 Icon: IconSettings     },
+  { href: "/billing",      label: "Billing",                  Icon: IconBilling      },
 ] as const;
 
 // ── SignOut (inside sidebar) ───────────────────────────────────────────────
@@ -193,12 +194,18 @@ function NavGroup({
     <>
       {items.map(({ href, label, Icon }) => {
         const isActive =
-          pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+          pathname === href
+          || (href === "/underwriting" && (pathname === "/underwriting" || (pathname.startsWith("/underwriting") && !pathname.startsWith("/underwriting/history"))))
+          || (href !== "/underwriting" && pathname.startsWith(href));
+        const isPrimary = href === "/underwriting";
         return (
           <Link
             key={href}
             href={href}
-            className={isActive ? "active" : undefined}
+            className={[
+              isActive ? "active" : undefined,
+              isPrimary ? "sidebar-primary-item" : undefined,
+            ].filter(Boolean).join(" ") || undefined}
             onClick={onClose}
           >
             <Icon />
@@ -206,6 +213,19 @@ function NavGroup({
           </Link>
         );
       })}
+      {/* Deal History sub-item — shown whenever underwriting section is visible */}
+      {items.some(i => i.href === "/underwriting") && (
+        <Link
+          href="/underwriting/history"
+          className={[
+            "sidebar-sub-item",
+            pathname.startsWith("/underwriting/history") ? "active" : undefined,
+          ].filter(Boolean).join(" ")}
+          onClick={onClose}
+        >
+          📋 Deal History
+        </Link>
+      )}
     </>
   );
 }
@@ -233,8 +253,6 @@ export function Sidebar() {
   const navEl = (close?: () => void) => (
     <nav className="sidebar-nav">
       <NavGroup items={primaryNav} pathname={pathname} onClose={close} />
-      <div className="sidebar-section-label">Data</div>
-      <NavGroup items={toolsNav} pathname={pathname} onClose={close} />
       <div className="sidebar-section-label">Account</div>
       <NavGroup items={accountNav} pathname={pathname} onClose={close} />
     </nav>

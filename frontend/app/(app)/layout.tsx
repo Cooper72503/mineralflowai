@@ -15,6 +15,9 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const headersList = await headers();
+  const pathname = headersList.get("x-pathname") ?? "/";
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -22,9 +25,6 @@ export default async function AppLayout({
 
   // Middleware handles unauthenticated → /login, but guard here too
   if (!user) redirect("/login");
-
-  const headersList = await headers();
-  const pathname = headersList.get("x-pathname") ?? "/";
 
   const alwaysAllowed = ALWAYS_ALLOWED.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`)

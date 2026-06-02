@@ -378,6 +378,43 @@ tr:hover td { background: #f8fafc; }
 .sidebar-nav a.active .sidebar-nav-icon { opacity: 1; }
 .sidebar-nav a:hover .sidebar-nav-icon { opacity: 0.9; }
 
+/* MineralFlow Underwriting — primary product link accent */
+.sidebar-nav a.sidebar-primary-item {
+  color: #93c5fd;
+  font-weight: 600;
+}
+.sidebar-nav a.sidebar-primary-item:hover {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.12);
+  border-left-color: rgba(59, 130, 246, 0.3);
+}
+.sidebar-nav a.sidebar-primary-item.active {
+  color: var(--sidebar-text-active);
+  background: var(--sidebar-active-bg);
+  border-left-color: var(--sidebar-active-border);
+}
+
+/* Sub-navigation items (indented under a primary nav entry) */
+.sidebar-nav a.sidebar-sub-item {
+  padding-left: 2.1rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--sidebar-text);
+  opacity: 0.85;
+}
+.sidebar-nav a.sidebar-sub-item:hover {
+  opacity: 1;
+  color: var(--sidebar-text-hover);
+  background: var(--sidebar-hover-bg);
+}
+.sidebar-nav a.sidebar-sub-item.active {
+  opacity: 1;
+  color: var(--sidebar-text-active);
+  background: var(--sidebar-active-bg);
+  border-left-color: var(--sidebar-active-border);
+  font-weight: 600;
+}
+
 .sidebar-footer {
   padding: 0.75rem 1rem;
   border-top: 1px solid var(--sidebar-border);

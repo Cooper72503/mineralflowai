@@ -22,6 +22,8 @@ import { createSupabaseFromRouteRequest }  from "@/lib/supabase/from-route-reque
 import { extractUnderwritingDataFromDocuments } from "@/lib/underwriting/document-extraction";
 import { fetchTrrcViolations, fetchTrrcViolationsByOperator } from "@/lib/underwriting/trrc-compliance";
 import { fetchTrrcInjectionByApi, fetchTrrcInjectionByOperator } from "@/lib/underwriting/trrc-injection";
+import { fetchTrrcInspectionsForApis } from "@/lib/wells/trrc-inspection";
+import { fetchTrrcCompletionsForApis } from "@/lib/wells/trrc-completions";
 import { buildDDReport, type TrrcWellProduction } from "@/lib/underwriting/report-builder";
 import { lookupTrrcLeasesByApis }           from "@/lib/wells/trrc-api";
 import { fetchTrrcProductionByLease }       from "@/lib/wells/trrc-production";
@@ -53,6 +55,10 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
     const county       = (body.county ?? "").trim() || null;
     const state        = (body.state ?? "").trim() || null;
     const documents    = body.documents ?? [];
+    const nriOverride  = typeof body.nri_decimal === "number" && body.nri_decimal > 0 && body.nri_decimal <= 1
+      ? body.nri_decimal : null;
+    const wiOverride   = typeof body.wi_decimal  === "number" && body.wi_decimal  > 0 && body.wi_decimal  <= 1
+      ? body.wi_decimal  : null;
 
     // Texas if state explicitly says so, OR if any API number starts with "42"
     // (the Texas state code). This lets users get TRRC data without filling in state.
@@ -95,7 +101,7 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       ? getBenchmarkFromApi(api8ForBenchmark)
       : (resolvedCounty ? getBenchmarkFromCounty(resolvedCounty) : null);
 
-    const [trrcResult, complianceResult, injectionResult, financialContext] = await Promise.all([
+    const [trrcResult, complianceResult, injectionResult, inspectionResult, completionResult, financialContext] = await Promise.all([
       // TRRC production
       (async (): Promise<TrrcWellProduction[]> => {
         if (!isTexas) return [];
@@ -107,15 +113,11 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
           leaseNo: string,
           operator: string | null,
         ): Promise<TrrcWellProduction | null> => {
-          const result = await fetchTrrcProductionByLease(distCode, leaseNo, 12);
+          const result = await fetchTrrcProductionByLease(distCode, leaseNo, 36);
           if (!result || result.rows.length === 0) return null;
           const sorted = [...result.rows].sort((a, b) =>
             a.year !== b.year ? a.year - b.year : a.month - b.month
           );
-          const recentRows = sorted.slice(-3).filter(r => r.oil_bbl > 0);
-          const avgBbl = recentRows.length > 0
-            ? recentRows.reduce((s, r) => s + r.oil_bbl, 0) / recentRows.length
-            : 0;
           const latest = sorted[sorted.length - 1];
           return {
             api,
@@ -123,14 +125,18 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
             lease_number: leaseNo,
             district_code: distCode,
             operator: operator || resolvedOperator,
-            latest_monthly_oil_bbl: avgBbl,
+            // Use the actual latest month's reported production — not a smoothed average.
+            // Rolling averages (3/6/12-month) are computed in report-builder from monthly_rows.
+            latest_monthly_oil_bbl: latest ? latest.oil_bbl : 0,
             latest_production_month: latest ? `${latest.year}-${String(latest.month).padStart(2, "0")}` : null,
             cum_oil_bbl: sorted.reduce((s, r) => s + r.oil_bbl, 0),
             monthly_rows: sorted.map(r => ({
               year: r.year, month: r.month,
               oil_bbl: r.oil_bbl,
               gas_mcf: r.gas_mcf ?? 0,
-              water_bbl: 0,
+              // TRRC production reports do NOT include water disposition volumes.
+              // Storing null here prevents false "0% water cut" calculations.
+              water_bbl: null,
             })),
           };
         };
@@ -241,6 +247,26 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
         return [];
       })(),
 
+      // TRRC ICE inspection records (field visits, pass/fail, defect notes)
+      (async () => {
+        if (!isTexas || allApis.length === 0) return [];
+        const results = await Promise.race([
+          fetchTrrcInspectionsForApis(allApis),
+          lookupDeadline.then(() => []),
+        ]);
+        return Array.isArray(results) ? results : [];
+      })(),
+
+      // TRRC completions query (W-2 packet: formation, spud, depth, interval)
+      (async () => {
+        if (!isTexas || allApis.length === 0) return [];
+        const results = await Promise.race([
+          fetchTrrcCompletionsForApis(allApis),
+          lookupDeadline.then(() => []),
+        ]);
+        return Array.isArray(results) ? results : [];
+      })(),
+
       // EIA prices + EDGAR operator financials (parallel, 12 s cap)
       Promise.race([
         fetchFinancialContext(resolvedOperator),
@@ -262,13 +288,19 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
         documents,
       },
       extracted,
-      trrcWells: trrcResult,
-      trrcViolations: complianceResult,
-      trrcInjection: injectionResult,
+      trrcWells:        trrcResult,
+      trrcViolations:   complianceResult,
+      trrcInjection:    injectionResult,
+      trrcInspections:  inspectionResult,
+      trrcCompletions:  completionResult,
       financialContext: financialContext ?? undefined,
       benchmark: benchmark ?? undefined,
+      nriOverride: nriOverride ?? undefined,
+      wiOverride:  wiOverride  ?? undefined,
       processingTimeMs: Date.now() - t0,
       aiModel: model,
+      // This endpoint is always Quick Scan — full underwriting uses /api/underwriting/stream
+      scanMode: "quick",
     });
 
     return NextResponse.json({ ok: true, report });

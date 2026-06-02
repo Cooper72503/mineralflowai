@@ -42,7 +42,7 @@ export function OnboardingClient({ email }: { email: string }) {
         return;
       }
 
-      router.replace("/dashboard?welcome=1");
+      router.replace("/underwriting");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error. Please try again.");

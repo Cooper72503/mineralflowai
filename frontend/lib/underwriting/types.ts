@@ -8,6 +8,9 @@
  *   note      — "Needs operator confirmation", "Not provided", "Nearby/offset only", etc.
  */
 
+// Re-export sensitivity matrix types from economics engine so callers only need one import.
+export type { SensitivityMatrix, SensitivityCell } from "./economics-engine";
+
 // ─── Provenance wrapper ───────────────────────────────────────────────────────
 
 export type DataSource =
@@ -23,9 +26,24 @@ export type DataConfidence = "high" | "medium" | "low" | "none";
 export type DataPoint<T> = {
   value: T | null;
   source: DataSource;
-  source_detail?: string;   // e.g. "LOE Statement Mar-2024" or "TRRC Lease 12345/06"
+  source_detail?: string;     // e.g. "LOE Statement Mar-2024" or "TRRC Lease 12345/06"
+  /**
+   * Exact URL queried to obtain this value (public records only).
+   * Enables one-click human verification of every extracted fact.
+   */
+  source_url?: string;
+  /**
+   * ISO-8601 timestamp of when the source was queried.
+   * Required for audit trail — values must be tied to a specific capture event.
+   */
+  query_timestamp?: string;
   confidence: DataConfidence;
-  note?: string;            // human-readable caveat, e.g. "Needs operator confirmation"
+  note?: string;              // human-readable caveat, e.g. "Needs operator confirmation"
+  /**
+   * Field Audit debug trail — each entry documents one step in the 7-step provenance chain:
+   * [User Input → Normalization → Identity Resolution → Source Pull → Value Parsing → Confidence → Display]
+   */
+  audit_trail?: string[];
 };
 
 // ─── Subject identity & matching ─────────────────────────────────────────────
@@ -37,6 +55,25 @@ export type MatchTier =
   | "well_name_county"    // well name + county (weakest exact match)
   | "no_match";           // could not match — county-level data NOT used as subject
 
+/**
+ * Canonical API number with all standard formats derived from the raw input.
+ * Texas API: state(2) + county(3) + well(5) = 10-digit base; + sidetrack(2) + event(2) = 14-digit UWI.
+ */
+export type NormalizedApi = {
+  /** Exactly as entered by the user */
+  raw_api: string;
+  /** 10 digits, no hyphens: "4215101734" */
+  api_10: string;
+  /** 14 digits, full UWI: "42151017340000" */
+  api_14: string;
+  /** Display-format: "42-151-01734" */
+  api_formatted: string;
+  /** 2-digit FIPS state code: "42" = Texas */
+  state_code: string;
+  /** 3-digit county code within state: "151" = Harris */
+  county_code: string;
+};
+
 export type SubjectIdentity = {
   api_numbers: string[];          // 10-digit UWI format (42-XXX-XXXXX-XX-XX)
   rrc_lease_number?: string | null; // dist_code:lease_no e.g. "06:12345"
@@ -46,6 +83,13 @@ export type SubjectIdentity = {
   state?: string | null;
   match_tier: MatchTier;
   match_confidence: DataConfidence;
+  /** Normalized forms of every API number provided — populated by report-builder */
+  normalized_apis: NormalizedApi[];
+  /**
+   * Human-readable resolution steps showing how identifiers were processed.
+   * e.g. ["API input: 42-151-01734", "Normalized: 42-151-01734-00-00", "RRC lease lookup: no match"]
+   */
+  match_path: string[];
 };
 
 // ─── Production ──────────────────────────────────────────────────────────────
@@ -61,12 +105,16 @@ export type WellProductionRow = {
   latest_monthly_water_bbl: DataPoint<number>;
   latest_production_month: string | null;
   water_cut_pct: DataPoint<number>;
+  three_month_avg_bbl: DataPoint<number>;
   six_month_avg_bbl: DataPoint<number>;
   twelve_month_avg_bbl: DataPoint<number>;
+  twenty_four_month_avg_bbl: DataPoint<number>;
   production_trend: DataPoint<"increasing" | "flat" | "declining" | "offline">;
   cum_oil_bbl: DataPoint<number>;
   formation: string | null;
   perforation_depth_ft: DataPoint<number>;
+  /** Raw monthly history (up to 36 months) for charts and detailed analysis */
+  monthly_history: { period: string; oil_bbl: number; gas_mcf: number; water_bbl: number | null }[];
 };
 
 export type ProductionSection = {
@@ -179,8 +227,26 @@ export type ComplianceViolation = {
   confidence: DataConfidence;
 };
 
+// ─── Inspection Records (ICE field inspections) ───────────────────────────────
+// Distinct from violation database records — these are actual field visits.
+
+export type InspectionResult = "compliant" | "non_compliant" | "unknown";
+
+export type InspectionRecord = {
+  api: string;
+  inspection_date: string | null;
+  inspection_type: string | null;
+  result: InspectionResult;
+  defect_summary: string | null;
+  notes: string | null;
+};
+
 export type ComplianceSection = {
   violations: ComplianceViolation[];
+  /** ICE field inspection records — separate from the violation database */
+  inspection_records: InspectionRecord[];
+  most_recent_inspection_date: DataPoint<string>;
+  most_recent_inspection_result: DataPoint<InspectionResult>;
   open_violation_count: DataPoint<number>;
   most_recent_violation_date: DataPoint<string>;
   rrc_good_standing: DataPoint<boolean>;
@@ -236,6 +302,17 @@ export type InjectionSection = {
   wells: InjectionWellRecord[];
   total_disposal_capacity_bwpd: DataPoint<number>;
   current_utilization_pct: DataPoint<number>;
+  /** Estimated monthly disposal revenue (permitted_bwpd × utilization × disposal_rate × 30) */
+  swd_disposal_revenue_monthly: DataPoint<number>;
+  /** Estimated monthly SWD operating cost */
+  swd_operating_cost_monthly: DataPoint<number>;
+  /** Estimated monthly SWD net income */
+  swd_net_income_monthly: DataPoint<number>;
+  /** Annualized SWD net income */
+  swd_annual_net_income: DataPoint<number>;
+  /** Typical disposal rate per BBL used for estimate */
+  swd_disposal_rate_per_bbl: number | null;
+  swd_economics_notes: string[];
   notes: string[];
 };
 
@@ -268,6 +345,66 @@ export type MissingItem = {
   field: string;
   importance: "critical" | "important" | "nice_to_have";
   note: string;
+};
+
+// ─── Diligence Status Engine ─────────────────────────────────────────────────
+//
+// Every underwriting category is classified as one of three tiers:
+//   verified          — data confirmed from TRRC, signed docs, or high-confidence source
+//   partially_verified — data present but incomplete, inferred, or operator-unconfirmed
+//   missing           — no data available; action required before offer
+//   not_applicable    — category does not apply to this asset
+//
+// This is the "Missing Diligence Engine" — a buyer-facing status board that
+// instantly shows what is confirmed vs. what still needs to be resolved.
+
+export type DiligenceStatusTier =
+  | "verified"
+  | "partially_verified"
+  | "missing"
+  | "not_applicable";
+
+export type DiligenceStatusItem = {
+  /** Short category name, e.g. "Production History" */
+  category: string;
+  /** One-line explanation of current status */
+  status_detail: string;
+  tier: DiligenceStatusTier;
+  /** Where the data came from — e.g. "TRRC (exact API match)" */
+  source_label: string | null;
+  /** What the buyer must obtain to upgrade from missing/partial → verified */
+  action_required: string | null;
+  /** Relative urgency — critical items block offer; important items needed before close */
+  urgency: "critical" | "important" | "informational";
+};
+
+// ─── Operational Timeline ─────────────────────────────────────────────────────
+
+export type OperationalTimelineEventType =
+  | "workover"
+  | "major_workover"
+  | "production_drop"
+  | "production_recovery"
+  | "downtime_start"
+  | "downtime_end"
+  | "violation_opened"
+  | "violation_closed"
+  | "mit_test"
+  | "operator_change"
+  | "inspection"
+  | "completion"
+  | "recompletion";
+
+export type OperationalTimelineEvent = {
+  period: string | null;                    // "YYYY-MM" or "YYYY-MM-DD"
+  event_type: OperationalTimelineEventType;
+  well: string | null;
+  description: string;
+  /** "info" = operational note; "warning" = possible risk; "critical" = red flag */
+  severity: "info" | "warning" | "critical";
+  source: DataSource;
+  /** Change in production vs prior month (negative = drop) */
+  production_impact_bbl: number | null;
 };
 
 // ─── Next Questions ───────────────────────────────────────────────────────────
@@ -306,6 +443,7 @@ export type EconomicsScenario = {
   gas_price_usd: number;
   monthly_gross_revenue: number;
   monthly_net_revenue: number;
+  monthly_severance_tax: number;
   monthly_net_income: number;
   loe_per_boe: number;
   annual_net_income: number;
@@ -316,6 +454,14 @@ export type EconomicsScenario = {
   offer_high_usd: number;
   irr_pct: number | null;
   payout_months: number | null;
+};
+
+export type MonthlyCashFlowRow = {
+  month: number;            // 1-based month from current
+  rate_bbl: number;         // projected oil production (Arps)
+  gross_revenue: number;    // before NRI and taxes
+  net_income: number;       // after NRI, LOE, severance
+  cumulative_net_income: number;  // running total from month 1
 };
 
 export type AcquisitionEconomicsSection = {
@@ -330,6 +476,10 @@ export type AcquisitionEconomicsSection = {
   breakeven_oil_price: DataPoint<number>;
   months_remaining: DataPoint<number>;
   scenarios: EconomicsScenario[];
+  /** 4×4 production × price NPV10 sensitivity grid (IC standard) */
+  sensitivity_matrix?: import("./economics-engine").SensitivityMatrix;
+  /** 24-month projected cash flow schedule (base deck, Arps decline) */
+  monthly_cash_flow_schedule?: MonthlyCashFlowRow[];
   notes: string[];
 };
 
@@ -375,10 +525,18 @@ export type DDReportConfidence = "high" | "medium" | "low" | "very_low";
 export type DDReport = {
   report_id: string;
   generated_at: string;  // ISO timestamp
+  /**
+   * "quick" — preliminary scan only (3–10 s). Do NOT use for investment decisions.
+   * "full"  — complete underwriting pipeline. All available sources consulted.
+   */
+  scan_mode: ScanMode;
   overall_confidence: DDReportConfidence;
   overall_confidence_note: string;
 
   subject: SubjectIdentity;
+
+  // Executive summary (synthesized — no extra AI call)
+  executive_summary: ExecutiveSummarySection;
 
   // Core sections
   production: ProductionSection;
@@ -392,6 +550,22 @@ export type DDReport = {
   plugging_liability: PluggingLiabilitySection;
   injection: InjectionSection;
   ownership: OwnershipSection;
+  downtime: DowntimeSection;
+  buyer_qa: BuyerQASection;
+  formation_completion: FormationCompletionSection;
+  operator_profile: OperatorProfileSection;
+  /** Chronological event log — correlates workovers, violations, downtime, production changes */
+  operational_timeline: OperationalTimelineEvent[];
+  /** Three-tier diligence status board: VERIFIED / PARTIALLY VERIFIED / MISSING */
+  diligence_status: DiligenceStatusItem[];
+  /**
+   * Auto-generated IC-memo narrative (4 paragraphs):
+   *   [0] Asset description & identity
+   *   [1] Production analysis & decline
+   *   [2] Economics summary & offer range
+   *   [3] Risk assessment & recommendation
+   */
+  underwriting_narrative: string[];
   missing_items: MissingItem[];
   next_questions: NextQuestion[];
 
@@ -415,8 +589,211 @@ export type DDReport = {
     edgar_operator?: string | null;
     edgar_loe_per_boe?: number | null;
     basin?: string | null;
+    // Production intelligence summary
+    production_confidence?: "VERIFIED" | "PARTIAL" | "INFERRED" | null;
+    production_active_months?: number | null;
+    production_downtime_pct?: number | null;
+    production_stabilized_bbl?: number | null;
+    production_restart_events?: number | null;
   };
 };
+
+// ─── Formation & Completion ───────────────────────────────────────────────────
+
+export type PerforationInterval = {
+  top_ft: number | null;
+  bottom_ft: number | null;
+  formation: string | null;
+  /** "Producing" | "Plugged" | "Open" | "Squeezed" */
+  status: string | null;
+};
+
+export type CasingSpec = {
+  /** "Surface" | "Intermediate" | "Production" | "Liner" */
+  type: string;
+  size_inches: number | null;
+  weight_lbs_ft: number | null;
+  grade: string | null;
+  depth_set_ft: number | null;
+};
+
+export type TubingSpec = {
+  size_inches: number | null;
+  depth_ft: number | null;
+  material: string | null;
+};
+
+export type WellCompletionData = {
+  api: string;
+  well_name: string | null;
+  formation_name: DataPoint<string>;
+  total_depth_ft: DataPoint<number>;
+  completion_type: DataPoint<"vertical" | "horizontal" | "deviated">;
+  completion_date: DataPoint<string>;
+  /** "Rod Pump" | "Gas Lift" | "ESP" | "Plunger" | "Flowing" | "Jet Pump" */
+  artificial_lift_type: DataPoint<string>;
+  producing_zone: DataPoint<string>;
+  injection_zone: DataPoint<string>;
+  perforations: PerforationInterval[];
+  casing: CasingSpec[];
+  tubing: TubingSpec[];
+  notes: string[];
+};
+
+export type FormationCompletionSection = {
+  wells: WellCompletionData[];
+  primary_formation: DataPoint<string>;
+  /** e.g. "6,200 – 6,450 ft" */
+  depth_range: string | null;
+  lift_types_present: string[];
+  notes: string[];
+};
+
+// ─── Operator Profile ─────────────────────────────────────────────────────────
+
+export type OperatorProfileSection = {
+  name: DataPoint<string>;
+  compliance_status: DataPoint<"clean" | "minor_history" | "open_violations" | "unknown">;
+  open_violations: DataPoint<number>;
+  total_violations: DataPoint<number>;
+  bond_status: DataPoint<"confirmed" | "not_confirmed">;
+  bond_amount_usd: DataPoint<number>;
+  public_company: DataPoint<boolean>;
+  edgar_company_name: DataPoint<string>;
+  edgar_loe_per_boe: DataPoint<number>;
+  /** Qualitative 1–2 sentence assessment */
+  assessment: string;
+  notes: string[];
+};
+
+// ─── Executive Summary ────────────────────────────────────────────────────────
+
+export type ExecutiveSummarySection = {
+  /** One-line property description */
+  asset_description: string;
+  /** TRRC match quality */
+  identity_confidence: DataConfidence;
+  match_tier: MatchTier;
+  // Production snapshot
+  current_gross_rate_bbl: DataPoint<number>;
+  twelve_month_avg_bbl: DataPoint<number>;
+  production_trend: DataPoint<"increasing" | "flat" | "declining" | "offline">;
+  downtime_pct: number | null;
+  // Economics snapshot
+  monthly_net_income_usd: DataPoint<number>;
+  npv10_usd: DataPoint<number>;
+  offer_range_low: DataPoint<number>;
+  offer_range_high: DataPoint<number>;
+  breakeven_oil_price: DataPoint<number>;
+  // Risk
+  overall_risk_score: DataPoint<number>;
+  recommendation: DataPoint<"pursue" | "review" | "pass">;
+  recommendation_rationale: string;
+  top_risks: string[];
+  value_drivers: string[];
+  // Diligence status
+  data_completeness_score: number;   // 0–100
+  critical_missing_count: number;
+  important_missing_count: number;
+  // Audit
+  processing_time_ms: number;
+  sources_used: string[];
+};
+
+// ─── Downtime Analysis ───────────────────────────────────────────────────────
+
+export type { DowntimePeriod, DowntimePeriodClassification } from "./downtime-engine";
+
+export type DowntimeSection = {
+  total_zero_months: DataPoint<number>;
+  total_months_analyzed: number;
+  downtime_pct: DataPoint<number>;
+  /** Each consecutive run of zero-production months */
+  periods: import("./downtime-engine").DowntimePeriod[];
+  /** Median of non-zero months — removes outlier spikes */
+  normalized_rate_bbl: DataPoint<number>;
+  /** 0–10 score based on coefficient of variation */
+  volatility_score: DataPoint<number>;
+  longest_downtime_months: DataPoint<number>;
+  current_offline: DataPoint<boolean>;
+  production_consistency: DataPoint<"consistent" | "intermittent" | "erratic">;
+  underwriting_notes: string[];
+};
+
+// ─── Buyer Q&A ────────────────────────────────────────────────────────────────
+
+export type { BuyerQAConfidence, BuyerQA } from "./buyer-qa-engine";
+
+export type BuyerQASection = {
+  items: import("./buyer-qa-engine").BuyerQA[];
+};
+
+// ─── Scan mode ───────────────────────────────────────────────────────────────
+
+/**
+ * "quick" — fast triage scan (3–10 s). Preliminary confidence only.
+ * "full"  — complete async underwriting pipeline (1–5 min). Full confidence.
+ */
+export type ScanMode = "quick" | "full";
+
+// ─── Full-underwriting pipeline progress (SSE stream) ────────────────────────
+
+export type PipelineStepId =
+  | "normalize"           // 1  Parse / validate all inputs
+  | "resolve_asset"       // 2  RRC wellbore query → resolve lease + district
+  | "pull_production"     // 3  Fetch lease-level production history
+  | "pull_inspections"    // 4  ICE inspection records + violation database + injection
+  | "pull_completions"    // 5  W-1 drilling permit + CMPL W-2 packet lookup
+  | "parse_documents"     // 6  AI OCR extraction of uploaded documents
+  | "build_decline"       // 7  Decline-curve analysis (DCA)
+  | "run_economics"       // 8  EIA prices + EDGAR + acquisition economics
+  | "check_diligence"     // 9  Missing-item tracker + risk scoring
+  | "generate_report";    // 10 Final IC memo + report assembly
+
+export type PipelineStepStatus =
+  | "pending"    // Not yet started
+  | "running"    // In progress
+  | "complete"   // Finished successfully (possibly with fallback data)
+  | "failed"     // Step failed; pipeline continues with what was gathered
+  | "skipped";   // Not applicable (e.g. no API numbers → skip completions lookup)
+
+export type PipelineProgressEvent = {
+  type: "progress";
+  step: PipelineStepId;
+  status: PipelineStepStatus;
+  label: string;
+  /** Short explanation of what happened / what was found */
+  detail?: string;
+  /** True when partial / fallback data was used instead of full data */
+  usedFallback?: boolean;
+  /** Human-readable reason for fallback (e.g. "TRRC timeout — using doc-extracted values") */
+  fallbackReason?: string;
+  /** Error message when status === "failed" */
+  error?: string;
+  /** Wall-clock duration for this step */
+  durationMs?: number;
+};
+
+export type PipelineReportEvent = {
+  type: "report";
+  report: DDReport;
+};
+
+export type PipelineErrorEvent = {
+  type: "error";
+  message: string;
+};
+
+export type PipelineDoneEvent = {
+  type: "done";
+  totalDurationMs: number;
+};
+
+export type PipelineEvent =
+  | PipelineProgressEvent
+  | PipelineReportEvent
+  | PipelineErrorEvent
+  | PipelineDoneEvent;
 
 // ─── API request / response ───────────────────────────────────────────────────
 
@@ -428,12 +805,21 @@ export type UnderwritingInput = {
   lease_name?: string;
   county?: string;
   state?: string;
+  /** Interest overrides — if provided, supersede any division-order extraction */
+  nri_decimal?: number;   // e.g. 0.75 for 75% NRI
+  wi_decimal?: number;    // e.g. 1.0 for 100% WI
   /** Document texts to extract from (OCR'd or native) */
   documents?: {
     filename: string;
     text: string;
     doc_type?: string;  // user hint
   }[];
+  /**
+   * Run mode.
+   * "quick" — fast triage, limited data, preliminary confidence (default for /api/underwriting).
+   * "full"  — complete pipeline, all sources, SSE streaming (/api/underwriting/stream).
+   */
+  mode?: ScanMode;
 };
 
 export type UnderwritingResponse = {
