@@ -181,9 +181,9 @@ export function LandingPage() {
                 <h3>Six-dimension risk score</h3>
                 <p>
                   Scores production risk, financial risk, compliance, plugging liability,
-                  operator quality, and data completeness. Returns a pursue / review / pass
-                  recommendation with specific red, yellow, and green flags — not a number
-                  without reasoning.
+                  operator quality, and data completeness on a 1–10 scale where 1 is lowest
+                  risk. Returns a pursue / review / pass recommendation with specific red,
+                  yellow, and green flags — not a number without reasoning.
                 </p>
               </div>
             </div>
@@ -331,8 +331,8 @@ export function LandingPage() {
                 <strong>$215K – $290K – $342K</strong>
               </div>
               <div className={styles.finRow}>
-                <span>Risk score</span>
-                <strong>3.8 / 10 — Pursue</strong>
+                <span>Risk score (1=low risk, 10=high)</span>
+                <strong>3.8 — Pursue</strong>
               </div>
             </div>
           </div>
