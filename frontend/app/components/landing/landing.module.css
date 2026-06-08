@@ -759,91 +759,20 @@
   text-decoration: underline;
 }
 
-/* ── Live Price Ticker ─────────────────────────────────────────────────── */
-.ticker {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.9rem;
-  border-radius: 999px;
-  background: rgba(13, 26, 48, 0.8);
-  border: 1px solid var(--gold-border);
-  font-size: 0.8rem;
-  font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
-  backdrop-filter: blur(8px);
-  transition: border-color 0.3s;
+/* ── Live Price Ticker (TradingView widgets) ───────────────────────────── */
+.tickerRow {
+  display: flex;
+  gap: 0.75rem;
   margin-bottom: 1.25rem;
+  max-width: 480px;
 }
 
-.tickerFlash {
-  border-color: rgba(201, 168, 76, 0.6);
-}
-
-/* Animated live dot */
-.tickerLiveDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 6px #22c55e;
-  animation: tickerPulse 2s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-@keyframes tickerPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 6px #22c55e; }
-  50%       { opacity: 0.5; box-shadow: 0 0 2px #22c55e; }
-}
-
-.tickerLiveLabel {
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #22c55e;
-}
-
-.tickerDivider {
-  color: rgba(148, 163, 184, 0.3);
-  font-weight: 300;
-}
-
-.tickerName {
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
-.tickerPrice {
-  color: #f1f5f9;
-  font-weight: 700;
-  font-size: 0.82rem;
-  letter-spacing: 0.01em;
-}
-
-.tickerUp {
-  color: #22c55e;
-  font-size: 0.72rem;
-}
-
-.tickerDown {
-  color: #ef4444;
-  font-size: 0.72rem;
-}
-
-.tickerFlat {
-  color: var(--muted);
-  font-size: 0.72rem;
-}
-
-.tickerSource {
-  color: #475569;
-  font-size: 0.68rem;
-}
-
-.tickerLoading {
-  color: #475569;
-  font-size: 0.75rem;
-  font-style: italic;
+.tvWidget {
+  flex: 1;
+  min-width: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--gold-border);
+  background: rgba(13, 26, 48, 0.6);
+  backdrop-filter: blur(8px);
 }
