@@ -7,7 +7,7 @@ import { isAuthError } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/with-timeout";
 
-const LOGIN_REQUEST_TIMEOUT_MS = 10_000;
+const LOGIN_REQUEST_TIMEOUT_MS = 30_000;
 
 function formatUnderlyingError(original: unknown): string {
   if (original instanceof Error) {
