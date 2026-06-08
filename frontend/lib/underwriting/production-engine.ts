@@ -110,6 +110,22 @@ export type StabilizedProductionProfile = {
   downtime_pct: number;
   total_months_in_series: number;
   active_months: number;
+  /**
+   * Fraction of CALENDAR months that were classified as "active".
+   * = active_months / total_months_in_series
+   *
+   * This is the correct multiplier for converting a "producing-day rate"
+   * (current_stabilized_bbl) to a "calendar-month average rate" for NPV.
+   *
+   * DO NOT use (1 - downtime_pct/100) for this purpose — downtime_pct only
+   * counts months classified as "downtime" and ignores restart and incomplete
+   * months, which causes the economics haircut to be systematically too small.
+   *
+   * Example: 12 months (7 active, 2 downtime, 2 restart, 1 incomplete)
+   *   downtime_pct   = 2/12 = 16.7%  →  haircut factor = 0.833  (WRONG)
+   *   uptime_fraction = 7/12 = 58.3% →  haircut factor = 0.583  (CORRECT)
+   */
+  uptime_fraction: number;
 
   // ── Confidence ────────────────────────────────────────────────────────────
   production_confidence: ProductionDataConfidence;
@@ -134,10 +150,17 @@ const RESTART_TRANSITION_MONTHS = 2;
 const FLUSH_MULTIPLIER = 2.5;
 
 /**
- * TRRC production data typically lags real-time by 2-4 months.
- * The N most-recent months in the data are candidates for being partially reported.
+ * TRRC production data typically lags real-time by 2–5 months.
+ * Small/private operators often file 4–5 months late; large operators file within 2 months.
+ *
+ * CONSERVATIVE CHOICE: 5 months. Better to check a wider window than to include
+ * a genuinely partial month in a stabilized average, which overstates current production.
+ *
+ * A month is only classified "incomplete" if it is BOTH within this lag window AND
+ * shows a significant production drop vs. prior trend (< INCOMPLETE_DROP_THRESHOLD).
+ * This prevents normal decline from being mis-labeled as an incomplete report.
  */
-const TRRC_LAG_MONTHS = 3;
+const TRRC_LAG_MONTHS = 5;
 
 // ─── Statistical helpers ──────────────────────────────────────────────────────
 
@@ -214,13 +237,23 @@ function detectIncompleteMonths(
         if (priorAvg > 0) {
           const ratio = row.oil_bbl / priorAvg;
           if (row.oil_bbl === 0) {
-            // Zero during a lag period: could be downtime or not yet reported
+            // Zero during a lag period AND very recent (≤3 months): likely not yet filed.
+            // Do NOT flag as incomplete if beyond 3 months — could be legitimate shut-in.
+            if (monthsAgo <= 3) {
+              incomplete.add(i);
+            }
+          } else if (ratio < 0.40) {
+            // Drop to less than 40% of prior average in lag window.
+            // 0.55 was too aggressive — normal decline can hit 55% in 3–6 months.
+            // 0.40 is a much stronger signal of partial filing.
             incomplete.add(i);
-          } else if (ratio < 0.55) {
-            incomplete.add(i);
-          } else if (ratio < 0.75) {
+          } else if (ratio < 0.60) {
+            // 40–60%: borderline — flag but don't exclude
             borderline.add(i);
           }
+          // Ratio ≥ 0.60: within normal operating range, not flagged as incomplete.
+          // A well declining at 15%/month reaches 0.61 of its prior 3-month avg after
+          // just 2 months — this should NOT be marked as potentially incomplete.
         }
       } else if (i === sorted.length - 1 && row.oil_bbl === 0 && monthsAgo <= 2) {
         // Most recent month is zero and very recent — likely not yet reported
@@ -546,7 +579,7 @@ export function analyzeProductionIntelligence(
   if (downtimePct > 15) {
     warnings.push(
       `Production downtime: ${downtimePct.toFixed(1)}% of the reporting period. ` +
-      "Economics models use stabilized rates; apply a ${downtimePct.toFixed(0)}% downtime haircut to projected cash flows."
+      `Economics models use stabilized rates; apply a ${downtimePct.toFixed(0)}% downtime haircut to projected cash flows.`
     );
   }
 
@@ -579,6 +612,7 @@ export function analyzeProductionIntelligence(
     downtime_pct: Math.round(downtimePct * 10) / 10,
     total_months_in_series: sorted.length,
     active_months: allActive.length,
+    uptime_fraction: sorted.length > 0 ? allActive.length / sorted.length : 1,
     production_confidence: confidence,
     confidence_reasons: confidenceReasons,
     warnings,
@@ -610,6 +644,7 @@ function emptyProfile(): StabilizedProductionProfile {
     downtime_pct: 0,
     total_months_in_series: 0,
     active_months: 0,
+    uptime_fraction: 1,
     production_confidence: "INFERRED",
     confidence_reasons: ["No production data available"],
     warnings: [],

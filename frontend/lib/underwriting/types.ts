@@ -347,6 +347,45 @@ export type MissingItem = {
   note: string;
 };
 
+// ─── Three-Layer Evidence Hierarchy ──────────────────────────────────────────
+//
+// Every diligence field must have an evidence source classification:
+//
+//   Layer 1 — TRRC structured public records (wellbore query, lease production,
+//             completions query, ICE inspection). Highest reliability.
+//   Layer 2 — TRRC imaged records (W-1 drilling permit, W-2 completion report,
+//             EWA document viewer). Reliable but requires OCR.
+//   Layer 3 — Seller/operator document upload. Operator-provided; needs corroboration.
+//
+//   user_assumption  — user entered a value without documentary backing
+//   model_estimate   — inferred from basin benchmarks or calculations
+//   not_found        — not found in any source; document request generated
+
+export type EvidenceSource =
+  | "trrc_structured"   // Layer 1: TRRC structured public record
+  | "trrc_imaged"       // Layer 2: TRRC imaged record (W-1/W-2, OCR)
+  | "seller_document"   // Layer 3: Seller/operator provided document
+  | "user_assumption"   // User-entered without external backing
+  | "model_estimate"    // Inferred / basin benchmark
+  | "not_found";        // No source found — document required
+
+/**
+ * A structured document request generated when a diligence field cannot be
+ * satisfied from Layer 1 or Layer 2. These requests form the Layer 3 checklist
+ * sent to the seller/operator before offer.
+ */
+export type DocumentRequest = {
+  /** Short field label, e.g. "Monthly LOE" */
+  field: string;
+  /** Document type to request, e.g. "LOE Statement (JIB)", "Division Order" */
+  document_type: string;
+  /** Specific ask, e.g. "12 months of signed JIB statements covering Jan 2023–Dec 2023" */
+  description: string;
+  /** Who should provide this document */
+  from: "seller" | "operator" | "title_attorney" | "state_agency";
+  urgency: "critical" | "important" | "informational";
+};
+
 // ─── Diligence Status Engine ─────────────────────────────────────────────────
 //
 // Every underwriting category is classified as one of three tiers:
@@ -376,6 +415,44 @@ export type DiligenceStatusItem = {
   action_required: string | null;
   /** Relative urgency — critical items block offer; important items needed before close */
   urgency: "critical" | "important" | "informational";
+  /**
+   * Three-layer evidence source for this field.
+   * Drives the evidence-source badge and document-request generation.
+   */
+  evidence_source: EvidenceSource;
+  /**
+   * Structured document requests for this field.
+   * Populated when evidence_source is "not_found", "model_estimate", or "user_assumption".
+   * Forms the Layer 3 seller/operator checklist.
+   */
+  document_requests: DocumentRequest[];
+};
+
+// ─── Offer Gate ───────────────────────────────────────────────────────────────
+//
+// Prevents a final offer recommendation from being displayed until
+// production, ownership, LOE, water/disposal, and downtime/workover risk
+// are each backed by at least Layer 2 (TRRC imaged) evidence.
+// Fields sourced only from model_estimate or not_found block the offer.
+
+export type OfferGateField = {
+  category: string;
+  current_source: EvidenceSource;
+  required_sources: EvidenceSource[];
+  blocking: boolean;
+  resolution: string;
+};
+
+export type OfferGate = {
+  /**
+   * true  — offer recommendation is enabled
+   * false — final offer is locked until blocking fields are resolved
+   */
+  gate_open: boolean;
+  blocking_count: number;
+  blocking_fields: OfferGateField[];
+  /** Human-readable summary for the UI banner */
+  gate_message: string;
 };
 
 // ─── Operational Timeline ─────────────────────────────────────────────────────
@@ -739,6 +816,14 @@ export type DDReport = {
    * Use this to diagnose divergence between MineralFlow output and run statements.
    */
   production_audit: ProductionAudit | null;
+
+  /**
+   * Offer gate — controls whether a final offer recommendation is unlocked.
+   * Locked when any critical diligence field (production, ownership, LOE,
+   * water/disposal, downtime/workover) is sourced only from model_estimate
+   * or not_found. Must be resolved to Layer 2+ before offer is enabled.
+   */
+  offer_gate: OfferGate | null;
 
   /** Debug / audit trail */
   _meta: {

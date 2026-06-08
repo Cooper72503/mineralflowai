@@ -11,6 +11,7 @@ import type {
   WellCompletionData, OperationalTimelineEvent, OperationalTimelineEventType,
   DiligenceStatusItem, DiligenceStatusTier,
   SensitivityMatrix, MonthlyCashFlowRow, NormalizedApi,
+  EvidenceSource, DocumentRequest, OfferGate, OfferGateField,
 } from "@/lib/underwriting/types";
 import type { BuyerQA } from "@/lib/underwriting/buyer-qa-engine";
 import type { DowntimePeriod } from "@/lib/underwriting/downtime-engine";
@@ -968,6 +969,40 @@ function OwnershipTab({ report }: { report: DDReport }) {
 
 // ─── Diligence Status Dashboard ──────────────────────────────────────────────
 
+// ─── Evidence source badge ────────────────────────────────────────────────────
+
+const EVIDENCE_LABELS: Record<EvidenceSource, { label: string; short: string; color: string; bg: string }> = {
+  trrc_structured: { label: "TRRC Structured Record",  short: "L1 TRRC",       color: "#22c55e", bg: "rgba(34,197,94,0.12)"   },
+  trrc_imaged:     { label: "TRRC Imaged Record (W-1/W-2)", short: "L2 TRRC Imaged", color: "#4f8ef7", bg: "rgba(79,142,247,0.12)"  },
+  seller_document: { label: "Seller/Operator Document", short: "L3 Seller Doc", color: "#f59e0b", bg: "rgba(245,158,11,0.12)"   },
+  user_assumption: { label: "User Assumption",          short: "User Input",    color: "#8892a4", bg: "rgba(136,146,164,0.10)"  },
+  model_estimate:  { label: "Model Estimate (Inferred)", short: "Estimated",    color: "#ef4444", bg: "rgba(239,68,68,0.10)"    },
+  not_found:       { label: "Not Found — Doc Required", short: "Not Found",     color: "#ef4444", bg: "rgba(239,68,68,0.10)"    },
+};
+
+function EvidenceBadge({ source, small = false }: { source: EvidenceSource; small?: boolean }) {
+  const cfg = EVIDENCE_LABELS[source];
+  return (
+    <span style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "0.25rem",
+      fontSize: small ? "0.57rem" : "0.62rem",
+      fontWeight: 700,
+      color: cfg.color,
+      background: cfg.bg,
+      border: `1px solid ${cfg.color}30`,
+      borderRadius: 4,
+      padding: small ? "0.06rem 0.35rem" : "0.1rem 0.45rem",
+      textTransform: "uppercase" as const,
+      letterSpacing: "0.04em",
+      flexShrink: 0,
+    }}>
+      {cfg.short}
+    </span>
+  );
+}
+
 function DiligenceStatusDashboard({ items, compact = false }: {
   items: DiligenceStatusItem[];
   compact?: boolean;
@@ -1119,31 +1154,33 @@ function DiligenceStatusDashboard({ items, compact = false }: {
                   padding: "0.75rem 0.9rem",
                   borderLeft: `3px solid ${cfg.color}`,
                 }}>
-                  {/* Category + urgency */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.35rem" }}>
-                    <span style={{ fontSize: "0.78rem", fontWeight: 700, color: COLORS.text }}>
+                  {/* Category + urgency + evidence badge */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.35rem", gap: "0.4rem" }}>
+                    <span style={{ fontSize: "0.78rem", fontWeight: 700, color: COLORS.text, flex: 1 }}>
                       {item.category}
                     </span>
-                    {item.tier !== "verified" && item.tier !== "not_applicable" && (
-                      <span style={{
-                        fontSize: "0.6rem",
-                        fontWeight: 800,
-                        color: item.urgency === "critical" ? COLORS.red
-                          : item.urgency === "important" ? COLORS.yellow
-                          : COLORS.textFaint,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                        background: item.urgency === "critical" ? COLORS.redDim
-                          : item.urgency === "important" ? COLORS.yellowDim
-                          : "transparent",
-                        padding: "0.1rem 0.4rem",
-                        borderRadius: 3,
-                        flexShrink: 0,
-                        marginLeft: "0.5rem",
-                      }}>
-                        {item.urgency}
-                      </span>
-                    )}
+                    <div style={{ display: "flex", gap: "0.3rem", alignItems: "center", flexShrink: 0 }}>
+                      <EvidenceBadge source={item.evidence_source} small />
+                      {item.tier !== "verified" && item.tier !== "not_applicable" && (
+                        <span style={{
+                          fontSize: "0.6rem",
+                          fontWeight: 800,
+                          color: item.urgency === "critical" ? COLORS.red
+                            : item.urgency === "important" ? COLORS.yellow
+                            : COLORS.textFaint,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          background: item.urgency === "critical" ? COLORS.redDim
+                            : item.urgency === "important" ? COLORS.yellowDim
+                            : "transparent",
+                          padding: "0.1rem 0.4rem",
+                          borderRadius: 3,
+                          flexShrink: 0,
+                        }}>
+                          {item.urgency}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Status detail */}
@@ -1174,6 +1211,13 @@ function DiligenceStatusDashboard({ items, compact = false }: {
                         → Action:{" "}
                       </span>
                       {item.action_required}
+                    </div>
+                  )}
+
+                  {/* Document request count badge */}
+                  {item.document_requests.length > 0 && (
+                    <div style={{ marginTop: "0.4rem", fontSize: "0.62rem", color: COLORS.textFaint }}>
+                      📋 {item.document_requests.length} document request{item.document_requests.length > 1 ? "s" : ""} generated
                     </div>
                   )}
                 </div>
@@ -1260,6 +1304,151 @@ function DiligenceStatusDashboard({ items, compact = false }: {
   );
 }
 
+function OfferGateBanner({ gate }: { gate: OfferGate | null }) {
+  if (!gate) return null;
+
+  const bg     = gate.gate_open ? "rgba(34,197,94,0.08)"  : "rgba(239,68,68,0.08)";
+  const border = gate.gate_open ? "rgba(34,197,94,0.30)"  : "rgba(239,68,68,0.30)";
+  const color  = gate.gate_open ? COLORS.green             : COLORS.red;
+  const icon   = gate.gate_open ? "✓" : "⛔";
+  const title  = gate.gate_open ? "OFFER GATE: OPEN" : `OFFER GATE: LOCKED (${gate.blocking_count} field${gate.blocking_count !== 1 ? "s" : ""} unsatisfied)`;
+
+  return (
+    <div style={{
+      background: bg,
+      border: `1px solid ${border}`,
+      borderRadius: 10,
+      padding: "1rem 1.25rem",
+      marginBottom: "1.5rem",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.6rem" }}>
+        <span style={{ fontSize: "1.2rem" }}>{icon}</span>
+        <span style={{ fontSize: "0.8rem", fontWeight: 800, color, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {title}
+        </span>
+      </div>
+      <p style={{ fontSize: "0.75rem", color: COLORS.textMuted, margin: 0, lineHeight: 1.55 }}>
+        {gate.gate_message}
+      </p>
+      {!gate.gate_open && (
+        <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          {gate.blocking_fields.filter(f => f.blocking).map((f, i) => (
+            <div key={i} style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "0.6rem",
+              padding: "0.45rem 0.7rem",
+              background: "rgba(239,68,68,0.05)",
+              border: "1px solid rgba(239,68,68,0.15)",
+              borderRadius: 6,
+              fontSize: "0.72rem",
+            }}>
+              <EvidenceBadge source={f.current_source} small />
+              <div style={{ flex: 1 }}>
+                <span style={{ fontWeight: 700, color: COLORS.text }}>{f.category}</span>
+                <span style={{ color: COLORS.textMuted }}> — {f.resolution}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocumentRequestChecklist({ items }: { items: DiligenceStatusItem[] }) {
+  const allRequests = items.flatMap(item =>
+    item.document_requests.map(req => ({ ...req, _category: item.category }))
+  );
+  if (allRequests.length === 0) return null;
+
+  const critical   = allRequests.filter(r => r.urgency === "critical");
+  const important  = allRequests.filter(r => r.urgency === "important");
+  const info       = allRequests.filter(r => r.urgency === "informational");
+
+  const fromLabels: Record<string, string> = {
+    seller:         "🤝 Seller",
+    operator:       "🏭 Operator",
+    title_attorney: "⚖️ Title Attorney",
+    state_agency:   "🏛️ State Agency",
+  };
+
+  const renderRequests = (list: typeof allRequests, urgColor: string) => list.map((req, i) => (
+    <div key={i} style={{
+      padding: "0.7rem 0.9rem",
+      marginBottom: "0.5rem",
+      background: COLORS.surface,
+      border: `1px solid ${COLORS.border}`,
+      borderLeft: `3px solid ${urgColor}`,
+      borderRadius: "0 8px 8px 0",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.3rem", gap: "0.5rem" }}>
+        <span style={{ fontSize: "0.75rem", fontWeight: 700, color: COLORS.text }}>{req.document_type}</span>
+        <span style={{ fontSize: "0.62rem", color: COLORS.textFaint, flexShrink: 0 }}>
+          {fromLabels[req.from] ?? req.from}
+        </span>
+      </div>
+      <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, lineHeight: 1.45, marginBottom: "0.25rem" }}>
+        {req.description}
+      </div>
+      <div style={{ fontSize: "0.62rem", color: COLORS.textFaint }}>
+        For: <strong style={{ color: COLORS.textMuted }}>{req._category}</strong>
+      </div>
+    </div>
+  ));
+
+  return (
+    <Section title={`Document Request Checklist (${allRequests.length} items)`} icon="📋">
+      <p style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "1rem", lineHeight: 1.55 }}>
+        These document requests are automatically generated from fields that could not be verified through
+        TRRC structured records (Layer 1) or TRRC imaged records (Layer 2). Send this checklist to the
+        seller/operator before issuing an offer.
+      </p>
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+        {[
+          { src: "trrc_structured" as EvidenceSource, label: "Layer 1: TRRC Structured" },
+          { src: "trrc_imaged"     as EvidenceSource, label: "Layer 2: TRRC Imaged" },
+          { src: "seller_document" as EvidenceSource, label: "Layer 3: Seller Doc" },
+          { src: "model_estimate"  as EvidenceSource, label: "Estimated — needs confirmation" },
+          { src: "not_found"       as EvidenceSource, label: "Not found — doc required" },
+        ].map(({ src, label }) => (
+          <div key={src} style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+            <EvidenceBadge source={src} small />
+            <span style={{ fontSize: "0.65rem", color: COLORS.textFaint }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {critical.length > 0 && (
+        <>
+          <div style={{ fontSize: "0.7rem", fontWeight: 800, color: COLORS.red, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem" }}>
+            🔴 Critical ({critical.length})
+          </div>
+          {renderRequests(critical, COLORS.red)}
+        </>
+      )}
+      {important.length > 0 && (
+        <>
+          <div style={{ fontSize: "0.7rem", fontWeight: 800, color: COLORS.yellow, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem", marginTop: critical.length ? "0.75rem" : 0 }}>
+            🟡 Important ({important.length})
+          </div>
+          {renderRequests(important, COLORS.yellow)}
+        </>
+      )}
+      {info.length > 0 && (
+        <>
+          <div style={{ fontSize: "0.7rem", fontWeight: 800, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.5rem", marginTop: (critical.length || important.length) ? "0.75rem" : 0 }}>
+            ℹ️ Informational ({info.length})
+          </div>
+          {renderRequests(info, COLORS.textFaint)}
+        </>
+      )}
+    </Section>
+  );
+}
+
 function MissingItemsTab({ report }: { report: DDReport }) {
   const items    = report.missing_items;
   const critical   = items.filter(i => i.importance === "critical");
@@ -1290,16 +1479,49 @@ function MissingItemsTab({ report }: { report: DDReport }) {
 
   return (
     <>
-      {/* Diligence Status Board — this IS the Missing Diligence Engine */}
+      {/* Offer Gate Banner */}
+      <OfferGateBanner gate={report.offer_gate} />
+
+      {/* Evidence Source Legend */}
+      <Section title="Evidence Hierarchy" icon="🔗">
+        <p style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "0.75rem", lineHeight: 1.55 }}>
+          Every diligence field is classified against a three-layer evidence hierarchy.
+          Fields sourced only from model estimates or not found in any source block the offer gate.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "0.5rem" }}>
+          {(Object.entries(EVIDENCE_LABELS) as [EvidenceSource, typeof EVIDENCE_LABELS[EvidenceSource]][]).map(([src, cfg]) => (
+            <div key={src} style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "0.6rem",
+              padding: "0.5rem 0.75rem",
+              background: COLORS.surfaceAlt,
+              border: `1px solid ${COLORS.border}`,
+              borderRadius: 6,
+            }}>
+              <EvidenceBadge source={src} />
+              <span style={{ fontSize: "0.7rem", color: COLORS.textMuted, lineHeight: 1.4 }}>
+                {cfg.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* Diligence Status Board */}
       <Section title="Diligence Status Board" icon="📊">
         <p style={{ fontSize: "0.78rem", color: COLORS.textMuted, marginBottom: "1rem", lineHeight: 1.55 }}>
-          Every core underwriting category automatically classified as{" "}
-          <strong style={{ color: COLORS.green }}>VERIFIED</strong> (confirmed third-party data),{" "}
-          <strong style={{ color: COLORS.yellow }}>PARTIALLY VERIFIED</strong> (present but incomplete or unconfirmed), or{" "}
-          <strong style={{ color: COLORS.red }}>MISSING</strong> (not available — action required before offer).
+          Every core underwriting category classified as{" "}
+          <strong style={{ color: COLORS.green }}>VERIFIED</strong>,{" "}
+          <strong style={{ color: COLORS.yellow }}>PARTIALLY VERIFIED</strong>, or{" "}
+          <strong style={{ color: COLORS.red }}>MISSING</strong>.
+          Each card shows the evidence source badge and any auto-generated document requests.
         </p>
         <DiligenceStatusDashboard items={report.diligence_status} />
       </Section>
+
+      {/* Document Request Checklist */}
+      <DocumentRequestChecklist items={report.diligence_status} />
 
       {/* Legacy detailed missing items list */}
       {items.length > 0 && (
@@ -1307,11 +1529,6 @@ function MissingItemsTab({ report }: { report: DDReport }) {
           {renderGroup("Critical", COLORS.red, critical)}
           {renderGroup("Important", COLORS.yellow, important)}
           {renderGroup("Nice-to-Have", COLORS.green, niceToHave)}
-          {items.length === 0 && (
-            <div style={{ color: COLORS.green, padding: "1rem", textAlign: "center", fontSize: "0.82rem" }}>
-              ✓ All tracked data items present.
-            </div>
-          )}
         </Section>
       )}
     </>
@@ -3325,6 +3542,9 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
           }
         </div>
       </div>
+
+      {/* Offer Gate Banner — always visible on exec summary */}
+      <OfferGateBanner gate={report.offer_gate} />
 
       {/* Diligence Status — compact three-pill summary */}
       <Section title="Diligence Status" icon="🔍">

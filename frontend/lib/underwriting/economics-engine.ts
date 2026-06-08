@@ -139,6 +139,30 @@ export type EconomicsOutput = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Terminal decline constant — matches decline-curve.ts.
+ *
+ * When the instantaneous hyperbolic/harmonic decline rate falls below this threshold,
+ * forward projections switch to exponential decline at this rate.
+ * This prevents b > 1 models from producing unrealistically long economic tails.
+ *
+ * 8% annual nominal = 0.00667/month — practical industry midpoint (SPE 5–10%).
+ * Must match the constant in decline-curve.ts.
+ */
+const TERMINAL_DI_MONTHLY = 0.006667;
+
+/**
+ * Project production rate at t months from now, starting at qi.
+ *
+ * Di is the instantaneous nominal decline rate at t=0 (now), NOT the historical
+ * t=0 rate from the DCA fit window.  Pass dcaResult.effective_Di_at_current from
+ * the DCA engine, not model.Di.
+ *
+ * For hyperbolic / harmonic models, applies the industry-standard terminal
+ * decline switch: when the instantaneous Di falls to TERMINAL_DI, the model
+ * switches to exponential decline at TERMINAL_DI.  This keeps economic life
+ * estimates realistic for high-b wells (b > 1).
+ */
 function projectRate(
   qi: number,
   Di: number,
@@ -146,7 +170,24 @@ function projectRate(
   t: number,  // months from now
 ): number {
   if (t <= 0) return qi;
-  if (b <= 0.001) return qi * Math.exp(-Di * t);
+  if (b <= 0.001) {
+    // Exponential — no terminal switch needed
+    return qi * Math.exp(-Di * t);
+  }
+
+  // Hyperbolic / harmonic — check for terminal switch
+  if (Di > TERMINAL_DI_MONTHLY) {
+    // Time at which instantaneous Di = TERMINAL_DI:  t_sw = (Di/TERMINAL_DI - 1) / (b·Di)
+    const t_sw = (Di / TERMINAL_DI_MONTHLY - 1) / (b * Di);
+    if (t >= t_sw) {
+      // Rate at the switch point
+      const q_sw = qi / Math.pow(1 + b * Di * t_sw, 1 / b);
+      // Exponential terminal decline from q_sw
+      return q_sw * Math.exp(-TERMINAL_DI_MONTHLY * (t - t_sw));
+    }
+  }
+
+  // Normal hyperbolic / harmonic before terminal switch
   return qi / Math.pow(1 + b * Di * t, 1 / b);
 }
 
@@ -381,26 +422,6 @@ export function buildSensitivityMatrix(
   };
 }
 
-// ─── Breakeven price ─────────────────────────────────────────────────────────
-
-function calcBreakevenPrice(
-  monthly_oil_bbl: number,
-  monthly_gas_mcf: number,
-  monthly_loe_usd: number,
-  nri_decimal: number,
-  wi_decimal: number,
-  gas_usd_mcf: number,
-  diff: number,
-): number {
-  // Solve: (oil_bbl*(P+diff) + gas*gasP) * NRI = LOE * WI
-  // P = (LOE*WI/NRI - gas*gasP) / oil_bbl - diff
-  if (monthly_oil_bbl <= 0) return 999;
-  const gasContrib = monthly_gas_mcf * gas_usd_mcf;
-  const required   = monthly_loe_usd * wi_decimal / nri_decimal;
-  const price      = (required - gasContrib) / monthly_oil_bbl - diff;
-  return Math.max(Math.round(price * 100) / 100, 0);
-}
-
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export function runEconomics(input: EconomicsInput): EconomicsOutput {
@@ -418,16 +439,26 @@ export function runEconomics(input: EconomicsInput): EconomicsOutput {
 
   const effOil = input.monthly_oil_bbl * (1 - downtime);
   const effGas = input.monthly_gas_mcf * (1 - downtime);
-  const transport = input.transport_oil_per_bbl ?? 0.50;
 
-  const breakeven = calcBreakevenPrice(
-    effOil,
-    effGas,
-    input.monthly_loe_usd,
-    nri, wi,
-    baseDeck.gas_usd_mcf,
-    baseDeck.differential_bbl,
-  );
+  // ── Breakeven oil price — exact binary search ────────────────────────────
+  // The old closed-form formula only included LOE and gas contribution.
+  // It missed: transport, ad valorem, workover reserve, and severance tax —
+  // all of which are price-dependent or production-cost offsets.
+  // Binary search over calcScenario is exact and always correct.
+  let breakeven = 0;
+  if (effOil > 0) {
+    let beLo = 0, beHi = 250;
+    for (let i = 0; i < 60; i++) {
+      const beMid = (beLo + beHi) / 2;
+      const testDeck: PriceDeck = { ...baseDeck, oil_usd_bbl: beMid };
+      const testNI   = calcScenario(normalized, testDeck).monthly_net_income_usd;
+      if (testNI > 0) beHi = beMid; else beLo = beMid;
+      if (beHi - beLo < 0.05) break;
+    }
+    breakeven = Math.round((beLo + beHi) / 2 * 100) / 100;
+  } else {
+    breakeven = 999; // gas-only or no production
+  }
 
   // Months remaining at base decline
   const lifeMonths = input.decline_rate_monthly > 0 && effOil > 5

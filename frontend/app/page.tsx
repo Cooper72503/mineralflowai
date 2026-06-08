@@ -6,9 +6,9 @@ import { getSessionUser } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Mineral Flow AI — Evaluate mineral deals in minutes",
+  title: "Mineral Flow AI — Working Interest Underwriting Platform",
   description:
-    "Upload deeds, leases, division orders, or revenue documents. Get a deal score, financial output when data is present, and clear reasoning — built for landmen and acquisition teams.",
+    "Enter an API number. Get 36 months of TRRC production, Arps decline curve analysis, multi-scenario NPV, offer range, and a six-dimension risk score — backed by live EIA pricing and basin benchmarks.",
 };
 
 export default async function HomePage() {

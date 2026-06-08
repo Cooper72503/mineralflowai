@@ -55,6 +55,10 @@ import type {
   DataProvenanceReport,
   ProductionLineage,
   ProvenanceRecord,
+  EvidenceSource,
+  DocumentRequest,
+  OfferGate,
+  OfferGateField,
 } from "./types";
 import type { DocumentExtractionResult } from "./document-extraction";
 import type { NormalizedApi } from "./types";
@@ -597,18 +601,43 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     reserve_pv10: reservePv10 != null
       ? dp(reservePv10, "uploaded_doc", "medium", "Reserve report")
       : missingDp<number>("Reserve report not provided"),
-    notes: !hasTrrc
-      ? hasDocProd
-        ? [
-            `NOTE: Production data sourced from uploaded documents (${docMonthlyRows.length} months). For TRRC-verified production, provide exact API number and RRC lease number + district.`,
-            "RRC oil production is lease-level; this exhibit supports underwriting but is not a formal well-level reserve-engineering decline curve.",
-          ]
-        : ["WARNING: No production data available. Provide an API number, RRC lease number, or upload production documents (LOE statements, run tickets, etc.)."]
-      : [
-          `LEASE-LEVEL DATA: RRC oil production is lease-level; this exhibit supports underwriting but is not a formal well-level reserve-engineering decline curve.${trrcWells.length > 0 ? ` Source: TRRC Specific Lease Production Query (${trrcWells.map(w => `Lease ${w.lease_number}, District ${w.district_code}`).join("; ")}).` : ""}`,
-          "WATER: TRRC production reports do not include water disposition volumes. Water cut requires operator run tickets or division orders — do not compute from TRRC data alone.",
-          "TRRC data may lag current operations by 3–5 months. Verify most-recent production with operator prior to offer.",
-        ],
+    notes: (() => {
+      if (!hasTrrc) {
+        return hasDocProd
+          ? [
+              `NOTE: Production data sourced from uploaded documents (${docMonthlyRows.length} months). For TRRC-verified production, provide exact API number and RRC lease number + district.`,
+              "RRC oil production is lease-level; this exhibit supports underwriting but is not a formal well-level reserve-engineering decline curve.",
+            ]
+          : ["WARNING: No production data available. Provide an API number, RRC lease number, or upload production documents (LOE statements, run tickets, etc.)."];
+      }
+
+      const prodNotes: string[] = [
+        `LEASE-LEVEL DATA: RRC oil production is lease-level; this exhibit supports underwriting but is not a formal well-level reserve-engineering decline curve.${trrcWells.length > 0 ? ` Source: TRRC Specific Lease Production Query (${trrcWells.map(w => `Lease ${w.lease_number}, District ${w.district_code}`).join("; ")}).` : ""}`,
+        "WATER: TRRC production reports do not include water disposition volumes. Water cut requires operator run tickets or division orders — do not compute from TRRC data alone.",
+        "TRRC data may lag current operations by 3–5 months. Verify most-recent production with operator prior to offer.",
+      ];
+
+      // ⚠️ CRITICAL: Multi-well lease attribution warning
+      // If the user supplied fewer API numbers than there are TRRC production wells
+      // on this lease, the production figures represent the aggregate of ALL wells
+      // on the lease — not just the wells the user intends to acquire.
+      // This is a frequent source of significant overstatement in acquisition models.
+      const uniqueLeases = Array.from(new Set(trrcWells.map(w => `${w.district_code}:${w.lease_number}`).filter(Boolean)));
+      const totalTrrcWellbores = trrcWells.length;
+      const suppliedApis = providedApis.length;
+      if (totalTrrcWellbores > 1 && suppliedApis < totalTrrcWellbores) {
+        prodNotes.push(
+          `⚠️ MULTI-WELL LEASE: TRRC resolved ${totalTrrcWellbores} wellbores across ${uniqueLeases.length} lease(s), ` +
+          `but only ${suppliedApis || "0"} API number(s) were provided. ` +
+          `TRRC production is aggregate lease-level — it includes ALL wells on the lease, ` +
+          `not just the ${suppliedApis || "subject"} well(s) being acquired. ` +
+          `If this is a partial-lease acquisition, the production figures OVERSTATE the subject asset. ` +
+          `Request per-well run tickets from the operator to allocate production to the acquired wellbores.`
+        );
+      }
+
+      return prodNotes;
+    })(),
   };
 
   // ── Economics / LOE section ───────────────────────────────────────────────
@@ -657,6 +686,32 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     avgLoeEffective = loePerBoe * totalBoe;
     loeSource       = "inferred";
     loeNote         = `EIA basin benchmark — ${benchmark.basin} median $${benchmark.loe_median_per_boe}/BOE (range $${benchmark.loe_low_per_boe}–$${benchmark.loe_high_per_boe}/BOE). Not well-specific.`;
+  }
+
+  // ── LOE sanity check vs. basin benchmark ────────────────────────────────────
+  // When LOE comes from operator-supplied documents, cross-check against the
+  // EIA basin benchmark.  A 25-year veteran would instantly flag LOE of $48/BOE
+  // in Permian Midland (benchmark $7.50–$18/BOE) as either fraudulent, data-entry
+  // error, or a material operational problem that must be explained before closing.
+  //
+  // Both directions are flagged:
+  //   • Too HIGH (> 1.5× benchmark high): possible inflated costs, book-entry error,
+  //     or a genuinely distressed asset (over-pumped, stuck pump, excessive workovers)
+  //   • Too LOW (< 0.5× benchmark low): possible missing cost categories (e.g.,
+  //     LOE statement omits electricity, compression, or contract labor)
+  if (loePerBoe != null && loeSource === "loe_statement" && benchmark != null && totalBoe > 0) {
+    const highThreshold = benchmark.loe_high_per_boe * 1.5;
+    const lowThreshold  = benchmark.loe_low_per_boe  * 0.5;
+    if (loePerBoe > highThreshold) {
+      const multiple = (loePerBoe / benchmark.loe_median_per_boe).toFixed(1);
+      loeNote = `⚠️ LOE/BOE ($${loePerBoe.toFixed(2)}) is ${multiple}× the ${benchmark.basin} benchmark median ` +
+        `($${benchmark.loe_median_per_boe}/BOE, range $${benchmark.loe_low_per_boe}–$${benchmark.loe_high_per_boe}/BOE). ` +
+        `Verify statements — may indicate abnormal operating costs, workover accruals, or data-entry error.`;
+    } else if (loePerBoe < lowThreshold) {
+      loeNote = `⚠️ LOE/BOE ($${loePerBoe.toFixed(2)}) is below the ${benchmark.basin} benchmark low ` +
+        `($${benchmark.loe_low_per_boe}/BOE). Confirm all cost categories are included ` +
+        `(electricity, compression, labor, disposal, insurance).`;
+    }
   }
 
   // Oil price — from run tickets, then LOE statements, then EIA current price + differential
@@ -1445,8 +1500,20 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     ? `Stabilized from production-engine: ${prodIntel.current_stabilized_source}`
     : "Raw TRRC total";
 
-  // Downtime haircut for projected cash flows
-  const downtimeHaircut = prodIntel != null ? prodIntel.downtime_pct / 100 : 0;
+  // Downtime haircut for projected cash flows.
+  //
+  // CRITICAL: use uptime_fraction (active_months / total_months), NOT downtime_pct.
+  //
+  // current_stabilized_bbl is an average of ACTIVE months only (the per-month rate
+  // when the well is producing). To convert it to a calendar-time average for NPV,
+  // we must multiply by the fraction of calendar months that were active — not just
+  // the fraction that were classified "downtime".
+  //
+  // downtime_pct only counts months classified as "downtime"; it ignores restart
+  // and incomplete months. Using it understates the haircut by up to 30%+.
+  //
+  // uptime_fraction = active_months / total_months accounts for ALL non-active time.
+  const downtimeHaircut = prodIntel != null ? (1 - prodIntel.uptime_fraction) : 0;
 
   // ── Decline Curve Analysis ────────────────────────────────────────────────
   // Use DCA-ready rows from production engine (calendar time indexed, active+flush only).
@@ -1550,6 +1617,32 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         if (dcaSource === "uploaded_doc") {
           notes.push("⚠️ DCA based on document-extracted production — provide API number for TRRC-verified curve.");
         }
+
+        // ── Decline rate vs. basin benchmark sanity check ───────────────────
+        // A 25-year veteran would immediately flag a fitted decline rate that is
+        // wildly outside the basin's expected range.  Two failure modes:
+        //   1. Rate too HIGH (> 3× basin typical): possible data gap or shut-in
+        //      masking a shorter effective history, or genuinely distressed well.
+        //   2. Rate too LOW (< 20% of basin typical): possible flat production
+        //      phase not yet in true decline, reservoir pressure support, or a
+        //      data continuity issue (e.g., TRRC production from different zone).
+        if (benchmark != null) {
+          const typicalPct = benchmark.typical_decline_rate_monthly;
+          const fittedPct  = dcaResult.decline_rate_monthly_pct;
+          if (fittedPct > typicalPct * 3) {
+            notes.push(
+              `⚠️ Fitted decline rate (${fittedPct.toFixed(1)}%/mo) is ${(fittedPct / typicalPct).toFixed(1)}× ` +
+              `the typical ${benchmark.basin} rate (${typicalPct}%/mo). ` +
+              `Verify production continuity — possible data gap, shut-in period, or zone commingling.`
+            );
+          } else if (fittedPct > 0 && fittedPct < typicalPct * 0.20) {
+            notes.push(
+              `ℹ️ Fitted decline rate (${fittedPct.toFixed(1)}%/mo) is well below the typical ${benchmark.basin} ` +
+              `rate (${typicalPct}%/mo). Possible causes: flat production plateau, pressure maintenance, ` +
+              `or production from a shallower/different zone than expected. Confirm formation.`
+            );
+          }
+        }
       } else {
         notes.push("Decline curve analysis requires ≥ 3 months of production history. Provide API number or upload production documents.");
       }
@@ -1560,14 +1653,21 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   // ── Acquisition Economics ─────────────────────────────────────────────────
 
   // NRI/WI: user override → doc extraction → default
-  const nriDecimal = nriOverride
-    ?? ownershipRecords.find(r => r.nri_decimal != null)?.nri_decimal
-    ?? 0.75;
-  const wiDecimal  = wiOverride
-    ?? ownershipRecords.find(r =>
-        r.interest_type.toLowerCase().includes("wi") || r.interest_type.toLowerCase().includes("working")
-       )?.decimal_interest
-    ?? 1.0;
+  // Track whether each falls through to a hard-coded default so we can warn
+  // and suppress economics when ownership is unverified.
+  const nriFromDoc = ownershipRecords.find(r => r.nri_decimal != null)?.nri_decimal;
+  const wiFromDoc  = ownershipRecords.find(r =>
+    r.interest_type.toLowerCase().includes("wi") || r.interest_type.toLowerCase().includes("working")
+  )?.decimal_interest;
+
+  const nriIsDefault = nriOverride == null && nriFromDoc == null;
+  const wiIsDefault  = wiOverride  == null && wiFromDoc  == null;
+  /** True when BOTH interest fractions are unverified assumptions.
+   *  In that state, offer/NPV numbers are materially unreliable and must not be displayed. */
+  const ownershipUnverified = nriIsDefault && wiIsDefault;
+
+  const nriDecimal = nriOverride ?? nriFromDoc ?? 0.75;
+  const wiDecimal  = wiOverride  ?? wiFromDoc  ?? 1.0;
 
   // Texas severance tax rates (applied to gross revenue, WI-share basis)
   // Oil production tax: 4.6% | Gas production tax: 7.5%
@@ -1576,8 +1676,12 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
 
   // Use effective LOE (from statements → EDGAR → benchmark)
   const monthlyLoe = avgLoeEffective ?? 0;
+  // Use the INSTANTANEOUS decline rate at the end of the production history, not
+  // the nominal Di at t=0 of the fit.  For a hyperbolic well that has been declining
+  // 24+ months, the t=0 Di can be 2–3× higher than today's rate, causing the
+  // economics engine to project an overly steep future decline and compress the offer.
   const dcaMonthlyDecline = dcaResult
-    ? dcaResult.model.Di
+    ? dcaResult.effective_Di_at_current
     : (declineRate != null ? Math.abs(declineRate) / 100 : 0.012);
   const bFactor = dcaResult?.model.b ?? 0;
 
@@ -1585,11 +1689,17 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   const baseDeckOil = eiaWti != null ? eiaWti : 65;
   const baseDeckGas = eiaHh  != null ? eiaHh  : 2.50;
   const diff        = basinDiff;
+  // Apply gas basin differential to all decks.
+  // gasDiff (benchmark.gas_differential_per_mmbtu) is the typical basis spread
+  // for this basin vs. Henry Hub (e.g., -$0.50/MCF for Permian, +$0.10/MCF for Gulf Coast).
+  // Previously this variable was declared but never used, causing gas revenue to be
+  // calculated at flat Henry Hub — systematically wrong for every basin.
+  const baseGasRealized = Math.max(baseDeckGas + gasDiff, 1.00);
   const customDecks = [
-    { label: "Stress",  oil_usd_bbl: Math.max(baseDeckOil - 20, 35), gas_usd_mcf: Math.max(baseDeckGas - 0.60, 1.50), differential_bbl: diff - 1.00 },
-    { label: "Base",    oil_usd_bbl: baseDeckOil,                     gas_usd_mcf: baseDeckGas,                         differential_bbl: diff },
-    { label: "Strip",   oil_usd_bbl: baseDeckOil + 7,                 gas_usd_mcf: baseDeckGas + 0.50,                  differential_bbl: diff + 0.75 },
-    { label: "Upside",  oil_usd_bbl: baseDeckOil + 20,                gas_usd_mcf: baseDeckGas + 1.00,                  differential_bbl: diff + 1.50 },
+    { label: "Stress",  oil_usd_bbl: Math.max(baseDeckOil - 20, 35), gas_usd_mcf: Math.max(baseGasRealized - 0.60, 1.00), differential_bbl: diff - 1.00 },
+    { label: "Base",    oil_usd_bbl: baseDeckOil,                     gas_usd_mcf: baseGasRealized,                        differential_bbl: diff },
+    { label: "Strip",   oil_usd_bbl: baseDeckOil + 7,                 gas_usd_mcf: baseGasRealized + 0.50,                 differential_bbl: diff + 0.75 },
+    { label: "Upside",  oil_usd_bbl: baseDeckOil + 20,                gas_usd_mcf: baseGasRealized + 1.00,                 differential_bbl: diff + 1.50 },
   ];
 
   // Use stabilized production rate (not raw last-month) as the economics input.
@@ -1598,7 +1708,25 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   const econOil = stabilizedOil > 0 ? stabilizedOil : totalOil;
   const econGas = totalGas; // gas production — stabilize if available
 
-  const econResult = (econOil > 0 || econGas > 0 || monthlyLoe > 0)
+  // SWD cost — derived from verified water cut (extracted documents only).
+  // TRRC does not report water volumes; only use water cut when explicitly
+  // provided in operator documents. Never infer SWD cost from basin benchmark
+  // typical_water_cut_pct_range — that would be speculative and could inflate costs.
+  //
+  // Formula: if oil_bbl/month is known and water_cut% is known:
+  //   water_bbl = oil_bbl × (water_cut% / (100 - water_cut%))
+  //   [equivalent to: water_cut = water/(oil+water) → water = oil×wc/(1-wc)]
+  const verifiedWaterCutPct =
+    waterCutValue != null && waterCutSource === "uploaded_doc" ? waterCutValue : null;
+  const monthlyWaterBbl =
+    verifiedWaterCutPct != null && verifiedWaterCutPct < 100 && econOil > 0
+      ? Math.round(econOil * verifiedWaterCutPct / (100 - verifiedWaterCutPct))
+      : 0;
+  const swdCostPerBbl = benchmark?.disposal_cost_per_bbl ?? 0.75;
+
+  // Block economics entirely when both NRI and WI are unverified defaults.
+  // A 30–50% error in either interest fraction is worse than showing nothing.
+  const econResult = (!ownershipUnverified && (econOil > 0 || econGas > 0 || monthlyLoe > 0))
     ? runEconomics({
         monthly_oil_bbl:           econOil,
         monthly_gas_mcf:           econGas,
@@ -1615,13 +1743,27 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         state_tax_pct_gas:         sevTaxGas,
         // Ad valorem: ~1.2% of gross revenue (Texas county average)
         ad_valorem_pct:            isTexasState ? 0.012 : 0.008,
-        // Transport: basin-specific, default $0.50/BBL
-        transport_oil_per_bbl:     benchmark?.oil_differential_per_bbl != null
-                                     ? Math.abs(benchmark.oil_differential_per_bbl) * 0.20  // ~20% of price diff
-                                     : 0.50,
-        transport_gas_per_mcf:     0.10,
+        // Transport: $0 when using basin-benchmark differential price decks.
+        //
+        // The price deck's `differential_bbl` IS the net wellhead-to-WTI spread —
+        // it already embeds all transport, pipeline tariff, and basis deductions.
+        // Adding a separate transport_oil_per_bbl on top would double-deduct:
+        //   (WTI + diff) * NRI - transport * WI  →  effective price < wellhead
+        //
+        // If run tickets show a separate pipeline tariff (e.g., $1.25/BBL charged
+        // on the settlement), that tariff is already embedded in the realized price
+        // recorded in the run ticket, which feeds into avgOilPrice and loeStatements.
+        //
+        // Gathering / compression costs for gas are captured in LOE statements; we
+        // do not add them again via transport_gas_per_mcf.
+        transport_oil_per_bbl:     0,
+        transport_gas_per_mcf:     0,
         // Workover reserve: $2/BOE/year for conventional wells
         workover_reserve_per_boe_annual: 2.00,
+        // SWD disposal cost — only populated when water cut is from verified documents.
+        // For high-water-cut wells this is material ($500–$2,000+/month for 200+ BBL/day water).
+        monthly_water_bbl:         monthlyWaterBbl,
+        swd_cost_per_bbl_water:    monthlyWaterBbl > 0 ? swdCostPerBbl : 0,
         // Downtime haircut: apply the historical downtime percentage
         downtime_haircut:          downtimeHaircut,
       })
@@ -1632,10 +1774,18 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
 
   // Build economics quality note
   const econQualityNote = (() => {
+    if (ownershipUnverified) {
+      return "⚠ Economics suppressed — NRI and WI are unverified. Upload division orders or JOA to enable offer calculations.";
+    }
     const parts: string[] = [];
+    if (nriIsDefault) parts.push("⚠ NRI assumed 75% — provide division orders");
+    if (wiIsDefault)  parts.push("⚠ WI assumed 100% — provide JOA");
     if (prodIntel) {
       parts.push(`${prodIntel.production_confidence} production (${prodIntel.active_months} active months)`);
-      if (downtimeHaircut > 0) parts.push(`${(downtimeHaircut * 100).toFixed(0)}% downtime haircut applied to projections`);
+      if (downtimeHaircut > 0) {
+        const uptimePct = Math.round(prodIntel.uptime_fraction * 100);
+        parts.push(`${uptimePct}% uptime (${prodIntel.active_months}/${prodIntel.total_months_in_series} months active) — calendar haircut applied to projections`);
+      }
       if (stabilizedOil !== totalOil) parts.push(`stabilized rate ${stabilizedOil} BBL/mo used (not raw total ${totalOil} BBL/mo)`);
     }
     if (monthlyLoe > 0) parts.push(`LOE from ${loePeriods.length > 0 ? loePeriods.length + " months of statements" : "EDGAR/benchmark"}`);
@@ -1651,7 +1801,9 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       ? dp(econResult.monthly_net_income_usd, econOil > 0 ? "trrc" : "loe_statement",
           prodIntel?.production_confidence === "VERIFIED" ? "medium" : "low",
           econQualityNote)
-      : missingDp<number>("Requires production and LOE data"),
+      : missingDp<number>(ownershipUnverified
+          ? "⚠ Unverified ownership — provide division orders to enable economics"
+          : "Requires production and LOE data"),
     annual_net_income_usd: econResult
       ? dp(econResult.annual_net_income_usd, "inferred", "medium")
       : missingDp<number>(),
@@ -1690,7 +1842,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         }))
       : [],
     // ── Sensitivity matrix (4×4 production × price, using stabilized rate) ──
-    sensitivity_matrix: (econOil > 0 || econGas > 0)
+    // Suppressed when ownership is unverified — unverified NRI/WI would make every cell misleading.
+    sensitivity_matrix: (!ownershipUnverified && (econOil > 0 || econGas > 0))
       ? buildSensitivityMatrix(
           {
             monthly_oil_bbl:        econOil,
@@ -1707,7 +1860,10 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
             state_tax_pct_oil:      sevTaxOil,
             state_tax_pct_gas:      sevTaxGas,
             ad_valorem_pct:         isTexasState ? 0.012 : 0.008,
-            transport_oil_per_bbl:  0.50,
+            transport_oil_per_bbl:  0,
+            transport_gas_per_mcf:  0,
+            monthly_water_bbl:      monthlyWaterBbl,
+            swd_cost_per_bbl_water: monthlyWaterBbl > 0 ? swdCostPerBbl : 0,
             workover_reserve_per_boe_annual: 2.00,
             downtime_haircut:       downtimeHaircut,
           },
@@ -2489,11 +2645,14 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   // This is the buyer-facing "what do I have vs. what do I still need" board.
 
   const diligenceStatus: DiligenceStatusItem[] = [];
+  let computedOfferGate: OfferGate | null = null;
 
   // 1. Operator Identity
   {
     const hasOperatorVerified = matchTier === "exact_api" || matchTier === "exact_rrc_lease";
     const hasOperatorName     = !!(operatorName ?? extracted?.operator_name);
+    const evidSrc: EvidenceSource = hasOperatorVerified ? "trrc_structured"
+      : hasOperatorName ? "user_assumption" : "not_found";
     diligenceStatus.push({
       category:     "Operator Identity",
       tier:         hasOperatorVerified ? "verified" : hasOperatorName ? "partially_verified" : "missing",
@@ -2507,6 +2666,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         : hasOperatorName ? "Confirm operator name against TRRC P-5 operator record"
         : "Provide operator name or API number to resolve operator identity",
       urgency: hasOperatorVerified ? "informational" : "critical",
+      evidence_source: evidSrc,
+      document_requests: hasOperatorVerified ? [] : [
+        {
+          field: "Operator Identity",
+          document_type: "TRRC P-5 Operator Record",
+          description: "Confirm current operator via TRRC P-5 Organization Report — verify operator name and bond status",
+          from: "state_agency",
+          urgency: "important",
+        },
+      ],
     });
   }
 
@@ -2563,7 +2732,21 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       : apiPresent || leasePresent ? "important" as const  // identifier present, just not matched
       : "critical" as const;
 
-    diligenceStatus.push({ category: "API / Well Identification", tier, status_detail, source_label, action_required, urgency });
+    const apiEvidSrc: EvidenceSource = exactMatch || leaseMatch ? "trrc_structured"
+      : apiPresent || leasePresent || weakMatch ? "user_assumption" : "not_found";
+    diligenceStatus.push({
+      category: "API / Well Identification", tier, status_detail, source_label, action_required, urgency,
+      evidence_source: apiEvidSrc,
+      document_requests: exactMatch || leaseMatch ? [] : [
+        {
+          field: "API / Well Identification",
+          document_type: "10-Digit API Number",
+          description: "Provide the 10-digit Texas API number (format 42-XXX-XXXXX) for each subject wellbore — required for exact TRRC production query",
+          from: "seller",
+          urgency: urgency === "critical" ? "critical" : "important",
+        },
+      ],
+    });
   }
 
   // 3. Production History
@@ -2633,7 +2816,34 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       : hasDocEvidence   ? "important" as const
       : "critical" as const;
 
-    diligenceStatus.push({ category: "Production History", tier, status_detail, source_label, action_required, urgency });
+    const prodEvidSrc: EvidenceSource = trrcMonths >= 6 ? "trrc_structured"
+      : totalDocMonths >= 6 ? "seller_document"
+      : hasDocEvidence ? "seller_document"
+      : identifierPresent ? "not_found" : "not_found";
+    const prodDocReqs: DocumentRequest[] = [];
+    if (trrcMonths < 24) {
+      prodDocReqs.push({
+        field: "Production History (Monthly Volumes)",
+        document_type: "Purchaser Run Statements",
+        description: `Request 24 months of signed purchaser run statements showing monthly oil, gas, and water volumes — verify against TRRC lease-level data`,
+        from: "seller",
+        urgency: trrcMonths === 0 ? "critical" : "important",
+      });
+    }
+    if (trrcMonths === 0 && !identifierPresent) {
+      prodDocReqs.push({
+        field: "Production History (TRRC Lease ID)",
+        document_type: "RRC Lease Number + District Code",
+        description: "Provide RRC lease number and district code (format 'DD:NNNNNN') — Texas TRRC production records are indexed by lease, not API number",
+        from: "seller",
+        urgency: "critical",
+      });
+    }
+    diligenceStatus.push({
+      category: "Production History", tier, status_detail, source_label, action_required, urgency,
+      evidence_source: prodEvidSrc,
+      document_requests: prodDocReqs,
+    });
   }
 
   // 4. Inspection / Compliance History
@@ -2660,6 +2870,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
           ? `Resolve ${openViolations} open violation(s) before or at closing — request cure plan from operator`
           : null,
       urgency: openViolations > 0 ? "critical" : !complianceChecked ? "important" : "informational",
+      evidence_source: complianceChecked ? "trrc_structured" : "not_found",
+      document_requests: complianceChecked ? [] : [
+        {
+          field: "Compliance History",
+          document_type: "TRRC Violation Search",
+          description: "Run TRRC violation and compliance check — provide API number to enable automated lookup",
+          from: "state_agency",
+          urgency: "important",
+        },
+      ],
     });
   }
 
@@ -2668,6 +2888,18 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     const loeSrc       = economicsSection.loe_statements.length > 0;
     const loeInferred  = economicsSection.avg_monthly_loe_usd.source === "inferred";
     const loeMonths    = economicsSection.loe_months_available;
+    const loeEvidSrc: EvidenceSource = loeSrc && loeMonths >= 12 ? "seller_document"
+      : loeSrc ? "seller_document"
+      : loeInferred ? "model_estimate" : "not_found";
+    const loeDocReqs: DocumentRequest[] = loeSrc && loeMonths >= 12 ? [] : [
+      {
+        field: "Lease Operating Expenses (Monthly)",
+        document_type: "LOE Statement / Joint Interest Billing (JIB)",
+        description: `Request 12 months of signed JIB / LOE statements showing per-well operating costs itemized by category (electricity, chemical, labor, water disposal, compression, workover)`,
+        from: "operator",
+        urgency: loeEvidSrc === "not_found" ? "critical" : "important",
+      },
+    ];
     diligenceStatus.push({
       category: "LOE Statements",
       tier: loeSrc && loeMonths >= 12 ? "verified"
@@ -2686,6 +2918,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         : loeSrc ? "Request additional LOE statements to cover 12 full months"
         : "Request 12 months of signed LOE statements from operator before offer",
       urgency: loeSrc ? "informational" : loeInferred ? "important" : "critical",
+      evidence_source: loeEvidSrc,
+      document_requests: loeDocReqs,
     });
   }
 
@@ -2709,6 +2943,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         : wcPresent ? "Request monthly water production records to confirm disposal volumes"
         : "Request water production records — essential for accurate LOE and SWD economics",
       urgency: wcVerified ? "informational" : wcPresent ? "important" : "important",
+      evidence_source: wcVerified ? "trrc_structured" : wcPresent ? "model_estimate" : "not_found",
+      document_requests: wcVerified ? [] : [
+        {
+          field: "Water Cut & Monthly Water Volumes",
+          document_type: "Monthly Water Production Records",
+          description: "Request 12 months of monthly water production records (BWPD or BWPM) and salt water disposal invoices — required to calculate disposal cost and confirm water cut percentage",
+          from: "operator",
+          urgency: "important",
+        },
+      ],
     });
   }
 
@@ -2736,6 +2980,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         : mitExpired ? "Renew expired MIT test before closing — SWD wells cannot operate without current MIT"
         : "Request MIT certificates for all SWD wells and confirm current status with TRRC",
       urgency: !hasSwd ? "informational" : mitCurrent ? "informational" : "critical",
+      evidence_source: !hasSwd ? "not_found" : mitCurrent ? "trrc_structured" : mitExpired ? "trrc_structured" : "not_found",
+      document_requests: !hasSwd || mitCurrent ? [] : [
+        {
+          field: "MIT Test Certificate",
+          document_type: "Mechanical Integrity Test (MIT) Certificate",
+          description: "Request current MIT certificates for all injection/SWD wells — must be dated within required TRRC renewal period and show passing result",
+          from: "operator",
+          urgency: "critical",
+        },
+      ],
     });
   }
 
@@ -2763,6 +3017,18 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
           ? "Request workover invoices and AFEs for all identified events — costs required for LOE modeling"
           : "Request 3-year workover history and invoices from operator",
       urgency: "important",
+      evidence_source: hasWorkovers
+        ? (workoverSection.events[0]?.source === "trrc" ? "trrc_structured" : "seller_document")
+        : "not_found",
+      document_requests: hasWorkovers && hasCosts ? [] : [
+        {
+          field: "Workover History & Invoices",
+          document_type: "Workover History Log + Invoices / AFEs",
+          description: "Request 3-year workover history log with dates, scope, and cost; include signed AFEs and invoices for all events over $5,000",
+          from: "operator",
+          urgency: "important",
+        },
+      ],
     });
   }
 
@@ -2784,6 +3050,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       action_required: reservePresent ? null
         : "Request SEC-standard reserve estimate (PV10) prepared by licensed petroleum engineer",
       urgency: reservePresent ? "informational" : "important",
+      evidence_source: reservePresent && pv10Present ? "seller_document" : reservePresent ? "seller_document" : "model_estimate",
+      document_requests: reservePresent ? [] : [
+        {
+          field: "Reserve Report / PV10",
+          document_type: "SEC-Standard Reserve Estimate (PV10)",
+          description: "Request reserve estimate prepared by a licensed petroleum engineer per SEC guidelines — include proved developed producing (PDP), proved developed non-producing (PDNP), and proved undeveloped (PUD) categories with PV10 discounted at 10%",
+          from: "seller",
+          urgency: "important",
+        },
+      ],
     });
   }
 
@@ -2807,6 +3083,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       action_required: !hasSwd || disposalVerified ? null
         : "Request current disposal contracts for all SWD wells — rate and volume commitments affect SWD economics",
       urgency: !hasSwd || disposalVerified ? "informational" : "important",
+      evidence_source: !hasSwd ? "not_found" : disposalVerified ? "seller_document" : "model_estimate",
+      document_requests: !hasSwd || disposalVerified ? [] : [
+        {
+          field: "Disposal Contracts (SWD)",
+          document_type: "Salt Water Disposal Contract",
+          description: "Request current disposal contracts for all SWD wells — include rate per barrel, volume commitments, term, and any minimum volume penalties",
+          from: "operator",
+          urgency: "important",
+        },
+      ],
     });
   }
 
@@ -2837,6 +3123,26 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
           ? "Request full W-2 completion report from seller/operator or RRC imaged records for perforation, casing, and interval details"
           : "Not found in captured public records; request seller/operator or RRC imaged records — W-1 (Drilling Permit), W-2 (Completion Report), completion packet",
       urgency: hasFormation ? "informational" : "important",
+      evidence_source: hasFormation && hasPerfs
+        ? (fromTrrc ? "trrc_structured" : "seller_document")
+        : trrcPacket ? "trrc_structured"
+        : "not_found",
+      document_requests: hasFormation && hasPerfs ? [] : [
+        {
+          field: "Formation & Completion Data",
+          document_type: "W-2 Completion Report (TRRC Imaged Record)",
+          description: "Request W-2 Completion Report from TRRC EWA imaged records — contains formation name, perforation intervals (top/bottom), casing specs, and completion date",
+          from: "state_agency",
+          urgency: "informational",
+        },
+        ...(hasFormation ? [] : [{
+          field: "Formation & Completion Data",
+          document_type: "W-1 Drilling Permit / Completion Certificate",
+          description: "Request W-1 drilling permit and completion certificate from TRRC EWA — provides formation target, total depth, and original completion details",
+          from: "state_agency" as const,
+          urgency: "informational" as const,
+        }]),
+      ],
     });
   }
 
@@ -2862,6 +3168,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
           ? "Verify field inspection history directly at TRRC EWA portal (Inspection/ICE lookup by API)"
           : null,
       urgency: nonCompliant.length > 0 ? "critical" : "informational",
+      evidence_source: hasInspections ? "trrc_structured" : "not_found",
+      document_requests: hasInspections ? [] : [
+        {
+          field: "Field Inspection Records (ICE)",
+          document_type: "TRRC ICE Inspection History",
+          description: "Verify field inspection history at TRRC EWA portal — search by API number under Inspection/ICE lookup. Note any deficiencies, violation notices, or non-compliant results",
+          from: "state_agency",
+          urgency: "informational",
+        },
+      ],
     });
   }
 
@@ -2888,7 +3204,68 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         : hasOwnership ? "Confirm WI and NRI decimals against current division orders and any JOA amendments"
         : "Request current division orders and ownership schedule — required to confirm buyer's interest before offer",
       urgency: hasOwnership ? "informational" : hasOverrides ? "important" : "critical",
+      evidence_source: hasOwnership && hasWi && hasNri ? "seller_document"
+        : hasOverrides ? "user_assumption" : "not_found",
+      document_requests: hasOwnership && hasWi && hasNri ? [] : [
+        {
+          field: "Division Orders / Ownership (NRI & WI)",
+          document_type: "Current Division Order",
+          description: "Request current division orders showing net revenue interest (NRI) and working interest (WI) decimals for each wellbore — verify against any JOA, PSA, or overriding royalty interest (ORRI) agreements",
+          from: "seller",
+          urgency: "critical",
+        },
+        {
+          field: "Ownership Schedule",
+          document_type: "Title Opinion or Ownership Schedule",
+          description: "Request title opinion or ownership schedule confirming seller's chain of title and any encumbrances — required before purchase price allocation",
+          from: "title_attorney",
+          urgency: "critical",
+        },
+      ],
     });
+  }
+
+  // ── Offer Gate Logic ──────────────────────────────────────────────────────
+  //
+  // Five gating fields: Production, LOE, Water Cut, Division Orders, Workover Risk.
+  // If any of these is sourced only from model_estimate or not_found, the offer is locked.
+  {
+    const GATE_FIELDS: Array<{ category: string; required: EvidenceSource[] }> = [
+      { category: "Production History",          required: ["trrc_structured", "trrc_imaged", "seller_document"] },
+      { category: "Division Orders / Ownership", required: ["trrc_structured", "trrc_imaged", "seller_document"] },
+      { category: "LOE Statements",              required: ["trrc_structured", "trrc_imaged", "seller_document"] },
+      { category: "Water Cut & Fluid Production",required: ["trrc_structured", "trrc_imaged", "seller_document"] },
+      { category: "Workover History & Invoices", required: ["trrc_structured", "trrc_imaged", "seller_document"] },
+    ];
+
+    const gateFields: OfferGateField[] = GATE_FIELDS.map(gf => {
+      const item = diligenceStatus.find(d => d.category === gf.category);
+      const src: EvidenceSource = item?.evidence_source ?? "not_found";
+      const blocking = !gf.required.includes(src);
+      const resolution = item?.action_required
+        ?? `Obtain ${gf.category} documentation before offer`;
+      return {
+        category: gf.category,
+        current_source: src,
+        required_sources: gf.required,
+        blocking,
+        resolution,
+      };
+    });
+
+    const blockingFields = gateFields.filter(f => f.blocking);
+    const gateOpen       = blockingFields.length === 0;
+
+    const gateMessage = gateOpen
+      ? "All critical diligence fields verified — offer recommendation is enabled."
+      : `Offer locked — ${blockingFields.length} field(s) lack sufficient evidence: ${blockingFields.map(f => f.category).join(", ")}. Resolve these before issuing an offer.`;
+
+    computedOfferGate = {
+      gate_open: gateOpen,
+      blocking_count: blockingFields.length,
+      blocking_fields: gateFields,
+      gate_message: gateMessage,
+    };
   }
 
   // ── IC Memo Narrative ─────────────────────────────────────────────────────
@@ -3367,6 +3744,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     })),
     data_provenance: dataProvenance,
     production_audit: productionAudit,
+    offer_gate: computedOfferGate,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,
       trrc_match_tier: matchTier,

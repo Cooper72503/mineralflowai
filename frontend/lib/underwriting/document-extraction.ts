@@ -288,8 +288,8 @@ export async function extractUnderwritingDataFromDocuments(
 
     const parsed = JSON.parse(cleaned) as DocumentExtractionResult;
 
-    // Normalize / sanitize
-    return {
+    // Normalize raw AI output into strongly-typed result
+    const result: DocumentExtractionResult = {
       operator_name: parsed.operator_name ?? null,
       lease_name: parsed.lease_name ?? null,
       county: parsed.county ?? null,
@@ -321,8 +321,135 @@ export async function extractUnderwritingDataFromDocuments(
       completion_data: parsed.completion_data ?? null,
       operator_notes: Array.isArray(parsed.operator_notes) ? parsed.operator_notes : [],
     };
+
+    // Sanitise AFTER parsing — catches AI hallucination / decimal-point errors
+    return validateAndSanitizeExtraction(result);
   } catch (err) {
     console.warn("[underwriting-extraction] failed:", err instanceof Error ? err.message : err);
     return null;
   }
+}
+
+// ─── Post-extraction sanitisation ────────────────────────────────────────────
+//
+// AI models occasionally hallucinate numeric values or misplace decimal points.
+// This function applies hard physical bounds and business-rule checks AFTER the
+// AI parse, before the result is consumed by the underwriting engine.
+//
+// Policy:
+//  • Clamp NRI / WI to (0, 1] — decimals outside this range are parse errors
+//  • Reject negative production volumes — physically impossible
+//  • Flag per-month production > 50 000 BBL for conventional wells (warn only)
+//  • Reject LOE of $0 for a month with production (likely a parse miss)
+//  • Reject LOE > $500 000/month for a conventional lease (physically implausible)
+//  • Sanitize oil prices outside [$10, $250]/BBL — replace with null
+//
+// The function is a pure transform — it NEVER sets values to fabricated numbers.
+// Out-of-range values are either clamped (interests) or nulled (prices, volumes).
+
+const MAX_CONVENTIONAL_OIL_BBL_PER_MONTH = 50_000;
+const MAX_CONVENTIONAL_LOE_PER_MONTH     = 500_000;
+const MIN_OIL_PRICE_PER_BBL              = 10;
+const MAX_OIL_PRICE_PER_BBL              = 250;
+
+export function validateAndSanitizeExtraction(
+  raw: DocumentExtractionResult,
+): DocumentExtractionResult {
+  // ── Ownership interests ───────────────────────────────────────────────────
+  const ownership_records = raw.ownership_records.map(r => {
+    let nri_decimal = r.nri_decimal;
+    let decimal_interest = r.decimal_interest;
+
+    if (nri_decimal != null) {
+      if (nri_decimal <= 0 || nri_decimal > 1) {
+        console.warn(`[extraction-sanitize] NRI out of range (${nri_decimal}) for "${r.owner_name}" — clamped`);
+        nri_decimal = Math.min(Math.max(nri_decimal, 0.001), 1.0);
+      }
+    }
+    if (decimal_interest != null) {
+      if (decimal_interest <= 0 || decimal_interest > 1) {
+        console.warn(`[extraction-sanitize] decimal_interest out of range (${decimal_interest}) for "${r.owner_name}" — clamped`);
+        decimal_interest = Math.min(Math.max(decimal_interest, 0.001), 1.0);
+      }
+    }
+    return { ...r, nri_decimal, decimal_interest };
+  });
+
+  // ── Production months ─────────────────────────────────────────────────────
+  const production_months = raw.production_months.map(pm => {
+    let oil_bbl  = pm.oil_bbl;
+    let gas_mcf  = pm.gas_mcf;
+    let water_bbl = pm.water_bbl;
+    let oil_price_per_bbl = pm.oil_price_per_bbl;
+
+    if (oil_bbl != null && oil_bbl < 0) {
+      console.warn(`[extraction-sanitize] Negative oil_bbl (${oil_bbl}) in period ${pm.period} — rejected`);
+      oil_bbl = null;
+    }
+    if (gas_mcf != null && gas_mcf < 0) {
+      console.warn(`[extraction-sanitize] Negative gas_mcf (${gas_mcf}) in period ${pm.period} — rejected`);
+      gas_mcf = null;
+    }
+    if (water_bbl != null && water_bbl < 0) {
+      console.warn(`[extraction-sanitize] Negative water_bbl (${water_bbl}) in period ${pm.period} — rejected`);
+      water_bbl = null;
+    }
+    if (oil_bbl != null && oil_bbl > MAX_CONVENTIONAL_OIL_BBL_PER_MONTH) {
+      console.warn(`[extraction-sanitize] Implausibly high oil_bbl (${oil_bbl}) in period ${pm.period} — flagged (not removed)`);
+      // We warn but do NOT null-out — a high-volume multi-well lease package is possible.
+      // The production engine applies its own plausibility check.
+    }
+    if (oil_price_per_bbl != null &&
+        (oil_price_per_bbl < MIN_OIL_PRICE_PER_BBL || oil_price_per_bbl > MAX_OIL_PRICE_PER_BBL)) {
+      console.warn(`[extraction-sanitize] Oil price out of range ($${oil_price_per_bbl}/BBL) in period ${pm.period} — nulled`);
+      oil_price_per_bbl = null;
+    }
+    return { ...pm, oil_bbl, gas_mcf, water_bbl, oil_price_per_bbl };
+  });
+
+  // ── LOE statements ────────────────────────────────────────────────────────
+  const loe_statements = raw.loe_statements.map(stmt => {
+    let total_loe_usd = stmt.total_loe_usd;
+
+    if (total_loe_usd != null && total_loe_usd < 0) {
+      console.warn(`[extraction-sanitize] Negative total_loe_usd (${total_loe_usd}) in period ${stmt.period} — rejected`);
+      total_loe_usd = null;
+    }
+    if (total_loe_usd === 0) {
+      // $0 LOE with production is almost certainly a parse miss (field absent, not a true $0 cost)
+      const hasProduction = raw.production_months.some(pm => pm.period === stmt.period && (pm.oil_bbl ?? 0) > 0);
+      if (hasProduction) {
+        console.warn(`[extraction-sanitize] $0 LOE in period ${stmt.period} despite reported production — nulled (likely parse miss)`);
+        total_loe_usd = null;
+      }
+    }
+    if (total_loe_usd != null && total_loe_usd > MAX_CONVENTIONAL_LOE_PER_MONTH) {
+      console.warn(`[extraction-sanitize] Implausibly high LOE ($${total_loe_usd}) in period ${stmt.period} — nulled`);
+      total_loe_usd = null;
+    }
+
+    // Sanitize gas price if present
+    let gas_price_per_mcf = stmt.gas_price_per_mcf;
+    if (gas_price_per_mcf != null && (gas_price_per_mcf < 0.10 || gas_price_per_mcf > 30)) {
+      console.warn(`[extraction-sanitize] Gas price out of range ($${gas_price_per_mcf}/MCF) in period ${stmt.period} — nulled`);
+      gas_price_per_mcf = null;
+    }
+
+    return { ...stmt, total_loe_usd, gas_price_per_mcf };
+  });
+
+  // ── Water cut ─────────────────────────────────────────────────────────────
+  let water_cut_pct = raw.water_cut_pct;
+  if (water_cut_pct != null && (water_cut_pct < 0 || water_cut_pct > 100)) {
+    console.warn(`[extraction-sanitize] water_cut_pct out of range (${water_cut_pct}) — nulled`);
+    water_cut_pct = null;
+  }
+
+  return {
+    ...raw,
+    ownership_records,
+    production_months,
+    loe_statements,
+    water_cut_pct,
+  };
 }

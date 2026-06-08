@@ -105,9 +105,43 @@ async function initTrrcSession(signal?: AbortSignal): Promise<string | null> {
  * Gas report row format:
  *   "Jan 2024  511  0  5  5  OperatorName ..."
  *    MonthAbbr Year  GasMCF GasDisp  CondensateBBL CondensateDisp ...
+ *
+ * Structural validation:
+ *   1. Confirms the HTML contains a TRRC production results table before parsing rows.
+ *   2. Validates parsed values are non-negative and within physical bounds.
+ *   3. Deduplicates month/year pairs — keeps the higher value when duplicates occur.
  */
 function parseTrrcHtmlRows(html: string, reportType: "O" | "G" = "O"): TrrcMonthlyRow[] {
+  // ── Structural guard ──────────────────────────────────────────────────────
+  // The TRRC production results page has two definitive fingerprints:
+  //   1. The action URL "specificLeaseQueryAction.do" appears in form/link tags
+  //      on the actual result page — it does NOT appear on the EWA nav/home page,
+  //      session-expiry redirects, or Struts error pages.
+  //   2. Production column headers are present.
+  //
+  // Using the action URL as the primary check is more reliable than content
+  // strings because the TRRC error page has generic text that can overlap with
+  // production terminology.
+  const hasActionUrl    = html.includes("specificLeaseQueryAction.do");
+  const hasColumnHeader = /Lease No\.|District Code|Production Month|Crude Oil|Casinghead/i.test(html);
+
+  if (!hasActionUrl && !hasColumnHeader) {
+    // Almost certainly a session-expiry redirect, maintenance page, or network error body.
+    // Return empty — the retry logic in fetchTrrcProductionByLease will catch this.
+    return [];
+  }
+
+  // ── Physical bounds ───────────────────────────────────────────────────────
+  // A single Texas lease reporting > 500,000 BBL/month is implausible for the
+  // wellbore counts and reservoir sizes in PDQ. Flag values above this.
+  // Values above 10M BBL/month are certainly parse errors (e.g., formatting issue).
+  const MAX_PLAUSIBLE_OIL_BBL  = 10_000_000;
+  const MAX_PLAUSIBLE_GAS_MCF  = 60_000_000;
+
   const rows: TrrcMonthlyRow[] = [];
+  // Use a map to deduplicate — keeps highest oil_bbl for a given month/year
+  const seen = new Map<string, TrrcMonthlyRow>();
+
   const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
   let match: RegExpExecArray | null;
 
@@ -126,9 +160,16 @@ function parseTrrcHtmlRows(html: string, reportType: "O" | "G" = "O"): TrrcMonth
     if (!m) continue;
 
     const month = MONTH_NAME_MAP[m[1]];
-    const year  = parseInt(m[2]);
+    const year  = parseInt(m[2], 10);
+
+    // Sanity-check the date before trusting the row
+    if (!month || year < 1990 || year > new Date().getFullYear() + 1) continue;
+
     const num1  = parseNum(m[3]);  // col3: oil BBL  (oil report) OR gas MCF (gas report)
     const num3  = m[5] ? parseNum(m[5]) : 0; // col5: casinghead MCF (oil) OR condensate BBL (gas)
+
+    // Reject negative values — these are parse errors
+    if (num1 < 0 || num3 < 0) continue;
 
     let oil_bbl: number;
     let gas_mcf: number | null;
@@ -136,20 +177,32 @@ function parseTrrcHtmlRows(html: string, reportType: "O" | "G" = "O"): TrrcMonth
     if (reportType === "O") {
       oil_bbl = num1;
       gas_mcf = num3 > 0 ? num3 : null;
+      // Validate bounds
+      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) continue;
+      if (gas_mcf != null && gas_mcf > MAX_PLAUSIBLE_GAS_MCF) gas_mcf = null;
     } else {
       // Gas report: num1 = gas MCF, num3 = condensate BBL
       // Convert gas → BOE (6 MCF ≈ 1 BOE) and add condensate
+      if (num1 > MAX_PLAUSIBLE_GAS_MCF) continue;
       const gas_boe = num1 > 0 ? Math.round(num1 / 6) : 0;
       oil_bbl = gas_boe + num3;
       gas_mcf = num1 > 0 ? num1 : null;
+      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) continue;
     }
 
     if (oil_bbl > 0 || gas_mcf != null) {
-      rows.push({ year, month, oil_bbl, gas_mcf });
+      const key = `${year}-${String(month).padStart(2, "0")}`;
+      const existing = seen.get(key);
+      // Deduplicate: keep the row with higher oil_bbl if a duplicate appears
+      if (!existing || oil_bbl > existing.oil_bbl) {
+        seen.set(key, { year, month, oil_bbl, gas_mcf });
+      }
     }
   }
 
-  return rows.sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+  return Array.from(seen.values()).sort(
+    (a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month
+  );
 }
 
 // ── production search ──────────────────────────────────────────────────────────
@@ -473,17 +526,15 @@ export async function fetchTrrcProductionByLease(
   leaseNo:   string,
   monthsBack = 6,
 ): Promise<{ rows: TrrcMonthlyRow[]; distCode: string; leaseNo: string } | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  /** Inner attempt — returns rows array (possibly empty) or throws */
+  async function attempt(signal: AbortSignal): Promise<TrrcMonthlyRow[]> {
+    const sessionCookie = await initTrrcSession(signal);
+    if (!sessionCookie) return [];
 
-  try {
-    const sessionCookie = await initTrrcSession(controller.signal);
-    if (!sessionCookie) { clearTimeout(timer); return null; }
-
-    const now       = new Date();
-    const endYear   = now.getFullYear();
-    const endMonth  = now.getMonth() + 1;
-    const startDate = new Date(now);
+    const now        = new Date();
+    const endYear    = now.getFullYear();
+    const endMonth   = now.getMonth() + 1;
+    const startDate  = new Date(now);
     startDate.setMonth(startDate.getMonth() - monthsBack);
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
@@ -493,21 +544,40 @@ export async function fetchTrrcProductionByLease(
     let rows = await fetchAllLeaseProduction(
       distCode, leaseNo, sessionCookie,
       startMonth, startYear, endMonth, endYear,
-      "O", 5, controller.signal,
+      "O", 5, signal,
     );
     if (rows.length === 0) {
       rows = await fetchAllLeaseProduction(
         distCode, leaseNo, sessionCookie,
         startMonth, startYear, endMonth, endYear,
-        "G", 5, controller.signal,
+        "G", 5, signal,
       );
     }
+    return rows;
+  }
 
-    clearTimeout(timer);
+  // First attempt
+  const controller1 = new AbortController();
+  const timer1 = setTimeout(() => controller1.abort(), 15_000);
+  try {
+    const rows = await attempt(controller1.signal);
+    clearTimeout(timer1);
+    if (rows.length > 0) return { rows, distCode, leaseNo };
+  } catch {
+    clearTimeout(timer1);
+  }
+
+  // Retry once — TRRC sessions sometimes expire mid-flight or return a redirect page.
+  // A fresh session call is cheap; we'd rather take the extra round-trip than return null.
+  const controller2 = new AbortController();
+  const timer2 = setTimeout(() => controller2.abort(), 15_000);
+  try {
+    const rows = await attempt(controller2.signal);
+    clearTimeout(timer2);
     if (rows.length === 0) return null;
     return { rows, distCode, leaseNo };
   } catch {
-    clearTimeout(timer);
+    clearTimeout(timer2);
     return null;
   }
 }

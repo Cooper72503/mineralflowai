@@ -24,7 +24,19 @@ export type DcaResult = {
   remaining_reserves_bbl: number;     // EUR minus historical cumulative
   economic_life_months: number;       // months until economic limit from today
 
-  // 60-month forward projection from current date
+  /**
+   * Instantaneous nominal decline rate at the end of the production history.
+   *
+   * For exponential: same as model.Di.
+   * For hyperbolic/harmonic: Di / (1 + b·Di·t_current) — declines over time.
+   *
+   * ALWAYS use this (not model.Di) as the forward-projection decline rate.
+   * Using model.Di (the t=0 rate) overstates future decline speed by up to 3×
+   * for mature hyperbolic wells, compressing offer ranges incorrectly.
+   */
+  effective_Di_at_current: number;
+
+  // 60-month forward projection from current date (uses terminal-decline-switch curve)
   projections: { month: number; rate_bbl: number }[];
 
   // Input data stats
@@ -103,7 +115,12 @@ function fitExponential(
   return { type: "exponential", qi, Di, b: 0, r_squared, sse };
 }
 
-// ─── Hyperbolic fit via grid search over b + Di ───────────────────────────────
+// ─── Hyperbolic fit via joint (qi, Di) gradient descent for each b ───────────
+//
+// qi is a FREE parameter — not hardcoded to rates[0].
+// Fixing qi to rates[0] is a common shortcut but causes large errors when the
+// first month is a flush event, a TRRC partial report, or a post-workover spike.
+// Jointly optimizing qi and Di via coordinate gradient descent is robust to this.
 
 function fitHyperbolic(
   rates: number[],
@@ -112,36 +129,51 @@ function fitHyperbolic(
   const bCandidates = [0.3, 0.5, 0.8, 1.0, 1.2, 1.5];
   let best: ArpsModel | null = null;
 
+  const ratesMean = rates.reduce((s, v) => s + v, 0) / rates.length;
+
   for (const b of bCandidates) {
-    // For a given b, fit Di and qi via Levenberg-Marquardt (simplified Newton iterations)
-    const qi0 = rates[0];
+    // Initialize qi at the geometric mean of the first 3 rates (more stable than rates[0])
+    // Di initialized from a rough log-decline estimate
+    const earlyRates = rates.slice(0, Math.min(3, rates.length));
+    let qi = Math.max(
+      earlyRates.reduce((p, v) => p * v, 1) ** (1 / earlyRates.length),
+      ratesMean * 0.5,
+    );
     let Di = 0.05;
 
-    for (let iter = 0; iter < 50; iter++) {
-      const predicted = times.map(t => hypRate(qi0, Di, b, t));
-      const { sse } = calcSseR2(rates, predicted);
+    const learningRateQi = 0.005;
+    const learningRateDi = 0.01;
 
-      // Numerical gradient on Di
-      const eps = Di * 0.01 + 1e-6;
-      const predP = times.map(t => hypRate(qi0, Di + eps, b, t));
-      const predM = times.map(t => hypRate(qi0, Di - eps, b, t));
-      let gradDi = 0;
+    for (let iter = 0; iter < 80; iter++) {
+      const predicted = times.map(t => hypRate(qi, Di, b, t));
+      const eps = 1e-6;
+
+      // Numerical gradients on both qi and Di
+      const predQiP = times.map(t => hypRate(qi + qi * eps + 1e-4, Di, b, t));
+      const predDiP = times.map(t => hypRate(qi, Di + Di * eps + 1e-6, b, t));
+      const predDiM = times.map(t => hypRate(qi, Math.max(Di - Di * eps - 1e-6, 1e-6), b, t));
+
+      let gradQi = 0, gradDi = 0;
       for (let i = 0; i < rates.length; i++) {
         const err = predicted[i] - rates[i];
-        gradDi += 2 * err * (predP[i] - predM[i]) / (2 * eps);
+        gradQi += 2 * err * (predQiP[i] - predicted[i]) / (qi * eps + 1e-4);
+        gradDi += 2 * err * (predDiP[i] - predDiM[i]) / (2 * (Di * eps + 1e-6));
       }
-      Di -= 0.01 * gradDi / (rates.length || 1);
+      const n = rates.length;
+      qi -= learningRateQi * gradQi / n;
+      Di -= learningRateDi * gradDi / n;
+      qi = Math.max(qi, 0.1);
       Di = Math.max(Di, 0.0001);
     }
 
-    const predicted = times.map(t => hypRate(qi0, Di, b, t));
+    const predicted = times.map(t => hypRate(qi, Di, b, t));
     const { sse, r_squared } = calcSseR2(rates, predicted);
 
     // Penalise b > 1.2 to avoid over-fitting (industry standard)
     const penalty = b > 1.2 ? sse * (1 + (b - 1.2) * 0.5) : sse;
 
     if (!best || penalty < best.sse) {
-      best = { type: "hyperbolic", qi: qi0, Di, b, r_squared, sse };
+      best = { type: "hyperbolic", qi, Di, b, r_squared, sse };
     }
   }
 
@@ -176,6 +208,72 @@ function fitHarmonic(
   return { type: "harmonic", qi, Di, b: 1, r_squared, sse };
 }
 
+// ─── Terminal decline constants ───────────────────────────────────────────────
+
+/**
+ * Nominal monthly decline rate at which we switch a hyperbolic/harmonic model
+ * to exponential terminal decline.
+ *
+ * Industry standard (SPE): switch when Di_instantaneous falls to 5–10% annual
+ * nominal. We use 8% annual = 0.00667/month — the practical industry midpoint.
+ *
+ * Using 5% annual is too conservative: when a well is still producing 20–30 BBL/month
+ * at the switch point, a 5% annual terminal decline still projects 300+ months to
+ * reach the 5-BBL economic limit — an unrealistically slow tail.
+ *
+ * Without this switch (no terminal limit):
+ *   b=1.5, Di=0.10/month, qi=200 BBL → economic life ≈ 1,600 months (130 years)
+ * With 8% annual terminal switch:
+ *   same parameters → economic life ≈ 300–350 months (25–30 years) — realistic
+ */
+const TERMINAL_DI_MONTHLY = 0.006667; // 8% annual nominal / 12
+
+/**
+ * Compute the instantaneous nominal decline rate for a hyperbolic/harmonic model
+ * at elapsed calendar time t.
+ *   D_inst(t) = Di / (1 + b·Di·t)
+ * For exponential (b≈0): D_inst = Di (constant).
+ */
+function instantaneousDi(Di: number, b: number, t: number): number {
+  if (b <= 0.001) return Di;
+  return Di / (1 + b * Di * t);
+}
+
+/**
+ * Compute the elapsed time at which the instantaneous decline equals TERMINAL_DI.
+ * Returns Infinity if Di is already ≤ TERMINAL_DI (no switch needed).
+ *   t_sw = (Di/TERMINAL_DI - 1) / (b·Di)
+ */
+function terminalSwitchTime(Di: number, b: number): number {
+  if (b <= 0.001 || Di <= TERMINAL_DI_MONTHLY) return Infinity;
+  return (Di / TERMINAL_DI_MONTHLY - 1) / (b * Di);
+}
+
+/**
+ * Rate at terminal switch time (the starting rate for the exponential terminal leg).
+ */
+function rateAtSwitchTime(model: ArpsModel, t_sw: number): number {
+  if (model.type === "exponential") return expRate(model.qi, model.Di, t_sw);
+  if (model.type === "harmonic")   return harmRate(model.qi, model.Di, t_sw);
+  return hypRate(model.qi, model.Di, model.b, t_sw);
+}
+
+/**
+ * Evaluate the rate at time t, applying the terminal decline switch.
+ *
+ * Before t_sw: use the original model (exp / hyp / harmonic).
+ * At or after t_sw: exponential decline from q(t_sw) at TERMINAL_DI.
+ */
+function rateWithTerminalSwitch(model: ArpsModel, t_sw: number, q_sw: number, t: number): number {
+  if (t < t_sw) {
+    if (model.type === "exponential") return expRate(model.qi, model.Di, t);
+    if (model.type === "harmonic")   return harmRate(model.qi, model.Di, t);
+    return hypRate(model.qi, model.Di, model.b, t);
+  }
+  // Exponential terminal decline from q_sw
+  return q_sw * Math.exp(-TERMINAL_DI_MONTHLY * (t - t_sw));
+}
+
 // ─── EUR integration ──────────────────────────────────────────────────────────
 
 function calcEur(
@@ -184,16 +282,15 @@ function calcEur(
   economicLimit: number,
   maxMonths = 600,
 ): { eur: number; lifeMonths: number } {
+  const t_sw = terminalSwitchTime(model.Di, model.b);
+  const q_sw = isFinite(t_sw) ? rateAtSwitchTime(model, t_sw) : 0;
+
   let cum = 0;
-  let t = startT;
   for (let i = 0; i < maxMonths; i++) {
-    let q = 0;
-    if (model.type === "exponential") q = expRate(model.qi, model.Di, t);
-    else if (model.type === "harmonic") q = harmRate(model.qi, model.Di, t);
-    else q = hypRate(model.qi, model.Di, model.b, t);
+    const t = startT + i;
+    const q = rateWithTerminalSwitch(model, t_sw, q_sw, t);
     if (q < economicLimit) return { eur: cum, lifeMonths: i };
     cum += q;
-    t++;
   }
   return { eur: cum, lifeMonths: maxMonths };
 }
@@ -267,32 +364,38 @@ export function runDca(
   // How far along the decline curve are we?
   const currentT = times[times.length - 1];
 
-  // EUR from current time forward
+  // EUR from current time forward (with terminal decline switch)
   const { eur, lifeMonths } = calcEur(best, currentT, economicLimitBbl);
   const remaining = Math.max(eur, 0);
 
-  // Decline rate
+  // Decline rate — report the EFFECTIVE rate (at t=0 of the fit window for display)
   const effectiveMonthlyPct = nominalToEffectiveMonthly(best.Di, best.b);
   const effectiveAnnualPct  = (1 - Math.pow(1 - effectiveMonthlyPct / 100, 12)) * 100;
 
-  // 60-month projections from current date (t = currentT, currentT+1, ...)
+  // Instantaneous nominal Di at the current end of history.
+  // This is the correct decline rate to pass to the economics engine for forward projections.
+  // Using model.Di (the t=0 historical rate) would overstate future decline speed
+  // by up to 3× for mature hyperbolic wells.
+  const effectiveDiAtCurrent = instantaneousDi(best.Di, best.b, currentT);
+
+  // 60-month projections from current date — use terminal-decline-switch curve
+  const t_sw = terminalSwitchTime(best.Di, best.b);
+  const q_sw = isFinite(t_sw) ? rateAtSwitchTime(best, t_sw) : 0;
   const projections: { month: number; rate_bbl: number }[] = [];
   for (let i = 1; i <= 60; i++) {
     const t = currentT + i;
-    let q = 0;
-    if (best.type === "exponential") q = expRate(best.qi, best.Di, t);
-    else if (best.type === "harmonic") q = harmRate(best.qi, best.Di, t);
-    else q = hypRate(best.qi, best.Di, best.b, t);
+    const q = rateWithTerminalSwitch(best, t_sw, q_sw, t);
     projections.push({ month: i, rate_bbl: Math.max(0, q) });
   }
 
   return {
     model: best,
-    decline_rate_monthly_pct: Math.round(effectiveMonthlyPct * 100) / 100,
-    decline_rate_annual_pct:  Math.round(effectiveAnnualPct * 100) / 100,
-    eur_bbl:                  Math.round(eur + cum),
-    remaining_reserves_bbl:   Math.round(remaining),
-    economic_life_months:     lifeMonths,
+    decline_rate_monthly_pct:  Math.round(effectiveMonthlyPct * 100) / 100,
+    decline_rate_annual_pct:   Math.round(effectiveAnnualPct * 100) / 100,
+    eur_bbl:                   Math.round(eur + cum),
+    remaining_reserves_bbl:    Math.round(remaining),
+    economic_life_months:      lifeMonths,
+    effective_Di_at_current:   effectiveDiAtCurrent,
     projections,
     months_of_data: positive.length,
     avg_12mo_bbl:   Math.round(avg12 * 10) / 10,
