@@ -308,7 +308,7 @@ export default function UnderwritingHistoryPage() {
           {/* Meta */}
           <div style={{ marginTop: "0.5rem", fontSize: "0.62rem", color: COLORS.textFaint, display: "flex", gap: "0.75rem" }}>
             <span>{new Date(r.created_at).toLocaleDateString()}</span>
-            {r.scan_mode && <span>{r.scan_mode === "full" ? "Full Underwriting" : "Quick Scan"}</span>}
+            {r.scan_mode && <span>{r.scan_mode === "full" ? "Full Diligence Run" : "Preliminary Screen"}</span>}
             {r.data_completeness_score != null && <span>Data: {r.data_completeness_score}/100</span>}
             {r.overall_confidence && <span>Confidence: {r.overall_confidence.toUpperCase()}</span>}
           </div>

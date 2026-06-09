@@ -319,24 +319,31 @@ const MANDATORY_DILIGENCE_CATEGORIES = [
   "Workover History & Invoices",
 ] as const;
 
-function deriveReportCompletionLabel(items: DiligenceStatusItem[]): {
+// Tiers that count as "resolved" for the completion gate
+const RESOLVED_TIERS = new Set<DiligenceStatusTier>(["verified", "searched_no_records", "not_applicable"]);
+
+function deriveReportCompletionLabel(
+  items: DiligenceStatusItem[],
+  serverLabel?: DDReport["diligence_run_label"],
+): {
   label: string;
   sublabel: string;
   severity: "complete" | "partial" | "blocked";
   blockingCount: number;
 } {
   if (!items || items.length === 0) {
-    return { label: "Full Underwriting Complete", sublabel: "All available data sources were consulted.", severity: "complete", blockingCount: 0 };
+    return { label: serverLabel ?? "Full Diligence", sublabel: "All available data sources were consulted.", severity: "complete", blockingCount: 0 };
   }
 
   const mandatory = items.filter(i => MANDATORY_DILIGENCE_CATEGORIES.includes(i.category as typeof MANDATORY_DILIGENCE_CATEGORIES[number]));
-  const blocking  = mandatory.filter(i => i.tier !== "verified" && i.tier !== "not_applicable");
-  const critical  = blocking.filter(i => i.urgency === "critical");
+  // "searched_no_records" and "not_applicable" both count as resolved — same as "verified"
+  const blocking  = mandatory.filter(i => !RESOLVED_TIERS.has(i.tier));
+  const critical  = blocking.filter(i => i.urgency === "critical" || i.tier === "missing" || i.tier === "query_failed");
 
   if (critical.length > 0) {
     const fields = critical.map(i => i.category).join(", ");
     return {
-      label: "Underwriting Blocked — Critical Diligence Missing",
+      label: "Preliminary Screen — Critical Diligence Missing",
       sublabel: `${critical.length} critical item(s) unresolved: ${fields}.`,
       severity: "blocked",
       blockingCount: critical.length,
@@ -345,14 +352,14 @@ function deriveReportCompletionLabel(items: DiligenceStatusItem[]): {
   if (blocking.length > 0) {
     return {
       label: "Partial Underwriting — Additional Diligence Required",
-      sublabel: `${blocking.length} mandatory item(s) not yet verified. Review missing diligence tab.`,
+      sublabel: `${blocking.length} mandatory item(s) not yet fully verified. Review missing diligence tab.`,
       severity: "partial",
       blockingCount: blocking.length,
     };
   }
   return {
-    label: "Full Underwriting Complete",
-    sublabel: "All mandatory diligence categories verified or marked not applicable.",
+    label: serverLabel ?? "Full Diligence",
+    sublabel: "All mandatory diligence categories verified or confirmed no records — offer gate enabled.",
     severity: "complete",
     blockingCount: 0,
   };
@@ -1091,6 +1098,20 @@ function DiligenceStatusDashboard({ items, compact = false }: {
       bg: "rgba(239,68,68,0.10)",
       border: "rgba(239,68,68,0.30)",
     },
+    searched_no_records: {
+      label: "SEARCHED — NO RECORDS",
+      icon: "○",
+      color: COLORS.green,
+      bg: "rgba(34,197,94,0.07)",
+      border: "rgba(34,197,94,0.25)",
+    },
+    query_failed: {
+      label: "QUERY FAILED",
+      icon: "⚠",
+      color: COLORS.red,
+      bg: "rgba(239,68,68,0.10)",
+      border: "rgba(239,68,68,0.30)",
+    },
     not_applicable: {
       label: "N/A",
       icon: "—",
@@ -1100,20 +1121,21 @@ function DiligenceStatusDashboard({ items, compact = false }: {
     },
   };
 
-  const verified   = items.filter(i => i.tier === "verified");
-  const partial    = items.filter(i => i.tier === "partially_verified");
-  const missing    = items.filter(i => i.tier === "missing");
-  const na         = items.filter(i => i.tier === "not_applicable");
-  const applicable = items.filter(i => i.tier !== "not_applicable");
+  const verified        = items.filter(i => i.tier === "verified");
+  const searchedNone    = items.filter(i => i.tier === "searched_no_records");
+  const partial         = items.filter(i => i.tier === "partially_verified");
+  const missing         = items.filter(i => i.tier === "missing" || i.tier === "query_failed");
+  const na              = items.filter(i => i.tier === "not_applicable");
+  const applicable      = items.filter(i => i.tier !== "not_applicable");
 
   if (compact) {
     // Compact summary bar for the Executive Summary tab
     return (
       <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "stretch" }}>
         {[
-          { tier: "verified"          as DiligenceStatusTier, count: verified.length,  label: "Verified"          },
-          { tier: "partially_verified"as DiligenceStatusTier, count: partial.length,   label: "Partial"           },
-          { tier: "missing"           as DiligenceStatusTier, count: missing.length,   label: "Missing"           },
+          { tier: "verified"           as DiligenceStatusTier, count: verified.length + searchedNone.length, label: "Verified / Searched" },
+          { tier: "partially_verified" as DiligenceStatusTier, count: partial.length,   label: "Partial"  },
+          { tier: "missing"            as DiligenceStatusTier, count: missing.length,   label: "Missing"  },
         ].map(({ tier, count, label }) => {
           const cfg = tierConfig[tier];
           return (
@@ -1298,9 +1320,10 @@ function DiligenceStatusDashboard({ items, compact = false }: {
         gap: "0.5rem",
         marginBottom: "1.25rem",
       }}>
-        {(["verified", "partially_verified", "missing", "not_applicable"] as DiligenceStatusTier[]).map(tier => {
+        {(["verified", "searched_no_records", "partially_verified", "missing", "query_failed", "not_applicable"] as DiligenceStatusTier[]).map(tier => {
           const cfg = tierConfig[tier];
           const count = items.filter(i => i.tier === tier).length;
+          if (count === 0 && tier !== "verified" && tier !== "missing") return null;
           return (
             <div key={tier} style={{
               background: cfg.bg,
@@ -1323,11 +1346,12 @@ function DiligenceStatusDashboard({ items, compact = false }: {
         })}
       </div>
 
-      {/* Three-column board */}
+      {/* Three-column board (four if searched_no_records items exist) */}
       <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start", flexWrap: "wrap" }}>
-        {renderColumn("verified",           verified)}
-        {renderColumn("partially_verified", partial)}
-        {renderColumn("missing",            missing)}
+        {renderColumn("verified",             verified)}
+        {searchedNone.length > 0 && renderColumn("searched_no_records", searchedNone)}
+        {renderColumn("partially_verified",   partial)}
+        {renderColumn("missing",              missing)}
       </div>
 
       {/* N/A items — shown compact at bottom */}
@@ -6306,7 +6330,7 @@ export default function UnderwritingPage() {
                 </button>
               </div>
             ) : (() => {
-                const completionStatus = deriveReportCompletionLabel(report.diligence_status ?? []);
+                const completionStatus = deriveReportCompletionLabel(report.diligence_status ?? [], report.diligence_run_label);
                 const isBlocked  = completionStatus.severity === "blocked";
                 const isPartial  = completionStatus.severity === "partial";
                 const bgColor    = isBlocked ? "rgba(239,68,68,0.1)" : isPartial ? "rgba(234,179,8,0.12)" : COLORS.greenDim;

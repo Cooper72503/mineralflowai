@@ -398,10 +398,12 @@ export type DocumentRequest = {
 // instantly shows what is confirmed vs. what still needs to be resolved.
 
 export type DiligenceStatusTier =
-  | "verified"
-  | "partially_verified"
-  | "missing"
-  | "not_applicable";
+  | "verified"           // Data confirmed from authoritative source
+  | "partially_verified" // Some data available, gaps remain
+  | "searched_no_records"// Query ran successfully; no records returned (expected/good for compliance)
+  | "missing"            // Data was never sought or not provided
+  | "query_failed"       // Query was attempted but failed (technical error)
+  | "not_applicable";    // Does not apply to this well/asset
 
 export type DiligenceStatusItem = {
   /** Short category name, e.g. "Production History" */
@@ -759,6 +761,17 @@ export type DDReport = {
    * "full"  — complete underwriting pipeline. All available sources consulted.
    */
   scan_mode: ScanMode;
+
+  /**
+   * Completion label derived from module status gate logic.
+   * "Preliminary Screen"   — quick scan or critical mandatory modules are missing/failed.
+   * "Partial Underwriting" — production history is at least partially_verified; no critical gaps.
+   * "Full Diligence"       — all mandatory modules are verified, searched_no_records, or not_applicable.
+   *
+   * The report NEVER says "Full Diligence" just because a report was generated.
+   * The gate logic drives this label — not the scan completing.
+   */
+  diligence_run_label: "Preliminary Screen" | "Partial Underwriting" | "Full Diligence";
   overall_confidence: DDReportConfidence;
   overall_confidence_note: string;
 

@@ -111,6 +111,59 @@ const TRRC_URLS = {
   permits:     "https://webapps2.rrc.texas.gov/EWA/drillingPermitsQueryAction.do",
 } as const;
 
+// ─── Blueprint: deriveFinalRunStatus ─────────────────────────────────────────
+//
+// Derives the human-facing completion label from module-level statuses.
+// The report may only show "Full Diligence" when every mandatory module is
+// verified, searched_no_records, or not_applicable.
+// "Partial Underwriting" requires production history to be at least
+// partially_verified with no critical mandatory gaps.
+// Everything else (quick scan, critical missing data) is "Preliminary Screen".
+
+const MANDATORY_DILIGENCE_MODULES = [
+  "Production History",
+  "Inspection & Compliance History",
+  "API / Well Identification",
+] as const;
+
+const FULL_DILIGENCE_TIERS = new Set<import("./types").DiligenceStatusTier>([
+  "verified",
+  "searched_no_records",
+  "not_applicable",
+]);
+
+function deriveFinalRunStatus(
+  diligenceStatus: DiligenceStatusItem[],
+  scanMode: import("./types").ScanMode,
+): "Preliminary Screen" | "Partial Underwriting" | "Full Diligence" {
+  // Quick scans are always preliminary — pipeline didn't run all modules
+  if (scanMode === "quick") return "Preliminary Screen";
+
+  const mandatory = diligenceStatus.filter(d =>
+    (MANDATORY_DILIGENCE_MODULES as readonly string[]).includes(d.category)
+  );
+
+  // Full Diligence: all mandatory modules are verified, searched_no_records, or not_applicable
+  const allFullyResolved = mandatory.every(d => FULL_DILIGENCE_TIERS.has(d.tier));
+  if (allFullyResolved && mandatory.length >= 3) return "Full Diligence";
+
+  // Partial Underwriting: production history at least partially_verified AND
+  // no mandatory module is in a hard-fail state (missing or query_failed)
+  const productionItem = diligenceStatus.find(d => d.category === "Production History");
+  const hasCriticalGap = mandatory.some(
+    d => d.tier === "missing" || d.tier === "query_failed"
+  );
+  if (
+    productionItem &&
+    (productionItem.tier === "partially_verified" || FULL_DILIGENCE_TIERS.has(productionItem.tier)) &&
+    !hasCriticalGap
+  ) {
+    return "Partial Underwriting";
+  }
+
+  return "Preliminary Screen";
+}
+
 // ─── Helper: build a DataPoint ────────────────────────────────────────────────
 
 function dp<T>(
@@ -2808,14 +2861,21 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     // Any form of document-based production evidence
     const hasDocEvidence = totalDocMonths > 0 || hasRunTickets || hasPurchStmts;
 
-    const tier =
-      trrcMonths >= 24 ? "verified" as const
-      : trrcMonths >= 6  ? "partially_verified" as const
-      : totalDocMonths >= 6 ? "partially_verified" as const
-      : totalMonths > 0  ? "partially_verified" as const
-      : hasDocEvidence   ? "partially_verified" as const   // run tickets / purchaser stmts present
-      : identifierPresent ? "partially_verified" as const  // API given — production lookup needed, not absent
-      : "missing" as const;
+    // Was TRRC actually queried for this asset?
+    // True when the pipeline is Texas AND at least one identifier was provided.
+    // If queried but 0 rows returned, that is "searched_no_records" — different from
+    // "missing" (never queried) and different from "partially_verified" (some data returned).
+    const trrcWasQueried = isTexasState && identifierPresent;
+    const tier: import("./types").DiligenceStatusTier =
+      trrcMonths >= 24 ? "verified"
+      : trrcMonths >= 6  ? "partially_verified"
+      : trrcMonths > 0   ? "partially_verified"
+      : totalDocMonths >= 6 ? "partially_verified"
+      : totalMonths > 0  ? "partially_verified"
+      : hasDocEvidence   ? "partially_verified"   // run tickets / purchaser stmts present
+      : trrcWasQueried   ? "searched_no_records"  // queried TRRC — no production rows returned
+      : identifierPresent ? "partially_verified"  // identifier present but query not yet run (non-TX)
+      : "missing";
 
     const status_detail =
       trrcMonths >= 24
@@ -2832,6 +2892,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         ? "Run tickets present — monthly production data not fully parsed"
       : hasPurchStmts
         ? "Purchaser statements present — monthly production data not fully parsed"
+      : trrcWasQueried
+        ? `TRRC production queried — no production rows returned for this lease/API. Well may be newly drilled, inactive, or lease resolution failed.`
       : identifierPresent
         ? `API/lease identifier provided — TRRC production requires RRC lease number + district code to query (Texas RRC does not index by API alone)`
       : "No production history available — provide API + RRC lease/district, or upload LOE statements / run tickets";
@@ -2893,13 +2955,18 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     const complianceChecked = trrcViolations.length >= 0 && providedApis.length > 0;
     const hasViolations     = complianceSection.violations.length > 0;
     const openViolations    = complianceSection.violations.filter(v => v.status === "open").length;
+    // "searched_no_records" means: query ran, nothing found — which is the GOOD outcome for compliance.
+    // "verified" is reserved for positive confirmation of data; absence of violations is a searched result.
+    const complianceTier: import("./types").DiligenceStatusTier =
+      complianceChecked && !hasViolations    ? "searched_no_records"  // clean — no violations ever
+      : complianceChecked && !openViolations ? "verified"             // had violations but all closed
+      : complianceChecked && openViolations  ? "partially_verified"   // open violations require action
+      : "missing";
     diligenceStatus.push({
       category: "Inspection & Compliance History",
-      tier: complianceChecked && !openViolations ? "verified"
-          : complianceChecked && openViolations  ? "partially_verified"
-          : "missing",
+      tier: complianceTier,
       status_detail: complianceChecked && !openViolations && !hasViolations
-        ? "TRRC compliance checked — no violations on record"
+        ? "TRRC compliance searched — no violations on record (well is clean)"
         : complianceChecked && openViolations > 0
           ? `TRRC compliance checked — ${openViolations} open violation(s) found, requires resolution`
           : complianceChecked && hasViolations
@@ -3815,12 +3882,21 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     );
   }
 
+  // ── Completion label (blueprint gate logic) ───────────────────────────────
+  //
+  // Must be derived AFTER diligenceStatus is fully populated and
+  // AFTER computedOfferGate is set — both feed into the label decision.
+  // "Full Diligence" requires all mandatory modules to be verified/searched/N/A.
+  // Economics (offer range) are suppressed unless computedOfferGate.gate_open.
+  const diligenceRunLabel = deriveFinalRunStatus(diligenceStatus, scanMode);
+
   // ── Assemble report ───────────────────────────────────────────────────────
 
   return {
     report_id: randomUUID(),
     generated_at: new Date().toISOString(),
     scan_mode: scanMode,
+    diligence_run_label: diligenceRunLabel,
     overall_confidence: overallConfidence,
     overall_confidence_note: overallNote,
     subject,
