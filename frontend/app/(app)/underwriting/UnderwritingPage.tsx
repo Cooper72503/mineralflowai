@@ -530,6 +530,14 @@ function ProductionTab({ report }: { report: DDReport }) {
         <KvRow label="Total Monthly Oil (BBL)">
           <DataCell dp={s.total_monthly_oil_bbl} format={n => fmtN(n, 0)} unit="BBL/mo" />
         </KvRow>
+        {s.total_daily_oil_bbl.value != null && (
+          <KvRow label="Daily Oil Rate (BOPD)">
+            <span style={{ fontWeight: 800, fontSize: "1rem", color: COLORS.green }}>
+              {s.total_daily_oil_bbl.value.toFixed(1)}
+            </span>
+            <span style={{ fontSize: "0.75rem", color: COLORS.textFaint, marginLeft: 6 }}>BOPD</span>
+          </KvRow>
+        )}
         <KvRow label="Total Monthly Gas (MCF)">
           <DataCell dp={s.total_monthly_gas_mcf} format={n => fmtN(n, 0)} unit="MCF/mo" />
         </KvRow>
@@ -582,17 +590,20 @@ function ProductionTab({ report }: { report: DDReport }) {
       {s.wells.length > 0 && (
         <Section title="Well-Level Production" icon="🛢️">
           <DdTable
-            headers={["Well / Lease", "API", "Latest BBL/mo", "3-Mo Avg", "6-Mo Avg", "12-Mo Avg", "Water Cut", "Trend", "Cum Oil BBL", "Source"]}
+            headers={["Well / Lease", "API", "Latest BBL/mo", "BOPD", "3-Mo Avg", "6-Mo Avg", "12-Mo Avg", "Water Cut", "Trend", "Cum Oil BBL", "Source"]}
             rows={s.wells.map(w => [
               w.well_name,
               w.api,
-              <DataCell key="oil" dp={w.latest_monthly_oil_bbl} format={n => fmtN(n, 0)} />,
-              <DataCell key="a3"  dp={w.three_month_avg_bbl}    format={n => fmtN(n, 0)} />,
-              <DataCell key="a6"  dp={w.six_month_avg_bbl}      format={n => fmtN(n, 0)} />,
-              <DataCell key="a12" dp={w.twelve_month_avg_bbl}   format={n => fmtN(n, 0)} />,
-              <DataCell key="wc"  dp={w.water_cut_pct}          format={fmtPct} />,
-              <DataCell key="tr"  dp={w.production_trend}       format={v => v} />,
-              <DataCell key="cum" dp={w.cum_oil_bbl}            format={n => fmtN(n, 0)} />,
+              <DataCell key="oil"  dp={w.latest_monthly_oil_bbl} format={n => fmtN(n, 0)} />,
+              <span key="bopd" style={{ fontWeight: 700, color: w.latest_daily_oil_bbl.value != null ? COLORS.green : COLORS.textFaint }}>
+                {w.latest_daily_oil_bbl.value != null ? `${w.latest_daily_oil_bbl.value.toFixed(1)}` : "—"}
+              </span>,
+              <DataCell key="a3"   dp={w.three_month_avg_bbl}    format={n => fmtN(n, 0)} />,
+              <DataCell key="a6"   dp={w.six_month_avg_bbl}      format={n => fmtN(n, 0)} />,
+              <DataCell key="a12"  dp={w.twelve_month_avg_bbl}   format={n => fmtN(n, 0)} />,
+              <DataCell key="wc"   dp={w.water_cut_pct}          format={fmtPct} />,
+              <DataCell key="tr"   dp={w.production_trend}       format={v => v} />,
+              <DataCell key="cum"  dp={w.cum_oil_bbl}            format={n => fmtN(n, 0)} />,
               <SourceBadge key="src" source={w.latest_monthly_oil_bbl.source} confidence={w.latest_monthly_oil_bbl.confidence} sourceDetail={w.latest_monthly_oil_bbl.source_detail} />,
             ])}
           />
@@ -2747,6 +2758,11 @@ function DcaTab({ report }: { report: DDReport }) {
           <KvRow label="Arps b-Factor"><DataCell dp={dca.b_factor} format={v => v.toFixed(3)} /></KvRow>
           <KvRow label="R² (fit quality)"><DataCell dp={dca.r_squared} format={v => v.toFixed(3)} /></KvRow>
           <KvRow label="Current Rate (BBL/mo)"><DataCell dp={dca.current_rate_bbl} format={v => fmtN(v)} /></KvRow>
+          <KvRow label="Current Rate (BOPD)">
+            <span style={{ fontWeight: 700, color: dca.current_rate_bopd.value != null ? COLORS.text : COLORS.textFaint }}>
+              {dca.current_rate_bopd.value != null ? `${dca.current_rate_bopd.value.toFixed(1)} BOPD` : "—"}
+            </span>
+          </KvRow>
           <KvRow label="Peak Rate (BBL/mo)"><DataCell dp={dca.peak_rate_bbl} format={v => fmtN(v)} /></KvRow>
           <KvRow label="Cum. Production (BBL)"><DataCell dp={dca.cum_oil_bbl} format={v => fmtN(v)} /></KvRow>
           <KvRow label="EUR (BBL)"><DataCell dp={dca.eur_bbl} format={v => fmtN(v)} /></KvRow>
@@ -3539,6 +3555,7 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
             { label: "Risk Score",     value: ex.overall_risk_score.value != null ? `${ex.overall_risk_score.value.toFixed(1)} / 10` : "—", color: scoreColor },
             { label: "Production Trend", value: ex.production_trend.value ?? "—", color: trendColor },
             { label: "Current Rate",   value: ex.current_gross_rate_bbl.value != null ? `${fmtN(ex.current_gross_rate_bbl.value)} BBL/mo` : "—", color: COLORS.text },
+            { label: "Daily Rate (BOPD)", value: report.dca.current_rate_bopd.value != null ? `${report.dca.current_rate_bopd.value.toFixed(1)} BOPD` : (ex.current_gross_rate_bbl.value != null ? `${(ex.current_gross_rate_bbl.value / 30.44).toFixed(1)} BOPD` : "—"), color: COLORS.green },
             { label: "12-Mo Avg",      value: ex.twelve_month_avg_bbl.value != null ? `${fmtN(ex.twelve_month_avg_bbl.value)} BBL/mo` : "—", color: COLORS.text },
             { label: "Monthly NCF",    value: ex.monthly_net_income_usd.value != null ? fmt$(ex.monthly_net_income_usd.value) : "—", color: (ex.monthly_net_income_usd.value ?? 0) >= 0 ? COLORS.green : COLORS.red },
             { label: "NPV10",          value: ex.npv10_usd.value != null ? fmt$(ex.npv10_usd.value) : "—", color: COLORS.text },
@@ -4841,7 +4858,8 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
 <div class="section">
   <h2>6. Production History</h2>
   <div class="grid4">
-    <div class="card"><div class="lbl">Total Monthly Oil</div><div class="val" style="font-size:11px">${report.production.total_monthly_oil_bbl.value!=null?fmtN(report.production.total_monthly_oil_bbl.value)+" BBL":"—"}</div></div>
+    <div class="card"><div class="lbl">Total Monthly Oil</div><div class="val" style="font-size:11px">${report.production.total_monthly_oil_bbl.value!=null?fmtN(report.production.total_monthly_oil_bbl.value)+" BBL/mo":"—"}</div></div>
+    <div class="card"><div class="lbl">Daily Rate (BOPD)</div><div class="val" style="font-size:11px;color:#16a34a;font-weight:700">${report.production.total_daily_oil_bbl.value!=null?report.production.total_daily_oil_bbl.value.toFixed(1)+" BOPD":"—"}</div></div>
     <div class="card"><div class="lbl">Water Cut</div><div class="val" style="font-size:11px">${report.production.water_cut_pct.value!=null?fmtPct(report.production.water_cut_pct.value):"—"}</div></div>
     <div class="card"><div class="lbl">Monthly Decline</div><div class="val" style="font-size:11px">${report.production.decline_rate_pct_monthly.value!=null?fmtPct(report.production.decline_rate_pct_monthly.value):"—"}</div></div>
     <div class="card"><div class="lbl">Last Production</div><div class="val" style="font-size:10px">${esc(report.production.last_production_date.value??"—")}</div></div>
@@ -4887,6 +4905,7 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
     <div class="kv"><span class="kv-label">Remaining Reserves</span><span>${report.dca.remaining_reserves_bbl.value!=null?fmtN(report.dca.remaining_reserves_bbl.value)+" BBL":"—"}</span></div>
     <div class="kv"><span class="kv-label">Economic Life</span><span>${report.dca.economic_life_months.value!=null?report.dca.economic_life_months.value+" months":"—"}</span></div>
     <div class="kv"><span class="kv-label">Current Rate</span><span>${report.dca.current_rate_bbl.value!=null?fmtN(report.dca.current_rate_bbl.value)+" BBL/mo":"—"}</span></div>
+    <div class="kv"><span class="kv-label">Daily Rate (BOPD)</span><span style="font-weight:700;color:#16a34a">${report.dca.current_rate_bopd.value!=null?report.dca.current_rate_bopd.value.toFixed(1)+" BOPD":"—"}</span></div>
   </div>
   ${report.dca.projections.length > 0 ? `
   <h3 style="margin-top:10px">60-Month Projection Milestones (Arps Decline)</h3>

@@ -478,6 +478,14 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       latest_monthly_oil_bbl: dp(w.latest_monthly_oil_bbl, "trrc", "high", trrcSource,
         "Most recent reported month — TRRC data may lag 3–5 months",
         TRRC_URLS.production),
+      latest_daily_oil_bbl: w.latest_monthly_oil_bbl > 0
+        ? dp(
+            Math.round((w.latest_monthly_oil_bbl / 30.44) * 10) / 10,
+            "trrc", "high", `${trrcSource} (÷ 30.44 days/month)`,
+            "BOPD equivalent of latest reported monthly volume",
+            TRRC_URLS.production,
+          )
+        : missingDp<number>("No oil production reported for latest month"),
       latest_monthly_gas_mcf: latestRow?.gas_mcf != null
         ? dp(latestRow.gas_mcf, "trrc", "high", trrcSource, undefined, TRRC_URLS.production)
         : missingDp<number>("Gas not reported on this lease"),
@@ -561,6 +569,10 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         district_code: null,
         operator: operatorName,
         latest_monthly_oil_bbl: dp(latestData.oil, "uploaded_doc", "medium", "Extracted from provided documents"),
+        latest_daily_oil_bbl: latestData.oil > 0
+          ? dp(Math.round((latestData.oil / 30.44) * 10) / 10, "uploaded_doc", "medium",
+              "BOPD equivalent (÷ 30.44 days/month)")
+          : missingDp<number>("No oil production reported for latest month"),
         latest_monthly_gas_mcf: latestData.gas > 0
           ? dp(latestData.gas, "uploaded_doc", "medium") : missingDp<number>("Gas not reported in docs"),
         latest_monthly_water_bbl: latestData.water > 0
@@ -654,6 +666,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       : hasDocProd
         ? dp(totalOil, "uploaded_doc", "medium", "Extracted from provided documents")
         : missingDp<number>("No production data — provide API number, RRC lease, or upload production documents"),
+    total_daily_oil_bbl: totalOil > 0
+      ? (() => {
+          const bopd = Math.round((totalOil / 30.44) * 10) / 10;
+          const src  = hasTrrc ? "trrc" : "uploaded_doc";
+          const conf = hasTrrc ? "high" : "medium";
+          return dp(bopd, src as DataSource, conf,
+            `${hasTrrc ? "TRRC" : "Document"} aggregate (÷ 30.44 days/month)`,
+            "BOPD equivalent of latest reported monthly volume");
+        })()
+      : missingDp<number>("No production data available"),
     total_monthly_gas_mcf: hasTrrc && totalGas > 0
       ? dp(totalGas, "trrc", "high", "TRRC production aggregate")
       : hasDocProd && totalGas > 0
@@ -1645,6 +1667,19 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       return totalOil > 0
         ? dp(totalOil, dcaSource as DataSource, "low")
         : missingDp<number>();
+    })(),
+    current_rate_bopd: (() => {
+      const monthlyBbl =
+        prodIntel?.current_stabilized_bbl ??
+        dcaResult?.current_bbl ??
+        (totalOil > 0 ? totalOil : null);
+      if (monthlyBbl == null || monthlyBbl === 0) return missingDp<number>();
+      const bopd = Math.round((monthlyBbl / 30.44) * 10) / 10;
+      const conf = prodIntel?.production_confidence === "VERIFIED" ? "high"
+        : dcaSource === "trrc" ? "medium" : "low";
+      return dp(bopd, dcaSource as DataSource, conf,
+        "BOPD equivalent (÷ 30.44 days/month)",
+        "Shown as BOPD for operator comparisons; derived from monthly volume");
     })(),
     peak_rate_bbl: dcaResult
       ? dp(dcaResult.peak_bbl, dcaSource as DataSource, "medium")

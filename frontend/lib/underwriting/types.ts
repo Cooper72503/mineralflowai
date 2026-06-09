@@ -101,6 +101,8 @@ export type WellProductionRow = {
   district_code: string | null;
   operator: string | null;
   latest_monthly_oil_bbl: DataPoint<number>;
+  /** Daily equivalent of latest_monthly_oil_bbl (÷ 30.44) — shown as BOPD */
+  latest_daily_oil_bbl: DataPoint<number>;
   latest_monthly_gas_mcf: DataPoint<number>;
   latest_monthly_water_bbl: DataPoint<number>;
   latest_production_month: string | null;
@@ -120,6 +122,8 @@ export type WellProductionRow = {
 export type ProductionSection = {
   wells: WellProductionRow[];
   total_monthly_oil_bbl: DataPoint<number>;
+  /** Daily equivalent of total_monthly_oil_bbl (÷ 30.44) — shown as BOPD */
+  total_daily_oil_bbl: DataPoint<number>;
   total_monthly_gas_mcf: DataPoint<number>;
   total_monthly_water_bbl: DataPoint<number>;
   water_cut_pct: DataPoint<number>;
@@ -507,6 +511,8 @@ export type DcaSection = {
   remaining_reserves_bbl: DataPoint<number>;
   economic_life_months: DataPoint<number>;
   current_rate_bbl: DataPoint<number>;
+  /** Daily equivalent of current_rate_bbl (÷ 30.44 days/month) — shown as BOPD */
+  current_rate_bopd: DataPoint<number>;
   peak_rate_bbl: DataPoint<number>;
   cum_oil_bbl: DataPoint<number>;
   // Monthly projections: month 1–60 from current
