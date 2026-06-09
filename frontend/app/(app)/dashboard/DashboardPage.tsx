@@ -154,14 +154,14 @@ export default function DashboardPage() {
         </h1>
         <p style={{ fontSize: "0.9rem", color: "#6b7280", margin: "0 0 1.25rem" }}>
           {isWelcome
-            ? "Your account is active. Start screening deals or upload a document."
+            ? "Your account is active. Begin underwriting a deal or review your pipeline."
             : "Your deal pipeline — best opportunities ranked first."}
         </p>
 
         {/* Quick actions */}
         <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
           <Link
-            href="/screen"
+            href="/underwriting"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -176,25 +176,7 @@ export default function DashboardPage() {
               letterSpacing: "0.01em",
             }}
           >
-            ⚡ Quick Screen
-          </Link>
-          <Link
-            href="/upload"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              padding: "0.55rem 1rem",
-              background: "#fff",
-              color: "#374151",
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              fontSize: "0.88rem",
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
-          >
-            ↑ Upload Document
+            ⚡ Begin Underwriting
           </Link>
           <Link
             href="/pipeline"
@@ -260,14 +242,14 @@ export default function DashboardPage() {
               No deals yet
             </h2>
             <p style={{ fontSize: "0.88rem", color: "#6b7280", marginBottom: "1.25rem", maxWidth: 360, margin: "0 auto 1.25rem" }}>
-              Run a Quick Screen on a legal description, or upload a lease to get your first deal scored.
+              Begin underwriting a deal — provide an API number, operator, or upload LOE statements and production documents to generate your first institutional-grade analysis.
             </p>
             <div style={{ display: "flex", gap: "0.65rem", justifyContent: "center", flexWrap: "wrap" }}>
-              <Link href="/screen" style={{ padding: "0.6rem 1.25rem", background: "#2563eb", color: "#fff", borderRadius: 8, fontSize: "0.88rem", fontWeight: 700, textDecoration: "none" }}>
-                ⚡ Quick Screen
+              <Link href="/underwriting" style={{ padding: "0.6rem 1.25rem", background: "#2563eb", color: "#fff", borderRadius: 8, fontSize: "0.88rem", fontWeight: 700, textDecoration: "none" }}>
+                ⚡ Begin Underwriting
               </Link>
-              <Link href="/upload" style={{ padding: "0.6rem 1.25rem", background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, fontSize: "0.88rem", fontWeight: 600, textDecoration: "none" }}>
-                Upload Document
+              <Link href="/pipeline" style={{ padding: "0.6rem 1.25rem", background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, fontSize: "0.88rem", fontWeight: 600, textDecoration: "none" }}>
+                View Pipeline
               </Link>
             </div>
           </div>

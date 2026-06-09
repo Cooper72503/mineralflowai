@@ -416,9 +416,6 @@ export async function lookupTrrcLeasesByApis(
       const county3    = api8.slice(0, 3); // "15131926" → "151"
       const wellSuffix = api8.slice(3);    // "15131926" → "31926"
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10_000);
-
       try {
         const body = new URLSearchParams({
           methodToCall:                    "search",
@@ -437,16 +434,13 @@ export async function lookupTrrcLeasesByApis(
           method:  "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body:    body.toString(),
-          signal:  controller.signal,
         });
-        clearTimeout(timer);
         if (!res.ok) return { api8, entries: [] as PdqWellEntry[] };
 
         const html    = await res.text();
         const entries = parsePdqCountyEntries(html, 25);
         return { api8, entries };
       } catch {
-        clearTimeout(timer);
         return { api8, entries: [] as PdqWellEntry[] };
       }
     })
@@ -490,12 +484,8 @@ export async function lookupTrrcLeasesByApis(
   }
 
   await Promise.allSettled(Array.from(byCounty.entries()).map(async ([cc, apis8]) => {
-    const controller2 = new AbortController();
-    const timer2 = setTimeout(() => controller2.abort(), 12_000);
-
     try {
       // Use apiNoPrefixArg=county (no suffix) for county-wide fallback.
-      // This is Strategy D from debug — returns all wells in county sorted by API.
       const body = new URLSearchParams({
         methodToCall:                    "search",
         "searchArgs.apiNoPrefixArg":     cc,
@@ -513,9 +503,7 @@ export async function lookupTrrcLeasesByApis(
         method:  "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body:    body.toString(),
-        signal:  controller2.signal,
       });
-      clearTimeout(timer2);
 
       if (res.ok) {
         const html    = await res.text();
@@ -531,9 +519,7 @@ export async function lookupTrrcLeasesByApis(
           }
         }
       }
-    } catch {
-      clearTimeout(timer2);
-    }
+    } catch { /* network error — accept empty */ }
   }));
 
   return result;
@@ -553,14 +539,7 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     };
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
-
   try {
-    // Request 100 results per page — TRRC defaults to 10, which gives a tiny
-    // non-representative sample for active counties (Fisher has 542 producers).
-    // Page size 100 keeps the HTML small enough to parse quickly while capturing
-    // a meaningful county-level cross-section in a single request.
     const body = new URLSearchParams({
       methodToCall:                   "search",
       "searchArgs.leaseTypeArg":      "",
@@ -578,9 +557,7 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
       method:  "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body:    body.toString(),
-      signal:  controller.signal,
     });
-    clearTimeout(timer);
 
     if (!res.ok) throw new Error(`TRRC PDQ HTTP ${res.status}`);
     const html = await res.text();
@@ -607,7 +584,6 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
         : `${wells.length} producing wells from Texas Railroad Commission PDQ. ${withProduction > 0 ? `${withProduction} with real monthly production data.` : "Monthly production data unavailable."}`,
     };
   } catch (err) {
-    clearTimeout(timer);
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.warn("[trrc-api] PDQ county lookup failed:", msg);
     return {

@@ -1,7 +1,5 @@
-export const dynamic = "force-dynamic";
-
-import QuickScreenPage from "./QuickScreenPage";
+import { redirect } from "next/navigation";
 
 export default function ScreenPage() {
-  return <QuickScreenPage />;
+  redirect("/underwriting");
 }

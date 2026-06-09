@@ -1,7 +1,5 @@
-export const dynamic = "force-dynamic";
-
-import UploadDocumentPage from "./UploadDocumentPage";
+import { redirect } from "next/navigation";
 
 export default function UploadPage() {
-  return <UploadDocumentPage />;
+  redirect("/underwriting");
 }

@@ -1,5 +1,5 @@
-export const dynamic = "force-dynamic";
-import OfferCalculatorPage from "./OfferCalculatorPage";
-export default function Page() {
-  return <OfferCalculatorPage />;
+import { redirect } from "next/navigation";
+
+export default function OfferPage() {
+  redirect("/underwriting");
 }

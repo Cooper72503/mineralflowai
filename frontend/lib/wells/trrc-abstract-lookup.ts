@@ -398,9 +398,6 @@ export async function lookupWellsByLegalDescription(params: {
   const idCount = [params.abstract_number, params.survey_name, params.block, params.section].filter(Boolean).length;
   if (!hasAbstract && idCount < 2) return null;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
-
   try {
     const normalizedSurvey = normalizeSurveyName(params.survey_name);
 
@@ -410,10 +407,9 @@ export async function lookupWellsByLegalDescription(params: {
       survey_level1:   normalizedSurvey,
       block:           params.block,
       section:         params.section,
-    }, controller.signal);
+    });
 
     if (polygons.length === 0) {
-      clearTimeout(timer);
       return null;
     }
 
@@ -427,7 +423,7 @@ export async function lookupWellsByLegalDescription(params: {
 
       if (!overallCentroid) overallCentroid = polygonCentroid(rings);
       const bbox = polygonBbox(rings);
-      const wellFeatures = await fetchWellsInBbox(bbox, controller.signal);
+      const wellFeatures = await fetchWellsInBbox(bbox);
 
       // The bbox query over-fetches (includes neighboring tracts).
       // Filter to wells whose surface location actually falls within THIS polygon
@@ -451,8 +447,6 @@ export async function lookupWellsByLegalDescription(params: {
         if (full) apiSet.add(full);
       }
     }
-
-    clearTimeout(timer);
 
     const apis = Array.from(apiSet);
     if (apis.length === 0) return null;
@@ -478,7 +472,6 @@ export async function lookupWellsByLegalDescription(params: {
       polygon_count: polygons.length,
     };
   } catch {
-    clearTimeout(timer);
     return null;
   }
 }

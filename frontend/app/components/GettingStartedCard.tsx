@@ -75,10 +75,10 @@ export function GettingStartedCard({ welcome }: { welcome?: boolean }) {
       const built: Step[] = [
         {
           id: "upload",
-          label: "Upload your first document",
-          description: "Drop a lease, title opinion, or deed to get started.",
-          href: "/upload",
-          linkLabel: "Go to Upload →",
+          label: "Begin your first underwriting",
+          description: "Enter an API number, operator, or upload LOE statements to generate institutional-grade diligence.",
+          href: "/underwriting",
+          linkLabel: "MineralFlow Underwriting →",
           done: (docCount ?? 0) > 0,
         },
         {
