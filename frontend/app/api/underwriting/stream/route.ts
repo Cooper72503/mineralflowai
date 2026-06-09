@@ -60,7 +60,7 @@ import type {
 
 export const runtime     = "nodejs";
 export const dynamic     = "force-dynamic";
-export const maxDuration = 800; // No artificial cap — run until complete
+export const maxDuration = 300; // Vercel Pro ceiling — maximum allowed on this plan
 
 // ── SSE helpers ───────────────────────────────────────────────────────────────
 
