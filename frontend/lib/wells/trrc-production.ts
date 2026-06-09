@@ -72,10 +72,48 @@ function parseNum(s: string): number {
 // ── session bootstrap ──────────────────────────────────────────────────────────
 
 /**
- * A minimal POST to wellboreQueryAction.do is sufficient to initialise a TRRC EWA
- * Java EE session. The resulting JSESSIONID must be passed to all subsequent requests.
+ * Initialise a TRRC EWA Java EE session using a GET-first pattern.
+ *
+ * Why GET first (not POST):
+ *   Submitting a search POST without first loading the page can land on a
+ *   maintenance page, session-expired redirect, or default form response.
+ *   A GET to the search page establishes the JSESSIONID and validates that
+ *   the EWA application is reachable before any query is submitted.
+ *
+ * Fingerprint validation:
+ *   We verify the response contains "wellboreQueryAction.do" — the action URL
+ *   on the actual search form.  If absent, the GET returned a redirect or
+ *   maintenance page; we fall back to a POST-based init (legacy path).
+ *
+ * The resulting JSESSIONID must be passed to all subsequent requests.
  */
 async function initTrrcSession(signal?: AbortSignal): Promise<string | null> {
+  // ── Primary path: GET the search page first ─────────────────────────────
+  try {
+    const getRes = await fetch(`${BASE}/wellboreQueryAction.do`, {
+      method:  "GET",
+      headers: {
+        "Accept":     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
+      },
+      signal,
+    });
+    if (getRes.ok) {
+      const html = await getRes.text();
+      // Validate we got the actual wellbore search page, not a redirect/maintenance page
+      if (html.includes("wellboreQueryAction.do")) {
+        const setCookie = getRes.headers.get("set-cookie") ?? "";
+        const m = setCookie.match(/JSESSIONID=([^;,\s]+)/i);
+        if (m) return `JSESSIONID=${m[1]}`;
+      }
+    }
+  } catch {
+    // Fall through to legacy POST path
+  }
+
+  // ── Fallback: POST-based init (original behavior) ────────────────────────
+  // Used when the GET either fails or doesn't return a session cookie.
+  // Some TRRC deployments issue JSESSIONID only on form POST.
   try {
     const res = await fetch(`${BASE}/wellboreQueryAction.do`, {
       method:  "POST",
@@ -313,8 +351,18 @@ async function fetchLeaseProductionNextPage(
 }
 
 /**
+ * Safety cap: maximum production pages to fetch in a single query.
+ * 10 rows/page × 36 pages = 360 rows ≈ 30 years of monthly data.
+ * This prevents infinite loops on malformed TRRC pagination links while
+ * still allowing full production history for long-lived conventional leases.
+ * (Raised from 6 to 36 — the 50-row cap was artificially limiting 24/36-month DCA.)
+ */
+const MAX_PRODUCTION_PAGES = 36;
+
+/**
  * Fetch all production rows for the given date range, following pagination.
- * Capped at `maxPages` pages (default 6 = 60 rows ≈ 5 years of monthly data).
+ * Stops when no new rows are returned, no next-page link exists, or MAX_PRODUCTION_PAGES
+ * is reached — whichever comes first.
  */
 async function fetchAllLeaseProduction(
   distCode:      string,
@@ -325,26 +373,41 @@ async function fetchAllLeaseProduction(
   endMonth:      number,
   endYear:       number,
   oilOrGas:      "O" | "G",
-  maxPages = 6,
+  maxPages = MAX_PRODUCTION_PAGES,
   signal?:       AbortSignal,
 ): Promise<TrrcMonthlyRow[]> {
-  const all: TrrcMonthlyRow[] = [];
-  let { rows, nextPagePath } = await fetchLeaseProductionPage(
+  // Use a Map for deduplication — month/year keys ensure we don't double-count
+  // rows that appear on overlapping pages (TRRC pager can return overlapping rows).
+  const seen = new Map<string, TrrcMonthlyRow>();
+
+  const addRows = (rows: TrrcMonthlyRow[]) => {
+    for (const row of rows) {
+      const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+      const existing = seen.get(key);
+      if (!existing || row.oil_bbl > existing.oil_bbl) seen.set(key, row);
+    }
+  };
+
+  let { rows: firstRows, nextPagePath } = await fetchLeaseProductionPage(
     distCode, leaseNo, sessionCookie,
     startMonth, startYear, endMonth, endYear,
     oilOrGas, signal,
   );
-  all.push(...rows);
+  addRows(firstRows);
 
   let page = 1;
   while (nextPagePath && page < maxPages) {
+    const before = seen.size;
     const next = await fetchLeaseProductionNextPage(nextPagePath, sessionCookie, oilOrGas, signal);
-    all.push(...next.rows);
+    addRows(next.rows);
     nextPagePath = next.nextPagePath;
     page++;
+    // Early exit: if no new unique rows were added, the pager has cycled back
+    // or is returning already-seen data — stop to avoid infinite loops.
+    if (seen.size === before) break;
   }
 
-  return all.sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+  return Array.from(seen.values()).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
 }
 
 // ── step 1 (legacy path): wellbore query → district + lease ───────────────────
@@ -524,7 +587,7 @@ export async function fetchTrrcLatestByLease(
 export async function fetchTrrcProductionByLease(
   distCode:  string,
   leaseNo:   string,
-  monthsBack = 6,
+  monthsBack = 36,
 ): Promise<{ rows: TrrcMonthlyRow[]; distCode: string; leaseNo: string } | null> {
   /** Inner attempt — returns rows array (possibly empty) or throws */
   async function attempt(signal: AbortSignal): Promise<TrrcMonthlyRow[]> {
@@ -540,17 +603,18 @@ export async function fetchTrrcProductionByLease(
     const startMonth = startDate.getMonth() + 1;
 
     // Try oil first; fall back to gas for gas-only leases.
-    // maxPages=5 → up to 50 rows ≈ 4+ years of monthly data (TRRC pages at 10 rows each).
+    // Use MAX_PRODUCTION_PAGES — pagination exits early when no new rows are returned,
+    // so the cap is a safety limit, not a target. 36 months = ~4 pages, conventional.
     let rows = await fetchAllLeaseProduction(
       distCode, leaseNo, sessionCookie,
       startMonth, startYear, endMonth, endYear,
-      "O", 5, signal,
+      "O", MAX_PRODUCTION_PAGES, signal,
     );
     if (rows.length === 0) {
       rows = await fetchAllLeaseProduction(
         distCode, leaseNo, sessionCookie,
         startMonth, startYear, endMonth, endYear,
-        "G", 5, signal,
+        "G", MAX_PRODUCTION_PAGES, signal,
       );
     }
     return rows;

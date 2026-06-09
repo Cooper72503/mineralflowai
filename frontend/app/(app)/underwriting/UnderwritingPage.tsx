@@ -298,6 +298,66 @@ const fmtBoe = (oil: number, gasMcf: number) => {
   return boe > 0 ? `${fmtN(Math.round(boe))} BOE/mo` : null;
 };
 
+// ─── Report completion label ──────────────────────────────────────────────────
+//
+// Derives the accurate scan-completion status from the diligence_status array.
+// A report is only "Full Underwriting Complete" when every mandatory category is
+// either verified or not_applicable. Missing or partially_verified critical items
+// produce a "Blocked" label; non-critical gaps produce "Partial."
+//
+// This prevents the banner from showing green when economics are suppressed,
+// ownership is unverified, or LOE/run-tickets are missing. (Finding #7, Manus AI review)
+
+const MANDATORY_DILIGENCE_CATEGORIES = [
+  "API / Well Identification",
+  "Operator Identity",
+  "Production History",
+  "Inspection & Compliance History",
+  "LOE Statements",
+  "Ownership / Division Orders",
+  "Water Cut & Fluid Production",
+  "Workover History & Invoices",
+] as const;
+
+function deriveReportCompletionLabel(items: DiligenceStatusItem[]): {
+  label: string;
+  sublabel: string;
+  severity: "complete" | "partial" | "blocked";
+  blockingCount: number;
+} {
+  if (!items || items.length === 0) {
+    return { label: "Full Underwriting Complete", sublabel: "All available data sources were consulted.", severity: "complete", blockingCount: 0 };
+  }
+
+  const mandatory = items.filter(i => MANDATORY_DILIGENCE_CATEGORIES.includes(i.category as typeof MANDATORY_DILIGENCE_CATEGORIES[number]));
+  const blocking  = mandatory.filter(i => i.tier !== "verified" && i.tier !== "not_applicable");
+  const critical  = blocking.filter(i => i.urgency === "critical");
+
+  if (critical.length > 0) {
+    const fields = critical.map(i => i.category).join(", ");
+    return {
+      label: "Underwriting Blocked — Critical Diligence Missing",
+      sublabel: `${critical.length} critical item(s) unresolved: ${fields}.`,
+      severity: "blocked",
+      blockingCount: critical.length,
+    };
+  }
+  if (blocking.length > 0) {
+    return {
+      label: "Partial Underwriting — Additional Diligence Required",
+      sublabel: `${blocking.length} mandatory item(s) not yet verified. Review missing diligence tab.`,
+      severity: "partial",
+      blockingCount: blocking.length,
+    };
+  }
+  return {
+    label: "Full Underwriting Complete",
+    sublabel: "All mandatory diligence categories verified or marked not applicable.",
+    severity: "complete",
+    blockingCount: 0,
+  };
+}
+
 // ─── Tab types ────────────────────────────────────────────────────────────────
 
 type TabId =
@@ -1652,18 +1712,26 @@ function RecommendationTab({ report }: { report: DDReport }) {
           </div>
           <div style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>out of 10</div>
         </div>
-        {report.acquisition_economics.offer_range_mid.value && (
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
-              Estimated Offer Range
+        {(() => {
+          const lo  = report.acquisition_economics.offer_range_low.value;
+          const hi  = report.acquisition_economics.offer_range_high.value;
+          const mid = report.acquisition_economics.offer_range_mid.value;
+          const validRange = typeof lo === "number" && lo > 0 &&
+                             typeof hi === "number" && hi > 0 && hi >= lo &&
+                             typeof mid === "number" && mid > 0;
+          if (!validRange) return null;
+          return (
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+                Estimated Offer Range
+              </div>
+              <div style={{ fontSize: "1.1rem", fontWeight: 800, color: COLORS.green }}>
+                {fmt$(lo)} – {fmt$(hi)}
+              </div>
+              <div style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>base price deck</div>
             </div>
-            <div style={{ fontSize: "1.1rem", fontWeight: 800, color: COLORS.green }}>
-              {fmt$(report.acquisition_economics.offer_range_low.value ?? 0)} –{" "}
-              {fmt$(report.acquisition_economics.offer_range_high.value ?? 0)}
-            </div>
-            <div style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>base price deck</div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Flag summary */}
@@ -6058,29 +6126,39 @@ export default function UnderwritingPage() {
                   🔍 Run Full Underwriting
                 </button>
               </div>
-            ) : (
-              <div style={{
-                background: COLORS.greenDim,
-                border: `1px solid rgba(34,197,94,0.3)`,
-                borderRadius: 10,
-                padding: "0.75rem 1.25rem",
-                marginBottom: "1.25rem",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.6rem",
-              }}>
-                <span style={{ fontSize: "1rem" }}>✓</span>
-                <div>
-                  <span style={{ fontWeight: 800, fontSize: "0.78rem", color: COLORS.green,
-                    letterSpacing: "0.08em", textTransform: "uppercase" as const }}>
-                    Full Underwriting Complete
-                  </span>
-                  <span style={{ fontSize: "0.76rem", color: COLORS.textMuted, marginLeft: "0.6rem" }}>
-                    All available data sources were consulted.
-                  </span>
-                </div>
-              </div>
-            )}
+            ) : (() => {
+                const completionStatus = deriveReportCompletionLabel(report.diligence_status ?? []);
+                const isBlocked  = completionStatus.severity === "blocked";
+                const isPartial  = completionStatus.severity === "partial";
+                const bgColor    = isBlocked ? "rgba(239,68,68,0.1)" : isPartial ? "rgba(234,179,8,0.12)" : COLORS.greenDim;
+                const borderColor = isBlocked ? "rgba(239,68,68,0.4)" : isPartial ? "rgba(234,179,8,0.5)" : "rgba(34,197,94,0.3)";
+                const labelColor  = isBlocked ? "#dc2626" : isPartial ? COLORS.yellow : COLORS.green;
+                const icon        = isBlocked ? "⛔" : isPartial ? "⚠" : "✓";
+                return (
+                  <div style={{
+                    background: bgColor,
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: 10,
+                    padding: "0.75rem 1.25rem",
+                    marginBottom: "1.25rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.6rem",
+                  }}>
+                    <span style={{ fontSize: "1rem" }}>{icon}</span>
+                    <div>
+                      <span style={{ fontWeight: 800, fontSize: "0.78rem", color: labelColor,
+                        letterSpacing: "0.08em", textTransform: "uppercase" as const }}>
+                        {completionStatus.label}
+                      </span>
+                      <span style={{ fontSize: "0.76rem", color: COLORS.textMuted, marginLeft: "0.6rem" }}>
+                        {completionStatus.sublabel}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()
+            }
 
             <ReportHeader report={report} />
             <Legend />
