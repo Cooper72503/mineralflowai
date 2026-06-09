@@ -163,17 +163,6 @@ function parseNumCell(s: string): number | null {
 }
 
 /**
- * Page-level fingerprint validation.
- * Returns true only when the HTML looks like a real TRRC production results page.
- * A false result means session-expiry redirect, maintenance page, or network error.
- */
-function isProductionResultPage(html: string): boolean {
-  const hasActionUrl    = html.includes("specificLeaseQueryAction.do");
-  const hasColumnHeader = /Lease No\.|District Code|Production Month|Crude Oil|Casinghead/i.test(html);
-  return hasActionUrl || hasColumnHeader;
-}
-
-/**
  * Structural cheerio-based parser for TRRC production HTML tables.
  *
  * Why cheerio instead of regex:
@@ -199,13 +188,6 @@ function isProductionResultPage(html: string): boolean {
  * the period column.
  */
 function parseTrrcHtmlRows(html: string, reportType: "O" | "G" = "O"): TrrcMonthlyRow[] {
-  // ── Page fingerprint guard ────────────────────────────────────────────────
-  if (!isProductionResultPage(html)) {
-    // Session-expiry redirect, maintenance page, or network error.
-    // Return empty — fetchTrrcProductionByLease retry logic handles this.
-    return [];
-  }
-
   const $ = cheerio.load(html);
   // Deduplicate by period key — keeps the highest oil_bbl for a given month/year
   const seen = new Map<string, TrrcMonthlyRow>();
@@ -319,42 +301,65 @@ function buildLeaseSearchBody(
 
 /**
  * POST the first page of production results.
- * Returns the parsed rows AND the "Next" page URL (if any) for pagination.
+ *
+ * Self-bootstrapping session design:
+ *   `sessionCookie` is optional. When null (the common case), the POST is sent
+ *   without a Cookie header. TRRC's Struts app will create a new server-side
+ *   session and return a Set-Cookie: JSESSIONID=... header on the response.
+ *   We capture that cookie and return it so pagination requests can use it.
+ *
+ *   This eliminates the pre-initialisation step that was failing in Node.js/Vercel
+ *   because Node.js fetch follows redirects and loses Set-Cookie headers that are
+ *   set on intermediate 302 responses — causing initTrrcSession() to return null
+ *   and the entire production fetch to bail out immediately with empty results.
+ *
+ * Returns rows, next-page URL (if any), and the active session cookie.
  */
 async function fetchLeaseProductionPage(
   distCode:      string,
   leaseNo:       string,
-  sessionCookie: string,
+  sessionCookie: string | null,   // null = no pre-initialised session
   startMonth:    number,
   startYear:     number,
   endMonth:      number,
   endYear:       number,
   oilOrGas:      "O" | "G",
   signal?:       AbortSignal,
-): Promise<{ rows: TrrcMonthlyRow[]; nextPagePath: string | null }> {
+): Promise<{ rows: TrrcMonthlyRow[]; nextPagePath: string | null; activeCookie: string | null }> {
   const body = buildLeaseSearchBody(
     distCode, leaseNo, startMonth, startYear, endMonth, endYear, oilOrGas,
   );
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent":   "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
+    "Accept":       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  };
+  if (sessionCookie) headers["Cookie"] = sessionCookie;
+
   const res = await fetch(`${BASE}/specificLeaseQueryAction.do`, {
     method:  "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Cookie":        sessionCookie,
-    },
+    headers,
     body:    body.toString(),
     signal,
   });
 
-  if (!res.ok) return { rows: [], nextPagePath: null };
-  const html = await res.text();
+  if (!res.ok) return { rows: [], nextPagePath: null, activeCookie: sessionCookie };
 
+  // Capture JSESSIONID from this response — TRRC sets it here when no session existed.
+  // This is the key fix: we bootstrap the session from the production POST itself
+  // rather than requiring a separate initTrrcSession() call that can fail silently.
+  const setCookieHeader = res.headers.get("set-cookie") ?? "";
+  const sessionMatch    = setCookieHeader.match(/JSESSIONID=([^;,\s]+)/i);
+  const activeCookie    = sessionMatch
+    ? `JSESSIONID=${sessionMatch[1]}`
+    : (sessionCookie ?? null);
+
+  const html = await res.text();
   const rows = parseTrrcHtmlRows(html, oilOrGas);
 
-  // Extract "Next" page link from pager
-  // URL format: /EWA/specificLeaseQueryAction.do?pager.pageSize=10&pager.offset=10&...
   const nextMatch = html.match(/href="(\/EWA\/[^"]*pager\.[^"]*pager\.offset=\d+[^"]*)"\s*>\s*\[Next/i);
-  return { rows, nextPagePath: nextMatch ? nextMatch[1] : null };
+  return { rows, nextPagePath: nextMatch ? nextMatch[1] : null, activeCookie };
 }
 
 /**
@@ -362,21 +367,22 @@ async function fetchLeaseProductionPage(
  */
 async function fetchLeaseProductionNextPage(
   path:          string,
-  sessionCookie: string,
+  sessionCookie: string | null,
   oilOrGas:      "O" | "G",
   signal?:       AbortSignal,
 ): Promise<{ rows: TrrcMonthlyRow[]; nextPagePath: string | null }> {
   const url = `https://webapps2.rrc.texas.gov${path}`;
-  const res = await fetch(url, {
-    headers: { "Cookie": sessionCookie },
-    signal,
-  });
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
+  };
+  if (sessionCookie) headers["Cookie"] = sessionCookie;
+
+  const res = await fetch(url, { headers, signal });
 
   if (!res.ok) return { rows: [], nextPagePath: null };
   const html = await res.text();
 
   const rows = parseTrrcHtmlRows(html, oilOrGas);
-  // Same regex as fetchLeaseProductionPage — URL format: /EWA/...?pager.pageSize=10&pager.offset=N&...
   const nextMatch = html.match(/href="(\/EWA\/[^"]*pager\.[^"]*pager\.offset=\d+[^"]*)"\s*>\s*\[Next/i);
   return { rows, nextPagePath: nextMatch ? nextMatch[1] : null };
 }
@@ -445,7 +451,7 @@ function mergeOilGasRows(
 async function fetchAllLeaseProduction(
   distCode:      string,
   leaseNo:       string,
-  sessionCookie: string,
+  sessionCookie: string | null,   // null = no pre-initialised session (self-bootstrapping)
   startMonth:    number,
   startYear:     number,
   endMonth:      number,
@@ -454,8 +460,6 @@ async function fetchAllLeaseProduction(
   maxPages = MAX_PRODUCTION_PAGES,
   signal?:       AbortSignal,
 ): Promise<TrrcMonthlyRow[]> {
-  // Use a Map for deduplication — month/year keys ensure we don't double-count
-  // rows that appear on overlapping pages (TRRC pager can return overlapping rows).
   const seen = new Map<string, TrrcMonthlyRow>();
 
   const addRows = (rows: TrrcMonthlyRow[]) => {
@@ -466,22 +470,25 @@ async function fetchAllLeaseProduction(
     }
   };
 
-  let { rows: firstRows, nextPagePath } = await fetchLeaseProductionPage(
+  // First page — also bootstraps the session cookie from the response
+  const firstPage = await fetchLeaseProductionPage(
     distCode, leaseNo, sessionCookie,
     startMonth, startYear, endMonth, endYear,
     oilOrGas, signal,
   );
-  addRows(firstRows);
+  addRows(firstPage.rows);
 
+  // Use the cookie captured from the first response for all pagination requests
+  const paginationCookie = firstPage.activeCookie;
+  let nextPagePath = firstPage.nextPagePath;
   let page = 1;
+
   while (nextPagePath && page < maxPages) {
     const before = seen.size;
-    const next = await fetchLeaseProductionNextPage(nextPagePath, sessionCookie, oilOrGas, signal);
+    const next = await fetchLeaseProductionNextPage(nextPagePath, paginationCookie, oilOrGas, signal);
     addRows(next.rows);
     nextPagePath = next.nextPagePath;
     page++;
-    // Early exit: if no new unique rows were added, the pager has cycled back
-    // or is returning already-seen data — stop to avoid infinite loops.
     if (seen.size === before) break;
   }
 
@@ -547,17 +554,8 @@ export async function fetchTrrcProductionHistory(
   monthsBack = FULL_HISTORY_MONTHS,
 ): Promise<TrrcProductionResult | null> {
   try {
-    // Init two independent sessions so oil and gas queries don't share server-side
-    // session state — TRRC's Struts app can corrupt results when two queries run
-    // against the same JSESSIONID concurrently.
-    const [oilSession, gasSession, lease] = await Promise.all([
-      initTrrcSession(),
-      initTrrcSession(),
-      getLeaseFromApiNumber(apiNumber),
-    ]);
-
+    const lease = await getLeaseFromApiNumber(apiNumber);
     if (!lease) return null;
-    if (!oilSession && !gasSession) return null;
 
     const now        = new Date();
     const endYear    = now.getFullYear();
@@ -567,25 +565,43 @@ export async function fetchTrrcProductionHistory(
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
-    // Fetch oil and gas reports in parallel with independent sessions
+    // Strategy A: self-bootstrapping direct POSTs (no pre-initialised session)
     const [oilRows, gasRows] = await Promise.all([
-      oilSession
-        ? fetchAllLeaseProduction(
-            lease.distCode, lease.leaseNo, oilSession,
-            startMonth, startYear, endMonth, endYear,
-            "O", MAX_PRODUCTION_PAGES,
-          )
-        : Promise.resolve([] as TrrcMonthlyRow[]),
-      gasSession
-        ? fetchAllLeaseProduction(
-            lease.distCode, lease.leaseNo, gasSession,
-            startMonth, startYear, endMonth, endYear,
-            "G", MAX_PRODUCTION_PAGES,
-          )
-        : Promise.resolve([] as TrrcMonthlyRow[]),
+      fetchAllLeaseProduction(
+        lease.distCode, lease.leaseNo, null,
+        startMonth, startYear, endMonth, endYear,
+        "O", MAX_PRODUCTION_PAGES,
+      ),
+      fetchAllLeaseProduction(
+        lease.distCode, lease.leaseNo, null,
+        startMonth, startYear, endMonth, endYear,
+        "G", MAX_PRODUCTION_PAGES,
+      ),
     ]);
 
-    const rows = mergeOilGasRows(oilRows, gasRows);
+    let rows = mergeOilGasRows(oilRows, gasRows);
+
+    // Strategy B fallback: if direct POST returned nothing, try with an explicit session
+    if (rows.length === 0) {
+      const [oilSession, gasSession] = await Promise.all([
+        initTrrcSession(),
+        initTrrcSession(),
+      ]);
+      const [oilRowsB, gasRowsB] = await Promise.all([
+        fetchAllLeaseProduction(
+          lease.distCode, lease.leaseNo, oilSession,
+          startMonth, startYear, endMonth, endYear,
+          "O", MAX_PRODUCTION_PAGES,
+        ),
+        fetchAllLeaseProduction(
+          lease.distCode, lease.leaseNo, gasSession,
+          startMonth, startYear, endMonth, endYear,
+          "G", MAX_PRODUCTION_PAGES,
+        ),
+      ]);
+      rows = mergeOilGasRows(oilRowsB, gasRowsB);
+    }
+
     if (rows.length === 0) return null;
 
     return {
@@ -674,46 +690,74 @@ export async function fetchTrrcProductionByLease(
   const startYear  = startDate.getFullYear();
   const startMonth = startDate.getMonth() + 1;
 
-  /** Single attempt — two independent sessions, both reports fetched in parallel */
-  async function attempt(): Promise<TrrcMonthlyRow[]> {
-    // Two sessions: one for oil report, one for gas report.
-    // Using the same JSESSIONID for parallel requests can corrupt server-side state
-    // in TRRC's Struts app, returning wrong or empty rows.
+  /**
+   * Strategy A — self-bootstrapping (no pre-initialised session).
+   *
+   * POST directly to specificLeaseQueryAction.do without a Cookie header.
+   * TRRC creates a new session on the POST and returns Set-Cookie: JSESSIONID.
+   * fetchAllLeaseProduction captures that cookie from the first-page response
+   * and uses it for all subsequent pagination GETs.
+   *
+   * This is the primary path. It removes the dependency on initTrrcSession()
+   * which fails silently in Node.js/Vercel because Node.js fetch follows
+   * redirects and loses Set-Cookie headers from intermediate 302 responses.
+   */
+  async function attemptDirect(): Promise<TrrcMonthlyRow[]> {
+    const [oilRows, gasRows] = await Promise.all([
+      fetchAllLeaseProduction(
+        distCode, leaseNo, null,                            // null = no pre-session
+        startMonth, startYear, endMonth, endYear, "O", MAX_PRODUCTION_PAGES,
+      ),
+      fetchAllLeaseProduction(
+        distCode, leaseNo, null,
+        startMonth, startYear, endMonth, endYear, "G", MAX_PRODUCTION_PAGES,
+      ),
+    ]);
+    return mergeOilGasRows(oilRows, gasRows);
+  }
+
+  /**
+   * Strategy B — explicit session init first (legacy path).
+   *
+   * Only used when Strategy A returns 0 rows.  Keeps the old initTrrcSession()
+   * behaviour as a fallback in case some TRRC endpoint configurations require
+   * a pre-existing session before accepting the specificLeaseQueryAction POST.
+   */
+  async function attemptWithSession(): Promise<TrrcMonthlyRow[]> {
     const [oilSession, gasSession] = await Promise.all([
       initTrrcSession(),
       initTrrcSession(),
     ]);
-    if (!oilSession && !gasSession) return [];
-
+    // If both session inits fail, still try without a session cookie rather
+    // than bailing completely — the direct POST may work even without one.
     const [oilRows, gasRows] = await Promise.all([
-      oilSession
-        ? fetchAllLeaseProduction(
-            distCode, leaseNo, oilSession,
-            startMonth, startYear, endMonth, endYear,
-            "O", MAX_PRODUCTION_PAGES,
-          )
-        : Promise.resolve([] as TrrcMonthlyRow[]),
-      gasSession
-        ? fetchAllLeaseProduction(
-            distCode, leaseNo, gasSession,
-            startMonth, startYear, endMonth, endYear,
-            "G", MAX_PRODUCTION_PAGES,
-          )
-        : Promise.resolve([] as TrrcMonthlyRow[]),
+      fetchAllLeaseProduction(
+        distCode, leaseNo, oilSession,
+        startMonth, startYear, endMonth, endYear, "O", MAX_PRODUCTION_PAGES,
+      ),
+      fetchAllLeaseProduction(
+        distCode, leaseNo, gasSession,
+        startMonth, startYear, endMonth, endYear, "G", MAX_PRODUCTION_PAGES,
+      ),
     ]);
-
     return mergeOilGasRows(oilRows, gasRows);
   }
 
-  // First attempt
+  // Try Strategy A (direct, no pre-session) first
   try {
-    const rows = await attempt();
+    const rows = await attemptDirect();
     if (rows.length > 0) return { rows, distCode, leaseNo };
-  } catch { /* TRRC session error — retry below */ }
+  } catch { /* network error — fall through */ }
 
-  // Retry once — TRRC sessions occasionally expire mid-flight or return a redirect.
+  // Strategy B (explicit session init)
   try {
-    const rows = await attempt();
+    const rows = await attemptWithSession();
+    if (rows.length > 0) return { rows, distCode, leaseNo };
+  } catch { /* session error — fall through */ }
+
+  // One final direct retry — TRRC can be intermittently slow to create sessions
+  try {
+    const rows = await attemptDirect();
     if (rows.length === 0) return null;
     return { rows, distCode, leaseNo };
   } catch {
