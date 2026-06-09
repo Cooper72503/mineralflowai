@@ -131,12 +131,8 @@ export async function fetchWvdepProductionHistory(
   const normalized = normalizeWvApiNumber(apiNumber);
   if (!normalized) return null;
 
-  const controller = new AbortController();
-  const timer      = setTimeout(() => controller.abort(), 15_000);
-
   try {
     const res = await fetch(`${BASE}/wellApi.cfm?api=${normalized}`, {
-      signal:  controller.signal,
       headers: { "User-Agent": "Mozilla/5.0 (compatible; MineralFlow/1.0)" },
     });
 
@@ -181,8 +177,6 @@ export async function fetchWvdepProductionHistory(
     };
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

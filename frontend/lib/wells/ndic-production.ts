@@ -127,17 +127,12 @@ async function resolveNdicFileNumber(apiNumber: string): Promise<string | null> 
   if (!normalized) return null;
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-
     const res = await fetch(
       `https://www.dmr.nd.gov/oilgas/bakkenwells.asp?f_geoid=&f_wellname=&f_wellnum=&f_api=${encodeURIComponent(normalized)}&f_basin=&f_county=&submitbtn=Submit`,
       {
-        signal:  controller.signal,
         headers: { "User-Agent": "Mozilla/5.0 (compatible; MineralFlow/1.0)" },
       },
     );
-    clearTimeout(timer);
 
     if (!res.ok) return null;
     const html = await res.text();
@@ -158,18 +153,13 @@ async function fetchNdicProductionByFileNum(
   apiNumber: string,
   monthsBack: number,
 ): Promise<NdicProductionResult | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
-
   try {
     const res = await fetch(
       `https://www.dmr.nd.gov/oilgas/productionstats.asp?FILENUM=${encodeURIComponent(fileNum)}`,
       {
-        signal:  controller.signal,
         headers: { "User-Agent": "Mozilla/5.0 (compatible; MineralFlow/1.0)" },
       },
     );
-    clearTimeout(timer);
 
     if (!res.ok) return null;
     const html = await res.text();
@@ -193,8 +183,6 @@ async function fetchNdicProductionByFileNum(
     };
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

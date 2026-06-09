@@ -103,9 +103,6 @@ export async function fetchOccProductionHistory(
   // OCC uses a 10-digit API (without leading state code in their form, but
   // including it in the URL query works too). Their production page accepts
   // a "api_no" parameter.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
-
   try {
     // OCC COGIS production query — POST form with API number
     const formData = new URLSearchParams({
@@ -121,8 +118,7 @@ export async function fetchOccProductionHistory(
         "User-Agent":   "Mozilla/5.0 (compatible; MineralFlow/1.0)",
         "Referer":      "https://www.occeweb.com/og/ogproduction.asp",
       },
-      body:   formData.toString(),
-      signal: controller.signal,
+      body: formData.toString(),
     });
 
     if (!res.ok) return null;
@@ -157,8 +153,6 @@ export async function fetchOccProductionHistory(
     return { api_number: normalized, rows, months_count: rows.length, source: "occ_actual" };
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

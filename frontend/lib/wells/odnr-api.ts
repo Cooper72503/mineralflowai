@@ -97,13 +97,9 @@ export async function lookupOdnrWells(county: string): Promise<WellLookupResult>
     f:                 "json",
   });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
-
   try {
     const url = `${ODNR_WELLS_URL}?${params.toString()}`;
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timer);
+    const res = await fetch(url);
 
     if (!res.ok) throw new Error(`Ohio DNR HTTP ${res.status}`);
 
@@ -127,13 +123,8 @@ export async function lookupOdnrWells(county: string): Promise<WellLookupResult>
         orderByFields:     "SPUD_DATE DESC",
         f:                 "json",
       });
-      const fallbackController = new AbortController();
-      const fallbackTimer = setTimeout(() => fallbackController.abort(), 10_000);
       try {
-        const fbRes = await fetch(`${ODNR_WELLS_URL}?${fallbackParams.toString()}`, {
-          signal: fallbackController.signal,
-        });
-        clearTimeout(fallbackTimer);
+        const fbRes = await fetch(`${ODNR_WELLS_URL}?${fallbackParams.toString()}`);
         if (fbRes.ok) {
           const fbJson = await fbRes.json() as {
             features?: OdnrFeature[];
@@ -142,7 +133,7 @@ export async function lookupOdnrWells(county: string): Promise<WellLookupResult>
           features.push(...(fbJson.features ?? []));
         }
       } catch {
-        clearTimeout(fallbackTimer);
+        // fallback failed silently
       }
     }
 
@@ -158,7 +149,6 @@ export async function lookupOdnrWells(county: string): Promise<WellLookupResult>
         : undefined,
     };
   } catch (err) {
-    clearTimeout(timer);
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.warn("[odnr-api] lookup failed:", msg);
     return {

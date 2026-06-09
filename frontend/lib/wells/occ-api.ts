@@ -81,13 +81,9 @@ export async function lookupOccWells(county: string): Promise<WellLookupResult> 
     f:                 "json",
   });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
-
   try {
     const url = `${OCC_WELLS_URL}?${params.toString()}`;
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timer);
+    const res = await fetch(url);
 
     if (!res.ok) throw new Error(`OCC HTTP ${res.status}`);
 
@@ -105,7 +101,6 @@ export async function lookupOccWells(county: string): Promise<WellLookupResult> 
       note: wells.length === 0 ? "No wells found in this county via OCC public records." : undefined,
     };
   } catch (err) {
-    clearTimeout(timer);
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.warn("[occ-api] lookup failed:", msg);
     return {
