@@ -499,14 +499,11 @@ export async function fetchTrrcProductionHistory(
   apiNumber: string,
   monthsBack = 36,
 ): Promise<TrrcProductionResult | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25_000);
-
   try {
     // Step 1: establish session + resolve lease identifiers from API number
     const [sessionCookie, lease] = await Promise.all([
-      initTrrcSession(controller.signal),
-      getLeaseFromApiNumber(apiNumber, controller.signal),
+      initTrrcSession(),
+      getLeaseFromApiNumber(apiNumber),
     ]);
 
     if (!sessionCookie || !lease) return null;
@@ -519,18 +516,19 @@ export async function fetchTrrcProductionHistory(
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
-    // Try oil first; fall back to gas (convert MCF → BOE) for gas-only leases
+    // Try oil first; fall back to gas (convert MCF → BOE) for gas-only leases.
+    // Use MAX_PRODUCTION_PAGES — exits early when no new rows appear.
     let rows = await fetchAllLeaseProduction(
       lease.distCode, lease.leaseNo, sessionCookie,
       startMonth, startYear, endMonth, endYear,
-      "O", 6, controller.signal,
+      "O", MAX_PRODUCTION_PAGES,
     );
 
     if (rows.length === 0) {
       rows = await fetchAllLeaseProduction(
         lease.distCode, lease.leaseNo, sessionCookie,
         startMonth, startYear, endMonth, endYear,
-        "G", 6, controller.signal,
+        "G", MAX_PRODUCTION_PAGES,
       );
     }
 
@@ -546,8 +544,6 @@ export async function fetchTrrcProductionHistory(
     };
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -565,10 +561,8 @@ export async function fetchTrrcLatestByLease(
   distCode: string,
   leaseNo:  string,
 ): Promise<{ oil_bbl: number; month: string } | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    const sessionCookie = await initTrrcSession(controller.signal);
+    const sessionCookie = await initTrrcSession();
     if (!sessionCookie) return null;
 
     const now        = new Date();
@@ -584,14 +578,14 @@ export async function fetchTrrcLatestByLease(
     let rows = await fetchAllLeaseProduction(
       distCode, leaseNo, sessionCookie,
       startMonth, startYear, endMonth, endYear,
-      "O", 2, controller.signal,
+      "O", 2,
     );
 
     if (rows.length === 0) {
       rows = await fetchAllLeaseProduction(
         distCode, leaseNo, sessionCookie,
         startMonth, startYear, endMonth, endYear,
-        "G", 2, controller.signal,
+        "G", 2,
       );
     }
 
@@ -602,8 +596,6 @@ export async function fetchTrrcLatestByLease(
     return { oil_bbl: latest.oil_bbl, month };
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -620,9 +612,9 @@ export async function fetchTrrcProductionByLease(
   leaseNo:   string,
   monthsBack = 36,
 ): Promise<{ rows: TrrcMonthlyRow[]; distCode: string; leaseNo: string } | null> {
-  /** Inner attempt — returns rows array (possibly empty) or throws */
-  async function attempt(signal: AbortSignal): Promise<TrrcMonthlyRow[]> {
-    const sessionCookie = await initTrrcSession(signal);
+  /** Single attempt — no abort signal; run until TRRC responds */
+  async function attempt(): Promise<TrrcMonthlyRow[]> {
+    const sessionCookie = await initTrrcSession();
     if (!sessionCookie) return [];
 
     const now        = new Date();
@@ -634,45 +626,33 @@ export async function fetchTrrcProductionByLease(
     const startMonth = startDate.getMonth() + 1;
 
     // Try oil first; fall back to gas for gas-only leases.
-    // Use MAX_PRODUCTION_PAGES — pagination exits early when no new rows are returned,
-    // so the cap is a safety limit, not a target. 36 months = ~4 pages, conventional.
     let rows = await fetchAllLeaseProduction(
       distCode, leaseNo, sessionCookie,
       startMonth, startYear, endMonth, endYear,
-      "O", MAX_PRODUCTION_PAGES, signal,
+      "O", MAX_PRODUCTION_PAGES,
     );
     if (rows.length === 0) {
       rows = await fetchAllLeaseProduction(
         distCode, leaseNo, sessionCookie,
         startMonth, startYear, endMonth, endYear,
-        "G", MAX_PRODUCTION_PAGES, signal,
+        "G", MAX_PRODUCTION_PAGES,
       );
     }
     return rows;
   }
 
   // First attempt
-  const controller1 = new AbortController();
-  const timer1 = setTimeout(() => controller1.abort(), 15_000);
   try {
-    const rows = await attempt(controller1.signal);
-    clearTimeout(timer1);
+    const rows = await attempt();
     if (rows.length > 0) return { rows, distCode, leaseNo };
-  } catch {
-    clearTimeout(timer1);
-  }
+  } catch { /* TRRC session error — retry below */ }
 
   // Retry once — TRRC sessions sometimes expire mid-flight or return a redirect page.
-  // A fresh session call is cheap; we'd rather take the extra round-trip than return null.
-  const controller2 = new AbortController();
-  const timer2 = setTimeout(() => controller2.abort(), 15_000);
   try {
-    const rows = await attempt(controller2.signal);
-    clearTimeout(timer2);
+    const rows = await attempt();
     if (rows.length === 0) return null;
     return { rows, distCode, leaseNo };
   } catch {
-    clearTimeout(timer2);
     return null;
   }
 }

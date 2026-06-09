@@ -37,9 +37,15 @@ import { fetchTrrcViolations, fetchTrrcViolationsByOperator } from "@/lib/underw
 import { fetchTrrcInjectionByApi, fetchTrrcInjectionByOperator } from "@/lib/underwriting/trrc-injection";
 import { fetchTrrcInspectionsForApis }     from "@/lib/wells/trrc-inspection";
 import { fetchTrrcCompletionsForApis }     from "@/lib/wells/trrc-completions";
+import {
+  fetchTrrcOperatorProfile,
+  fetchTrrcAnnualProductionBestOf,
+  type TrrcOperatorProfile,
+  type TrrcAnnualProduction,
+} from "@/lib/wells/trrc-operator-profile";
 import { buildDDReport, type TrrcWellProduction } from "@/lib/underwriting/report-builder";
 import { lookupTrrcLeasesByApis, TX_COUNTY_CODES } from "@/lib/wells/trrc-api";
-import { fetchTrrcProductionByLease }       from "@/lib/wells/trrc-production";
+import { fetchTrrcProductionByLease, fetchTrrcProductionHistory } from "@/lib/wells/trrc-production";
 import { fetchFinancialContext }            from "@/lib/underwriting/financial-lookup";
 import { getBenchmarkFromApi, getBenchmarkFromCounty } from "@/lib/underwriting/benchmarks";
 import { fetchBestWvdepProduction }         from "@/lib/wells/wvdep-production";
@@ -579,10 +585,47 @@ async function runPipeline(
         } catch { /* Path C timeout — accept empty */ }
       }
 
+      // Path D — direct API-number production history.
+      // Uses a separate TRRC entry point (wellboreQueryAction → specificLeaseQueryAction)
+      // that resolves the lease from the API number internally.  Catches cases where
+      // the leaseMap lookup failed (session issue, network blip) but the API is valid.
+      if (wells.length === 0 && apiNumbers.length > 0) {
+        for (const api of apiNumbers.slice(0, 4)) {
+          try {
+            const result = await fetchTrrcProductionHistory(api, 36);
+            if (result && result.rows.length > 0) {
+              const key = `${result.district_code}:${result.lease_number}`;
+              if (!seenLeases.has(key)) {
+                seenLeases.add(key);
+                const sorted = [...result.rows].sort((a, b) =>
+                  a.year !== b.year ? a.year - b.year : a.month - b.month
+                );
+                const latest = sorted[sorted.length - 1];
+                wells.push({
+                  api,
+                  well_name: `Lease ${result.lease_number} (District ${result.district_code})`,
+                  lease_number: result.lease_number,
+                  district_code: result.district_code,
+                  operator: operatorName,
+                  latest_monthly_oil_bbl: latest?.oil_bbl ?? 0,
+                  latest_production_month: latest
+                    ? `${latest.year}-${String(latest.month).padStart(2, "0")}` : null,
+                  cum_oil_bbl: sorted.reduce((s, r) => s + r.oil_bbl, 0),
+                  monthly_rows: sorted.map(r => ({
+                    year: r.year, month: r.month,
+                    oil_bbl: r.oil_bbl, gas_mcf: r.gas_mcf ?? 0, water_bbl: null,
+                  })),
+                });
+              }
+            }
+          } catch { /* per-API error — continue */ }
+        }
+      }
+
       if (wells.length === 0) {
         return {
           result: [],
-          detail: "No production records found in TRRC after exhausting all resolution strategies (leaseMap, explicit leases, operator re-query)",
+          detail: "No production records found in TRRC after exhausting all resolution strategies (leaseMap, explicit leases, operator re-query, direct API history)",
           usedFallback: true,
           fallbackReason: "No matching lease found or TRRC returned no rows — verify API numbers, lease numbers, and operator name",
         };
@@ -601,34 +644,31 @@ async function runPipeline(
     [],
   );
 
-  // ── 5. Pull inspections, violations, injection ─────────────────────────────
-  // Each sub-call gets its OWN timeout — they run in parallel but independently.
-  // This fixes the prior bug where Promise.all was awaited first, making the
-  // subsequent Promise.race effectively a no-op.
+  // ── 5. Pull inspections, violations, injection, P-5, H-15 ─────────────────
+  // All five sub-calls run in parallel with individual error isolation.
   let complianceResult: import("@/lib/underwriting/trrc-compliance").TrrcViolation[] = [];
   let injectionResult: import("@/lib/underwriting/trrc-injection").TrrcInjectionRecord[] = [];
   let inspectionResult: import("@/lib/wells/trrc-inspection").TrrcInspectionRecord[] = [];
+  let operatorProfile: TrrcOperatorProfile | null = null;
+  let annualProduction: TrrcAnnualProduction | null = null;
 
-  [complianceResult, injectionResult, inspectionResult] = await runStep(
+  [complianceResult, injectionResult, inspectionResult, operatorProfile, annualProduction] = await runStep(
     writer,
     "pull_inspections",
     "Pulling inspections & compliance",
     async () => {
       if (!isTexasResolved) {
         return {
-          result: [[], [], []] as [typeof complianceResult, typeof injectionResult, typeof inspectionResult],
+          result: [[], [], [], null, null] as
+            [typeof complianceResult, typeof injectionResult, typeof inspectionResult, typeof operatorProfile, typeof annualProduction],
           detail: "Non-Texas well — TRRC compliance lookup not applicable; provide documents for compliance review",
         };
       }
 
-      // Each call has its own independent timeout budget — a slow ICE response
-      // will not block violations or injection lookups (Promise.all runs all
-      // three concurrently).
-      //
+      // All five calls run concurrently — no call blocks any other.
       // EXHAUSTION POLICY: every lookup tries all available identifier strategies
-      // before accepting an empty result.  API-based and operator-based paths are
-      // additive (merged + deduped), not mutually exclusive.
-      const [violations, injection, inspections] = await Promise.all([
+      // before accepting an empty result.
+      const [violations, injection, inspections, p5Profile, h15Annual] = await Promise.all([
 
         // ── Violations ────────────────────────────────────────────────────────
         // Strategy 1: query every available API (up to 4) — different APIs on
@@ -752,23 +792,45 @@ async function runPipeline(
 
           return results;
         })(),
+
+        // ── P-5 Operator Organization ─────────────────────────────────────────
+        // Fetches the current P-5 org record for the resolved operator.
+        // Provides bond status, P-5 number, and contact info directly from TRRC.
+        (async (): Promise<TrrcOperatorProfile | null> => {
+          const name = trrcResolvedOperator ?? operatorName;
+          if (!name) return null;
+          try { return await fetchTrrcOperatorProfile(name); } catch { return null; }
+        })(),
+
+        // ── H-15 Annual Production ────────────────────────────────────────────
+        // Fetches cumulative annual production totals for the resolved lease.
+        // Longer historical view than the 36-month monthly window.
+        (async (): Promise<TrrcAnnualProduction | null> => {
+          // Use the first resolved lease from leaseMap
+          const first = Array.from(leaseMap.values())[0];
+          if (!first) return null;
+          try { return await fetchTrrcAnnualProductionBestOf(first.distCode, first.leaseNo); } catch { return null; }
+        })(),
       ]);
 
       const parts: string[] = [];
-      if (violations.length > 0)  parts.push(`${violations.length} violation(s)`);
-      if (injection.length  > 0)  parts.push(`${injection.length} injection well(s)`);
-      if (inspections.length > 0) parts.push(`${inspections.length} ICE inspection record(s)`);
+      if (violations.length > 0)   parts.push(`${violations.length} violation(s)`);
+      if (injection.length  > 0)   parts.push(`${injection.length} injection well(s)`);
+      if (inspections.length > 0)  parts.push(`${inspections.length} ICE inspection record(s)`);
+      if (p5Profile)               parts.push(`P-5 operator record found`);
+      if (h15Annual?.rows.length)  parts.push(`H-15: ${h15Annual.rows.length} year(s) of annual production`);
       const detail = parts.length > 0
         ? parts.join(", ")
         : "No compliance/inspection records found";
 
       return {
-        result: [violations, injection, inspections] as
-          [typeof complianceResult, typeof injectionResult, typeof inspectionResult],
+        result: [violations, injection, inspections, p5Profile, h15Annual] as
+          [typeof complianceResult, typeof injectionResult, typeof inspectionResult, typeof operatorProfile, typeof annualProduction],
         detail,
       };
     },
-    [[], [], []] as [typeof complianceResult, typeof injectionResult, typeof inspectionResult],
+    [[], [], [], null, null] as
+      [typeof complianceResult, typeof injectionResult, typeof inspectionResult, typeof operatorProfile, typeof annualProduction],
   );
 
   // ── 6. Pull completion / W-2 records ───────────────────────────────────────
@@ -936,9 +998,11 @@ async function runPipeline(
     processingTimeMs:     Date.now() - t0,
     aiModel:              model,
     scanMode:             "full",
-    trrcResolvedOperator: trrcResolvedOperator,
-    trrcResolvedCounty:   trrcResolvedCounty,
+    trrcResolvedOperator:  trrcResolvedOperator,
+    trrcResolvedCounty:    trrcResolvedCounty,
     sellerClaimedMonthlyBbl,
+    trrcOperatorProfile:   operatorProfile,
+    trrcAnnualProduction:  annualProduction,
   });
 
   const totalMs = Date.now() - t0;

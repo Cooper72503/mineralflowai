@@ -27,7 +27,7 @@
 
 const EWA_BASE  = "https://webapps2.rrc.texas.gov/EWA";
 const CMPL_BASE = "https://webapps.rrc.texas.gov/CMPL";
-const DEFAULT_TIMEOUT_MS = 14_000;
+// No timeout — run until TRRC responds.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -335,9 +335,6 @@ export async function fetchTrrcCompletionByApi(
   };
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
     // ── Step 1: EWA Drilling Permits query ────────────────────────────────
     const ewaRes = await fetch(`${EWA_BASE}/drillingPermitsQueryAction.do`, {
       method: "POST",
@@ -352,10 +349,9 @@ export async function fetchTrrcCompletionByApi(
         "pager.offset":                         "0",
         "pager.pageSize":                       "10",
       }).toString(),
-      signal: controller.signal,
     });
 
-    if (!ewaRes.ok) { clearTimeout(timer); return notFound; }
+    if (!ewaRes.ok) { return notFound; }
 
     const ewaHtml = await ewaRes.text();
     const permits = parseEwaPermitResults(ewaHtml);
@@ -364,8 +360,6 @@ export async function fetchTrrcCompletionByApi(
     const permit = permits.find(p => p.api8 === api8) ?? permits[0] ?? null;
 
     if (!permit) {
-      // No EWA drilling permit record for this API → packet_found stays false
-      clearTimeout(timer);
       return notFound;
     }
 
@@ -384,7 +378,6 @@ export async function fetchTrrcCompletionByApi(
 
     // ── Step 2: CMPL query (only if EWA gave us a CMPL URL) ───────────────
     if (!permit.cmpl_url) {
-      clearTimeout(timer);
       return baseRecord;
     }
 
@@ -395,10 +388,7 @@ export async function fetchTrrcCompletionByApi(
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer":   `${EWA_BASE}/drillingPermitsQueryAction.do`,
       },
-      signal: controller.signal,
     });
-
-    clearTimeout(timer);
 
     if (!cmplRes.ok) return baseRecord;
 

@@ -12,7 +12,7 @@
  */
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
-const DEFAULT_TIMEOUT_MS = 12_000;
+// No timeout — run until TRRC responds.
 
 export type TrrcInjectionRecord = {
   api10: string;
@@ -40,10 +40,6 @@ export async function fetchTrrcInjectionByApi(
   api10: string,
 ): Promise<TrrcInjectionRecord[]> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-    // Strip prefix/dashes to get bare 10-digit form
     const bare = api10.replace(/[^0-9]/g, "").slice(-10);
     const prefix = bare.slice(0, 2);
     const suffix = bare.slice(2);
@@ -64,9 +60,7 @@ export async function fetchTrrcInjectionByApi(
         "User-Agent": "Mozilla/5.0",
       },
       body: params.toString(),
-      signal: controller.signal,
     });
-    clearTimeout(timer);
 
     if (!res.ok) return [];
     const html = await res.text();
@@ -85,9 +79,6 @@ export async function fetchTrrcInjectionByOperator(
   county: string,
 ): Promise<TrrcInjectionRecord[]> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
     const params = new URLSearchParams({
       "searchArgs.operatorNameArg": operatorName,
       "searchArgs.countyNameArg": county,
@@ -104,9 +95,7 @@ export async function fetchTrrcInjectionByOperator(
         "User-Agent": "Mozilla/5.0",
       },
       body: params.toString(),
-      signal: controller.signal,
     });
-    clearTimeout(timer);
 
     if (!res.ok) return [];
     const html = await res.text();

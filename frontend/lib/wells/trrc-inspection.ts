@@ -18,7 +18,7 @@
  */
 
 const PDA_ICE_URL = "https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml";
-const DEFAULT_TIMEOUT_MS = 14_000;
+// No timeout — run until TRRC responds.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -311,9 +311,6 @@ export async function fetchTrrcInspectionsByApi(
   const api8  = toApi8(api10);
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
     // ── Step 1: GET the ICE page to establish a PDA session ────────────────
     const getRes = await fetch(`${PDA_ICE_URL}?action=init`, {
       method:  "GET",
@@ -324,11 +321,9 @@ export async function fetchTrrcInspectionsByApi(
         "Cache-Control":   "no-cache",
       },
       redirect: "follow",
-      signal:  controller.signal,
     });
 
     if (!getRes.ok) {
-      clearTimeout(timer);
       return [];
     }
 
@@ -337,7 +332,6 @@ export async function fetchTrrcInspectionsByApi(
     // Extract ViewState from the GET response
     const viewState = extractViewState(pageHtml);
     if (!viewState) {
-      clearTimeout(timer);
       return [];
     }
 
@@ -373,10 +367,7 @@ export async function fetchTrrcInspectionsByApi(
       method:  "POST",
       headers: postHeaders,
       body:    formData.toString(),
-      signal:  controller.signal,
     });
-
-    clearTimeout(timer);
 
     if (!postRes.ok) return [];
 

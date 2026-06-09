@@ -230,6 +230,10 @@ export type BuildReportArgs = {
    * in the uploaded documents.  Used to detect production mismatches vs. TRRC.
    */
   sellerClaimedMonthlyBbl?: number | null;
+  /** P-5 operator organization record from TRRC */
+  trrcOperatorProfile?: import("../wells/trrc-operator-profile").TrrcOperatorProfile | null;
+  /** H-15 annual production record from TRRC */
+  trrcAnnualProduction?: import("../wells/trrc-operator-profile").TrrcAnnualProduction | null;
 };
 
 export function buildDDReport(args: BuildReportArgs): DDReport {
@@ -251,6 +255,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     trrcResolvedOperator = null,
     trrcResolvedCounty   = null,
     sellerClaimedMonthlyBbl = null,
+    trrcOperatorProfile  = null,
+    trrcAnnualProduction = null,
   } = args;
 
   // Is this a Texas well? Used for severance tax rates.
@@ -1590,12 +1596,20 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     peak_rate_bbl: dcaResult
       ? dp(dcaResult.peak_bbl, dcaSource as DataSource, "medium")
       : missingDp<number>(),
-    cum_oil_bbl: dcaResult
-      ? dp(dcaResult.cum_oil_bbl, dcaSource as DataSource, dcaSource === "trrc" ? "high" : "medium",
-          `Total ${dcaSource === "trrc" ? "TRRC-reported" : "document-derived"} cumulative production`)
-      : (hasTrrc ? dp(trrcWells.reduce((s, w) => s + w.cum_oil_bbl, 0), "trrc", "high")
-          : hasDocProd ? dp(docMonthlyRows.reduce((s, r) => s + r.oil_bbl, 0), "uploaded_doc", "medium")
-          : missingDp<number>()),
+    cum_oil_bbl: (() => {
+      // Prefer H-15 annual cumulative (longest history, most authoritative)
+      if (trrcAnnualProduction && trrcAnnualProduction.cum_oil_bbl > 0)
+        return dp(trrcAnnualProduction.cum_oil_bbl, "trrc", "high",
+          `TRRC H-15 annual production (${trrcAnnualProduction.rows.length} year(s) of record)`);
+      if (dcaResult)
+        return dp(dcaResult.cum_oil_bbl, dcaSource as DataSource, dcaSource === "trrc" ? "high" : "medium",
+          `Total ${dcaSource === "trrc" ? "TRRC-reported" : "document-derived"} cumulative production`);
+      if (hasTrrc)
+        return dp(trrcWells.reduce((s, w) => s + w.cum_oil_bbl, 0), "trrc", "high");
+      if (hasDocProd)
+        return dp(docMonthlyRows.reduce((s, r) => s + r.oil_bbl, 0), "uploaded_doc", "medium");
+      return missingDp<number>();
+    })(),
     projections: dcaResult?.projections ?? [],
     notes: (() => {
       const notes: string[] = [];
@@ -2281,12 +2295,20 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     ),
     open_violations:   dp(openViolations.length, trrcWells.length > 0 ? "trrc" : "missing", trrcWells.length > 0 ? "medium" : "none", undefined, undefined, TRRC_URLS.violations),
     total_violations:  dp(allViolations.length,  trrcWells.length > 0 ? "trrc" : "missing", trrcWells.length > 0 ? "medium" : "none", undefined, undefined, TRRC_URLS.violations),
-    bond_status:       extracted?.bond_amount_usd != null
-      ? dp("confirmed" as const, "uploaded_doc", "high", "Bond certificate in provided documents")
-      : dp("not_confirmed" as const, "missing", "none", "Bond certificate not provided"),
-    bond_amount_usd:   extracted?.bond_amount_usd != null
-      ? dp(extracted.bond_amount_usd, "uploaded_doc", "high")
-      : missingDp<number>("Request operator's current RRC bond certificate"),
+    bond_status: (() => {
+      if (extracted?.bond_amount_usd != null)
+        return dp("confirmed" as const, "uploaded_doc", "high", "Bond certificate in provided documents");
+      if (trrcOperatorProfile?.bond_amount_usd != null)
+        return dp("confirmed" as const, "trrc", "medium", "TRRC P-5 operator organization record");
+      return dp("not_confirmed" as const, "missing", "none", "Bond certificate not provided; P-5 bond amount not found");
+    })(),
+    bond_amount_usd: (() => {
+      if (extracted?.bond_amount_usd != null)
+        return dp(extracted.bond_amount_usd, "uploaded_doc", "high");
+      if (trrcOperatorProfile?.bond_amount_usd != null)
+        return dp(trrcOperatorProfile.bond_amount_usd, "trrc", "medium", "TRRC P-5 operator organization record");
+      return missingDp<number>("Request operator's current RRC bond certificate");
+    })(),
     public_company:    dp(opPublicCompany, financialContext?.edgar != null ? "uploaded_doc" : "missing", financialContext?.edgar != null ? "medium" : "none"),
     edgar_company_name: financialContext?.edgar?.company_name
       ? dp(financialContext.edgar.company_name, "uploaded_doc", "medium", "SEC EDGAR")

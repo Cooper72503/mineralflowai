@@ -10,7 +10,7 @@
  */
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
-const DEFAULT_TIMEOUT_MS = 12_000;
+// No timeout — run until TRRC responds.
 
 export type TrrcViolation = {
   violation_id: string | null;
@@ -30,10 +30,6 @@ export async function fetchTrrcViolations(
   api10: string,
 ): Promise<TrrcViolation[]> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-    // TRRC violation search accepts the API number in the wellbore field
     const params = new URLSearchParams({
       "searchArgs.apiNumberArg": api10,
       "searchArgs.violationTypeArg": "",
@@ -50,9 +46,7 @@ export async function fetchTrrcViolations(
         "User-Agent": "Mozilla/5.0",
       },
       body: params.toString(),
-      signal: controller.signal,
     });
-    clearTimeout(timer);
 
     if (!res.ok) return [];
     const html = await res.text();
@@ -72,9 +66,6 @@ export async function fetchTrrcViolationsByOperator(
   county: string,
 ): Promise<TrrcViolation[]> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
     const params = new URLSearchParams({
       "searchArgs.operatorNameArg": operatorName,
       "searchArgs.countyNameArg": county,
@@ -92,9 +83,7 @@ export async function fetchTrrcViolationsByOperator(
         "User-Agent": "Mozilla/5.0",
       },
       body: params.toString(),
-      signal: controller.signal,
     });
-    clearTimeout(timer);
 
     if (!res.ok) return [];
     const html = await res.text();
