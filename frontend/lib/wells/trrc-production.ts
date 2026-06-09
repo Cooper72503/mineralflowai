@@ -2,16 +2,19 @@
  * TRRC Monthly Production Fetcher
  *
  * Two-request process against the Texas Railroad Commission's public PDQ web app:
- *   1. POST wellboreQueryAction.do  →  establish a TRRC EWA session (JSESSIONID)
- *   2. POST specificLeaseQueryAction.do  →  HTML table with monthly production rows
+ *   1. GET/POST wellboreQueryAction.do  →  establish a TRRC EWA session (JSESSIONID)
+ *   2. POST specificLeaseQueryAction.do →  HTML table with monthly production rows
  *
- * The specificLeaseQueryAction.do CSV download endpoint requires complex session
- * state and is unreliable. We parse the HTML production table directly instead.
+ * HTML parsing uses cheerio for structural <table><tr><td> traversal rather than
+ * regex against flattened text — more robust to column-order changes, non-breaking
+ * spaces, links inside cells, and layout differences between oil and gas reports.
  *
  * Run server-side only (no CORS issues from Next.js API routes).
  *
  * Reference: https://webapps2.rrc.texas.gov/EWA/ewaPdqMain.do
  */
+
+import * as cheerio from "cheerio";
 
 const BASE = "https://webapps2.rrc.texas.gov/EWA";
 
@@ -133,110 +136,138 @@ async function initTrrcSession(signal?: AbortSignal): Promise<string | null> {
 
 // ── HTML production table parser ───────────────────────────────────────────────
 
+// Physical bounds — single Texas lease
+const MAX_PLAUSIBLE_OIL_BBL = 10_000_000;
+const MAX_PLAUSIBLE_GAS_MCF = 60_000_000;
+
 /**
- * Parse monthly production rows from the TRRC "Specific Lease Query Results" HTML.
- *
- * Oil report row format (after stripping tags, whitespace-normalised):
- *   "Jan 2024  5  0  511  511  OperatorName ..."
- *    MonthAbbr Year  OilBBL OilDisp  CasingheadMCF CasingheadDisp ...
- *
- * Gas report row format:
- *   "Jan 2024  511  0  5  5  OperatorName ..."
- *    MonthAbbr Year  GasMCF GasDisp  CondensateBBL CondensateDisp ...
- *
- * Structural validation:
- *   1. Confirms the HTML contains a TRRC production results table before parsing rows.
- *   2. Validates parsed values are non-negative and within physical bounds.
- *   3. Deduplicates month/year pairs — keeps the higher value when duplicates occur.
+ * Normalize a raw table cell to plain text.
+ * Handles non-breaking spaces ( ), multiple whitespace, and HTML entities.
  */
-function parseTrrcHtmlRows(html: string, reportType: "O" | "G" = "O"): TrrcMonthlyRow[] {
-  // ── Structural guard ──────────────────────────────────────────────────────
-  // The TRRC production results page has two definitive fingerprints:
-  //   1. The action URL "specificLeaseQueryAction.do" appears in form/link tags
-  //      on the actual result page — it does NOT appear on the EWA nav/home page,
-  //      session-expiry redirects, or Struts error pages.
-  //   2. Production column headers are present.
-  //
-  // Using the action URL as the primary check is more reliable than content
-  // strings because the TRRC error page has generic text that can overlap with
-  // production terminology.
+function cleanCell(raw: string): string {
+  return raw
+    .replace(/ /g, " ")   // non-breaking space → regular space
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Parse a numeric cell value — returns null for blanks, dashes, "N/A".
+ * Strips commas (e.g. "1,234") before parsing.
+ */
+function parseNumCell(s: string): number | null {
+  const c = cleanCell(s).replace(/,/g, "");
+  if (!c || c === "-" || /^N\/?A$/i.test(c)) return null;
+  const n = Number(c);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Page-level fingerprint validation.
+ * Returns true only when the HTML looks like a real TRRC production results page.
+ * A false result means session-expiry redirect, maintenance page, or network error.
+ */
+function isProductionResultPage(html: string): boolean {
   const hasActionUrl    = html.includes("specificLeaseQueryAction.do");
   const hasColumnHeader = /Lease No\.|District Code|Production Month|Crude Oil|Casinghead/i.test(html);
+  return hasActionUrl || hasColumnHeader;
+}
 
-  if (!hasActionUrl && !hasColumnHeader) {
-    // Almost certainly a session-expiry redirect, maintenance page, or network error body.
-    // Return empty — the retry logic in fetchTrrcProductionByLease will catch this.
+/**
+ * Structural cheerio-based parser for TRRC production HTML tables.
+ *
+ * Why cheerio instead of regex:
+ *   The old approach flattened each <tr> to a single string via regex and then
+ *   applied a month-name pattern against the result.  This breaks when:
+ *     • Cells contain non-breaking spaces (common in TRRC tables)
+ *     • A cell contains a link or <span> that places text out of order
+ *     • Column order changes between oil and gas report layouts
+ *     • A "dash" or blank cell causes the positional offsets to shift
+ *
+ *   cheerio traverses <table><tr><td> structurally, extracts cell text
+ *   independently of surrounding markup, and handles entity decoding natively.
+ *   Each cell's position is determined by its actual DOM index, not the order
+ *   text appears in the flattened string.
+ *
+ * Column layout (TRRC EWA Specific Lease Query):
+ *   Oil report:  [Period] [Crude Oil BBL] [Oil Disp] [Casinghead MCF] [Gas Disp] ...
+ *   Gas report:  [Period] [Gas MCF]       [Gas Disp] [Condensate BBL] [Cond Disp] ...
+ *
+ * The "Period" cell contains "Mon YYYY" (e.g. "Jan 2024"). We scan each row for
+ * a cell matching that pattern to locate the data anchor, then read numeric values
+ * from the immediately following cells — this survives column insertions before
+ * the period column.
+ */
+function parseTrrcHtmlRows(html: string, reportType: "O" | "G" = "O"): TrrcMonthlyRow[] {
+  // ── Page fingerprint guard ────────────────────────────────────────────────
+  if (!isProductionResultPage(html)) {
+    // Session-expiry redirect, maintenance page, or network error.
+    // Return empty — fetchTrrcProductionByLease retry logic handles this.
     return [];
   }
 
-  // ── Physical bounds ───────────────────────────────────────────────────────
-  // A single Texas lease reporting > 500,000 BBL/month is implausible for the
-  // wellbore counts and reservoir sizes in PDQ. Flag values above this.
-  // Values above 10M BBL/month are certainly parse errors (e.g., formatting issue).
-  const MAX_PLAUSIBLE_OIL_BBL  = 10_000_000;
-  const MAX_PLAUSIBLE_GAS_MCF  = 60_000_000;
-
-  const rows: TrrcMonthlyRow[] = [];
-  // Use a map to deduplicate — keeps highest oil_bbl for a given month/year
+  const $ = cheerio.load(html);
+  // Deduplicate by period key — keeps the highest oil_bbl for a given month/year
   const seen = new Map<string, TrrcMonthlyRow>();
 
-  const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
-  let match: RegExpExecArray | null;
+  $("table tr").each((_i, tr) => {
+    // Extract text of every <td> in this row, cleaned
+    const cells: string[] = [];
+    $(tr).find("td").each((_j, td) => {
+      cells.push(cleanCell($(td).text()));
+    });
 
-  while ((match = trRegex.exec(html)) !== null) {
-    const cell = match[1]
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-      .trim()
-      .replace(/\s+/g, " ");
+    if (cells.length < 3) return; // header row or empty row
 
-    // Rows start with "MonthAbbr YYYY num num ..."
-    const m = cell.match(
-      /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4})\s+([\d,]+)\s+([\d,]+)\s+([\d,]*)/,
-    );
-    if (!m) continue;
+    // Find the cell containing "Mon YYYY" (e.g. "Jan 2024")
+    const PERIOD_RE = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})$/i;
+    const periodIdx = cells.findIndex(c => PERIOD_RE.test(c));
+    if (periodIdx === -1) return; // not a data row
 
-    const month = MONTH_NAME_MAP[m[1]];
-    const year  = parseInt(m[2], 10);
+    const periodMatch = cells[periodIdx].match(PERIOD_RE)!;
+    const month = MONTH_NAME_MAP[periodMatch[1].slice(0, 1).toUpperCase() + periodMatch[1].slice(1, 3).toLowerCase()];
+    const year  = parseInt(periodMatch[2], 10);
 
-    // Sanity-check the date before trusting the row
-    if (!month || year < 1990 || year > new Date().getFullYear() + 1) continue;
+    if (!month || year < 1990 || year > new Date().getFullYear() + 1) return;
 
-    const num1  = parseNum(m[3]);  // col3: oil BBL  (oil report) OR gas MCF (gas report)
-    const num3  = m[5] ? parseNum(m[5]) : 0; // col5: casinghead MCF (oil) OR condensate BBL (gas)
+    // Numeric columns follow the period cell at fixed relative offsets:
+    //   +1 = primary volume  (oil BBL or gas MCF)
+    //   +2 = disposition     (skip)
+    //   +3 = secondary volume (casinghead MCF or condensate BBL)
+    const v1 = parseNumCell(cells[periodIdx + 1] ?? ""); // primary
+    const v3 = parseNumCell(cells[periodIdx + 3] ?? ""); // secondary
 
-    // Reject negative values — these are parse errors
-    if (num1 < 0 || num3 < 0) continue;
+    // Reject negatives — parse errors
+    if ((v1 ?? 0) < 0 || (v3 ?? 0) < 0) return;
 
     let oil_bbl: number;
     let gas_mcf: number | null;
 
     if (reportType === "O") {
-      oil_bbl = num1;
-      gas_mcf = num3 > 0 ? num3 : null;
-      // Validate bounds
-      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) continue;
+      // Oil report: v1 = crude oil BBL, v3 = casinghead gas MCF
+      oil_bbl = v1 ?? 0;
+      gas_mcf = (v3 != null && v3 > 0) ? v3 : null;
+      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) return;
       if (gas_mcf != null && gas_mcf > MAX_PLAUSIBLE_GAS_MCF) gas_mcf = null;
     } else {
-      // Gas report: num1 = gas MCF, num3 = condensate BBL
-      // Convert gas → BOE (6 MCF ≈ 1 BOE) and add condensate
-      if (num1 > MAX_PLAUSIBLE_GAS_MCF) continue;
-      const gas_boe = num1 > 0 ? Math.round(num1 / 6) : 0;
-      oil_bbl = gas_boe + num3;
-      gas_mcf = num1 > 0 ? num1 : null;
-      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) continue;
+      // Gas report: v1 = gas MCF, v3 = condensate BBL
+      // Convert gas → BOE equivalent (6 MCF ≈ 1 BOE) and add condensate
+      if ((v1 ?? 0) > MAX_PLAUSIBLE_GAS_MCF) return;
+      const condensate = v3 ?? 0;
+      const gas_boe = (v1 != null && v1 > 0) ? Math.round(v1 / 6) : 0;
+      oil_bbl = gas_boe + condensate;
+      gas_mcf = (v1 != null && v1 > 0) ? v1 : null;
+      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) return;
     }
 
     if (oil_bbl > 0 || gas_mcf != null) {
       const key = `${year}-${String(month).padStart(2, "0")}`;
       const existing = seen.get(key);
-      // Deduplicate: keep the row with higher oil_bbl if a duplicate appears
       if (!existing || oil_bbl > existing.oil_bbl) {
         seen.set(key, { year, month, oil_bbl, gas_mcf });
       }
     }
-  }
+  });
 
   return Array.from(seen.values()).sort(
     (a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month

@@ -825,6 +825,16 @@ export type DDReport = {
    */
   offer_gate: OfferGate | null;
 
+  /**
+   * Cross-source contradictions detected by the contradiction engine.
+   * Each entry represents a specific conflict between two evidence sources
+   * (e.g. seller doc vs. TRRC wellbore query, seller production claim vs. TRRC rate).
+   * Critical-severity contradictions automatically suppress economics and offer range.
+   * Empty array means no contradictions detected — NOT the same as "none exist";
+   * absence of evidence is not evidence of absence when sources are incomplete.
+   */
+  contradictions: import("./contradiction-engine").Contradiction[];
+
   /** Debug / audit trail */
   _meta: {
     trrc_lookup_attempted: boolean;

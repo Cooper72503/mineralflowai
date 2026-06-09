@@ -4065,9 +4065,188 @@ function OperationsWorkoverTab({ report }: { report: DDReport }) {
   );
 }
 
+// ─── Cross-Source Contradictions Panel ───────────────────────────────────────
+//
+// Surfaces findings from the contradiction detection engine.  Each entry
+// compared seller documents against TRRC public record and flagged a mismatch
+// that requires manual review before any offer can proceed.
+
+function ContradictionsPanel({ report }: { report: DDReport }) {
+  const items = report.contradictions ?? [];
+  if (items.length === 0) return null;
+
+  const critCount  = items.filter(c => c.severity === "critical").length;
+  const impCount   = items.filter(c => c.severity === "important").length;
+
+  const severityStyle = (sev: string): { background: string; color: string; border: string } => {
+    if (sev === "critical")     return { background: COLORS.redDim,    color: COLORS.red,    border: `1px solid ${COLORS.red}40`    };
+    if (sev === "important")    return { background: COLORS.yellowDim, color: COLORS.yellow, border: `1px solid ${COLORS.yellow}40` };
+    return                             { background: COLORS.accentDim, color: COLORS.accent, border: `1px solid ${COLORS.accent}40` };
+  };
+
+  const severityLabel = (sev: string) =>
+    sev === "critical" ? "CRITICAL" : sev === "important" ? "IMPORTANT" : "INFO";
+
+  return (
+    <Section title="Cross-Source Contradictions" icon="⚡">
+      {/* Summary banner */}
+      <div style={{
+        display: "flex",
+        gap: "0.75rem",
+        flexWrap: "wrap",
+        marginBottom: "1.25rem",
+      }}>
+        {critCount > 0 && (
+          <div style={{
+            padding: "0.4rem 0.85rem",
+            borderRadius: 6,
+            background: COLORS.redDim,
+            border: `1px solid ${COLORS.red}40`,
+            fontSize: "0.75rem",
+            fontWeight: 700,
+            color: COLORS.red,
+          }}>
+            ⛔ {critCount} Critical — Economics Suppressed
+          </div>
+        )}
+        {impCount > 0 && (
+          <div style={{
+            padding: "0.4rem 0.85rem",
+            borderRadius: 6,
+            background: COLORS.yellowDim,
+            border: `1px solid ${COLORS.yellow}40`,
+            fontSize: "0.75rem",
+            fontWeight: 700,
+            color: COLORS.yellow,
+          }}>
+            ⚠ {impCount} Important — Review Required
+          </div>
+        )}
+        <div style={{
+          padding: "0.4rem 0.85rem",
+          borderRadius: 6,
+          background: COLORS.surfaceAlt,
+          border: `1px solid ${COLORS.border}`,
+          fontSize: "0.72rem",
+          color: COLORS.textFaint,
+          display: "flex",
+          alignItems: "center",
+        }}>
+          Seller documents vs. TRRC public record
+        </div>
+      </div>
+
+      {/* Individual contradiction cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
+        {items.map((c) => {
+          const style = severityStyle(c.severity);
+          return (
+            <div key={c.id} style={{
+              borderRadius: 8,
+              border: style.border,
+              background: style.background,
+              padding: "0.9rem 1.1rem",
+            }}>
+              {/* Header row */}
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.55rem", flexWrap: "wrap" }}>
+                <span style={{
+                  fontSize: "0.64rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  color: style.color,
+                  padding: "0.15rem 0.5rem",
+                  background: "rgba(0,0,0,0.25)",
+                  borderRadius: 4,
+                }}>
+                  {severityLabel(c.severity)}
+                </span>
+                <span style={{
+                  fontSize: "0.64rem",
+                  fontWeight: 600,
+                  color: COLORS.textFaint,
+                  padding: "0.15rem 0.45rem",
+                  background: "rgba(0,0,0,0.2)",
+                  borderRadius: 4,
+                  fontFamily: "monospace",
+                }}>
+                  {c.id}
+                </span>
+                <span style={{ fontSize: "0.82rem", fontWeight: 700, color: COLORS.text }}>
+                  {c.field}
+                </span>
+                {c.auto_suppresses_economics && (
+                  <span style={{
+                    fontSize: "0.62rem",
+                    fontWeight: 700,
+                    color: COLORS.red,
+                    padding: "0.1rem 0.45rem",
+                    background: COLORS.redDim,
+                    border: `1px solid ${COLORS.red}30`,
+                    borderRadius: 4,
+                    marginLeft: "auto",
+                  }}>
+                    ⛔ Suppresses Economics
+                  </span>
+                )}
+              </div>
+
+              {/* Description */}
+              <p style={{ margin: "0 0 0.65rem 0", fontSize: "0.78rem", color: COLORS.text, lineHeight: 1.5 }}>
+                {c.description}
+              </p>
+
+              {/* Source comparison */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "0.5rem",
+                marginBottom: "0.65rem",
+              }}>
+                {[
+                  { label: c.source_a, value: c.value_a },
+                  { label: c.source_b, value: c.value_b },
+                ].map((src, i) => (
+                  <div key={i} style={{
+                    background: "rgba(0,0,0,0.2)",
+                    borderRadius: 6,
+                    padding: "0.5rem 0.7rem",
+                  }}>
+                    <div style={{ fontSize: "0.64rem", color: COLORS.textFaint, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "0.25rem" }}>
+                      {src.label}
+                    </div>
+                    <div style={{ fontSize: "0.78rem", color: COLORS.text, fontWeight: 600 }}>
+                      {src.value !== null && src.value !== undefined ? String(src.value) : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Recommended action */}
+              <div style={{
+                fontSize: "0.73rem",
+                color: COLORS.textMuted,
+                padding: "0.45rem 0.7rem",
+                background: "rgba(0,0,0,0.15)",
+                borderRadius: 5,
+                borderLeft: `3px solid ${style.color}60`,
+                lineHeight: 1.5,
+              }}>
+                <span style={{ fontWeight: 700, color: style.color }}>Action: </span>
+                {c.recommended_action}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
 function ComplianceRiskTab({ report }: { report: DDReport }) {
   return (
     <>
+      <ContradictionsPanel report={report} />
+      {(report.contradictions ?? []).length > 0 && <div style={{ height: "1.5rem" }} />}
       <RecommendationTab report={report} />
       <div style={{ height: "1.5rem" }} />
       <ComplianceTab report={report} />

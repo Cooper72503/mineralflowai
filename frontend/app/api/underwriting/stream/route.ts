@@ -42,7 +42,7 @@ import { fetchTrrcInjectionByApi, fetchTrrcInjectionByOperator } from "@/lib/und
 import { fetchTrrcInspectionsForApis }     from "@/lib/wells/trrc-inspection";
 import { fetchTrrcCompletionsForApis }     from "@/lib/wells/trrc-completions";
 import { buildDDReport, type TrrcWellProduction } from "@/lib/underwriting/report-builder";
-import { lookupTrrcLeasesByApis }           from "@/lib/wells/trrc-api";
+import { lookupTrrcLeasesByApis, TX_COUNTY_CODES } from "@/lib/wells/trrc-api";
 import { fetchTrrcProductionByLease }       from "@/lib/wells/trrc-production";
 import { fetchFinancialContext }            from "@/lib/underwriting/financial-lookup";
 import { getBenchmarkFromApi, getBenchmarkFromCounty } from "@/lib/underwriting/benchmarks";
@@ -183,6 +183,10 @@ async function runPipeline(
   const leaseName    = (body.lease_name ?? "").trim() || null;
   let county       = (body.county ?? "").trim() || null;
   const state        = (body.state ?? "").trim() || null;
+
+  // TRRC-resolved identity — captured from wellbore query, distinct from user inputs
+  let trrcResolvedOperator: string | null = null;
+  let trrcResolvedCounty:   string | null = null;
   const documents    = body.documents ?? [];
   const nriOverride  = typeof body.nri_decimal === "number" && body.nri_decimal > 0 && body.nri_decimal <= 1
     ? body.nri_decimal : null;
@@ -326,6 +330,9 @@ async function runPipeline(
 
       const entries = Array.from(map) as Array<[string, { distCode: string; leaseNo: string; operator: string }]>;
       const firstOp = entries[0]?.[1]?.operator;
+      // Capture TRRC-resolved operator independently so contradiction engine can
+      // compare it against the doc-extracted operator even after operatorName is set.
+      trrcResolvedOperator = firstOp ?? null;
       if (firstOp && !operatorName) operatorName = firstOp;
 
       const leaseList = entries.map(([, { distCode, leaseNo }]) =>
@@ -339,6 +346,32 @@ async function runPipeline(
     },
     new Map(),
   );
+
+  // Derive TRRC-resolved county from the embedded county code in the first API number.
+  // Texas 10-digit API: 42-CCC-WWWWW  (CCC = 3-digit county FIPS code)
+  // Build a reverse lookup (code → name) from the exported TX_COUNTY_CODES map.
+  if (!trrcResolvedCounty && apiNumbers.length > 0) {
+    const api10 = apiNumbers[0].replace(/\D/g, "");
+    const countyCode3 = api10.startsWith("42") && api10.length >= 10
+      ? api10.slice(2, 5)   // 10-digit form: 42-CCC-WWWWW → slice chars 2,3,4
+      : api10.length >= 8
+        ? api10.slice(0, 3) // 8-digit form:  CCC-WWWWW → slice chars 0,1,2
+        : null;
+    if (countyCode3) {
+      // Reverse the name→code map to get code→name
+      const reverseCounty = Object.fromEntries(
+        Object.entries(TX_COUNTY_CODES).map(([name, code]) => [code, name])
+      );
+      const matched = reverseCounty[countyCode3];
+      if (matched) {
+        // Capitalize first letter of each word (e.g. "midland" → "Midland")
+        trrcResolvedCounty = matched
+          .split(" ")
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ");
+      }
+    }
+  }
 
   // ── 4. Pull production history ─────────────────────────────────────────────
   let trrcWells: TrrcWellProduction[] = [];
@@ -749,6 +782,16 @@ async function runPipeline(
 
   const model = process.env.OPENAI_OCR_MODEL ?? "gpt-4o-mini";
 
+  // Derive seller-claimed monthly production from document extraction.
+  // Use the most recent production month present in seller documents (sorted
+  // descending by period) as the seller's stated current rate.
+  const sellerClaimedMonthlyBbl: number | null = (() => {
+    const months = extracted?.production_months ?? [];
+    if (months.length === 0) return null;
+    const sorted = [...months].sort((a, b) => b.period.localeCompare(a.period));
+    return sorted[0]?.oil_bbl ?? null;
+  })();
+
   const report = buildDDReport({
     input: {
       api_numbers:        apiNumbers,
@@ -760,18 +803,21 @@ async function runPipeline(
       documents,
     },
     extracted,
-    trrcWells:        trrcWells,
-    trrcViolations:   complianceResult,
-    trrcInjection:    injectionResult,
-    trrcInspections:  inspectionResult,
-    trrcCompletions:  completionResult,
-    financialContext: financialContext ?? undefined,
-    benchmark:        benchmark ?? undefined,
-    nriOverride:      nriOverride ?? undefined,
-    wiOverride:       wiOverride  ?? undefined,
-    processingTimeMs: Date.now() - t0,
-    aiModel:          model,
-    scanMode:         "full",
+    trrcWells:            trrcWells,
+    trrcViolations:       complianceResult,
+    trrcInjection:        injectionResult,
+    trrcInspections:      inspectionResult,
+    trrcCompletions:      completionResult,
+    financialContext:     financialContext ?? undefined,
+    benchmark:            benchmark ?? undefined,
+    nriOverride:          nriOverride ?? undefined,
+    wiOverride:           wiOverride  ?? undefined,
+    processingTimeMs:     Date.now() - t0,
+    aiModel:              model,
+    scanMode:             "full",
+    trrcResolvedOperator: trrcResolvedOperator,
+    trrcResolvedCounty:   trrcResolvedCounty,
+    sellerClaimedMonthlyBbl,
   });
 
   const totalMs = Date.now() - t0;

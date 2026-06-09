@@ -77,6 +77,8 @@ import type { StabilizedProductionProfile } from "./production-engine";
 import { buildBuyerQA } from "./buyer-qa-engine";
 import type { FinancialContext } from "./financial-lookup";
 import type { BasinBenchmark } from "./benchmarks";
+import { detectContradictions } from "./contradiction-engine";
+import type { Contradiction } from "./contradiction-engine";
 
 // ─── TRRC production well (from existing well lookup) ─────────────────────────
 
@@ -213,6 +215,21 @@ export type BuildReportArgs = {
   aiModel: string;
   /** "quick" = preliminary triage scan; "full" = complete pipeline (default: "quick") */
   scanMode?: import("./types").ScanMode;
+  /**
+   * Operator name as returned by the TRRC wellbore query (not from documents).
+   * Used by the contradiction engine to detect operator mismatches.
+   */
+  trrcResolvedOperator?: string | null;
+  /**
+   * County as returned by the TRRC wellbore query.
+   * Used to detect county mismatches (wrong API number entered).
+   */
+  trrcResolvedCounty?: string | null;
+  /**
+   * Seller-claimed current monthly production (BBL/mo), if explicitly stated
+   * in the uploaded documents.  Used to detect production mismatches vs. TRRC.
+   */
+  sellerClaimedMonthlyBbl?: number | null;
 };
 
 export function buildDDReport(args: BuildReportArgs): DDReport {
@@ -231,6 +248,9 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     processingTimeMs,
     aiModel,
     scanMode = "quick",
+    trrcResolvedOperator = null,
+    trrcResolvedCounty   = null,
+    sellerClaimedMonthlyBbl = null,
   } = args;
 
   // Is this a Texas well? Used for severance tax rates.
@@ -3707,6 +3727,72 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     };
   })();
 
+  // ── Cross-source contradiction detection ──────────────────────────────────
+  //
+  // Runs after all sections are built so it has access to stabilized production,
+  // resolved identifiers, and completion records.
+  //
+  // Detects: operator mismatch, lease mismatch, county mismatch, status mismatch,
+  //          production mismatch (seller claim vs. TRRC rate), completion mismatch.
+  //
+  // Critical-severity contradictions are surfaced in the risk section red_flags
+  // and cause the economics/offer range suppression flag to be set.
+
+  const trrcConsecutiveZeroAtEnd = (() => {
+    if (!prodIntel) return 0;
+    const classified = [...prodIntel.classified_months].reverse();
+    let count = 0;
+    for (const m of classified) {
+      if (m.classification === "downtime" || m.oil_bbl === 0) count++;
+      else break;
+    }
+    return count;
+  })();
+
+  const sellerClaimsWorkover =
+    (extracted?.workover_events ?? []).length > 0 ||
+    !!(extracted?.operator_notes ?? []).join(" ").match(/workover|recompletion|recomplete|re-complete|stimulat/i);
+
+  const trrcCompletionFound = (trrcCompletions ?? []).some(c => c.packet_found);
+
+  const contradictions: Contradiction[] = detectContradictions({
+    extracted,
+    trrcOperatorName:              trrcResolvedOperator,
+    trrcResolvedLeaseNo:           trrcWells[0]?.lease_number ?? null,
+    userProvidedLeaseNos:          providedLeases,
+    userProvidedApis:              providedApis,
+    trrcResolvedApis:              normalizedApis.map(n => n.api_10),
+    trrcStabilizedRateBbl:         prodIntel?.current_stabilized_bbl ?? null,
+    trrcLatestProductionMonth:     wellRows[0]?.latest_production_month ?? null,
+    trrcWellboreStatusActive:      trrcWells.length > 0 ? true : null,
+    trrcConsecutiveZeroMonthsAtEnd: trrcConsecutiveZeroAtEnd,
+    sellerClaimsWorkover,
+    trrcCompletionFound,
+    sellerClaimedMonthlyBbl,
+    openViolationCount:            openViolations.length,
+    inputCounty:                   county,
+    trrcResolvedCounty,
+  });
+
+  // Surface critical contradictions in risk red_flags (they don't duplicate
+  // existing flags since they are cross-source findings, not single-source ones)
+  const criticalContradictions = contradictions.filter(c => c.severity === "critical");
+  if (criticalContradictions.length > 0) {
+    riskSection.red_flags.push(
+      ...criticalContradictions.map(c =>
+        `⚡ CONTRADICTION [${c.id}] — ${c.field}: ${c.description.split(".")[0]}.`
+      )
+    );
+  }
+  const importantContradictions = contradictions.filter(c => c.severity === "important");
+  if (importantContradictions.length > 0) {
+    riskSection.yellow_flags.push(
+      ...importantContradictions.map(c =>
+        `⚡ CONTRADICTION [${c.id}] — ${c.field}: ${c.description.split(".")[0]}.`
+      )
+    );
+  }
+
   // ── Assemble report ───────────────────────────────────────────────────────
 
   return {
@@ -3745,6 +3831,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     data_provenance: dataProvenance,
     production_audit: productionAudit,
     offer_gate: computedOfferGate,
+    contradictions,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,
       trrc_match_tier: matchTier,

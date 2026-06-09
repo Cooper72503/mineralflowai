@@ -20,7 +20,7 @@ const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
 // Texas county name → 3-digit code embedded in API numbers (42-XXX-...).
 // These are Texas FIPS county codes. All 254 Texas counties use odd codes 001–507.
-const TX_COUNTY_CODES: Record<string, string> = {
+export const TX_COUNTY_CODES: Record<string, string> = {
   // Permian Basin (West Texas)
   andrews: "003",
   archer: "009",
