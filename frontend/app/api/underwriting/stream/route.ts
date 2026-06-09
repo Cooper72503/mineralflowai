@@ -557,12 +557,38 @@ async function runPipeline(
         }
       }
 
+      // Path C — operator-name re-query.
+      // When both the wellbore-resolved leaseMap and the explicit lease list
+      // returned no production rows, use the TRRC-resolved operator name to
+      // re-run the wellbore lookup.  This catches cases where the API number
+      // returned a leaseMap entry but that lease had no production (e.g. a
+      // recently drilled well) while a separate lease under the same operator
+      // does have history.
+      if (wells.length === 0 && trrcResolvedOperator && county) {
+        try {
+          const opMap = await withTimeout(
+            lookupTrrcLeasesByApis(county, apiNumbers),
+            20_000,
+            "TRRC production Path C (operator re-query)",
+          );
+          for (const [api, { distCode, leaseNo, operator }] of Array.from(opMap)) {
+            const key = `${distCode}:${leaseNo}`;
+            if (seenLeases.has(key)) continue;
+            seenLeases.add(key);
+            try {
+              const w = await fetchWell(api, distCode, leaseNo, operator);
+              if (w) wells.push(w);
+            } catch { /* per-well timeout */ }
+          }
+        } catch { /* Path C timeout — accept empty */ }
+      }
+
       if (wells.length === 0) {
         return {
           result: [],
-          detail: "No production records found in TRRC for any resolved lease",
+          detail: "No production records found in TRRC after exhausting all resolution strategies (leaseMap, explicit leases, operator re-query)",
           usedFallback: true,
-          fallbackReason: "No matching lease found or TRRC returned no rows — check API numbers and lease numbers",
+          fallbackReason: "No matching lease found or TRRC returned no rows — verify API numbers, lease numbers, and operator name",
         };
       }
 
@@ -599,63 +625,136 @@ async function runPipeline(
         };
       }
 
-      // Each call has its own independent 30-second timeout — a slow ICE
-      // response will not block violations or injection lookups.
+      // Each call has its own independent timeout budget — a slow ICE response
+      // will not block violations or injection lookups (Promise.all runs all
+      // three concurrently).
+      //
+      // EXHAUSTION POLICY: every lookup tries all available identifier strategies
+      // before accepting an empty result.  API-based and operator-based paths are
+      // additive (merged + deduped), not mutually exclusive.
       const [violations, injection, inspections] = await Promise.all([
 
-        // Violations — prefer API number lookup, fall back to operator+county
+        // ── Violations ────────────────────────────────────────────────────────
+        // Strategy 1: query every available API (up to 4) — different APIs on
+        //   the same lease may have separate violation records in TRRC.
+        // Strategy 2: query by operator + county — catches violations filed
+        //   against the operator that aren't linked to a specific API number.
+        // Results from both strategies are merged and deduplicated.
         (async (): Promise<typeof complianceResult> => {
-          try {
-            if (apiNumbers.length > 0) {
-              return await withTimeout(
-                fetchTrrcViolations(apiNumbers[0]),
-                30_000,
-                "TRRC violations by API",
-              );
+          type V = import("@/lib/underwriting/trrc-compliance").TrrcViolation;
+          const seen  = new Set<string>();
+          const merged: V[] = [];
+          const addAll = (rows: V[]) => {
+            for (const v of rows) {
+              const key = `${v.violation_id ?? ""}|${v.date ?? ""}|${v.type}`;
+              if (!seen.has(key)) { seen.add(key); merged.push(v); }
             }
-            if (operatorName && county) {
-              return await withTimeout(
+          };
+
+          // S1 — by API (all available, up to 4)
+          for (const api of apiNumbers.slice(0, 4)) {
+            try {
+              addAll(await withTimeout(
+                fetchTrrcViolations(api),
+                20_000,
+                `TRRC violations API ${api}`,
+              ));
+            } catch { /* per-API timeout — continue to next */ }
+          }
+
+          // S2 — by operator + county (always run, not just when S1 returns 0)
+          if (operatorName && county) {
+            try {
+              addAll(await withTimeout(
                 fetchTrrcViolationsByOperator(operatorName, county),
-                30_000,
+                20_000,
                 "TRRC violations by operator",
-              );
-            }
-          } catch { /* timeout — return empty */ }
-          return [];
+              ));
+            } catch { /* timeout — violations from S1 still used */ }
+          }
+
+          return merged;
         })(),
 
-        // Injection wells
+        // ── Injection wells ───────────────────────────────────────────────────
+        // Strategy 1: query every available API (up to 4).
+        // Strategy 2: operator + county fallback only when S1 returns nothing —
+        //   injection records are per-well and the operator scan can over-return.
         (async (): Promise<typeof injectionResult> => {
-          try {
-            if (apiNumbers.length > 0) {
-              return await withTimeout(
-                fetchTrrcInjectionByApi(apiNumbers[0]),
-                30_000,
-                "TRRC injection by API",
-              );
+          type IR = import("@/lib/underwriting/trrc-injection").TrrcInjectionRecord;
+          const seen  = new Set<string>();
+          const merged: IR[] = [];
+          const addAll = (rows: IR[]) => {
+            for (const r of rows) {
+              const key = `${r.api10}|${r.permit_number ?? ""}`;
+              if (!seen.has(key)) { seen.add(key); merged.push(r); }
             }
-            if (operatorName && county) {
-              return await withTimeout(
+          };
+
+          // S1 — by API (all available, up to 4)
+          for (const api of apiNumbers.slice(0, 4)) {
+            try {
+              addAll(await withTimeout(
+                fetchTrrcInjectionByApi(api),
+                20_000,
+                `TRRC injection API ${api}`,
+              ));
+            } catch { /* per-API timeout — continue */ }
+          }
+
+          // S2 — operator + county when S1 found nothing
+          if (merged.length === 0 && operatorName && county) {
+            try {
+              addAll(await withTimeout(
                 fetchTrrcInjectionByOperator(operatorName, county),
-                30_000,
+                20_000,
                 "TRRC injection by operator",
-              );
-            }
-          } catch { /* timeout — return empty */ }
-          return [];
+              ));
+            } catch { /* timeout */ }
+          }
+
+          return merged;
         })(),
 
-        // ICE field inspection records
+        // ── ICE field inspection records ──────────────────────────────────────
+        // fetchTrrcInspectionsForApis already iterates all provided APIs
+        // internally.  If that returns nothing and we have a TRRC-resolved
+        // operator name, retry with a single-API lookup against each API to
+        // rule out a session-init issue on the first attempt.
         (async (): Promise<typeof inspectionResult> => {
+          type IR = import("@/lib/wells/trrc-inspection").TrrcInspectionRecord;
           if (apiNumbers.length === 0) return [];
+
+          // Primary: batched call for all APIs
+          let results: IR[] = [];
           try {
-            return await withTimeout(
+            results = await withTimeout(
               fetchTrrcInspectionsForApis(apiNumbers),
               30_000,
-              "TRRC ICE inspections",
+              "TRRC ICE inspections (batch)",
             );
-          } catch { /* timeout — return empty */ }
-          return [];
+          } catch { /* timeout — try individual fallback below */ }
+
+          // Fallback: retry each API individually when batch returned nothing
+          if (results.length === 0) {
+            const { fetchTrrcInspectionsByApi } = await import("@/lib/wells/trrc-inspection");
+            const seen = new Set<string>();
+            for (const api of apiNumbers.slice(0, 4)) {
+              try {
+                const rows = await withTimeout(
+                  fetchTrrcInspectionsByApi(api),
+                  20_000,
+                  `TRRC ICE inspections API ${api}`,
+                );
+                for (const r of rows) {
+                  const key = `${r.api}|${r.inspection_date}`;
+                  if (!seen.has(key)) { seen.add(key); results.push(r); }
+                }
+              } catch { /* per-API timeout — continue */ }
+            }
+          }
+
+          return results;
         })(),
       ]);
 
@@ -694,12 +793,38 @@ async function runPipeline(
         };
       }
 
-      // 45 seconds — CMPL two-step (EWA drilling permit → CMPL W-2) can be slow
-      const results = await withTimeout(
-        fetchTrrcCompletionsForApis(apiNumbers),
-        45_000,
-        "TRRC completion / W-2 lookup",
-      );
+      // EXHAUSTION POLICY: try batched lookup first, then fall back to individual
+      // per-API lookups when the batch times out or returns nothing.  The CMPL
+      // two-step (EWA drilling permit → CMPL W-2) is slow — 45 s for the batch,
+      // 25 s per individual API on retry.
+      type CR = import("@/lib/wells/trrc-completions").TrrcCompletionRecord;
+      let results: CR[] = [];
+
+      // Pass 1 — batched (fastest when TRRC is responsive)
+      try {
+        results = await withTimeout(
+          fetchTrrcCompletionsForApis(apiNumbers),
+          45_000,
+          "TRRC completion / W-2 lookup (batch)",
+        );
+      } catch { /* batch timed out — fall through to per-API retry */ }
+
+      // Pass 2 — individual per-API retry for any API that didn't get a result
+      // in Pass 1 (covers timeouts and partial batch failures).
+      const coveredApis = new Set(results.map(r => r.api?.replace(/\D/g, "")));
+      const { fetchTrrcCompletionByApi } = await import("@/lib/wells/trrc-completions");
+      for (const api of apiNumbers.slice(0, 4)) {
+        const api10 = api.replace(/\D/g, "");
+        if (coveredApis.has(api10)) continue; // already have a result for this API
+        try {
+          const r = await withTimeout(
+            fetchTrrcCompletionByApi(api),
+            25_000,
+            `TRRC completion API ${api} (retry)`,
+          );
+          if (r) results.push(r);
+        } catch { /* per-API timeout — continue to next */ }
+      }
 
       const found    = results.filter(r => r.packet_found);
       const notFound = results.filter(r => !r.packet_found);
@@ -721,7 +846,7 @@ async function runPipeline(
 
       return {
         result: results,
-        detail: parts.length > 0 ? parts.join("; ") : "No completion records found",
+        detail: parts.length > 0 ? parts.join("; ") : "No completion records found in TRRC CMPL — request W-2 from seller",
         usedFallback: found.length === 0,
         fallbackReason: found.length === 0
           ? "W-2 not in CMPL online system — may be in RRC imaged records; request from seller"
