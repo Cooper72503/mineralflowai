@@ -23,13 +23,9 @@
  *   9  check_diligence   Missing-item tracker + risk scoring — sync
  *  10  generate_report   Final IC memo + report assembly — sync
  *
- * Budget: Vercel Pro maxDuration = 300 s (5 min)
- *   Step 2  parse_documents:  ≤ 90 s  (AI — worth waiting for identifiers)
- *   Step 3  resolve_asset:    ≤ 30 s
- *   Step 4  pull_production:  ≤ 20 s/well, ≤ 120 s total
- *   Step 5  pull_inspections: ≤ 30 s per sub-call (violations, injection, ICE)
- *   Step 6  pull_completions: ≤ 45 s
- *   Step 8  run_economics:    ≤ 25 s
+ * No per-step timeouts — every lookup runs until the upstream source responds.
+ * maxDuration = 800 s (Vercel Enterprise ceiling); pipeline completes whenever
+ * all sources have been fully exhausted.
  *   Steps 7,9,10:             < 1 s each (sync)
  *   Total ceiling:            ~240 s
  */
@@ -58,7 +54,7 @@ import type {
 
 export const runtime     = "nodejs";
 export const dynamic     = "force-dynamic";
-export const maxDuration = 300; // Vercel Pro — 5 minutes
+export const maxDuration = 800; // No artificial cap — run until complete
 
 // ── SSE helpers ───────────────────────────────────────────────────────────────
 
@@ -120,14 +116,14 @@ async function runStep<T>(
   }
 }
 
-/** Race a promise against a timeout; throws on timeout so runStep catches it */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} did not respond within ${ms / 1000}s`)), ms)
-    ),
-  ]);
+/**
+ * Pass-through — no timeout enforced on any step.
+ * The ms and label parameters are retained for documentation purposes only.
+ * Every lookup runs until the upstream source responds or the connection drops.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function withTimeout<T>(promise: Promise<T>, _ms: number, _label: string): Promise<T> {
+  return promise;
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
