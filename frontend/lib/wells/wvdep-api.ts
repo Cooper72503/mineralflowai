@@ -97,10 +97,7 @@ async function enrichWvWellsWithProduction(
       .catch(() => { /* silently skip failures */ }),
   );
 
-  await Promise.race([
-    Promise.allSettled(tasks),
-    new Promise<void>(resolve => setTimeout(resolve, 20_000)),
-  ]);
+  await Promise.allSettled(tasks);
 }
 
 export async function lookupWvdepWells(county: string): Promise<WellLookupResult> {

@@ -11,10 +11,6 @@
  *   4. Attempt TRRC injection well lookup
  *   5. Build DDReport via report-builder
  *
- * Budget: Vercel maxDuration = 60 s
- *   AI extraction:  40 s cap
- *   TRRC lookups:   18 s cap (parallel)
- *   Report build:    <1 s
  */
 
 import { NextResponse }                    from "next/server";
@@ -33,7 +29,7 @@ import type { UnderwritingInput, UnderwritingResponse } from "@/lib/underwriting
 
 export const runtime    = "nodejs";
 export const dynamic    = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<NextResponse<UnderwritingResponse>> {
   const t0 = Date.now();
@@ -66,13 +62,9 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       (!!state && /^texas$|^tx$/i.test(state.trim())) ||
       apiNumbers.some(a => a.replace(/\D/g, "").startsWith("42"));
 
-    // ── Phase 1: AI document extraction (up to 40 s) ──────────────────────
+    // ── Phase 1: AI document extraction ───────────────────────────────────
 
-    const extractionDeadline = new Promise<null>(r => setTimeout(() => r(null), 40_000));
-    const extracted = await Promise.race([
-      extractUnderwritingDataFromDocuments(documents),
-      extractionDeadline,
-    ]);
+    const extracted = await extractUnderwritingDataFromDocuments(documents);
 
     // Merge API numbers from extraction
     const allApis = [
@@ -88,9 +80,7 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
     const resolvedCounty  = county  ?? extracted?.county  ?? null;
     const resolvedOperator = operatorName ?? extracted?.operator_name ?? null;
 
-    // ── Phase 2: TRRC + compliance + injection (parallel, 18 s cap) ───────
-
-    const lookupDeadline = new Promise<null>(r => setTimeout(() => r(null), 18_000));
+    // ── Phase 2: TRRC + compliance + injection (parallel) ─────────────────
 
     // Basin benchmarks — synchronous, no network call
     const api8ForBenchmark = allApis
@@ -145,12 +135,7 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
         // Always try this first — API number carries its own county code so
         // no state/county input is needed from the user.
         if (allApis.length > 0) {
-          const leaseRace = await Promise.race([
-            lookupTrrcLeasesByApis(resolvedCounty, allApis),
-            new Promise<Map<string, { distCode: string; leaseNo: string; operator: string }>>(
-              r => setTimeout(() => r(new Map()), 14_000)
-            ),
-          ]);
+          const leaseRace = await lookupTrrcLeasesByApis(resolvedCounty, allApis);
 
           const wells: TrrcWellProduction[] = [];
           const seenLeases = new Set<string>();
@@ -210,68 +195,35 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       // TRRC compliance
       (async () => {
         if (!isTexas) return [];
-        if (allApis.length > 0) {
-          const results = await Promise.race([
-            fetchTrrcViolations(allApis[0]),
-            lookupDeadline.then(() => []),
-          ]);
-          return Array.isArray(results) ? results : [];
-        }
-        if (resolvedOperator && resolvedCounty) {
-          const results = await Promise.race([
-            fetchTrrcViolationsByOperator(resolvedOperator, resolvedCounty),
-            lookupDeadline.then(() => []),
-          ]);
-          return Array.isArray(results) ? results : [];
-        }
+        if (allApis.length > 0) return fetchTrrcViolations(allApis[0]);
+        if (resolvedOperator && resolvedCounty)
+          return fetchTrrcViolationsByOperator(resolvedOperator, resolvedCounty);
         return [];
       })(),
 
       // TRRC injection
       (async () => {
         if (!isTexas) return [];
-        if (allApis.length > 0) {
-          const results = await Promise.race([
-            fetchTrrcInjectionByApi(allApis[0]),
-            lookupDeadline.then(() => []),
-          ]);
-          return Array.isArray(results) ? results : [];
-        }
-        if (resolvedOperator && resolvedCounty) {
-          const results = await Promise.race([
-            fetchTrrcInjectionByOperator(resolvedOperator, resolvedCounty),
-            lookupDeadline.then(() => []),
-          ]);
-          return Array.isArray(results) ? results : [];
-        }
+        if (allApis.length > 0) return fetchTrrcInjectionByApi(allApis[0]);
+        if (resolvedOperator && resolvedCounty)
+          return fetchTrrcInjectionByOperator(resolvedOperator, resolvedCounty);
         return [];
       })(),
 
       // TRRC ICE inspection records (field visits, pass/fail, defect notes)
       (async () => {
         if (!isTexas || allApis.length === 0) return [];
-        const results = await Promise.race([
-          fetchTrrcInspectionsForApis(allApis),
-          lookupDeadline.then(() => []),
-        ]);
-        return Array.isArray(results) ? results : [];
+        return fetchTrrcInspectionsForApis(allApis);
       })(),
 
       // TRRC completions query (W-2 packet: formation, spud, depth, interval)
       (async () => {
         if (!isTexas || allApis.length === 0) return [];
-        const results = await Promise.race([
-          fetchTrrcCompletionsForApis(allApis),
-          lookupDeadline.then(() => []),
-        ]);
-        return Array.isArray(results) ? results : [];
+        return fetchTrrcCompletionsForApis(allApis);
       })(),
 
-      // EIA prices + EDGAR operator financials (parallel, 12 s cap)
-      Promise.race([
-        fetchFinancialContext(resolvedOperator),
-        new Promise<null>(r => setTimeout(() => r(null), 12_000)),
-      ]),
+      // EIA prices + EDGAR operator financials
+      fetchFinancialContext(resolvedOperator),
     ]);
 
     // ── Phase 3: Build report ─────────────────────────────────────────────

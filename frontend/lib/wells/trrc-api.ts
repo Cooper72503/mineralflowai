@@ -335,11 +335,7 @@ async function enrichWithProduction(
       .catch(() => { /* silently skip failures */ }),
   );
 
-  // Give production fetches up to 20 s
-  await Promise.race([
-    Promise.allSettled(tasks),
-    new Promise<void>(resolve => setTimeout(resolve, 20_000)),
-  ]);
+  await Promise.allSettled(tasks);
 }
 
 /**
