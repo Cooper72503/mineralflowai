@@ -482,7 +482,7 @@ async function runPipeline(
         operator: string | null,
       ): Promise<TrrcWellProduction | null> => {
         const res = await withTimeout(
-          fetchTrrcProductionByLease(distCode, leaseNo, 36),
+          fetchTrrcProductionByLease(distCode, leaseNo),
           20_000,
           `TRRC production Dist ${distCode} Lease ${leaseNo}`,
         );
@@ -592,7 +592,7 @@ async function runPipeline(
       if (wells.length === 0 && apiNumbers.length > 0) {
         for (const api of apiNumbers.slice(0, 4)) {
           try {
-            const result = await fetchTrrcProductionHistory(api, 36);
+            const result = await fetchTrrcProductionHistory(api);
             if (result && result.rows.length > 0) {
               const key = `${result.district_code}:${result.lease_number}`;
               if (!seenLeases.has(key)) {

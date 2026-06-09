@@ -103,7 +103,7 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
           leaseNo: string,
           operator: string | null,
         ): Promise<TrrcWellProduction | null> => {
-          const result = await fetchTrrcProductionByLease(distCode, leaseNo, 36);
+          const result = await fetchTrrcProductionByLease(distCode, leaseNo);
           if (!result || result.rows.length === 0) return null;
           const sorted = [...result.rows].sort((a, b) =>
             a.year !== b.year ? a.year - b.year : a.month - b.month

@@ -383,12 +383,59 @@ async function fetchLeaseProductionNextPage(
 
 /**
  * Safety cap: maximum production pages to fetch in a single query.
- * 10 rows/page × 36 pages = 360 rows ≈ 30 years of monthly data.
- * This prevents infinite loops on malformed TRRC pagination links while
- * still allowing full production history for long-lived conventional leases.
- * (Raised from 6 to 36 — the 50-row cap was artificially limiting 24/36-month DCA.)
+ * 10 rows/page × 60 pages = 600 rows ≈ 50 years of monthly data.
+ * Covers the full electronic record history in TRRC (records from ~1993 onward).
  */
-const MAX_PRODUCTION_PAGES = 36;
+const MAX_PRODUCTION_PAGES = 60;
+
+/**
+ * How far back to request from TRRC when fetching full production history.
+ * 480 months = 40 years — older than any electronic record in the TRRC PDQ system.
+ * Using a fixed large window guarantees we never silently truncate history.
+ */
+const FULL_HISTORY_MONTHS = 480;
+
+/**
+ * Merge an oil-report row set and a gas-report row set into a single timeline.
+ *
+ * Why both reports are needed:
+ *   Oil report  → crude oil BBL + casinghead gas MCF per month
+ *   Gas report  → gas MCF + condensate BOE per month
+ *   Dual-completion wells report to BOTH; fetching only one silently drops half the data.
+ *
+ * Merge strategy:
+ *   • Months present only in one report → use that report's row.
+ *   • Months in both reports → keep oil report's crude oil BBL (authoritative for oil);
+ *     use the higher gas_mcf from either report (gas report may have more detail).
+ */
+function mergeOilGasRows(
+  oilRows: TrrcMonthlyRow[],
+  gasRows: TrrcMonthlyRow[],
+): TrrcMonthlyRow[] {
+  const byKey = new Map<string, TrrcMonthlyRow>();
+
+  for (const r of oilRows) {
+    byKey.set(`${r.year}-${String(r.month).padStart(2, "0")}`, r);
+  }
+
+  for (const r of gasRows) {
+    const key = `${r.year}-${String(r.month).padStart(2, "0")}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, r);
+    } else {
+      // Oil report's crude oil is authoritative; use best gas from either report
+      const bestGas = Math.max(existing.gas_mcf ?? 0, r.gas_mcf ?? 0) || null;
+      if (bestGas !== (existing.gas_mcf ?? null)) {
+        byKey.set(key, { ...existing, gas_mcf: bestGas });
+      }
+    }
+  }
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month,
+  );
+}
 
 /**
  * Fetch all production rows for the given date range, following pagination.
@@ -460,7 +507,7 @@ async function getLeaseFromApiNumber(
   const body = new URLSearchParams({
     "searchArgs.apiNoPrefixArg": countyCode,
     "searchArgs.apiNoSuffixArg": wellNo,
-    "searchArgs.wellTypeArg":    "PR",   // Return production lease, not drill/completion lease
+    "searchArgs.wellTypeArg":    "",     // No filter — find oil, gas, condensate, and combo leases
     "methodToCall":              "search",
   });
 
@@ -497,16 +544,20 @@ async function getLeaseFromApiNumber(
  */
 export async function fetchTrrcProductionHistory(
   apiNumber: string,
-  monthsBack = 36,
+  monthsBack = FULL_HISTORY_MONTHS,
 ): Promise<TrrcProductionResult | null> {
   try {
-    // Step 1: establish session + resolve lease identifiers from API number
-    const [sessionCookie, lease] = await Promise.all([
+    // Init two independent sessions so oil and gas queries don't share server-side
+    // session state — TRRC's Struts app can corrupt results when two queries run
+    // against the same JSESSIONID concurrently.
+    const [oilSession, gasSession, lease] = await Promise.all([
+      initTrrcSession(),
       initTrrcSession(),
       getLeaseFromApiNumber(apiNumber),
     ]);
 
-    if (!sessionCookie || !lease) return null;
+    if (!lease) return null;
+    if (!oilSession && !gasSession) return null;
 
     const now        = new Date();
     const endYear    = now.getFullYear();
@@ -516,22 +567,25 @@ export async function fetchTrrcProductionHistory(
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
-    // Try oil first; fall back to gas (convert MCF → BOE) for gas-only leases.
-    // Use MAX_PRODUCTION_PAGES — exits early when no new rows appear.
-    let rows = await fetchAllLeaseProduction(
-      lease.distCode, lease.leaseNo, sessionCookie,
-      startMonth, startYear, endMonth, endYear,
-      "O", MAX_PRODUCTION_PAGES,
-    );
+    // Fetch oil and gas reports in parallel with independent sessions
+    const [oilRows, gasRows] = await Promise.all([
+      oilSession
+        ? fetchAllLeaseProduction(
+            lease.distCode, lease.leaseNo, oilSession,
+            startMonth, startYear, endMonth, endYear,
+            "O", MAX_PRODUCTION_PAGES,
+          )
+        : Promise.resolve([] as TrrcMonthlyRow[]),
+      gasSession
+        ? fetchAllLeaseProduction(
+            lease.distCode, lease.leaseNo, gasSession,
+            startMonth, startYear, endMonth, endYear,
+            "G", MAX_PRODUCTION_PAGES,
+          )
+        : Promise.resolve([] as TrrcMonthlyRow[]),
+    ]);
 
-    if (rows.length === 0) {
-      rows = await fetchAllLeaseProduction(
-        lease.distCode, lease.leaseNo, sessionCookie,
-        startMonth, startYear, endMonth, endYear,
-        "G", MAX_PRODUCTION_PAGES,
-      );
-    }
-
+    const rows = mergeOilGasRows(oilRows, gasRows);
     if (rows.length === 0) return null;
 
     return {
@@ -610,35 +664,45 @@ export async function fetchTrrcLatestByLease(
 export async function fetchTrrcProductionByLease(
   distCode:  string,
   leaseNo:   string,
-  monthsBack = 36,
+  monthsBack = FULL_HISTORY_MONTHS,
 ): Promise<{ rows: TrrcMonthlyRow[]; distCode: string; leaseNo: string } | null> {
-  /** Single attempt — no abort signal; run until TRRC responds */
+  const now        = new Date();
+  const endYear    = now.getFullYear();
+  const endMonth   = now.getMonth() + 1;
+  const startDate  = new Date(now);
+  startDate.setMonth(startDate.getMonth() - monthsBack);
+  const startYear  = startDate.getFullYear();
+  const startMonth = startDate.getMonth() + 1;
+
+  /** Single attempt — two independent sessions, both reports fetched in parallel */
   async function attempt(): Promise<TrrcMonthlyRow[]> {
-    const sessionCookie = await initTrrcSession();
-    if (!sessionCookie) return [];
+    // Two sessions: one for oil report, one for gas report.
+    // Using the same JSESSIONID for parallel requests can corrupt server-side state
+    // in TRRC's Struts app, returning wrong or empty rows.
+    const [oilSession, gasSession] = await Promise.all([
+      initTrrcSession(),
+      initTrrcSession(),
+    ]);
+    if (!oilSession && !gasSession) return [];
 
-    const now        = new Date();
-    const endYear    = now.getFullYear();
-    const endMonth   = now.getMonth() + 1;
-    const startDate  = new Date(now);
-    startDate.setMonth(startDate.getMonth() - monthsBack);
-    const startYear  = startDate.getFullYear();
-    const startMonth = startDate.getMonth() + 1;
+    const [oilRows, gasRows] = await Promise.all([
+      oilSession
+        ? fetchAllLeaseProduction(
+            distCode, leaseNo, oilSession,
+            startMonth, startYear, endMonth, endYear,
+            "O", MAX_PRODUCTION_PAGES,
+          )
+        : Promise.resolve([] as TrrcMonthlyRow[]),
+      gasSession
+        ? fetchAllLeaseProduction(
+            distCode, leaseNo, gasSession,
+            startMonth, startYear, endMonth, endYear,
+            "G", MAX_PRODUCTION_PAGES,
+          )
+        : Promise.resolve([] as TrrcMonthlyRow[]),
+    ]);
 
-    // Try oil first; fall back to gas for gas-only leases.
-    let rows = await fetchAllLeaseProduction(
-      distCode, leaseNo, sessionCookie,
-      startMonth, startYear, endMonth, endYear,
-      "O", MAX_PRODUCTION_PAGES,
-    );
-    if (rows.length === 0) {
-      rows = await fetchAllLeaseProduction(
-        distCode, leaseNo, sessionCookie,
-        startMonth, startYear, endMonth, endYear,
-        "G", MAX_PRODUCTION_PAGES,
-      );
-    }
-    return rows;
+    return mergeOilGasRows(oilRows, gasRows);
   }
 
   // First attempt
@@ -647,7 +711,7 @@ export async function fetchTrrcProductionByLease(
     if (rows.length > 0) return { rows, distCode, leaseNo };
   } catch { /* TRRC session error — retry below */ }
 
-  // Retry once — TRRC sessions sometimes expire mid-flight or return a redirect page.
+  // Retry once — TRRC sessions occasionally expire mid-flight or return a redirect.
   try {
     const rows = await attempt();
     if (rows.length === 0) return null;
