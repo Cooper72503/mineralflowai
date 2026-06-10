@@ -376,6 +376,7 @@ type TabId =
   | "compliance_risk"
   | "ownership_interests"
   | "swd_water"
+  | "imaged_records"
   | "documents_sources"
   | "missing_diligence"
   | "ic_memo"
@@ -396,6 +397,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "compliance_risk",     label: "Compliance & Risk",      icon: "🔒" },
   { id: "ownership_interests", label: "Ownership & Interests",  icon: "📜" },
   { id: "swd_water",           label: "SWD / Water",            icon: "💧" },
+  { id: "imaged_records",      label: "Imaged Records",         icon: "📄" },
   { id: "documents_sources",   label: "Documents & Sources",    icon: "📂" },
   { id: "missing_diligence",   label: "Missing Diligence",      icon: "⚠️" },
   { id: "ic_memo",             label: "IC Memo",                icon: "🤔" },
@@ -1001,6 +1003,105 @@ function InjectionTab({ report }: { report: DDReport }) {
       {s.notes.map((n, i) => (
         <div key={i} style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.5rem 0" }}>ℹ️ {n}</div>
       ))}
+    </>
+  );
+}
+
+// ─── Imaged Records Tab ───────────────────────────────────────────────────────
+//
+// Displays TRRC Layer 2 filed document links (W-1, W-2, G-1, P-4).
+// Each record has a direct one-click link to the TRRC PDF viewer.
+
+const DOC_TYPE_COLORS: Record<string, string> = {
+  "W-1": "#3b82f6", "W-2": "#22c55e", "G-1": "#f97316",
+  "P-4": "#ef4444", "W-10": "#a855f7", "OG-2": "#64748b", "OTHER": "#94a3b8",
+};
+
+function ImagedRecordsTab({ report }: { report: DDReport }) {
+  const s = report.imaged_records;
+  if (!s) {
+    return (
+      <Section title="TRRC Imaged Records" icon="📄">
+        <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
+          Imaged records are available on full diligence runs with an API number. Re-run in full mode to fetch W-1, W-2, G-1, and P-4 links.
+        </div>
+      </Section>
+    );
+  }
+
+  const tierColors: Record<string, string> = {
+    verified: COLORS.green, partially_verified: COLORS.yellow,
+    searched_no_records: COLORS.accent, query_failed: COLORS.red, missing: COLORS.textFaint, not_applicable: COLORS.textFaint,
+  };
+  const tierColor = tierColors[s.diligence_tier] ?? COLORS.textFaint;
+
+  return (
+    <>
+      <Section title="TRRC Imaged Records (Layer 2)" icon="📄">
+        {/* Status banner */}
+        <div style={{ display: "flex", gap: "1rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+          <span style={{ background: tierColor + "18", color: tierColor, border: `1px solid ${tierColor}40`, borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.72rem", fontWeight: 700 }}>
+            {s.diligence_tier === "verified" ? "✓ Completion report found" :
+             s.diligence_tier === "partially_verified" ? "⚠ Partial records found" :
+             s.diligence_tier === "searched_no_records" ? "Searched — no documents found" :
+             s.diligence_tier === "query_failed" ? "✗ Query failed" : "Unknown"}
+          </span>
+          {s.has_completion_report && <span style={{ color: COLORS.green, fontSize: "0.72rem", fontWeight: 600 }}>✓ W-2 Completion Report</span>}
+          {s.has_plugging_record   && <span style={{ color: COLORS.red,   fontSize: "0.72rem", fontWeight: 600 }}>⚠ P-4 Plugging Record</span>}
+        </div>
+
+        {/* Quick-access links */}
+        {(s.latest_completion_url || s.latest_plugging_url) && (
+          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+            {s.latest_completion_url && (
+              <a href={s.latest_completion_url} target="_blank" rel="noopener noreferrer"
+                style={{ background: COLORS.greenDim, color: COLORS.green, border: `1px solid ${COLORS.green}40`, borderRadius: 6, padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 700, textDecoration: "none" }}>
+                Open W-2 Completion Report →
+              </a>
+            )}
+            {s.latest_plugging_url && (
+              <a href={s.latest_plugging_url} target="_blank" rel="noopener noreferrer"
+                style={{ background: COLORS.redDim, color: COLORS.red, border: `1px solid ${COLORS.red}40`, borderRadius: 6, padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 700, textDecoration: "none" }}>
+                Open P-4 Plugging Record →
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* All records table */}
+        {s.records.length > 0 ? (
+          <DdTable
+            headers={["Document Type", "Filing Date", "Operator", "Action"]}
+            rows={s.records.map(r => [
+              <span key="type" style={{ background: (DOC_TYPE_COLORS[r.doc_type] ?? COLORS.accent) + "18", color: DOC_TYPE_COLORS[r.doc_type] ?? COLORS.accent, borderRadius: 5, padding: "0.15rem 0.45rem", fontSize: "0.72rem", fontWeight: 700 }}>
+                {r.doc_type} — {r.doc_label}
+              </span>,
+              r.filing_date ?? "—",
+              r.operator ?? "—",
+              <a key="link" href={r.viewer_url} target="_blank" rel="noopener noreferrer"
+                style={{ color: COLORS.accent, fontSize: "0.75rem", fontWeight: 600, textDecoration: "none" }}>
+                View →
+              </a>,
+            ])}
+          />
+        ) : (
+          <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
+            {s.query_succeeded
+              ? "No filed documents found for this API in the TRRC image archive. This is common for older wells predating the digital imaging system."
+              : "Document image query failed. Try opening TRRC EWA directly: https://webapps2.rrc.texas.gov/EWA/rrcdocsQueryAction.do"}
+          </div>
+        )}
+      </Section>
+
+      {/* Why this matters */}
+      <Section title="About Imaged Records (Layer 2)" icon="ℹ️">
+        <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", lineHeight: 1.7 }}>
+          <p style={{ marginBottom: "0.5rem" }}><strong style={{ color: COLORS.text }}>W-2 Completion Report</strong> — Confirms target formation, perforation intervals, total depth, and artificial lift type directly from the driller&apos;s filed report. Upgrades formation and depth data from &quot;model estimate&quot; to TRRC Layer 2 evidence.</p>
+          <p style={{ marginBottom: "0.5rem" }}><strong style={{ color: COLORS.text }}>W-1 Drilling Permit</strong> — Confirms the original permitted depth and formation. Useful for identifying permitted vs. completed depth discrepancies.</p>
+          <p style={{ marginBottom: "0.5rem" }}><strong style={{ color: COLORS.text }}>P-4 Plugging Record</strong> — If present, confirms the well has been plugged and abandoned. A P-4 for a well shown as &quot;active&quot; is a red flag requiring immediate clarification.</p>
+          <p><strong style={{ color: COLORS.text }}>G-1 Gas Well Status</strong> — Initial potential test results filed with TRRC. Useful for verifying original gas deliverability and confirming formation.</p>
+        </div>
+      </Section>
     </>
   );
 }
@@ -6002,6 +6103,20 @@ export default function UnderwritingPage() {
                 setReport(event.report);
                 setActiveTab("executive_summary");
                 setShowForm(false);
+                // Auto-save: persist the completed report immediately so it
+                // appears in deal history without requiring a manual save click.
+                setSaveStatus("saving");
+                fetch("/api/underwriting/reports", {
+                  method:  "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body:    JSON.stringify({ report: event.report }),
+                })
+                  .then(r => r.json())
+                  .then(d => {
+                    if (d.ok) { setSavedReportId(d.id); setSaveStatus("saved"); }
+                    else setSaveStatus("idle"); // silent fail — user can still save manually
+                  })
+                  .catch(() => setSaveStatus("idle"));
               } else if (event.type === "error") {
                 setError(event.message ?? "Pipeline error");
               }
@@ -6692,6 +6807,7 @@ export default function UnderwritingPage() {
               {activeTab === "compliance_risk"       && <ComplianceRiskTab      report={report} />}
               {activeTab === "ownership_interests"   && <OwnershipTab           report={report} />}
               {activeTab === "swd_water"             && <InjectionTab           report={report} />}
+              {activeTab === "imaged_records"        && <ImagedRecordsTab       report={report} />}
               {activeTab === "documents_sources"     && <DocumentsSourcesTab    report={report} />}
               {activeTab === "missing_diligence"     && <MissingItemsTab        report={report} />}
               {activeTab === "ic_memo"               && <IcMemoTab              report={report} />}

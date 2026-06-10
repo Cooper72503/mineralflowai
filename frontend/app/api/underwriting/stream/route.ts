@@ -37,6 +37,8 @@ import { fetchTrrcViolations, fetchTrrcViolationsByOperator } from "@/lib/underw
 import { fetchTrrcInjectionByApi, fetchTrrcInjectionByOperator } from "@/lib/underwriting/trrc-injection";
 import { fetchTrrcInspectionsForApis }     from "@/lib/wells/trrc-inspection";
 import { fetchTrrcCompletionsForApis }     from "@/lib/wells/trrc-completions";
+import { fetchTrrcImagedRecordsMulti }     from "@/lib/wells/trrc-imaged-records";
+import type { TrrcImagedRecordsResult }    from "@/lib/wells/trrc-imaged-records";
 import {
   fetchTrrcOperatorProfile,
   fetchTrrcAnnualProductionBestOf,
@@ -687,12 +689,17 @@ async function runPipeline(
             }
           };
 
-          // S1 — by API (all available, up to 4)
+          // Resolve distCode + leaseNo for district CSV strategy
+          const firstLease = Array.from(leaseMap.values())[0];
+          const distCodeForViolations = firstLease?.distCode ?? null;
+          const leaseNoForViolations  = firstLease?.leaseNo  ?? null;
+
+          // S1 — district CSV + per-API HTML fallback (all available, up to 4)
           for (const api of apiNumbers.slice(0, 4)) {
             try {
               addAll(await withTimeout(
-                fetchTrrcViolations(api),
-                20_000,
+                fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations),
+                30_000,
                 `TRRC violations API ${api}`,
               ));
             } catch { /* per-API timeout — continue to next */ }
@@ -833,8 +840,9 @@ async function runPipeline(
       [typeof complianceResult, typeof injectionResult, typeof inspectionResult, typeof operatorProfile, typeof annualProduction],
   );
 
-  // ── 6. Pull completion / W-2 records ───────────────────────────────────────
+  // ── 6. Pull completion / W-2 records + TRRC imaged records ──────────────
   let completionResult: import("@/lib/wells/trrc-completions").TrrcCompletionRecord[] = [];
+  let imagedRecordsResult: TrrcImagedRecordsResult[] | null = null;
 
   completionResult = await runStep(
     writer,
@@ -884,6 +892,20 @@ async function runPipeline(
         } catch { /* per-API timeout — continue to next */ }
       }
 
+      // Run imaged records query in parallel with completions pass 2 cleanup
+      // (TRRC document image search for W-1, W-2, G-1, P-4 viewer links)
+      let imagedResults: TrrcImagedRecordsResult[] | null = null;
+      if (apiNumbers.length > 0) {
+        try {
+          imagedResults = await withTimeout(
+            fetchTrrcImagedRecordsMulti(apiNumbers.slice(0, 4)),
+            30_000,
+            "TRRC imaged records (W-1/W-2/G-1/P-4)",
+          );
+        } catch { imagedResults = null; }
+      }
+      imagedRecordsResult = imagedResults;
+
       const found    = results.filter(r => r.packet_found);
       const notFound = results.filter(r => !r.packet_found);
       const parts: string[] = [];
@@ -901,6 +923,8 @@ async function runPipeline(
       if (notFound.length > 0) {
         parts.push(`${notFound.length} well(s) not found in CMPL online records`);
       }
+      const totalImagedDocs = imagedResults?.reduce((s, r) => s + r.records.length, 0) ?? 0;
+      if (totalImagedDocs > 0) parts.push(`${totalImagedDocs} imaged record(s) found`);
 
       return {
         result: results,
@@ -1003,6 +1027,7 @@ async function runPipeline(
     sellerClaimedMonthlyBbl,
     trrcOperatorProfile:   operatorProfile,
     trrcAnnualProduction:  annualProduction,
+    imagedRecords:         imagedRecordsResult,
   });
 
   const totalMs = Date.now() - t0;

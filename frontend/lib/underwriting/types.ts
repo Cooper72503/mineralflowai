@@ -802,6 +802,12 @@ export type DDReport = {
   buyer_qa: BuyerQASection;
   formation_completion: FormationCompletionSection;
   operator_profile: OperatorProfileSection;
+  /**
+   * TRRC Layer 2 imaged records — W-1, W-2, G-1, P-4 direct viewer links.
+   * Null when the query was not attempted (quick scan or no API numbers).
+   */
+  imaged_records: ImagedRecordsSection | null;
+
   /** Chronological event log — correlates workovers, violations, downtime, production changes */
   operational_timeline: OperationalTimelineEvent[];
   /** Three-tier diligence status board: VERIFIED / PARTIALLY VERIFIED / MISSING */
@@ -1023,6 +1029,39 @@ export type { BuyerQAConfidence, BuyerQA } from "./buyer-qa-engine";
 
 export type BuyerQASection = {
   items: import("./buyer-qa-engine").BuyerQA[];
+};
+
+// ─── Imaged Records ──────────────────────────────────────────────────────────
+//
+// Layer 2 evidence: TRRC filed documents (W-1, W-2, G-1, P-4, W-10).
+// Having these links upgrades key fields from "model_estimate" to "trrc_imaged"
+// evidence, which can unlock the Offer Gate.
+
+export type ImagedRecord = {
+  api10: string;
+  doc_type: string;     // "W-1" | "W-2" | "G-1" | "P-4" | "W-10" | "OG-2" | "OTHER"
+  doc_label: string;    // e.g. "Completion Report"
+  filing_date: string | null;
+  operator: string | null;
+  viewer_url: string;   // direct TRRC PDF viewer link
+  doc_id: string | null;
+};
+
+export type ImagedRecordsSection = {
+  /** Whether TRRC document query completed successfully */
+  query_succeeded: boolean;
+  /** All filed documents found, sorted by type priority then date desc */
+  records: ImagedRecord[];
+  /** W-2 (completion report) found — enables formation / perf depth from Layer 2 */
+  has_completion_report: boolean;
+  /** P-4 (plugging record) found — confirms P&A status for liability */
+  has_plugging_record: boolean;
+  /** Direct link to most recent W-2, if found */
+  latest_completion_url: string | null;
+  /** Direct link to most recent P-4, if found */
+  latest_plugging_url: string | null;
+  /** Diligence status tier for this module */
+  diligence_tier: DiligenceStatusTier;
 };
 
 // ─── Scan mode ───────────────────────────────────────────────────────────────

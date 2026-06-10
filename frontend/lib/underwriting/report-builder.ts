@@ -289,6 +289,12 @@ export type BuildReportArgs = {
   trrcOperatorProfile?: import("../wells/trrc-operator-profile").TrrcOperatorProfile | null;
   /** H-15 annual production record from TRRC */
   trrcAnnualProduction?: import("../wells/trrc-operator-profile").TrrcAnnualProduction | null;
+  /**
+   * TRRC imaged records (Layer 2) — W-1, W-2, G-1, P-4 document links.
+   * Fetched separately so the report can cite filed documents for formation,
+   * depth, and completion data.  Null when not attempted (quick scan).
+   */
+  imagedRecords?: import("../wells/trrc-imaged-records").TrrcImagedRecordsResult[] | null;
 };
 
 export function buildDDReport(args: BuildReportArgs): DDReport {
@@ -312,6 +318,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     sellerClaimedMonthlyBbl = null,
     trrcOperatorProfile  = null,
     trrcAnnualProduction = null,
+    imagedRecords        = null,
   } = args;
 
   // Is this a Texas well? Used for severance tax rates.
@@ -3371,6 +3378,84 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     });
   }
 
+  // ── Imaged Records Section ────────────────────────────────────────────────
+  //
+  // Aggregates TRRC Layer 2 filed document links (W-1, W-2, G-1, P-4) across
+  // all subject wells.  Having a W-2 completion report upgrades formation and
+  // depth data from "model_estimate" to "trrc_imaged" evidence.
+
+  let imagedRecordsSection: import("./types").ImagedRecordsSection | null = null;
+
+  if (imagedRecords && imagedRecords.length > 0) {
+    const allDocs = imagedRecords.flatMap(r => r.records.map(rec => ({
+      ...rec,
+      api10: r.api10,
+    })));
+    const anySucceeded = imagedRecords.some(r => r.query_succeeded);
+    const hasW2 = imagedRecords.some(r => r.has_completion_report);
+    const hasP4 = imagedRecords.some(r => r.has_plugging_record);
+
+    const w2Result = imagedRecords.find(r => r.latest_completion_url);
+    const p4Result = imagedRecords.find(r => r.latest_plugging_url);
+
+    let tier: import("./types").DiligenceStatusTier;
+    if (!anySucceeded) {
+      tier = "query_failed";
+    } else if (allDocs.length === 0) {
+      tier = "searched_no_records";
+    } else if (hasW2) {
+      tier = "verified";
+    } else {
+      tier = "partially_verified";
+    }
+
+    imagedRecordsSection = {
+      query_succeeded:        anySucceeded,
+      records:                allDocs,
+      has_completion_report:  hasW2,
+      has_plugging_record:    hasP4,
+      latest_completion_url:  w2Result?.latest_completion_url ?? null,
+      latest_plugging_url:    p4Result?.latest_plugging_url ?? null,
+      diligence_tier:         tier,
+    };
+
+    // Add diligence status entry for imaged records
+    diligenceStatus.push({
+      category: "TRRC Imaged Records (W-1/W-2/P-4)",
+      tier,
+      status_detail: !anySucceeded
+        ? "Document query failed — TRRC image search unavailable"
+        : allDocs.length === 0
+          ? "Query succeeded — no filed documents found for this API"
+          : `${allDocs.length} filed document(s) found: ${[hasW2 ? "W-2 Completion" : null, hasP4 ? "P-4 Plugging" : null].filter(Boolean).join(", ") || "Other"}`,
+      source_label: anySucceeded ? "TRRC EWA Document Search" : null,
+      action_required: !hasW2
+        ? "Request W-2 Completion Report directly from TRRC EWA — confirms formation, perforations, and artificial lift type"
+        : null,
+      urgency: !anySucceeded ? "important" : !hasW2 ? "important" : "informational",
+      evidence_source: tier === "verified" || tier === "partially_verified" ? "trrc_imaged" : "not_found",
+      document_requests: hasW2 ? [] : [{
+        field:         "Completion Report (W-2)",
+        document_type: "TRRC W-2 Completion Report",
+        description:   "Request W-2 completion report from TRRC EWA document search — confirms target formation, perforation intervals, total depth, and artificial lift type",
+        from:          "state_agency",
+        urgency:       "important",
+      }],
+    });
+  } else if (scanMode === "full" && providedApis.length > 0) {
+    // Full scan with APIs — imaged records were expected but not passed
+    diligenceStatus.push({
+      category: "TRRC Imaged Records (W-1/W-2/P-4)",
+      tier: "query_failed",
+      status_detail: "Imaged record query not attempted in this run",
+      source_label: null,
+      action_required: "Re-run in full mode to fetch TRRC filed documents",
+      urgency: "important",
+      evidence_source: "not_found",
+      document_requests: [],
+    });
+  }
+
   // ── Offer Gate Logic ──────────────────────────────────────────────────────
   //
   // Five gating fields: Production, LOE, Water Cut, Division Orders, Workover Risk.
@@ -3996,6 +4081,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     buyer_qa: buyerQASection,
     formation_completion: formationCompletionSection,
     operator_profile: operatorProfileSection,
+    imaged_records: imagedRecordsSection,
     operational_timeline: timelineEvents,
     diligence_status: diligenceStatus,
     underwriting_narrative: underwritingNarrative,
