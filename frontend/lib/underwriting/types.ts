@@ -845,6 +845,25 @@ export type DDReport = {
   offer_gate: OfferGate | null;
 
   /**
+   * RRC Truth-Check Engine results (Developer Handoff, June 2026).
+   *
+   * Automated pass that compares every production and compliance claim in this
+   * report against the underlying raw TRRC evidence. If verified public records
+   * contradict the report, the gate blocks specific sections.
+   *
+   * gate.block_production_claims → current rate, trend, and BOPD figures are suppressed
+   * gate.block_clean_compliance  → "no violations" badge is suppressed
+   * gate.block_economics         → NPV, offer range, payout are suppressed
+   * gate.block_offer             → offer recommendation is suppressed
+   *
+   * overall_verdict:
+   *   "pass"  — all claims verified against raw evidence
+   *   "warn"  — stale or unsupported claims (review before advancing)
+   *   "block" — contradicted or failed claims (do not publish offer)
+   */
+  truth_check: import("./truth-check-engine").TruthCheckResult | null;
+
+  /**
    * Cross-source contradictions detected by the contradiction engine.
    * Each entry represents a specific conflict between two evidence sources
    * (e.g. seller doc vs. TRRC wellbore query, seller production claim vs. TRRC rate).

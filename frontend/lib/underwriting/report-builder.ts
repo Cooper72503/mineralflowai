@@ -79,6 +79,8 @@ import type { FinancialContext } from "./financial-lookup";
 import type { BasinBenchmark } from "./benchmarks";
 import { detectContradictions } from "./contradiction-engine";
 import type { Contradiction } from "./contradiction-engine";
+import { runTruthCheck } from "./truth-check-engine";
+import type { TruthCheckResult } from "./truth-check-engine";
 
 // ─── TRRC production well (from existing well lookup) ─────────────────────────
 
@@ -3917,6 +3919,49 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     );
   }
 
+  // ── RRC Truth-Check Engine (Developer Handoff, June 2026) ────────────────
+  //
+  // Non-negotiable: the report must not assert clean compliance, active production,
+  // or positive economics until it has verified those claims against raw TRRC evidence.
+  //
+  // Runs AFTER all sections are assembled so it can compare the generated claims
+  // against the raw rows. The gate outputs are stored on the report and drive
+  // UI suppression — the truth-check does NOT mutate any section in-place.
+
+  const allRawTrrcRows = trrcWells.flatMap(w =>
+    (w.monthly_rows ?? []).map(r => ({
+      year:    r.year,
+      month:   r.month,
+      oil_bbl: r.oil_bbl,
+      gas_mcf: r.gas_mcf ?? null,
+    }))
+  );
+
+  const trrcProductionQueryAttempted =
+    isTexasState && (providedApis.length > 0 || providedLeases.length > 0);
+  const trrcViolationQueryAttempted =
+    trrcComplianceLookupAttempted;
+
+  let truthCheck: TruthCheckResult | null = null;
+  try {
+    truthCheck = runTruthCheck({
+      rawTrrcRows:                  allRawTrrcRows,
+      trrcProductionQueryAttempted,
+      rawViolations:                trrcViolations,
+      trrcViolationQueryAttempted,
+      reportProduction:             productionSection,
+      reportDca:                    dcaSection,
+      reportDowntime:               downtimeSection,
+      reportCompliance:             complianceSection,
+      reportEconomics:              economicsSection,
+      offerGate:                    computedOfferGate,
+    });
+  } catch (err) {
+    console.error("[truth-check] unexpected error:", err);
+    // Never let truth-check failure block report assembly — degrade gracefully
+    truthCheck = null;
+  }
+
   // ── Completion label (blueprint gate logic) ───────────────────────────────
   //
   // Must be derived AFTER diligenceStatus is fully populated and
@@ -3964,6 +4009,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     data_provenance: dataProvenance,
     production_audit: productionAudit,
     offer_gate: computedOfferGate,
+    truth_check: truthCheck,
     contradictions,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,

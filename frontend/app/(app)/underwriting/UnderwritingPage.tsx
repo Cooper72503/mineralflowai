@@ -381,9 +381,11 @@ type TabId =
   | "ic_memo"
   | "export_center"
   | "production_audit"
-  | "data_provenance";
+  | "data_provenance"
+  | "truth_check";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: "truth_check",         label: "Truth-Check",            icon: "⚖️" },
   { id: "data_provenance",     label: "Data Provenance",        icon: "🔍" },
   { id: "executive_summary",   label: "Executive Summary",      icon: "📋" },
   { id: "asset_overview",      label: "Asset Overview",         icon: "🪨" },
@@ -1864,6 +1866,118 @@ function RecommendationTab({ report }: { report: DDReport }) {
 // is reviewed and the production lineage is confirmed.
 
 import type { DataProvenanceReport, ProductionLineage, ProvenanceRecord } from "@/lib/underwriting/types";
+
+// ─── Truth-Check Tab ──────────────────────────────────────────────────────────
+
+function TruthCheckTab({ report }: { report: DDReport }) {
+  const tc = report.truth_check;
+
+  if (!tc) {
+    return (
+      <Section title="RRC Truth-Check Engine" icon="⚖️">
+        <div style={{ color: COLORS.textFaint, fontSize: "0.82rem", padding: "1rem 0" }}>
+          Truth-check results not available for this report. Re-run the full underwriting pipeline.
+        </div>
+      </Section>
+    );
+  }
+
+  const VERDICT_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+    true:                  { label: "TRUE",                  color: COLORS.green,    bg: "rgba(34,197,94,0.10)"  },
+    false:                 { label: "FALSE",                 color: COLORS.red,      bg: "rgba(239,68,68,0.12)"  },
+    stale:                 { label: "STALE",                 color: COLORS.yellow,   bg: "rgba(234,179,8,0.10)"  },
+    unsupported:           { label: "UNSUPPORTED",           color: "#f97316",        bg: "rgba(249,115,22,0.10)" },
+    contradicted:          { label: "CONTRADICTED",          color: COLORS.red,      bg: "rgba(239,68,68,0.15)"  },
+    query_failed:          { label: "QUERY FAILED",          color: COLORS.red,      bg: "rgba(239,68,68,0.12)"  },
+    parse_failed:          { label: "PARSE FAILED",          color: COLORS.red,      bg: "rgba(239,68,68,0.12)"  },
+    verified_records_found:{ label: "RECORDS FOUND",         color: "#f97316",        bg: "rgba(249,115,22,0.10)" },
+  };
+
+  const overallColor = tc.overall_verdict === "block" ? COLORS.red : tc.overall_verdict === "warn" ? COLORS.yellow : COLORS.green;
+
+  return (
+    <>
+      {/* Summary */}
+      <Section title="RRC Truth-Check Engine" icon="⚖️">
+        <div style={{
+          background: tc.overall_verdict === "block" ? COLORS.redDim : tc.overall_verdict === "warn" ? COLORS.yellowDim : "rgba(34,197,94,0.08)",
+          border: `1px solid ${overallColor}40`,
+          borderRadius: 8,
+          padding: "0.85rem 1.1rem",
+          marginBottom: "1rem",
+        }}>
+          <div style={{ fontWeight: 800, fontSize: "0.78rem", color: overallColor, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: 4 }}>
+            Overall: {tc.overall_verdict.toUpperCase()}
+          </div>
+          <div style={{ fontSize: "0.8rem", color: COLORS.text }}>{tc.summary}</div>
+          <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, marginTop: 4 }}>
+            Ran at {new Date(tc.ran_at).toLocaleString()} · {tc.claims.length} claim(s) evaluated
+          </div>
+        </div>
+
+        {/* Active gates */}
+        {(tc.gate.block_production_claims || tc.gate.block_clean_compliance || tc.gate.block_economics || tc.gate.block_offer) && (
+          <div style={{ marginBottom: "1rem" }}>
+            <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: "0.4rem", fontWeight: 700 }}>
+              Active Blocks
+            </div>
+            <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" as const }}>
+              {tc.gate.block_production_claims && <span style={{ fontSize: "0.68rem", fontWeight: 700, color: COLORS.red, background: COLORS.redDim, padding: "0.25rem 0.6rem", borderRadius: 4, textTransform: "uppercase" as const }}>Production Claims</span>}
+              {tc.gate.block_clean_compliance  && <span style={{ fontSize: "0.68rem", fontWeight: 700, color: COLORS.red, background: COLORS.redDim, padding: "0.25rem 0.6rem", borderRadius: 4, textTransform: "uppercase" as const }}>Clean Compliance</span>}
+              {tc.gate.block_economics         && <span style={{ fontSize: "0.68rem", fontWeight: 700, color: COLORS.red, background: COLORS.redDim, padding: "0.25rem 0.6rem", borderRadius: 4, textTransform: "uppercase" as const }}>Economics / NPV</span>}
+              {tc.gate.block_offer             && <span style={{ fontSize: "0.68rem", fontWeight: 700, color: COLORS.red, background: COLORS.redDim, padding: "0.25rem 0.6rem", borderRadius: 4, textTransform: "uppercase" as const }}>Offer Range</span>}
+            </div>
+          </div>
+        )}
+      </Section>
+
+      {/* Claim table */}
+      <Section title="Claim-by-Claim Evidence Comparison" icon="📋">
+        <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
+          {tc.claims.map((cl, i) => {
+            const cfg = VERDICT_CONFIG[cl.verdict] ?? { label: cl.verdict.toUpperCase(), color: COLORS.textFaint, bg: "transparent" };
+            return (
+              <div key={i} style={{
+                background: cl.blocking ? cfg.bg : COLORS.surfaceAlt,
+                borderRadius: 8,
+                padding: "0.75rem 1rem",
+                borderLeft: `3px solid ${cl.blocking ? cfg.color : COLORS.border}`,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem", marginBottom: "0.3rem", flexWrap: "wrap" as const }}>
+                  <span style={{ fontWeight: 700, fontSize: "0.78rem", color: COLORS.text }}>{cl.claim_label}</span>
+                  <span style={{
+                    fontSize: "0.62rem", fontWeight: 900,
+                    color: cfg.color,
+                    background: cfg.bg,
+                    padding: "0.15rem 0.5rem",
+                    borderRadius: 4,
+                    letterSpacing: "0.07em",
+                    textTransform: "uppercase" as const,
+                    flexShrink: 0,
+                    border: `1px solid ${cfg.color}60`,
+                  }}>
+                    {cfg.label}
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem 1rem", marginBottom: "0.3rem", fontSize: "0.72rem" }}>
+                  <div>
+                    <span style={{ color: COLORS.textFaint, textTransform: "uppercase" as const, fontSize: "0.6rem", letterSpacing: "0.06em" }}>Report claims: </span>
+                    <span style={{ color: COLORS.text, fontWeight: 600 }}>{cl.report_value ?? "—"}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: COLORS.textFaint, textTransform: "uppercase" as const, fontSize: "0.6rem", letterSpacing: "0.06em" }}>Evidence shows: </span>
+                    <span style={{ color: cl.blocking ? cfg.color : COLORS.text, fontWeight: 600 }}>{cl.evidence_value ?? "—"}</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, lineHeight: 1.5 }}>{cl.explanation}</div>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+    </>
+  );
+}
 
 function DataProvenanceTab({ report }: { report: DDReport }) {
   const prov = report.data_provenance;
@@ -6382,6 +6496,79 @@ export default function UnderwritingPage() {
               })()
             }
 
+            {/* ── Truth-Check Engine banner ────────────────────────────── */}
+            {report.truth_check && (() => {
+              const tc = report.truth_check;
+              const isBlock = tc.overall_verdict === "block";
+              const isWarn  = tc.overall_verdict === "warn";
+              const bg      = isBlock ? "rgba(239,68,68,0.10)" : isWarn ? "rgba(234,179,8,0.09)" : "rgba(34,197,94,0.08)";
+              const border  = isBlock ? "rgba(239,68,68,0.45)" : isWarn ? "rgba(234,179,8,0.45)" : "rgba(34,197,94,0.35)";
+              const color   = isBlock ? COLORS.red : isWarn ? COLORS.yellow : COLORS.green;
+              const icon    = isBlock ? "⛔" : isWarn ? "⚠" : "✓";
+              const label   = isBlock ? "TRUTH-CHECK BLOCKED" : isWarn ? "TRUTH-CHECK WARNINGS" : "TRUTH-CHECK PASSED";
+              return (
+                <div style={{ background: bg, border: `1.5px solid ${border}`, borderRadius: 10, padding: "0.85rem 1.25rem", marginBottom: "1rem" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "0.65rem" }}>
+                    <span style={{ fontSize: "1rem", lineHeight: 1.4 }}>{icon}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" as const, marginBottom: "0.4rem" }}>
+                        <span style={{ fontWeight: 900, fontSize: "0.72rem", color, letterSpacing: "0.1em", textTransform: "uppercase" as const }}>
+                          {label}
+                        </span>
+                        <span style={{ fontSize: "0.72rem", color: COLORS.textMuted }}>
+                          {tc.claims.length} claim{tc.claims.length !== 1 ? "s" : ""} checked against TRRC raw evidence
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "0.76rem", color: COLORS.text, marginBottom: tc.claims.filter(c => c.blocking).length > 0 ? "0.6rem" : 0 }}>
+                        {tc.summary}
+                      </div>
+                      {/* Active blocks */}
+                      {tc.claims.filter(c => c.blocking).map((cl, i) => (
+                        <div key={i} style={{
+                          marginTop: "0.3rem",
+                          background: "rgba(0,0,0,0.2)",
+                          borderRadius: 6,
+                          padding: "0.4rem 0.75rem",
+                          borderLeft: `3px solid ${color}`,
+                          fontSize: "0.72rem",
+                        }}>
+                          <span style={{ fontWeight: 800, color, textTransform: "uppercase" as const, letterSpacing: "0.06em", marginRight: 8 }}>
+                            {cl.verdict.replace(/_/g, " ")}
+                          </span>
+                          <span style={{ color: COLORS.textMuted }}>
+                            {cl.claim_label}:
+                          </span>
+                          <span style={{ color: COLORS.text, marginLeft: 6 }}>
+                            {cl.explanation}
+                          </span>
+                        </div>
+                      ))}
+                      {/* Gate summary */}
+                      {(tc.gate.block_production_claims || tc.gate.block_clean_compliance || tc.gate.block_economics) && (
+                        <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" as const }}>
+                          {tc.gate.block_production_claims && (
+                            <span style={{ fontSize: "0.62rem", fontWeight: 800, color: COLORS.red, background: COLORS.redDim, padding: "0.2rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>
+                              🚫 Production Claims Blocked
+                            </span>
+                          )}
+                          {tc.gate.block_clean_compliance && (
+                            <span style={{ fontSize: "0.62rem", fontWeight: 800, color: COLORS.red, background: COLORS.redDim, padding: "0.2rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>
+                              🚫 Clean Compliance Blocked
+                            </span>
+                          )}
+                          {tc.gate.block_economics && (
+                            <span style={{ fontSize: "0.62rem", fontWeight: 800, color: COLORS.red, background: COLORS.redDim, padding: "0.2rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>
+                              🚫 Economics / Offer Blocked
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             <ReportHeader report={report} />
             <Legend />
 
@@ -6494,6 +6681,7 @@ export default function UnderwritingPage() {
 
             {/* Tab content */}
             <div>
+              {activeTab === "truth_check"           && <TruthCheckTab          report={report} />}
               {activeTab === "data_provenance"       && <DataProvenanceTab      report={report} />}
               {activeTab === "executive_summary"    && <ExecutiveSummaryTab    report={report} />}
               {activeTab === "asset_overview"        && <AssetOverviewTab       report={report} />}
