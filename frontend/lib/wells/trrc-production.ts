@@ -256,6 +256,222 @@ function parseTrrcHtmlRows(html: string, reportType: "O" | "G" = "O"): TrrcMonth
   );
 }
 
+// ── CSV download (Strategy A — primary) ───────────────────────────────────────
+//
+// TRRC's EWA system provides a CSV action that returns the FULL production history
+// for a lease in a single structured response — no pagination, no HTML parsing.
+// This is the official download path used by authoritative diligence tools.
+//
+// Endpoint: POST /EWA/specificLeaseCSVAction.do
+//   Returns: text/csv with one header row + one row per production month.
+//
+// If this endpoint fails or returns no rows, the HTML pager path (Strategy B) is
+// used as a fallback.  Both strategies return TrrcMonthlyRow[] so the caller
+// is identical regardless of which path succeeded.
+
+/**
+ * Parse a raw CSV text body into key→value column maps, one per data row.
+ * Handles:
+ *   - Comma or pipe delimiters (auto-detected from header row)
+ *   - Double-quoted fields (standard RFC 4180)
+ *   - Trailing carriage returns (\r\n from Windows)
+ *   - Empty / whitespace-only rows
+ */
+function parseCsvText(raw: string): Record<string, string>[] {
+  const lines = raw.replace(/\r/g, "").split("\n").filter(l => l.trim());
+  if (lines.length < 2) return [];
+
+  // Auto-detect delimiter: pipe '|' is used by some TRRC exports
+  const delimiter = lines[0].includes("|") ? "|" : ",";
+
+  /** Split a single CSV line respecting double-quoted fields */
+  const splitLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = !inQuotes; }
+      } else if (ch === delimiter && !inQuotes) {
+        fields.push(cur.trim()); cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    fields.push(cur.trim());
+    return fields;
+  };
+
+  const headers = splitLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, "_"));
+
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = splitLine(lines[i]);
+    if (cells.every(c => !c)) continue; // blank row
+    const obj: Record<string, string> = {};
+    headers.forEach((h, idx) => { obj[h] = cells[idx] ?? ""; });
+    rows.push(obj);
+  }
+  return rows;
+}
+
+/**
+ * Find a column value from a parsed CSV row by trying multiple header aliases.
+ * Returns the first match, or null if none found.
+ */
+function colVal(row: Record<string, string>, aliases: string[]): string | null {
+  for (const alias of aliases) {
+    const key = Object.keys(row).find(k => k.includes(alias));
+    if (key && row[key] !== undefined) return row[key];
+  }
+  return null;
+}
+
+/**
+ * Convert a parsed CSV row set from TRRC's production export into TrrcMonthlyRow[].
+ *
+ * TRRC CSV column aliases (headers vary by EWA version):
+ *   Oil report: month, year, crude_oil_produced__bbl_, casinghead_gas_produced__mcf_
+ *   Gas report: month, year, gas_produced__mcf_, condensate_produced__bbl_
+ */
+function csvRowsToProduction(
+  parsed: Record<string, string>[],
+  reportType: "O" | "G",
+): TrrcMonthlyRow[] {
+  const seen = new Map<string, TrrcMonthlyRow>();
+
+  for (const row of parsed) {
+    // Month: might be "1", "01", "JAN", "January"
+    const rawMonth = colVal(row, ["month"]) ?? "";
+    const rawYear  = colVal(row, ["year"])  ?? "";
+
+    let month: number;
+    let year: number;
+
+    // Numeric month
+    const mNum = parseInt(rawMonth, 10);
+    if (!isNaN(mNum) && mNum >= 1 && mNum <= 12) {
+      month = mNum;
+    } else {
+      // Named month
+      const mStr = rawMonth.slice(0, 3).toLowerCase();
+      const named: Record<string, number> = {
+        jan:1, feb:2, mar:3, apr:4, may:5, jun:6,
+        jul:7, aug:8, sep:9, oct:10, nov:11, dec:12,
+      };
+      month = named[mStr] ?? 0;
+    }
+
+    year = parseInt(rawYear, 10);
+    if (!month || !year || year < 1990 || year > new Date().getFullYear() + 1) continue;
+
+    let oil_bbl: number;
+    let gas_mcf: number | null;
+
+    if (reportType === "O") {
+      const oilStr = colVal(row, ["crude_oil_produced", "crude_oil_bbl", "oil_produced", "crude_oil"]) ?? "0";
+      const gasStr = colVal(row, ["casinghead_gas_produced", "casinghead_gas_mcf", "casinghead_gas"]) ?? "0";
+      oil_bbl = parseFloat(oilStr.replace(/,/g, "")) || 0;
+      const gasParsed = parseFloat(gasStr.replace(/,/g, "")) || 0;
+      gas_mcf = gasParsed > 0 ? gasParsed : null;
+      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) continue;
+      if (gas_mcf != null && gas_mcf > MAX_PLAUSIBLE_GAS_MCF) gas_mcf = null;
+    } else {
+      // Gas report — gas MCF primary, condensate BBL secondary
+      const gasStr  = colVal(row, ["gas_produced_mcf_", "gas_produced", "gas_mcf", "gas"]) ?? "0";
+      const condStr = colVal(row, ["condensate_produced", "condensate_bbl", "condensate"]) ?? "0";
+      if (!gasStr && !condStr) continue;
+      const gasParsed  = parseFloat(gasStr.replace(/,/g, ""))  || 0;
+      const condParsed = parseFloat(condStr.replace(/,/g, "")) || 0;
+      if (gasParsed > MAX_PLAUSIBLE_GAS_MCF) continue;
+      const gas_boe = gasParsed > 0 ? Math.round(gasParsed / 6) : 0;
+      oil_bbl = gas_boe + condParsed;
+      gas_mcf = gasParsed > 0 ? gasParsed : null;
+      if (oil_bbl > MAX_PLAUSIBLE_OIL_BBL) continue;
+    }
+
+    if (oil_bbl > 0 || gas_mcf != null) {
+      const key = `${year}-${String(month).padStart(2, "0")}`;
+      const existing = seen.get(key);
+      if (!existing || oil_bbl > existing.oil_bbl) {
+        seen.set(key, { year, month, oil_bbl, gas_mcf });
+      }
+    }
+  }
+
+  return Array.from(seen.values()).sort(
+    (a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month,
+  );
+}
+
+/**
+ * Download the complete production history for a lease via the TRRC CSV endpoint.
+ *
+ * Returns all production months in a single HTTP request — no session management,
+ * no pagination, no HTML parsing.  This is the authoritative data path.
+ *
+ * Falls through to null (not throws) on any network or format error so the caller
+ * can fall back to the HTML strategy without disruption.
+ */
+async function fetchLeaseProductionCsv(
+  distCode:   string,
+  leaseNo:    string,
+  startMonth: number,
+  startYear:  number,
+  endMonth:   number,
+  endYear:    number,
+  oilOrGas:   "O" | "G",
+): Promise<TrrcMonthlyRow[] | null> {
+  try {
+    const body = new URLSearchParams({
+      "methodToCall":                  "search",
+      "searchType":                    "specificLease",
+      "searchArgs.searchType":         "specificLease",
+      "searchArgs.oilOrGasArg":        oilOrGas,
+      "searchArgs.leaseNumberArg":     leaseNo,
+      "searchArgs.districtCodeArg":    distCode,
+      "searchArgs.startMonthArg":      String(startMonth).padStart(2, "0"),
+      "searchArgs.startYearArg":       String(startYear),
+      "searchArgs.endMonthArg":        String(endMonth).padStart(2, "0"),
+      "searchArgs.endYearArg":         String(endYear),
+    });
+
+    const res = await fetch(`${BASE}/specificLeaseCSVAction.do`, {
+      method:  "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent":   "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
+        "Accept":       "text/csv,text/plain,*/*",
+      },
+      body: body.toString(),
+    });
+
+    if (!res.ok) return null;
+
+    const contentType = res.headers.get("content-type") ?? "";
+    // Accept text/csv, text/plain, or application/octet-stream (some TRRC versions)
+    // Reject HTML responses (means we landed on an error or redirect page)
+    const text = await res.text();
+    if (
+      contentType.includes("text/html") ||
+      text.trimStart().startsWith("<!") ||
+      text.trimStart().startsWith("<html")
+    ) {
+      return null; // Got HTML — CSV action not available, fall back to HTML scraper
+    }
+
+    const parsed = parseCsvText(text);
+    if (parsed.length === 0) return null;
+
+    const rows = csvRowsToProduction(parsed, oilOrGas);
+    return rows.length > 0 ? rows : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── production search ──────────────────────────────────────────────────────────
 
 /**
@@ -565,53 +781,80 @@ export async function fetchTrrcProductionHistory(
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
-    // Strategy A: self-bootstrapping direct POSTs (no pre-initialised session)
-    const [oilRows, gasRows] = await Promise.all([
-      fetchAllLeaseProduction(
-        lease.distCode, lease.leaseNo, null,
-        startMonth, startYear, endMonth, endYear,
-        "O", MAX_PRODUCTION_PAGES,
-      ),
-      fetchAllLeaseProduction(
-        lease.distCode, lease.leaseNo, null,
-        startMonth, startYear, endMonth, endYear,
-        "G", MAX_PRODUCTION_PAGES,
-      ),
-    ]);
-
-    let rows = mergeOilGasRows(oilRows, gasRows);
-
-    // Strategy B fallback: if direct POST returned nothing, try with an explicit session
-    if (rows.length === 0) {
-      const [oilSession, gasSession] = await Promise.all([
-        initTrrcSession(),
-        initTrrcSession(),
+    // ── Strategy A: Official TRRC CSV download ────────────────────────────
+    //
+    // specificLeaseCSVAction.do returns the full production history in a single
+    // structured CSV response — no pagination, no HTML parsing, no session needed.
+    {
+      const [oilCsv, gasCsv] = await Promise.all([
+        fetchLeaseProductionCsv(lease.distCode, lease.leaseNo, startMonth, startYear, endMonth, endYear, "O"),
+        fetchLeaseProductionCsv(lease.distCode, lease.leaseNo, startMonth, startYear, endMonth, endYear, "G"),
       ]);
-      const [oilRowsB, gasRowsB] = await Promise.all([
+      const rows = mergeOilGasRows(oilCsv ?? [], gasCsv ?? []);
+      if (rows.length > 0) {
+        return {
+          api_number:    apiNumber,
+          district_code: lease.distCode,
+          lease_number:  lease.leaseNo,
+          rows,
+          months_count:  rows.length,
+          source:        "trrc_actual",
+        };
+      }
+    }
+
+    // ── Strategy B: HTML scraper — self-bootstrapping POST ────────────────
+    //
+    // Used when the CSV endpoint is unavailable or returns no data.
+    {
+      const [oilRows, gasRows] = await Promise.all([
         fetchAllLeaseProduction(
-          lease.distCode, lease.leaseNo, oilSession,
+          lease.distCode, lease.leaseNo, null,
           startMonth, startYear, endMonth, endYear,
           "O", MAX_PRODUCTION_PAGES,
         ),
         fetchAllLeaseProduction(
-          lease.distCode, lease.leaseNo, gasSession,
+          lease.distCode, lease.leaseNo, null,
           startMonth, startYear, endMonth, endYear,
           "G", MAX_PRODUCTION_PAGES,
         ),
       ]);
-      rows = mergeOilGasRows(oilRowsB, gasRowsB);
+      let rows = mergeOilGasRows(oilRows, gasRows);
+
+      // ── Strategy C: HTML scraper — explicit session init ──────────────
+      if (rows.length === 0) {
+        const [oilSession, gasSession] = await Promise.all([
+          initTrrcSession(),
+          initTrrcSession(),
+        ]);
+        const [oilRowsC, gasRowsC] = await Promise.all([
+          fetchAllLeaseProduction(
+            lease.distCode, lease.leaseNo, oilSession,
+            startMonth, startYear, endMonth, endYear,
+            "O", MAX_PRODUCTION_PAGES,
+          ),
+          fetchAllLeaseProduction(
+            lease.distCode, lease.leaseNo, gasSession,
+            startMonth, startYear, endMonth, endYear,
+            "G", MAX_PRODUCTION_PAGES,
+          ),
+        ]);
+        rows = mergeOilGasRows(oilRowsC, gasRowsC);
+      }
+
+      if (rows.length === 0) return null;
+
+      return {
+        api_number:    apiNumber,
+        district_code: lease.distCode,
+        lease_number:  lease.leaseNo,
+        rows,
+        months_count:  rows.length,
+        source:        "trrc_actual",
+      };
     }
 
-    if (rows.length === 0) return null;
-
-    return {
-      api_number:    apiNumber,
-      district_code: lease.distCode,
-      lease_number:  lease.leaseNo,
-      rows,
-      months_count:  rows.length,
-      source:        "trrc_actual",
-    };
+    return null;
   } catch {
     return null;
   }
@@ -632,31 +875,57 @@ export async function fetchTrrcLatestByLease(
   leaseNo:  string,
 ): Promise<{ oil_bbl: number; month: string } | null> {
   try {
-    const sessionCookie = await initTrrcSession();
-    if (!sessionCookie) return null;
-
     const now        = new Date();
     const endYear    = now.getFullYear();
     const endMonth   = now.getMonth() + 1;
     const startDate  = new Date(now);
-    // 12-month window: TRRC data can lag 3–5 months; 6 months was too narrow
+    // 12-month window: TRRC data can lag 3–5 months
     startDate.setMonth(startDate.getMonth() - 12);
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
-    // Try oil first; fall back to gas
-    let rows = await fetchAllLeaseProduction(
-      distCode, leaseNo, sessionCookie,
-      startMonth, startYear, endMonth, endYear,
-      "O", 2,
-    );
+    let rows: TrrcMonthlyRow[] = [];
 
+    // ── Strategy A: CSV download (full history in one request) ───────────
+    {
+      const [oilCsv, gasCsv] = await Promise.all([
+        fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "O"),
+        fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "G"),
+      ]);
+      rows = mergeOilGasRows(oilCsv ?? [], gasCsv ?? []);
+    }
+
+    // ── Strategy B: HTML scraper — self-bootstrapping POST ───────────────
     if (rows.length === 0) {
-      rows = await fetchAllLeaseProduction(
-        distCode, leaseNo, sessionCookie,
-        startMonth, startYear, endMonth, endYear,
-        "G", 2,
+      const oilRows = await fetchAllLeaseProduction(
+        distCode, leaseNo, null,
+        startMonth, startYear, endMonth, endYear, "O", 2,
       );
+      if (oilRows.length > 0) {
+        rows = oilRows;
+      } else {
+        rows = await fetchAllLeaseProduction(
+          distCode, leaseNo, null,
+          startMonth, startYear, endMonth, endYear, "G", 2,
+        );
+      }
+    }
+
+    // ── Strategy C: HTML scraper — explicit session init ─────────────────
+    if (rows.length === 0) {
+      const sessionCookie = await initTrrcSession();
+      const oilRows = await fetchAllLeaseProduction(
+        distCode, leaseNo, sessionCookie,
+        startMonth, startYear, endMonth, endYear, "O", 2,
+      );
+      if (oilRows.length > 0) {
+        rows = oilRows;
+      } else {
+        rows = await fetchAllLeaseProduction(
+          distCode, leaseNo, sessionCookie,
+          startMonth, startYear, endMonth, endYear, "G", 2,
+        );
+      }
     }
 
     if (rows.length === 0) return null;
@@ -690,79 +959,70 @@ export async function fetchTrrcProductionByLease(
   const startYear  = startDate.getFullYear();
   const startMonth = startDate.getMonth() + 1;
 
-  /**
-   * Strategy A — self-bootstrapping (no pre-initialised session).
-   *
-   * POST directly to specificLeaseQueryAction.do without a Cookie header.
-   * TRRC creates a new session on the POST and returns Set-Cookie: JSESSIONID.
-   * fetchAllLeaseProduction captures that cookie from the first-page response
-   * and uses it for all subsequent pagination GETs.
-   *
-   * This is the primary path. It removes the dependency on initTrrcSession()
-   * which fails silently in Node.js/Vercel because Node.js fetch follows
-   * redirects and loses Set-Cookie headers from intermediate 302 responses.
-   */
-  async function attemptDirect(): Promise<TrrcMonthlyRow[]> {
-    const [oilRows, gasRows] = await Promise.all([
-      fetchAllLeaseProduction(
-        distCode, leaseNo, null,                            // null = no pre-session
-        startMonth, startYear, endMonth, endYear, "O", MAX_PRODUCTION_PAGES,
-      ),
-      fetchAllLeaseProduction(
-        distCode, leaseNo, null,
-        startMonth, startYear, endMonth, endYear, "G", MAX_PRODUCTION_PAGES,
-      ),
+  // ── Strategy A: Official TRRC CSV download ──────────────────────────────
+  //
+  // specificLeaseCSVAction.do returns the full production history in a single
+  // structured CSV response.  No pagination, no HTML parsing, no session needed.
+  // This is the authoritative path — the same approach used by professional
+  // diligence tools including the Manus AI reference implementation.
+  {
+    const [oilCsv, gasCsv] = await Promise.all([
+      fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "O"),
+      fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "G"),
     ]);
-    return mergeOilGasRows(oilRows, gasRows);
-  }
-
-  /**
-   * Strategy B — explicit session init first (legacy path).
-   *
-   * Only used when Strategy A returns 0 rows.  Keeps the old initTrrcSession()
-   * behaviour as a fallback in case some TRRC endpoint configurations require
-   * a pre-existing session before accepting the specificLeaseQueryAction POST.
-   */
-  async function attemptWithSession(): Promise<TrrcMonthlyRow[]> {
-    const [oilSession, gasSession] = await Promise.all([
-      initTrrcSession(),
-      initTrrcSession(),
-    ]);
-    // If both session inits fail, still try without a session cookie rather
-    // than bailing completely — the direct POST may work even without one.
-    const [oilRows, gasRows] = await Promise.all([
-      fetchAllLeaseProduction(
-        distCode, leaseNo, oilSession,
-        startMonth, startYear, endMonth, endYear, "O", MAX_PRODUCTION_PAGES,
-      ),
-      fetchAllLeaseProduction(
-        distCode, leaseNo, gasSession,
-        startMonth, startYear, endMonth, endYear, "G", MAX_PRODUCTION_PAGES,
-      ),
-    ]);
-    return mergeOilGasRows(oilRows, gasRows);
-  }
-
-  // Try Strategy A (direct, no pre-session) first
-  try {
-    const rows = await attemptDirect();
+    const rows = mergeOilGasRows(oilCsv ?? [], gasCsv ?? []);
     if (rows.length > 0) return { rows, distCode, leaseNo };
-  } catch { /* network error — fall through */ }
-
-  // Strategy B (explicit session init)
-  try {
-    const rows = await attemptWithSession();
-    if (rows.length > 0) return { rows, distCode, leaseNo };
-  } catch { /* session error — fall through */ }
-
-  // One final direct retry — TRRC can be intermittently slow to create sessions
-  try {
-    const rows = await attemptDirect();
-    if (rows.length === 0) return null;
-    return { rows, distCode, leaseNo };
-  } catch {
-    return null;
   }
+
+  // ── Strategy B: HTML scraper — self-bootstrapping POST ─────────────────
+  //
+  // Used when the CSV endpoint is unavailable or returns no data.
+  // POSTs directly to specificLeaseQueryAction.do without a pre-initialised
+  // session — TRRC creates the session on the POST and returns Set-Cookie.
+  // Follows pagination until all pages are consumed.
+  {
+    try {
+      const [oilRows, gasRows] = await Promise.all([
+        fetchAllLeaseProduction(
+          distCode, leaseNo, null,
+          startMonth, startYear, endMonth, endYear, "O", MAX_PRODUCTION_PAGES,
+        ),
+        fetchAllLeaseProduction(
+          distCode, leaseNo, null,
+          startMonth, startYear, endMonth, endYear, "G", MAX_PRODUCTION_PAGES,
+        ),
+      ]);
+      const rows = mergeOilGasRows(oilRows, gasRows);
+      if (rows.length > 0) return { rows, distCode, leaseNo };
+    } catch { /* fall through */ }
+  }
+
+  // ── Strategy C: HTML scraper — explicit session init ───────────────────
+  //
+  // Last resort: pre-initialise a TRRC session then use it for the HTML query.
+  // Some TRRC endpoint configurations require a pre-existing session.
+  {
+    try {
+      const [oilSession, gasSession] = await Promise.all([
+        initTrrcSession(),
+        initTrrcSession(),
+      ]);
+      const [oilRows, gasRows] = await Promise.all([
+        fetchAllLeaseProduction(
+          distCode, leaseNo, oilSession,
+          startMonth, startYear, endMonth, endYear, "O", MAX_PRODUCTION_PAGES,
+        ),
+        fetchAllLeaseProduction(
+          distCode, leaseNo, gasSession,
+          startMonth, startYear, endMonth, endYear, "G", MAX_PRODUCTION_PAGES,
+        ),
+      ]);
+      const rows = mergeOilGasRows(oilRows, gasRows);
+      if (rows.length > 0) return { rows, distCode, leaseNo };
+    } catch { /* fall through */ }
+  }
+
+  return null;
 }
 
 /**
