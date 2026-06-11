@@ -24,15 +24,31 @@ import type { TrrcViolation } from "./trrc-compliance";
 
 // ── District violation file URL registry ──────────────────────────────────────
 //
-// TRRC publishes district-specific violation download files via file-transfer
-// links (MFT system). These GUIDs are stable but the registry should be
-// periodically refreshed from:
-//   https://www.rrc.texas.gov/resource-center/inspections-and-violations/
+// TRRC publishes all district violation files in a SINGLE public MFT share.
+// The share contains: VIOLATIONS.txt (statewide, 67 MB) + VIOLATIONS_DIST<XX>.txt
+// for every district. Files are updated weekly.
 //
-// Confirmed as of June 2026 (cross-referenced from Manus implementation spec):
+// Share URL confirmed working as of June 2026:
+//   https://mft.rrc.texas.gov/link/c7c28dc9-b218-4f0a-8278-bf15d009def1
+//
+// Because all districts live in the same share, every district maps to the same URL.
+// The per-district file is selected by filename (VIOLATIONS_DIST8A.txt, etc.).
+const MFT_SHARE_URL = "https://mft.rrc.texas.gov/link/c7c28dc9-b218-4f0a-8278-bf15d009def1";
+
 const DISTRICT_VIOLATION_URLS: Record<string, string> = {
-  // District 8A — Permian Basin (Gaines, Yoakum, Terry, Lynn, Garza, Dawson, Borden, Scurry)
-  "8A": "https://mft.rrc.texas.gov/link/c7c28dc9-b218-4f0a-8278-bf15d009def1",
+  // All Texas RRC Oil & Gas Districts — same share, different filenames
+  "01":  MFT_SHARE_URL, "1":   MFT_SHARE_URL,
+  "02":  MFT_SHARE_URL, "2":   MFT_SHARE_URL,
+  "03":  MFT_SHARE_URL, "3":   MFT_SHARE_URL,
+  "04":  MFT_SHARE_URL, "4":   MFT_SHARE_URL,
+  "05":  MFT_SHARE_URL, "5":   MFT_SHARE_URL,
+  "06":  MFT_SHARE_URL, "6":   MFT_SHARE_URL,
+  "7B":  MFT_SHARE_URL,
+  "7C":  MFT_SHARE_URL,
+  "08":  MFT_SHARE_URL, "8":   MFT_SHARE_URL,
+  "8A":  MFT_SHARE_URL,
+  "09":  MFT_SHARE_URL, "9":   MFT_SHARE_URL,
+  "10":  MFT_SHARE_URL,
 };
 
 // Fallback: scrape the TRRC resource page to discover all district file URLs
@@ -82,15 +98,22 @@ function normalizeOp(s: string): string {
 }
 
 /**
- * Auto-detect whether a text file is pipe-delimited, comma-delimited,
- * or tab-delimited based on the first non-empty line.
+ * Auto-detect delimiter for TRRC violation files.
+ *
+ * The live VIOLATIONS_DIST*.txt files use '}' (right curly brace) as delimiter.
+ * Older or alternative exports may use '|', tab, or comma.
+ * We count occurrences of each candidate in the header row and pick the winner.
  */
 function detectDelimiter(firstLine: string): string {
+  const braces = (firstLine.match(/\}/g) ?? []).length;
   const pipes  = (firstLine.match(/\|/g) ?? []).length;
   const commas = (firstLine.match(/,/g)  ?? []).length;
   const tabs   = (firstLine.match(/\t/g) ?? []).length;
-  if (pipes > commas && pipes > tabs) return "|";
-  if (tabs  > commas)                 return "\t";
+  const max = Math.max(braces, pipes, commas, tabs);
+  if (max === 0) return ",";
+  if (braces === max) return "}";
+  if (pipes  === max) return "|";
+  if (tabs   === max) return "\t";
   return ",";
 }
 
@@ -162,17 +185,22 @@ function col(row: Record<string, string>, aliases: string[]): string {
  * Convert a parsed district file row into a TrrcViolation.
  */
 function rowToViolation(row: Record<string, string>): TrrcViolation {
-  const date        = col(row, ["violation_discovery_date", "discovery_date", "viol_date", "date"]);
+  // Column names in live VIOLATIONS_DIST*.txt (delimited by '}'):
+  //   OPERATOR_NAME, P5_OPERATOR_NO, DISTRICT, OIL_LEASE_GAS_WELL_ID,
+  //   LEASE_FAC_NAME, API_NO, COUNTY, WELL_NO, DRILLING_PERMIT_NO, FIELD_NAME,
+  //   VIOLATED_RULE, VIOLATED_RULE_DESC, MAJOR_VIOL_IND, COMPLIANT_ON_REINSP,
+  //   LAST_ENF_ACTION, LAST_ENF_ACTION_DATE, VIOLATION_DISC_DATE
+  const date        = col(row, ["violation_disc_date", "violation_discovery_date", "discovery_date", "viol_date", "disc_date", "date"]);
   const operator    = col(row, ["operator_name", "oper_name", "operator"]);
-  const leaseNo     = col(row, ["lease_no", "lease_number", "lsno"]);
-  const leaseName   = col(row, ["lease_facility_name", "lease_name", "lsnm"]);
+  const leaseNo     = col(row, ["oil_lease_gas_well_id", "lease_no", "lease_number", "lsno", "lease_gas_well_id", "well_id"]);
+  const leaseName   = col(row, ["lease_fac_name", "lease_facility_name", "lease_name", "lsnm"]);
   const apiNo       = col(row, ["api_no", "api_number", "api"]);
   const rule        = col(row, ["violated_rule", "viol_rule", "rule"]);
-  const ruleDesc    = col(row, ["violated_rule_description", "rule_description", "viol_rule_desc", "description"]);
-  const isMajor     = col(row, ["major_violation_indicator", "major_viol", "major"]);
-  const compliant   = col(row, ["compliant_on_reinspection", "compliant_reinsp", "compliant"]);
-  const enfAction   = col(row, ["last_enforcement_action", "enforcement_action", "enf_action"]);
-  const enfDate     = col(row, ["last_enforcement_action_date", "enforcement_date", "enf_date"]);
+  const ruleDesc    = col(row, ["violated_rule_desc", "violated_rule_description", "rule_description", "viol_rule_desc", "description"]);
+  const isMajor     = col(row, ["major_viol_ind", "major_violation_indicator", "major_viol", "major"]);
+  const compliant   = col(row, ["compliant_on_reinsp", "compliant_on_reinspection", "compliant_reinsp", "compliant"]);
+  const enfAction   = col(row, ["last_enf_action", "last_enforcement_action", "enforcement_action", "enf_action"]);
+  const enfDate     = col(row, ["last_enf_action_date", "last_enforcement_action_date", "enforcement_date", "enf_date"]);
 
   let status: "open" | "closed" | "unknown" = "unknown";
   const cl = compliant.toLowerCase();
@@ -208,14 +236,212 @@ function rowToViolation(row: Record<string, string>): TrrcViolation {
   };
 }
 
-// ── URL discovery ─────────────────────────────────────────────────────────────
+// ── MFT GoDrive file download ──────────────────────────────────────────────────
+//
+// TRRC publishes violation files via the Thru MFT GoDrive system. The share link
+// presents a file listing without authentication, but files are served via a
+// JavaScript-driven PrimeFaces UI — there is no direct static download URL.
+//
+// Reverse-engineered download protocol (confirmed working June 2026):
+//
+//   Step 1 — GET the share link to establish a session:
+//     GET https://mft.rrc.texas.gov/link/<guid>
+//     → Set-Cookie: JSESSIONID=XXXX
+//     → HTML with ViewState token and file table (each row has data-rk="NNNN")
+//
+//   Step 2 — Click the target file by submitting the fileList form:
+//     POST https://mft.rrc.texas.gov/webclient/godrive/PublicGoDrive.xhtml
+//     Body: fileList_SUBMIT=1
+//           fileTable_selection=<data-rk>
+//           fileTable%3A<row>%3A<compId>=fileTable%3A<row>%3A<compId>
+//           javax.faces.ViewState=<token>
+//     → 302 Location: /link/godrivedownload
+//
+//   Step 3 — Follow the redirect to stream the file:
+//     GET https://mft.rrc.texas.gov/link/godrivedownload
+//     Cookie: JSESSIONID=XXXX
+//     → 200 Content-Disposition: attachment;filename="VIOLATIONS_DIST8A.txt"
+//     → Raw violation data (3+ MB, '}'-delimited)
+
+const MFT_BASE = "https://mft.rrc.texas.gov";
+const GODRIVE_ACTION = `${MFT_BASE}/webclient/godrive/PublicGoDrive.xhtml`;
+const GODRIVE_DOWNLOAD = `${MFT_BASE}/link/godrivedownload`;
 
 /**
- * Try to scrape the TRRC resource center page to find the download URL
- * for a specific district.  The page has links like:
- *   "District 8A Violations" → https://mft.rrc.texas.gov/link/...
+ * Download a specific file from a public MFT GoDrive share link.
  *
- * This is a best-effort scrape — if it fails, fall back to the hardcoded registry.
+ * @param shareUrl  Full share URL, e.g. https://mft.rrc.texas.gov/link/<guid>
+ * @param filename  Exact filename to download, e.g. "VIOLATIONS_DIST8A.txt"
+ * @returns         Raw file text, or null on any failure
+ */
+async function downloadFileFromMftShare(
+  shareUrl: string,
+  filename: string,
+): Promise<string | null> {
+  const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+  // ── Step 1: GET share page, capture session cookie + ViewState ────────────
+  let jsessionid: string | null = null;
+  let viewState:  string | null = null;
+  let fileRowKey: string | null = null;
+  let fileCompId: string | null = null;
+  let fileRowIdx: string | null = null;
+
+  try {
+    const getRes = await fetch(shareUrl, {
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!getRes.ok) return null;
+
+    // Extract JSESSIONID from Set-Cookie
+    const setCookie = getRes.headers.get("set-cookie") ?? "";
+    const cookieMatch = setCookie.match(/JSESSIONID=([^;,\s]+)/i);
+    if (cookieMatch) jsessionid = cookieMatch[1];
+
+    const html = await getRes.text();
+
+    // Extract ViewState (same value appears in all forms on the page)
+    const vsMatch = html.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
+    if (vsMatch) viewState = vsMatch[1];
+
+    // Find the row for the target filename:
+    //   <tr data-ri="N" data-rk="MMMM" ...>
+    //   ...
+    //   onclick="PrimeFaces.addSubmitParam('fileList',{'fileTable:N:j_id_XX':'fileTable:N:j_id_XX'})">FILENAME</a>
+    //
+    // We look for the <tr> just before the filename appears
+    const filePattern = new RegExp(
+      `data-ri="(\\d+)"[^>]*data-rk="(\\d+)"[^<]*(?:<[^>]+>)*[^<]*` +
+      `addSubmitParam[^']*'fileList'[^{]*\\{([^}]+)\\}[^>]+>${filename.replace(/[.]/g, "\\.")}`,
+      "i",
+    );
+    const rowMatch = html.match(filePattern);
+    if (rowMatch) {
+      fileRowIdx = rowMatch[1];
+      fileRowKey = rowMatch[2];
+      // Parse the component ID from {'fileTable:N:j_id_XX':'fileTable:N:j_id_XX'}
+      const compMatch = rowMatch[3].match(/'(fileTable:[^']+)'/);
+      if (compMatch) fileCompId = compMatch[1];
+    }
+
+    // Fallback: scan the table for the filename text and extract row info
+    if (!fileRowKey) {
+      const lines = html.split("\n");
+      for (const line of lines) {
+        if (!line.includes(filename)) continue;
+        // Look for data-rk in this region of the HTML
+        const rkMatch = line.match(/data-rk="(\d+)"/);
+        const riMatch = line.match(/data-ri="(\d+)"/);
+        const cpMatch = line.match(/addSubmitParam[^']*'fileList'[^{]*\{'(fileTable:[^']+)'/);
+        if (rkMatch && riMatch && cpMatch) {
+          fileRowKey = rkMatch[1];
+          fileRowIdx = riMatch[1];
+          fileCompId = cpMatch[1];
+          break;
+        }
+      }
+    }
+
+    // Second fallback: search wider context around filename
+    if (!fileRowKey) {
+      const idx = html.indexOf(filename);
+      if (idx > 0) {
+        const region = html.slice(Math.max(0, idx - 800), idx + 200);
+        const rkMatch  = region.match(/data-rk="(\d+)"/);
+        const riMatch  = region.match(/data-ri="(\d+)"/);
+        const cpMatch  = region.match(/'(fileTable:\d+:[^']+)'/);
+        if (rkMatch && riMatch && cpMatch) {
+          fileRowKey = rkMatch[1];
+          fileRowIdx = riMatch[1];
+          fileCompId = cpMatch[1];
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  // fileCompId is required; fileRowKey is optional (component ID alone is sufficient)
+  if (!jsessionid || !viewState || !fileCompId) return null;
+
+  // ── Step 2: Submit fileList form to "click" the file ─────────────────────
+  // This tells the server which file to prepare for download.
+  // Server responds with 302 → /link/godrivedownload
+  const cookie = `JSESSIONID=${jsessionid}`;
+  const body = new URLSearchParams({
+    "fileList_SUBMIT":       "1",
+    "javax.faces.ViewState": viewState,
+  });
+  // fileTable_selection (row key) is best-effort — the component ID is authoritative
+  if (fileRowKey) body.append("fileTable_selection", fileRowKey);
+  // Component ID param (colons in key name, not URL-encoded)
+  body.append(fileCompId, fileCompId);
+
+  try {
+    const clickRes = await fetch(GODRIVE_ACTION, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent":   UA,
+        "Cookie":       cookie,
+        "Referer":      shareUrl,
+        "Accept":       "text/html,*/*",
+      },
+      body: body.toString(),
+      redirect: "manual",   // capture the 302, don't follow it automatically
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    // Expect 302 to /link/godrivedownload
+    if (clickRes.status !== 302) return null;
+    const location = clickRes.headers.get("location");
+    if (!location || !location.includes("godrivedownload")) return null;
+  } catch {
+    return null;
+  }
+
+  // ── Step 3: Follow redirect to download the file ──────────────────────────
+  try {
+    const dlRes = await fetch(GODRIVE_DOWNLOAD, {
+      headers: {
+        "User-Agent": UA,
+        "Cookie":     cookie,
+        "Referer":    GODRIVE_ACTION,
+        "Accept":     "text/plain,application/octet-stream,*/*",
+      },
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!dlRes.ok) return null;
+    const ct = dlRes.headers.get("content-type") ?? "";
+    if (ct.includes("text/html")) return null; // got a login/error page
+
+    return await dlRes.text();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Map a normalized district code to the filename used in the MFT share.
+ * TRRC file naming convention: VIOLATIONS_DIST<code>.txt
+ * Special cases: single-digit districts are zero-padded (01–10); alpha suffixes preserved.
+ */
+function districtToFilename(districtCode: string): string {
+  const code = districtCode.toUpperCase().trim();
+  // Single-digit numeric → zero-pad (e.g. "1" → "01", "8" → "08")
+  if (/^\d$/.test(code)) return `VIOLATIONS_DIST0${code}.txt`;
+  // District 7B, 7C, 8A etc. → VIOLATIONS_DIST7B.txt etc.
+  return `VIOLATIONS_DIST${code}.txt`;
+}
+
+/**
+ * Try to scrape the TRRC resource center page to discover the share URL for a district.
+ * Falls back to the hardcoded registry.
  */
 async function scrapeDistrictUrl(districtCode: string): Promise<string | null> {
   try {
@@ -225,9 +451,6 @@ async function scrapeDistrictUrl(districtCode: string): Promise<string | null> {
     });
     if (!res.ok) return null;
     const html = await res.text();
-
-    // Look for href containing mft.rrc.texas.gov near district label
-    // e.g. "District 8A" ... href="https://mft.rrc.texas.gov/link/..."
     const distLabel = districtCode.replace(/\s+/g, "\\s*");
     const re = new RegExp(
       `District\\s*${distLabel}[^<]{0,200}href=["'](https://mft\\.rrc\\.texas\\.gov/link/[^"']+)["']|href=["'](https://mft\\.rrc\\.texas\\.gov/link/[^"']+)["'][^<]{0,200}District\\s*${distLabel}`,
@@ -241,11 +464,10 @@ async function scrapeDistrictUrl(districtCode: string): Promise<string | null> {
 }
 
 /**
- * Resolve the download URL for a given district code.
- * Priority: hardcoded registry → live scrape of TRRC resource page.
+ * Resolve the MFT share URL for a given district code.
+ * Priority: hardcoded registry → live scrape.
  */
-async function resolveDistrictUrl(districtCode: string): Promise<string | null> {
-  // Normalize district code (e.g. "8a" → "8A")
+async function resolveDistrictShareUrl(districtCode: string): Promise<string | null> {
   const normalized = districtCode.toUpperCase().trim();
   if (DISTRICT_VIOLATION_URLS[normalized]) return DISTRICT_VIOLATION_URLS[normalized];
   return scrapeDistrictUrl(normalized);
@@ -275,13 +497,13 @@ export async function fetchDistrictViolations(
   const timestamp = new Date().toISOString();
   const normalizedDist = districtCode.toUpperCase().trim();
 
-  // ── 1. Resolve URL ────────────────────────────────────────────────────────
-  let sourceUrl: string | null = null;
+  // ── 1. Resolve the MFT share URL for this district ────────────────────────
+  let shareUrl: string | null = null;
   try {
-    sourceUrl = await resolveDistrictUrl(normalizedDist);
+    shareUrl = await resolveDistrictShareUrl(normalizedDist);
   } catch { /* fall through */ }
 
-  if (!sourceUrl) {
+  if (!shareUrl) {
     return {
       status: "no_url_for_district",
       district: normalizedDist,
@@ -291,60 +513,25 @@ export async function fetchDistrictViolations(
       matching_violations: [],
       match_count: 0,
       confirmed_clean: false,
-      evidence_note: `No district violation file URL found for District ${normalizedDist}. Compliance status UNVERIFIED — do not claim clean compliance.`,
+      evidence_note: `No district violation file share URL found for District ${normalizedDist}. Compliance status UNVERIFIED.`,
       query_timestamp: timestamp,
     };
   }
 
-  // ── 2. Download file ──────────────────────────────────────────────────────
-  let rawText: string;
+  // ── 2. Download the district-specific violation file via MFT GoDrive ──────
+  //
+  // The MFT share contains files named VIOLATIONS_DIST<code>.txt.
+  // We use the 3-step protocol: GET share → POST fileList form → GET download.
+  // This is the same flow a browser uses when clicking the file name.
+  const targetFilename = districtToFilename(normalizedDist);
+  const sourceUrl = shareUrl; // for reporting
+
+  let rawText: string | null = null;
   try {
-    const res = await fetch(sourceUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
-        "Accept": "text/plain,text/csv,application/octet-stream,*/*",
-      },
-      signal: AbortSignal.timeout(45_000),
-    });
+    rawText = await downloadFileFromMftShare(shareUrl, targetFilename);
+  } catch { /* fall through */ }
 
-    if (!res.ok) {
-      return {
-        status: "download_failed",
-        district: normalizedDist,
-        source_url: sourceUrl,
-        raw_sha256: null,
-        total_rows_in_file: 0,
-        matching_violations: [],
-        match_count: 0,
-        confirmed_clean: false,
-        evidence_note: `District ${normalizedDist} violation file returned HTTP ${res.status}. Download failed — compliance UNVERIFIED. Do not claim clean compliance based on a failed download.`,
-        query_timestamp: timestamp,
-      };
-    }
-
-    const contentType = res.headers.get("content-type") ?? "";
-    rawText = await res.text();
-
-    // If we got back HTML (error page), treat as download failure
-    if (
-      contentType.includes("text/html") ||
-      rawText.trimStart().startsWith("<!") ||
-      rawText.trimStart().startsWith("<html")
-    ) {
-      return {
-        status: "download_failed",
-        district: normalizedDist,
-        source_url: sourceUrl,
-        raw_sha256: null,
-        total_rows_in_file: 0,
-        matching_violations: [],
-        match_count: 0,
-        confirmed_clean: false,
-        evidence_note: `District ${normalizedDist} violation file URL returned HTML (error page or redirect). Compliance UNVERIFIED.`,
-        query_timestamp: timestamp,
-      };
-    }
-  } catch {
+  if (!rawText) {
     return {
       status: "download_failed",
       district: normalizedDist,
@@ -354,7 +541,24 @@ export async function fetchDistrictViolations(
       matching_violations: [],
       match_count: 0,
       confirmed_clean: false,
-      evidence_note: `District ${normalizedDist} violation file download failed (network error). Compliance UNVERIFIED — do not claim clean compliance.`,
+      evidence_note: `District ${normalizedDist} violation file (${targetFilename}) download failed. Compliance UNVERIFIED — cannot claim clean compliance.`,
+      query_timestamp: timestamp,
+    };
+  }
+
+  // Guard: reject HTML responses (login page / error page)
+  const trimmed = rawText.trimStart();
+  if (trimmed.startsWith("<!") || trimmed.startsWith("<html") || trimmed.startsWith("<?xml")) {
+    return {
+      status: "download_failed",
+      district: normalizedDist,
+      source_url: sourceUrl,
+      raw_sha256: null,
+      total_rows_in_file: 0,
+      matching_violations: [],
+      match_count: 0,
+      confirmed_clean: false,
+      evidence_note: `District ${normalizedDist} violation file returned HTML instead of data. Compliance UNVERIFIED.`,
       query_timestamp: timestamp,
     };
   }
@@ -409,7 +613,7 @@ export async function fetchDistrictViolations(
   const matching: TrrcViolation[] = [];
 
   for (const row of parsed.rows) {
-    const rowLeaseNo  = col(row, ["lease_no", "lease_number", "lsno"]).replace(/\s/g, "");
+    const rowLeaseNo  = col(row, ["oil_lease_gas_well_id", "lease_no", "lease_number", "lsno", "lease_gas_well_id", "well_id"]).replace(/\s/g, "");
     const rowApiNo    = apiDigits(col(row, ["api_no", "api_number", "api"]));
     const rowOpName   = normalizeOp(col(row, ["operator_name", "oper_name", "operator"]));
 
