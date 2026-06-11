@@ -115,7 +115,7 @@ export type WellProductionRow = {
   cum_oil_bbl: DataPoint<number>;
   formation: string | null;
   perforation_depth_ft: DataPoint<number>;
-  /** Raw monthly history (up to 36 months) for charts and detailed analysis */
+  /** Full monthly production history (all nonzero months from RRC CSV — up to 40 years / 480 months) */
   monthly_history: { period: string; oil_bbl: number; gas_mcf: number; water_bbl: number | null }[];
 };
 

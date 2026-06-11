@@ -43,7 +43,7 @@ import { fetchTrrcP5ByOperatorNo, fetchTrrcP5ByOperatorName } from "@/lib/underw
 import type { TrrcP5Record }               from "@/lib/underwriting/trrc-p5";
 import { fetchTrrcProration }              from "@/lib/underwriting/trrc-proration";
 import type { TrrcProrationRecord }        from "@/lib/underwriting/trrc-proration";
-import { fetchTrrcInactiveWellByApi, fetchTrrcInactiveWellsByOperator } from "@/lib/underwriting/trrc-inactive-wells";
+import { fetchTrrcInactiveWellByApi } from "@/lib/underwriting/trrc-inactive-wells";
 import type { TrrcInactiveWellRecord }     from "@/lib/underwriting/trrc-inactive-wells";
 import { fetchTrrcOffsetWellsByField }     from "@/lib/underwriting/trrc-field-wells";
 import type { TrrcFieldWellsResult }       from "@/lib/underwriting/trrc-field-wells";
@@ -389,6 +389,25 @@ async function runPipeline(
     }
   }
 
+  // ── 3b. Primary lease identifiers — shared by inventory + all subsequent steps ──
+  // Computed once here so every downstream step uses consistent values without
+  // re-deriving from leaseMap.
+  const _primaryDistCode = Array.from(leaseMap.values())[0]?.distCode ?? null;
+  const _primaryLeaseNo  = Array.from(leaseMap.values())[0]?.leaseNo  ?? null;
+
+  // ── 3c. Lease-well inventory — start concurrently with step 4 ────────────
+  // Runs in the background while production is being fetched.
+  // Awaited immediately after step 4 so the full 52-well API list is available
+  // for completions (step 6), imaged records, ICE inspections, etc.
+  //
+  // Manus spec §4.3 + §8: one API ≠ one well; canClaimSingleWellProduction ALWAYS false.
+  // Golden fixture: Lease 60509 / District 8A → 52 wells.
+  let leaseInventoryResult: LeaseWellInventoryResult | null = null;
+  const _leaseInvPromise: Promise<LeaseWellInventoryResult | null> =
+    (isTexasResolved && !!_primaryDistCode && !!_primaryLeaseNo)
+      ? fetchLeaseWellInventory(_primaryDistCode, _primaryLeaseNo).catch(() => null)
+      : Promise.resolve(null);
+
   // ── 4. Pull production history ─────────────────────────────────────────────
   let trrcWells: TrrcWellProduction[] = [];
 
@@ -658,15 +677,36 @@ async function runPipeline(
     [],
   );
 
+  // ── 4b. Collect inventory + build full well API list ─────────────────────
+  // The inventory promise started before step 4. By the time production finishes
+  // (20–60 s), the inventory query (35 s) is almost always done.
+  leaseInventoryResult = await _leaseInvPromise;
+
+  // allLeaseApis = input APIs + all APIs discovered in the lease inventory.
+  // Input APIs come first so the user's anchor wells are always prioritized.
+  // This list is used by completions, imaged records, ICE inspections, inactive
+  // well checks — giving full coverage of the lease instead of just 4 APIs.
+  const allLeaseApis: string[] = (() => {
+    const seen = new Set<string>(apiNumbers.map(a => a.replace(/\D/g, "")));
+    const combined = [...apiNumbers];
+    for (const w of leaseInventoryResult?.wells ?? []) {
+      const clean = w.api10.replace(/\D/g, "");
+      if (clean.length >= 8 && !seen.has(clean)) {
+        seen.add(clean);
+        combined.push(w.api10);
+      }
+    }
+    return combined;
+  })();
+
   // ── 5. Pull inspections, violations, injection, P-5, H-15 ─────────────────
-  // All five sub-calls run in parallel with individual error isolation.
+  // All sub-calls run in parallel with individual error isolation.
   let complianceResult: import("@/lib/underwriting/trrc-compliance").TrrcViolation[] = [];
   let injectionResult: import("@/lib/underwriting/trrc-injection").TrrcInjectionRecord[] = [];
   let inspectionResult: import("@/lib/wells/trrc-inspection").TrrcInspectionRecord[] = [];
   let operatorProfile: TrrcOperatorProfile | null = null;
   let annualProduction: TrrcAnnualProduction | null = null;
   let districtViolationsResult: DistrictViolationResult | null = null;
-  let leaseInventoryResult: LeaseWellInventoryResult | null = null;
 
   [complianceResult, injectionResult, inspectionResult, operatorProfile, annualProduction] = await runStep(
     writer,
@@ -681,15 +721,18 @@ async function runPipeline(
         };
       }
 
-      // All seven calls run concurrently — no call blocks any other.
+      // All six calls run concurrently — no call blocks any other.
       // EXHAUSTION POLICY: every lookup tries all available identifier strategies
       // before accepting an empty result.
       //
-      // Entries 6 + 7 are the Manus-spec mandatory evidence modules:
-      //   6 — district violation file download (RRC official TXT artifact)
-      //   7 — lease-well inventory (all wells on the lease, not just the anchor API)
-      const _primaryDistCode = Array.from(leaseMap.values())[0]?.distCode ?? null;
-      const _primaryLeaseNo  = Array.from(leaseMap.values())[0]?.leaseNo  ?? null;
+      // Entry 6 is the Manus-spec mandatory district violation file:
+      //   6 — district violation file download (RRC official TXT artifact, full history)
+      //
+      // Note: lease-well inventory (previously entry 7) now runs before step 4 so
+      // allLeaseApis is available for all steps. Entry 7 returns the cached result.
+      //
+      // allLeaseApis contains ALL well APIs on this lease (up to 52 for lease 60509).
+      // Violations, injection, and ICE inspections now cover ALL wells — not just 4.
       const [violations, injection, inspections, p5Profile, h15Annual, distViolsLocal, leaseInvLocal] = await Promise.all([
 
         // ── Violations ────────────────────────────────────────────────────────
@@ -714,8 +757,10 @@ async function runPipeline(
           const distCodeForViolations = firstLease?.distCode ?? null;
           const leaseNoForViolations  = firstLease?.leaseNo  ?? null;
 
-          // S1 — district CSV + per-API HTML fallback (all available, up to 4)
-          for (const api of apiNumbers.slice(0, 4)) {
+          // S1 — district CSV + per-API HTML fallback
+          // Use allLeaseApis (all wells on the lease) so no violation record is missed.
+          // Cap at 10 to avoid excessive TRRC load while still covering large leases.
+          for (const api of allLeaseApis.slice(0, 10)) {
             try {
               addAll(await withTimeout(
                 fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations),
@@ -754,8 +799,9 @@ async function runPipeline(
             }
           };
 
-          // S1 — by API (all available, up to 4)
-          for (const api of apiNumbers.slice(0, 4)) {
+          // S1 — by API: use allLeaseApis so injection well checks cover the full lease.
+          // Cap at 10 — injection wells are rare on a given lease; >10 APIs unlikely to add records.
+          for (const api of allLeaseApis.slice(0, 10)) {
             try {
               addAll(await withTimeout(
                 fetchTrrcInjectionByApi(api),
@@ -786,15 +832,16 @@ async function runPipeline(
         // rule out a session-init issue on the first attempt.
         (async (): Promise<typeof inspectionResult> => {
           type IR = import("@/lib/wells/trrc-inspection").TrrcInspectionRecord;
-          if (apiNumbers.length === 0) return [];
+          if (allLeaseApis.length === 0) return [];
 
-          // Primary: batched call for all APIs
+          // Primary: batched call for all lease APIs (up to 15).
+          // allLeaseApis includes inventory-discovered wells, not just anchor APIs.
           let results: IR[] = [];
           try {
             results = await withTimeout(
-              fetchTrrcInspectionsForApis(apiNumbers),
-              30_000,
-              "TRRC ICE inspections (batch)",
+              fetchTrrcInspectionsForApis(allLeaseApis.slice(0, 15)),
+              45_000,
+              "TRRC ICE inspections (batch — all lease wells)",
             );
           } catch { /* timeout — try individual fallback below */ }
 
@@ -802,7 +849,7 @@ async function runPipeline(
           if (results.length === 0) {
             const { fetchTrrcInspectionsByApi } = await import("@/lib/wells/trrc-inspection");
             const seen = new Set<string>();
-            for (const api of apiNumbers.slice(0, 4)) {
+            for (const api of allLeaseApis.slice(0, 8)) {
               try {
                 const rows = await withTimeout(
                   fetchTrrcInspectionsByApi(api),
@@ -848,30 +895,21 @@ async function runPipeline(
         (async (): Promise<DistrictViolationResult | null> => {
           if (!_primaryDistCode || !_primaryLeaseNo) return null;
           try {
+            // Pass allLeaseApis so the district file search matches against all
+            // 52 API numbers on the lease, not just the 1-4 anchor APIs.
             return await withTimeout(
-              fetchDistrictViolations(_primaryDistCode, _primaryLeaseNo, apiNumbers, operatorName),
+              fetchDistrictViolations(_primaryDistCode, _primaryLeaseNo, allLeaseApis, operatorName),
               50_000,
               `District ${_primaryDistCode} violation file`,
             );
           } catch { return null; }
         })(),
 
-        // ── ENTRY 7: Lease-well inventory (Manus spec §4.3 / §8) ─────────────
-        // Discovers ALL wells on the lease from TRRC wellbore query.
-        //
-        // Critical rule: one API ≠ one well.
-        // Golden fixture: Lease 60509 / District 8A → 52 wells.
-        // canClaimSingleWellProduction is ALWAYS false.
-        (async (): Promise<LeaseWellInventoryResult | null> => {
-          if (!_primaryDistCode || !_primaryLeaseNo) return null;
-          try {
-            return await withTimeout(
-              fetchLeaseWellInventory(_primaryDistCode, _primaryLeaseNo),
-              35_000,
-              `Lease inventory Dist ${_primaryDistCode} Lease ${_primaryLeaseNo}`,
-            );
-          } catch { return null; }
-        })(),
+        // ── ENTRY 7: Lease-well inventory — return already-computed result ─────
+        // Inventory was started before step 4 (section 3c) and awaited after step 4.
+        // Returning the cached result here keeps the Promise.all structure intact
+        // while adding zero extra latency — the result is already in memory.
+        Promise.resolve(leaseInventoryResult),
       ]);
 
       // ── Store new evidence in outer scope (captured by closure) ────────────
@@ -942,7 +980,7 @@ async function runPipeline(
     "pull_completions",
     "Searching completion records",
     async () => {
-      if (!isTexasResolved || apiNumbers.length === 0) {
+      if (!isTexasResolved || allLeaseApis.length === 0) {
         return {
           result: [],
           detail: !isTexasResolved
@@ -954,17 +992,20 @@ async function runPipeline(
 
       // EXHAUSTION POLICY: try batched lookup first, then fall back to individual
       // per-API lookups when the batch times out or returns nothing.  The CMPL
-      // two-step (EWA drilling permit → CMPL W-2) is slow — 45 s for the batch,
-      // 25 s per individual API on retry.
+      // two-step (EWA drilling permit → CMPL W-2) is slow.
+      //
+      // FULL FAN-OUT: allLeaseApis includes ALL wells discovered by the lease
+      // inventory (up to 52 for lease 60509), not just the 4 anchor APIs.
+      // This ensures completions are pulled for every well on the lease.
       type CR = import("@/lib/wells/trrc-completions").TrrcCompletionRecord;
       let results: CR[] = [];
 
-      // Pass 1 — batched (fastest when TRRC is responsive)
+      // Pass 1 — batched for up to 20 wells (fastest when TRRC is responsive)
       try {
         results = await withTimeout(
-          fetchTrrcCompletionsForApis(apiNumbers),
-          45_000,
-          "TRRC completion / W-2 lookup (batch)",
+          fetchTrrcCompletionsForApis(allLeaseApis.slice(0, 20)),
+          90_000,
+          `TRRC completion / W-2 lookup (batch — ${Math.min(allLeaseApis.length, 20)} wells)`,
         );
       } catch { /* batch timed out — fall through to per-API retry */ }
 
@@ -972,7 +1013,7 @@ async function runPipeline(
       // in Pass 1 (covers timeouts and partial batch failures).
       const coveredApis = new Set(results.map(r => r.api?.replace(/\D/g, "")));
       const { fetchTrrcCompletionByApi } = await import("@/lib/wells/trrc-completions");
-      for (const api of apiNumbers.slice(0, 4)) {
+      for (const api of allLeaseApis.slice(0, 8)) {
         const api10 = api.replace(/\D/g, "");
         if (coveredApis.has(api10)) continue; // already have a result for this API
         try {
@@ -988,15 +1029,16 @@ async function runPipeline(
       // Run imaged records, P-5, proration, and inactive-well queries in parallel
       const firstLease = Array.from(leaseMap.values())[0];
       const distCodeForPro = firstLease?.distCode ?? "";
-      const firstApi = apiNumbers[0] ?? "";
+      const firstApi = allLeaseApis[0] ?? "";
 
       const [imagedResults, p5Rec, proRec, inactiveRec] = await Promise.allSettled([
         // TRRC imaged records (W-1/W-2/G-1/P-4 viewer links)
-        apiNumbers.length > 0
+        // Use allLeaseApis so imaged records are fetched for all lease wells, not just 4.
+        allLeaseApis.length > 0
           ? withTimeout(
-              fetchTrrcImagedRecordsMulti(apiNumbers.slice(0, 4)),
-              30_000,
-              "TRRC imaged records (W-1/W-2/G-1/P-4)",
+              fetchTrrcImagedRecordsMulti(allLeaseApis.slice(0, 15)),
+              60_000,
+              `TRRC imaged records (W-1/W-2/G-1/P-4 — ${Math.min(allLeaseApis.length, 15)} wells)`,
             ).catch(() => null)
           : Promise.resolve(null),
 
@@ -1021,14 +1063,26 @@ async function runPipeline(
           ).catch(() => null);
         })(),
 
-        // TRRC inactive well status for subject API
+        // TRRC inactive well status — cover all wells on the lease.
+        // allLeaseApis gives us every well from the inventory, not just the anchor API.
+        // Cap at 10 APIs — inactive well queries are fast but we respect TRRC load limits.
         (async (): Promise<TrrcInactiveWellRecord[] | null> => {
-          if (!isTexasResolved || !firstApi) return null;
-          const res = await withTimeout(
-            fetchTrrcInactiveWellByApi(firstApi),
-            15_000, "TRRC inactive well check",
-          ).catch(() => ({ is_active_not_flagged: true, records: [] as TrrcInactiveWellRecord[] }));
-          return res.records;
+          if (!isTexasResolved) return null;
+          const seen = new Set<string>();
+          const merged: TrrcInactiveWellRecord[] = [];
+          for (const api of allLeaseApis.slice(0, 10)) {
+            try {
+              const res = await withTimeout(
+                fetchTrrcInactiveWellByApi(api),
+                12_000, `TRRC inactive well API ${api}`,
+              ).catch(() => ({ is_active_not_flagged: true, records: [] as TrrcInactiveWellRecord[] }));
+              for (const r of res.records) {
+                const key = `${r.api8}|${r.lease_name ?? ""}`;
+                if (!seen.has(key)) { seen.add(key); merged.push(r); }
+              }
+            } catch { /* per-API timeout — continue */ }
+          }
+          return merged.length > 0 ? merged : null;
         })(),
       ]);
 

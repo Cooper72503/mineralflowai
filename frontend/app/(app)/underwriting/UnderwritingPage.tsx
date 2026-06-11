@@ -648,6 +648,23 @@ function ProductionTab({ report }: { report: DDReport }) {
         <KvRow label="Last Production Date">
           <DataCell dp={s.last_production_date} format={v => v} />
         </KvRow>
+        {(() => {
+          const totalRows = s.wells.reduce((n, w) => n + w.monthly_history.length, 0);
+          const firstPeriod = s.wells.flatMap(w => w.monthly_history).sort((a, b) => a.period < b.period ? -1 : 1)[0]?.period ?? null;
+          if (totalRows === 0) return null;
+          return (
+            <KvRow label="Production History Depth">
+              <span style={{ fontWeight: 600, color: COLORS.text }}>
+                {totalRows.toLocaleString()} months
+              </span>
+              {firstPeriod && (
+                <span style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginLeft: 8 }}>
+                  (from {firstPeriod} · {Math.round(totalRows / 12)} years of RRC data)
+                </span>
+              )}
+            </KvRow>
+          );
+        })()}
         <KvRow label="Reserve Report">
           <DataCell dp={s.reserve_report_present} format={v => v ? "Provided" : "Not provided"} />
         </KvRow>
@@ -663,8 +680,8 @@ function ProductionTab({ report }: { report: DDReport }) {
         <Section title="Production History & Decline Projection" icon="📈">
           <ProductionDeclineChart report={report} />
           <p style={{ fontSize: "0.68rem", color: COLORS.textFaint, margin: "0.5rem 0 0 0" }}>
-            Actual production from state agency records (up to 36 months). Dashed line = Arps DCA projection.
-            TRRC data may lag current operations by 3–5 months.
+            Chart shows most recent 36 months; full history (up to 40 years) used for DCA and averages.
+            Dashed line = Arps DCA projection. TRRC data may lag current operations by 3–5 months.
           </p>
         </Section>
       )}
