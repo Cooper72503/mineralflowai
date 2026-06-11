@@ -760,7 +760,7 @@ async function runPipeline(
           // S1 — district CSV + per-API HTML fallback
           // Use allLeaseApis (all wells on the lease) so no violation record is missed.
           // Cap at 10 to avoid excessive TRRC load while still covering large leases.
-          for (const api of allLeaseApis.slice(0, 10)) {
+          for (const api of allLeaseApis) {
             try {
               addAll(await withTimeout(
                 fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations),
@@ -801,7 +801,7 @@ async function runPipeline(
 
           // S1 — by API: use allLeaseApis so injection well checks cover the full lease.
           // Cap at 10 — injection wells are rare on a given lease; >10 APIs unlikely to add records.
-          for (const api of allLeaseApis.slice(0, 10)) {
+          for (const api of allLeaseApis) {
             try {
               addAll(await withTimeout(
                 fetchTrrcInjectionByApi(api),
@@ -839,7 +839,7 @@ async function runPipeline(
           let results: IR[] = [];
           try {
             results = await withTimeout(
-              fetchTrrcInspectionsForApis(allLeaseApis.slice(0, 15)),
+              fetchTrrcInspectionsForApis(allLeaseApis),
               45_000,
               "TRRC ICE inspections (batch — all lease wells)",
             );
@@ -849,7 +849,7 @@ async function runPipeline(
           if (results.length === 0) {
             const { fetchTrrcInspectionsByApi } = await import("@/lib/wells/trrc-inspection");
             const seen = new Set<string>();
-            for (const api of allLeaseApis.slice(0, 8)) {
+            for (const api of allLeaseApis) {
               try {
                 const rows = await withTimeout(
                   fetchTrrcInspectionsByApi(api),
@@ -1003,9 +1003,9 @@ async function runPipeline(
       // Pass 1 — batched for up to 20 wells (fastest when TRRC is responsive)
       try {
         results = await withTimeout(
-          fetchTrrcCompletionsForApis(allLeaseApis.slice(0, 20)),
+          fetchTrrcCompletionsForApis(allLeaseApis),
           90_000,
-          `TRRC completion / W-2 lookup (batch — ${Math.min(allLeaseApis.length, 20)} wells)`,
+          `TRRC completion / W-2 lookup (batch — ${allLeaseApis.length} wells)`,
         );
       } catch { /* batch timed out — fall through to per-API retry */ }
 
@@ -1013,7 +1013,7 @@ async function runPipeline(
       // in Pass 1 (covers timeouts and partial batch failures).
       const coveredApis = new Set(results.map(r => r.api?.replace(/\D/g, "")));
       const { fetchTrrcCompletionByApi } = await import("@/lib/wells/trrc-completions");
-      for (const api of allLeaseApis.slice(0, 8)) {
+      for (const api of allLeaseApis) {
         const api10 = api.replace(/\D/g, "");
         if (coveredApis.has(api10)) continue; // already have a result for this API
         try {
@@ -1036,9 +1036,9 @@ async function runPipeline(
         // Use allLeaseApis so imaged records are fetched for all lease wells, not just 4.
         allLeaseApis.length > 0
           ? withTimeout(
-              fetchTrrcImagedRecordsMulti(allLeaseApis.slice(0, 15)),
+              fetchTrrcImagedRecordsMulti(allLeaseApis),
               60_000,
-              `TRRC imaged records (W-1/W-2/G-1/P-4 — ${Math.min(allLeaseApis.length, 15)} wells)`,
+              `TRRC imaged records (W-1/W-2/G-1/P-4 — ${allLeaseApis.length} wells)`,
             ).catch(() => null)
           : Promise.resolve(null),
 
@@ -1070,7 +1070,7 @@ async function runPipeline(
           if (!isTexasResolved) return null;
           const seen = new Set<string>();
           const merged: TrrcInactiveWellRecord[] = [];
-          for (const api of allLeaseApis.slice(0, 10)) {
+          for (const api of allLeaseApis) {
             try {
               const res = await withTimeout(
                 fetchTrrcInactiveWellByApi(api),

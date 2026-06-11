@@ -427,7 +427,7 @@ export async function fetchTrrcCompletionsForApis(
   if (apis.length === 0) return [];
 
   const results = await Promise.allSettled(
-    apis.slice(0, 5).map(api => fetchTrrcCompletionByApi(api))
+    apis.map(api => fetchTrrcCompletionByApi(api))
   );
 
   return results

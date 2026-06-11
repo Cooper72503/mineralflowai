@@ -397,7 +397,7 @@ export async function fetchTrrcInspectionsForApis(
   if (apis.length === 0) return [];
 
   const results = await Promise.allSettled(
-    apis.slice(0, 5).map(api => fetchTrrcInspectionsByApi(api))
+    apis.map(api => fetchTrrcInspectionsByApi(api))
   );
 
   const all: TrrcInspectionRecord[] = [];
