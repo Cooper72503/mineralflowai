@@ -1,22 +1,24 @@
 /**
  * TRRC compliance & violations lookup.
  *
- * Primary path (Strategy A) — district violation CSV download:
- *   POST /EWA/violationCSVAction.do with districtCodeArg
- *   Returns the full violation history for the district in one structured CSV.
- *   Filter locally by API number, lease number, and operator number.
- *   Same approach used by authoritative diligence tools (Manus reference).
+ * Source: TRRC ICE (Inspection and Compliance Enforcement) portal — Violations tab
+ *   https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml
  *
- * Fallback (Strategy B) — per-API HTML scrape:
- *   POST /EWA/violationQueryAction.do with apiNumberArg
- *   Returns paginated HTML table — fragile but catches records when CSV fails.
+ * Protocol: JSF/PrimeFaces AJAX (3 steps)
+ *   1. GET the ICE page → JSESSIONID cookie + javax.faces.ViewState token
+ *   2. POST tabChange to activate the Violations tab (index 1, dynamic/lazy-loaded)
+ *      → updated ViewState that knows tab 2 is active
+ *   3. POST violations search with API number in NNN-NNNNN InputMask format
+ *      → <partial-response> XML containing the violResults HTML panel
  *
  * Returns empty arrays on failure — callers always label missing data appropriately.
+ *
+ * NOTE: Data prior to August 1, 2015 is not available via this search engine.
+ *       The full historical dataset is downloadable from:
+ *       https://www.rrc.texas.gov/resource-center/inspections-and-violations/
  */
 
-import * as cheerio from "cheerio";
-
-const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
+const PDA_ICE_URL = "https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,296 +32,462 @@ export type TrrcViolation = {
   api_or_lease: string | null;
 };
 
-// ─── CSV utilities (mirrors trrc-production.ts approach) ──────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseCsvLines(raw: string): Record<string, string>[] {
-  const lines = raw.replace(/\r/g, "").split("\n").filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const delimiter = lines[0].includes("|") ? "|" : ",";
-
-  const splitLine = (line: string): string[] => {
-    const fields: string[] = [];
-    let cur = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-        else { inQuotes = !inQuotes; }
-      } else if (ch === delimiter && !inQuotes) {
-        fields.push(cur.trim()); cur = "";
-      } else {
-        cur += ch;
-      }
-    }
-    fields.push(cur.trim());
-    return fields;
-  };
-
-  const headers = splitLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, "_"));
-
-  const rows: Record<string, string>[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cells = splitLine(lines[i]);
-    if (cells.every(c => !c)) continue;
-    const obj: Record<string, string> = {};
-    headers.forEach((h, idx) => { obj[h] = cells[idx] ?? ""; });
-    rows.push(obj);
-  }
-  return rows;
+/** Strip HTML tags and decode common entities */
+function stripHtml(s: string): string {
+  return s
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function colVal(row: Record<string, string>, aliases: string[]): string {
-  for (const alias of aliases) {
-    const key = Object.keys(row).find(k => k.includes(alias));
-    if (key && row[key]) return row[key];
-  }
-  return "";
+/** Normalize a raw API input to the 10-digit form (42 + county3 + well5) */
+function normalizeApi10(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return digits;
+  if (digits.length === 8) return `42${digits}`;
+  if (digits.length >= 14 && digits.startsWith("42")) return digits.slice(0, 10);
+  return digits.slice(0, 10).padEnd(10, "0");
 }
-
-/** Normalise a raw API string to 10 digits for comparison */
-function norm10(raw: string): string {
-  return raw.replace(/[-\s]/g, "").replace(/^0+/, "").slice(0, 10);
-}
-
-function csvRowToViolation(row: Record<string, string>): TrrcViolation | null {
-  const violId   = colVal(row, ["enforcement_number", "violation_id", "enf_no", "violation_no"]);
-  const date     = colVal(row, ["violation_date", "date_of_violation", "enf_date", "date"]);
-  const vType    = colVal(row, ["violation_type", "enf_type", "type"]);
-  const desc     = colVal(row, ["violation_description", "description", "comments", "comment"]);
-  const statusRaw = colVal(row, ["violation_status", "status", "enf_status"]).toLowerCase();
-  const penaltyRaw = colVal(row, ["penalty_amount", "penalty_usd", "amount_paid", "fine_amount"]);
-  const apiRaw   = colVal(row, ["api_number", "api_no", "api"]);
-  const leaseRaw = colVal(row, ["lease_number", "lease_no"]);
-
-  // Need at least a type or description to be useful
-  if (!vType && !desc) return null;
-
-  let status: "open" | "closed" | "unknown" = "unknown";
-  if (statusRaw.includes("closed") || statusRaw.includes("resolved") || statusRaw.includes("compli")) status = "closed";
-  else if (statusRaw.includes("open") || statusRaw.includes("active") || statusRaw.includes("pending") || statusRaw.includes("issued")) status = "open";
-
-  let penalty_usd: number | null = null;
-  if (penaltyRaw) {
-    const n = parseFloat(penaltyRaw.replace(/[$,]/g, ""));
-    if (isFinite(n) && n > 0) penalty_usd = n;
-  }
-
-  return {
-    violation_id: violId || null,
-    date: date || null,
-    type: vType || "Violation",
-    description: desc || vType || "See TRRC records",
-    status,
-    penalty_usd,
-    api_or_lease: apiRaw || leaseRaw || null,
-  };
-}
-
-// ─── Strategy A: District violation CSV ──────────────────────────────────────
 
 /**
- * Download the full violation CSV for a TRRC district and filter to the
- * records matching our subject well (by API, lease number, or operator number).
+ * Convert 10-digit API to the ICE InputMask format: NNN-NNNNN
+ * (county-3 digits + dash + well-5 digits, stripping the "42" state prefix)
  *
- * Manus downloads violations at district granularity rather than per-API so
- * that violations filed against the operator or lease — rather than the exact
- * API — are not missed.  This is especially important for operators with
- * multiple wells sharing a lease/permit.
- *
- * Returns null if the CSV endpoint is unavailable — falls through to HTML.
+ * PrimeFaces InputMask on qvapino uses mask "999\-99999"
  */
-async function fetchViolationsDistrictCsv(
-  distCode: string,
-  api10: string | null,
-  leaseNo: string | null,
-  operatorNo: string | null,
-): Promise<TrrcViolation[] | null> {
+function toApiMask(api10: string): string {
+  const digits = api10.replace(/\D/g, "");
+  // Strip leading "42" if present and pad to 8
+  const api8 = digits.startsWith("42") && digits.length === 10
+    ? digits.slice(2)
+    : digits.slice(0, 8).padEnd(8, "0");
+  return `${api8.slice(0, 3)}-${api8.slice(3, 8)}`;
+}
+
+/** Extract javax.faces.ViewState value from HTML or XML */
+function extractViewState(text: string): string | null {
+  const m = text.match(
+    /name=["']javax\.faces\.ViewState["'][^>]*value=["']([^"']+)["']/i
+  ) ?? text.match(
+    /value=["']([^"']+)["'][^>]*name=["']javax\.faces\.ViewState["']/i
+  );
+  // Also check update blocks in partial-response XML
+  const xmlM = text.match(
+    /<update[^>]*id=["'][^"']*ViewState[^"']*["'][^>]*>(?:<!\[CDATA\[)?([^<\]]+)/i
+  );
+  return m ? m[1] : xmlM ? xmlM[1].trim() : null;
+}
+
+/** Extract Set-Cookie JSESSIONID from response headers */
+function extractSessionId(headers: Headers): string | null {
+  const raw =
+    (typeof (headers as unknown as { getSetCookie?: () => string[] }).getSetCookie === "function"
+      ? ((headers as unknown as { getSetCookie: () => string[] }).getSetCookie() ?? []).join("; ")
+      : headers.get("set-cookie") ?? "");
+  const m = raw.match(/JSESSIONID=([^;,\s]+)/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Extract the CDATA content of a named <update> block from a JSF
+ * <partial-response> XML string.
+ */
+function extractPartialUpdate(xml: string, targetId: string): string | null {
+  const escaped = targetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(
+    `<update[^>]*id=["']${escaped}["'][^>]*>\\s*(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?\\s*</update>`,
+    "i"
+  );
+  const m = xml.match(re);
+  if (!m) return null;
+  let content = m[1];
+  content = content.replace(/\]\]>?\s*$/, "").replace(/^<!\[CDATA\[/, "");
+  return content.trim() || null;
+}
+
+// ─── Result parser ────────────────────────────────────────────────────────────
+
+/**
+ * Violation table column order (confirmed from live ICE portal, June 2026):
+ *  0  Violation Discovery Date
+ *  1  Oil & Gas District
+ *  2  Operator Name
+ *  3  Operator No
+ *  4  Lease No
+ *  5  Lease/Facility Name
+ *  6  API No
+ *  7  County
+ *  8  Well No
+ *  9  Drilling Permit No
+ * 10  Field Name
+ * 11  Violated Rule
+ * 12  Violated Rule Description
+ * 13  Major Violation Indicator
+ * 14  Compliant on Reinspection
+ * 15  Last Enforcement Action
+ * 16  Last Enforcement Action Date
+ */
+const VIOL_COL_DATE         = 0;
+const VIOL_COL_OPERATOR     = 2;
+const VIOL_COL_LEASE_NO     = 4;
+const VIOL_COL_LEASE_NAME   = 5;
+const VIOL_COL_API          = 6;
+const VIOL_COL_RULE         = 11;
+const VIOL_COL_RULE_DESC    = 12;
+const VIOL_COL_MAJOR        = 13;
+const VIOL_COL_COMPLIANT    = 14;
+const VIOL_COL_ENF_ACTION   = 15;
+const VIOL_COL_ENF_DATE     = 16;
+
+function parseViolResultsHtml(html: string): TrrcViolation[] {
+  if (!html || html.trim().length < 50) return [];
+  if (/your search returned no results/i.test(html)) return [];
+  if (/showing 0.0 out of 0/i.test(html)) return [];
+
+  const violations: TrrcViolation[] = [];
+
+  // PrimeFaces DataTable data rows have data-ri="N" attribute
+  const rowRe = /<tr[^>]*data-ri="\d+"[^>]*>([\s\S]*?)<\/tr>/gi;
+  const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+
+  let rowMatch: RegExpExecArray | null;
+  while ((rowMatch = rowRe.exec(html)) !== null) {
+    const rowHtml = rowMatch[1];
+    const cells: string[] = [];
+    let cellMatch: RegExpExecArray | null;
+    cellRe.lastIndex = 0;
+    while ((cellMatch = cellRe.exec(rowHtml)) !== null) {
+      cells.push(stripHtml(cellMatch[1]));
+    }
+
+    if (cells.length < 4) continue;
+
+    const date        = cells[VIOL_COL_DATE]        || null;
+    const operator    = cells[VIOL_COL_OPERATOR]     || null;
+    const leaseNo     = cells[VIOL_COL_LEASE_NO]     || null;
+    const leaseName   = cells[VIOL_COL_LEASE_NAME]   || null;
+    const apiNo       = cells[VIOL_COL_API]          || null;
+    const rule        = cells[VIOL_COL_RULE]         || null;
+    const ruleDesc    = cells[VIOL_COL_RULE_DESC]    || null;
+    const isMajor     = cells[VIOL_COL_MAJOR]        || null;
+    const compliant   = cells.length > VIOL_COL_COMPLIANT   ? cells[VIOL_COL_COMPLIANT]   : null;
+    const enfAction   = cells.length > VIOL_COL_ENF_ACTION  ? cells[VIOL_COL_ENF_ACTION]  : null;
+    const enfDate     = cells.length > VIOL_COL_ENF_DATE    ? cells[VIOL_COL_ENF_DATE]    : null;
+
+    // Determine status from compliance and enforcement columns
+    let status: "open" | "closed" | "unknown" = "unknown";
+    const compliantLower = (compliant ?? "").toLowerCase();
+    const enfLower       = (enfAction  ?? "").toLowerCase();
+    if (
+      compliantLower === "y" ||
+      compliantLower.includes("yes") ||
+      compliantLower.includes("compliant") ||
+      enfLower.includes("resolved") ||
+      enfLower.includes("closed") ||
+      enfLower.includes("no further")
+    ) {
+      status = "closed";
+    } else if (
+      compliantLower === "n" ||
+      compliantLower.includes("no") ||
+      enfLower.includes("notice") ||
+      enfLower.includes("order") ||
+      enfLower.includes("penalty") ||
+      enfLower.includes("open")
+    ) {
+      status = "open";
+    }
+
+    // Build description combining rule description, major indicator, enforcement
+    const descParts: string[] = [];
+    if (ruleDesc) descParts.push(ruleDesc);
+    if (isMajor && /^y$/i.test(isMajor.trim())) descParts.push("MAJOR VIOLATION");
+    if (enfAction && enfAction !== "N/A" && enfAction !== "") {
+      const enfStr = enfDate ? `${enfAction} (${enfDate})` : enfAction;
+      descParts.push(`Enforcement: ${enfStr}`);
+    }
+    const description = descParts.join(" | ") || rule || "See TRRC ICE records";
+
+    // Build violation_id from operator + lease + date (no canonical ID in this table)
+    const idParts: string[] = [];
+    if (apiNo)   idParts.push(apiNo.replace(/\D/g, ""));
+    if (date)    idParts.push(date.replace(/\//g, ""));
+    if (rule)    idParts.push(rule.replace(/\s+/g, "").slice(0, 10));
+    const violation_id = idParts.length > 0 ? idParts.join("-") : null;
+
+    // Context note: operator + lease
+    const contextParts: string[] = [];
+    if (operator)  contextParts.push(operator);
+    if (leaseName) contextParts.push(`Lease: ${leaseName}`);
+    const context = contextParts.join(" | ") || null;
+    void context; // used below via api_or_lease
+
+    violations.push({
+      violation_id,
+      date,
+      type:        rule || "Violation",
+      description,
+      status,
+      penalty_usd: null, // ICE violations table doesn't surface penalty amounts directly
+      api_or_lease: apiNo || leaseNo,
+    });
+  }
+
+  return violations;
+}
+
+// ─── ICE session helpers ──────────────────────────────────────────────────────
+
+interface IceSession {
+  jsessionId: string;
+  viewState: string;
+}
+
+/** Step 1: GET ICE page, extract JSESSIONID and ViewState */
+async function initIceSession(): Promise<IceSession | null> {
   try {
-    const body = new URLSearchParams({
-      "methodToCall":                "search",
-      "searchArgs.districtCodeArg":  distCode,
-      "searchArgs.apiNumberArg":     "",       // empty = district-wide download
-      "searchArgs.operatorNoArg":    "",
-      "searchArgs.violationTypeArg": "",
-      "searchArgs.violationStatusArg": "",
+    const res = await fetch(PDA_ICE_URL, {
+      method: "GET",
+      headers: {
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Cache-Control":   "no-cache",
+      },
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const jsessionId = extractSessionId(res.headers);
+    const viewState  = extractViewState(html);
+    if (!jsessionId || !viewState) return null;
+    return { jsessionId, viewState };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Step 2: POST tabChange to activate the Violations tab (index 1).
+ * The violations tab is dynamically loaded (PrimeFaces dynamic:true),
+ * so it must be activated before a violations search will be processed.
+ * Returns the updated ViewState from the partial-response.
+ */
+async function activateViolationsTab(session: IceSession): Promise<string | null> {
+  try {
+    const body = new URLSearchParams();
+    body.append("javax.faces.partial.ajax",    "true");
+    body.append("javax.faces.source",          "IceQueryForm:j_idt39");
+    body.append("javax.faces.partial.execute", "IceQueryForm:j_idt39");
+    body.append("javax.faces.partial.render",  "IceQueryForm:j_idt39");
+    body.append("javax.faces.behavior.event",  "tabChange");
+    body.append("javax.faces.partial.event",   "tabChange");
+    body.append("IceQueryForm:j_idt39_activeIndex", "1");
+    body.append("IceQueryForm", "IceQueryForm");
+    body.append("javax.faces.ViewState", session.viewState);
+
+    const res = await fetch(PDA_ICE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept":           "application/xml, text/xml, */*; q=0.01",
+        "Faces-Request":    "partial/ajax",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent":       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin":           "https://webapps2.rrc.texas.gov",
+        "Referer":          PDA_ICE_URL,
+        "Cookie":           `JSESSIONID=${session.jsessionId}`,
+      },
+      body: body.toString(),
     });
 
-    const res = await fetch(`${EWA_BASE}/violationCSVAction.do`, {
-      method:  "POST",
+    if (!res.ok) return null;
+    const xml = await res.text();
+    return extractViewState(xml);
+  } catch {
+    return null;
+  }
+}
+
+// ─── Core ICE violations fetch ────────────────────────────────────────────────
+
+/**
+ * Fetch TRRC violations for one API number from ICE Tab 2.
+ * Uses 3-step JSF AJAX protocol.
+ * Returns null on transport failure (allows caller to distinguish
+ * "searched, none found" from "couldn't reach TRRC").
+ */
+async function fetchViolationsIce(
+  api10: string,
+  opts: {
+    leaseNo?: string | null;
+    operatorNo?: string | null;
+  } = {},
+): Promise<TrrcViolation[] | null> {
+  try {
+    // Step 1: establish session
+    const session = await initIceSession();
+    if (!session) return null;
+
+    // Step 2: activate violations tab (lazy-loaded, must exist before search)
+    const viewState2 = await activateViolationsTab(session);
+    if (!viewState2) return null;
+
+    // Step 3: search violations by API number
+    const apiMask = toApiMask(api10); // NNN-NNNNN format required by InputMask
+
+    const body = new URLSearchParams();
+    body.append("javax.faces.partial.ajax",    "true");
+    body.append("javax.faces.source",          "IceQueryForm:j_idt39:j_idt181");
+    body.append("javax.faces.partial.execute", "IceQueryForm");
+    body.append("javax.faces.partial.render",  "IceQueryForm:j_idt39:violResults");
+    body.append("IceQueryForm:j_idt39:j_idt181", "IceQueryForm:j_idt39:j_idt181");
+    body.append("IceQueryForm", "IceQueryForm");
+    // Search by API number (primary identifier)
+    body.append("IceQueryForm:j_idt39:qvapino", apiMask);
+    // Optional additional filters (empty strings = no filter)
+    body.append("IceQueryForm:j_idt39:qvopnm", "");
+    body.append("IceQueryForm:j_idt39:qvopno", opts.operatorNo ?? "");
+    body.append("IceQueryForm:j_idt39:qvcnty_input",  "");
+    body.append("IceQueryForm:j_idt39:qvcnty_focus",  "");
+    body.append("IceQueryForm:j_idt39:qvdis_input",   "");
+    body.append("IceQueryForm:j_idt39:qvdis_focus",   "");
+    body.append("IceQueryForm:j_idt39:qvlsnm", "");
+    body.append("IceQueryForm:j_idt39:qvlsno", opts.leaseNo?.slice(0, 6) ?? "");
+    body.append("IceQueryForm:j_idt39:qvdpno", "");
+    body.append("IceQueryForm:j_idt39:qvindtf_input", "");
+    body.append("IceQueryForm:j_idt39:qvindtt_input", "");
+    body.append("IceQueryForm:j_idt39:qviRle_focus",  "");
+    body.append("IceQueryForm:j_idt39:qviRle_input",  "");
+    body.append("IceQueryForm:j_idt39_activeIndex",   "1");
+    body.append("javax.faces.ViewState", viewState2);
+
+    const res = await fetch(PDA_ICE_URL, {
+      method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent":   "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
-        "Accept":       "text/csv,text/plain,*/*",
+        "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept":           "application/xml, text/xml, */*; q=0.01",
+        "Faces-Request":    "partial/ajax",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent":       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin":           "https://webapps2.rrc.texas.gov",
+        "Referer":          PDA_ICE_URL,
+        "Cookie":           `JSESSIONID=${session.jsessionId}`,
       },
       body: body.toString(),
     });
 
     if (!res.ok) return null;
 
-    const contentType = res.headers.get("content-type") ?? "";
-    const text = await res.text();
+    const xml = await res.text();
 
-    // Reject if we got HTML back (endpoint not available or returned error page)
-    if (
-      contentType.includes("text/html") ||
-      text.trimStart().startsWith("<!") ||
-      text.trimStart().startsWith("<html") ||
-      text.trimStart().startsWith("<HTML")
-    ) {
+    // Check for JSF validation error
+    const msgs = extractPartialUpdate(xml, "IceQueryForm:messages") ?? "";
+    if (/minimum of one search parameter/i.test(msgs)) {
+      // Shouldn't happen with a valid API, but treat as query failure
       return null;
     }
 
-    const parsed = parseCsvLines(text);
-    if (parsed.length === 0) return [];
+    const resultsHtml = extractPartialUpdate(xml, "IceQueryForm:j_idt39:violResults");
+    if (!resultsHtml) return null;
 
-    // Filter rows to our subject well
-    const api10Norm = api10 ? norm10(api10) : null;
-
-    const matched: TrrcViolation[] = [];
-    for (const row of parsed) {
-      // Match by API, lease number, or operator number
-      const rowApi  = norm10(colVal(row, ["api_number", "api_no", "api"]));
-      const rowLease = colVal(row, ["lease_number", "lease_no"]);
-      const rowOpNo  = colVal(row, ["operator_number", "operator_no", "oper_no"]);
-
-      const apiMatch  = api10Norm && rowApi && rowApi === api10Norm;
-      const leaseMatch = leaseNo && rowLease && rowLease.trim() === leaseNo.trim();
-      const opMatch   = operatorNo && rowOpNo && rowOpNo.trim() === operatorNo.trim();
-
-      if (!apiMatch && !leaseMatch && !opMatch) continue;
-
-      const v = csvRowToViolation(row);
-      if (v) matched.push(v);
-    }
-
-    return matched;
+    return parseViolResultsHtml(resultsHtml);
   } catch {
     return null;
-  }
-}
-
-// ─── Strategy B: Per-API HTML scrape ─────────────────────────────────────────
-
-/**
- * Look up TRRC violations for a specific API number (10-digit, no dashes).
- * Used as fallback when the district CSV is unavailable.
- */
-async function fetchViolationsHtml(
-  params: URLSearchParams,
-): Promise<TrrcViolation[]> {
-  try {
-    const res = await fetch(`${EWA_BASE}/violationQueryAction.do`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
-      },
-      body: params.toString(),
-    });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-    return parseViolationsHtml(html);
-  } catch {
-    return [];
   }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Look up TRRC violations for a specific API number.
+ * Look up TRRC violations for a specific API number via ICE Tab 2.
  *
- * Strategy A: Download district-level CSV and filter locally.
- *   Catches violations filed against operator or lease — not just API.
- *   Requires distCode (from production lookup) to target the correct district.
+ * Returns [] when no violations are found (well is clean).
+ * Returns [] on transport failure — callers should check diligence tier
+ * separately to distinguish "no violations" from "query failed".
  *
- * Strategy B: Per-API HTML scrape fallback.
- *   Slower but available even when the CSV endpoint is down.
+ * Note: only covers violations from August 1, 2015 onward.
  */
 export async function fetchTrrcViolations(
-  api10: string,
-  distCode?: string | null,
+  api10Raw: string,
+  _distCode?: string | null,   // unused (kept for API compat with callers)
   leaseNo?: string | null,
   operatorNo?: string | null,
 ): Promise<TrrcViolation[]> {
-  // Strategy A: district CSV (if we have a distCode)
-  if (distCode) {
-    const csvResult = await fetchViolationsDistrictCsv(distCode, api10, leaseNo ?? null, operatorNo ?? null);
-    if (csvResult !== null) return csvResult; // null = endpoint unavailable; empty = searched, none found
-  }
-
-  // Strategy B: per-API HTML
-  return fetchViolationsHtml(new URLSearchParams({
-    "searchArgs.apiNumberArg":        api10,
-    "searchArgs.violationTypeArg":    "",
-    "searchArgs.violationStatusArg":  "",
-    "pager.offset":                   "0",
-    "pager.pageSize":                 "50",
-  }));
+  const api10 = normalizeApi10(api10Raw);
+  const result = await fetchViolationsIce(api10, { leaseNo, operatorNo });
+  return result ?? [];
 }
 
 /**
- * Look up TRRC violations by operator name (fuzzy).
- * Only use when no API number is available.
+ * Look up violations by operator number (no specific API).
+ * Used when only an operator number is known.
+ * Queries ICE Tab 2 with the operator number field.
  */
 export async function fetchTrrcViolationsByOperator(
-  operatorName: string,
-  county: string,
+  operatorNo: string,
+  _county?: string,            // unused (county filter not needed when op# is known)
 ): Promise<TrrcViolation[]> {
-  return fetchViolationsHtml(new URLSearchParams({
-    "searchArgs.operatorNameArg":    operatorName,
-    "searchArgs.countyNameArg":      county,
-    "searchArgs.violationTypeArg":   "",
-    "searchArgs.violationStatusArg": "",
-    "pager.offset":                  "0",
-    "pager.pageSize":                "50",
-  }));
-}
+  try {
+    const session = await initIceSession();
+    if (!session) return [];
 
-// ─── HTML parser ──────────────────────────────────────────────────────────────
+    const viewState2 = await activateViolationsTab(session);
+    if (!viewState2) return [];
 
-function parseViolationsHtml(html: string): TrrcViolation[] {
-  const $ = cheerio.load(html);
-  const violations: TrrcViolation[] = [];
+    const body = new URLSearchParams();
+    body.append("javax.faces.partial.ajax",    "true");
+    body.append("javax.faces.source",          "IceQueryForm:j_idt39:j_idt181");
+    body.append("javax.faces.partial.execute", "IceQueryForm");
+    body.append("javax.faces.partial.render",  "IceQueryForm:j_idt39:violResults");
+    body.append("IceQueryForm:j_idt39:j_idt181", "IceQueryForm:j_idt39:j_idt181");
+    body.append("IceQueryForm", "IceQueryForm");
+    body.append("IceQueryForm:j_idt39:qvapino",  "");
+    body.append("IceQueryForm:j_idt39:qvopnm",   "");
+    body.append("IceQueryForm:j_idt39:qvopno",   operatorNo.slice(0, 6));
+    body.append("IceQueryForm:j_idt39:qvcnty_input",  "");
+    body.append("IceQueryForm:j_idt39:qvcnty_focus",  "");
+    body.append("IceQueryForm:j_idt39:qvdis_input",   "");
+    body.append("IceQueryForm:j_idt39:qvdis_focus",   "");
+    body.append("IceQueryForm:j_idt39:qvlsnm", "");
+    body.append("IceQueryForm:j_idt39:qvlsno", "");
+    body.append("IceQueryForm:j_idt39:qvdpno", "");
+    body.append("IceQueryForm:j_idt39:qvindtf_input", "");
+    body.append("IceQueryForm:j_idt39:qvindtt_input", "");
+    body.append("IceQueryForm:j_idt39:qviRle_focus",  "");
+    body.append("IceQueryForm:j_idt39:qviRle_input",  "");
+    body.append("IceQueryForm:j_idt39_activeIndex",   "1");
+    body.append("javax.faces.ViewState", viewState2);
 
-  $("table tr").each((_i, tr) => {
-    const cells: string[] = [];
-    $(tr).find("td").each((_j, td) => {
-      cells.push($(td).text().replace(/\s+/g, " ").trim());
+    const res = await fetch(PDA_ICE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept":           "application/xml, text/xml, */*; q=0.01",
+        "Faces-Request":    "partial/ajax",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent":       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin":           "https://webapps2.rrc.texas.gov",
+        "Referer":          PDA_ICE_URL,
+        "Cookie":           `JSESSIONID=${session.jsessionId}`,
+      },
+      body: body.toString(),
     });
 
-    if (cells.length < 4) return;
-
-    // Heuristic: first cell looks like a violation/enforcement ID
-    const id = cells[0];
-    if (!/^[VWvEe\d]/.test(id)) return;
-
-    const rowHtml = $(tr).html() ?? "";
-    const rowLower = rowHtml.toLowerCase();
-
-    let status: "open" | "closed" | "unknown" = "unknown";
-    if (rowLower.includes("closed") || rowLower.includes("resolved")) status = "closed";
-    else if (rowLower.includes("open") || rowLower.includes("active") || rowLower.includes("pending")) status = "open";
-
-    let penalty: number | null = null;
-    for (const cell of cells) {
-      const m = cell.match(/\$\s*([\d,]+(?:\.\d+)?)/);
-      if (m) { penalty = parseFloat(m[1].replace(/,/g, "")); break; }
-    }
-
-    violations.push({
-      violation_id: id || null,
-      date: cells[1] || null,
-      type: cells[2] || "Unknown",
-      description: cells[3] || "See TRRC records",
-      status,
-      penalty_usd: penalty,
-      api_or_lease: null,
-    });
-  });
-
-  return violations;
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const resultsHtml = extractPartialUpdate(xml, "IceQueryForm:j_idt39:violResults");
+    if (!resultsHtml) return [];
+    return parseViolResultsHtml(resultsHtml);
+  } catch {
+    return [];
+  }
 }

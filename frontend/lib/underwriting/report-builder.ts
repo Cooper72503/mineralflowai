@@ -120,57 +120,198 @@ const TRRC_URLS = {
   permits:     "https://webapps2.rrc.texas.gov/EWA/drillingPermitsQueryAction.do",
 } as const;
 
-// ─── Blueprint: deriveFinalRunStatus ─────────────────────────────────────────
+// ─── FinalGateDecision — Manus spec §11 ──────────────────────────────────────
 //
-// Derives the human-facing completion label from module-level statuses.
-// The report may only show "Full Diligence" when every mandatory module is
-// verified, searched_no_records, or not_applicable.
-// "Partial Underwriting" requires production history to be at least
-// partially_verified with no critical mandatory gaps.
-// Everything else (quick scan, critical missing data) is "Preliminary Screen".
+// Derives the five-label final gate from module evidence statuses.
+// This must be deterministic and server-side. Claude may only explain facts
+// that the gate already permits.
+//
+// Labels (ascending certainty):
+//   Quick Screen            — identity only; production/compliance/inventory not yet verified
+//   Preliminary Diligence   — 1-2 evidence modules returned results; major gaps remain
+//   Public-Record Diligence — all public-record modules complete; private docs still missing
+//   Failed Verification     — a critical claim is contradicted by official evidence
+//   Acquisition-Grade Diligence — public + private records verified; no contradictions
+//
+// canClaimSingleWellProduction is ALWAYS false unless explicit per-well allocation
+// evidence exists (the system never generates such evidence from RRC lease-level data).
 
-const MANDATORY_DILIGENCE_MODULES = [
-  "Production History",
-  "Inspection & Compliance History",
-  "API / Well Identification",
-] as const;
+type FinalGateLabel =
+  | "Quick Screen"
+  | "Preliminary Diligence"
+  | "Public-Record Diligence"
+  | "Failed Verification"
+  | "Acquisition-Grade Diligence";
 
-const FULL_DILIGENCE_TIERS = new Set<import("./types").DiligenceStatusTier>([
-  "verified",
-  "searched_no_records",
-  "not_applicable",
-]);
+type FinalGateDecision = {
+  label: FinalGateLabel;
+  canRenderNormalReport: boolean;
+  canShowOfferRange: boolean;
+  canShowNPV: boolean;
+  canClaimCleanCompliance: boolean;
+  canClaimCurrentProduction: boolean;
+  canClaimSingleWellProduction: false;
+  blockingReasons: string[];
+  warnings: string[];
+};
 
+function determineFinalGate(opts: {
+  scanMode: import("./types").ScanMode;
+  diligenceStatus: DiligenceStatusItem[];
+  productionVerified: boolean;
+  complianceStatus: "verified_found" | "searched_no_records" | "download_failed" | "no_url" | "parse_error" | "unknown";
+  leaseInventoryVerified: boolean;
+  leaseInventoryWellCount: number;
+  hasDistrictViolations: boolean;
+  districtFileDownloadFailed: boolean;
+  contradictions: import("./contradiction-engine").Contradiction[];
+  hasPrivateDocuments: boolean;
+  hasLoeDocuments: boolean;
+}): FinalGateDecision {
+  const {
+    scanMode,
+    diligenceStatus,
+    productionVerified,
+    complianceStatus,
+    leaseInventoryVerified,
+    hasDistrictViolations,
+    districtFileDownloadFailed,
+    contradictions,
+    hasPrivateDocuments,
+    hasLoeDocuments,
+  } = opts;
+
+  // STEP 1: Detect critical contradictions — these block the report regardless
+  // of how polished it looks. A contradicted claim must result in "Failed Verification".
+  const blockingContradictions = contradictions.filter(c => c.severity === "critical");
+  const criticalBlockingReasons: string[] = blockingContradictions.map(c => c.description);
+
+  // STEP 2: Detect gate-blocking conditions based on module evidence
+  // A failed district violation download is NOT the same as clean compliance.
+  if (districtFileDownloadFailed) {
+    criticalBlockingReasons.push(
+      "District violation file download failed — compliance status unverified; report cannot claim clean compliance."
+    );
+  }
+
+  // If we have contradictions or blocking conditions → Failed Verification
+  if (criticalBlockingReasons.length > 0) {
+    return {
+      label: "Failed Verification",
+      canRenderNormalReport: false,
+      canShowOfferRange: false,
+      canShowNPV: false,
+      canClaimCleanCompliance: false,
+      canClaimCurrentProduction: false,
+      canClaimSingleWellProduction: false,
+      blockingReasons: criticalBlockingReasons,
+      warnings: [],
+    };
+  }
+
+  // Quick scan: never make public-record claims
+  if (scanMode === "quick") {
+    return {
+      label: "Quick Screen",
+      canRenderNormalReport: false,
+      canShowOfferRange: false,
+      canShowNPV: false,
+      canClaimCleanCompliance: false,
+      canClaimCurrentProduction: false,
+      canClaimSingleWellProduction: false,
+      blockingReasons: ["Quick Screen — full evidence pipeline not run."],
+      warnings: ["Output is a preliminary scan only. Do not use for investment decisions."],
+    };
+  }
+
+  // STEP 3: Public-record completeness check
+  // All of these must pass for Public-Record Diligence:
+  //   (a) production verified from RRC
+  //   (b) compliance status is verified_found or searched_no_records (not download_failed)
+  //   (c) lease-well inventory query ran (even if 0 wells returned)
+  const productionItem = diligenceStatus.find(d => d.category === "Production History");
+  const identityItem   = diligenceStatus.find(d => d.category === "API / Well Identification");
+
+  const publicRecordComplete =
+    productionVerified &&
+    (complianceStatus === "verified_found" || complianceStatus === "searched_no_records") &&
+    leaseInventoryVerified &&
+    productionItem?.tier !== "missing" &&
+    productionItem?.tier !== "query_failed" &&
+    identityItem?.tier !== "missing";
+
+  if (!publicRecordComplete) {
+    // Determine if we have at least some evidence (Preliminary vs Quick)
+    const hasAnyEvidence = productionVerified ||
+      diligenceStatus.some(d => d.tier === "verified" || d.tier === "partially_verified");
+
+    return {
+      label: hasAnyEvidence ? "Preliminary Diligence" : "Quick Screen",
+      canRenderNormalReport: false,
+      canShowOfferRange: false,
+      canShowNPV: false,
+      canClaimCleanCompliance: complianceStatus === "searched_no_records",
+      canClaimCurrentProduction: productionVerified,
+      canClaimSingleWellProduction: false,
+      blockingReasons: [
+        "Public-record modules are incomplete or partially verified.",
+        ...(!productionVerified ? ["Production not yet verified from RRC official CSV."] : []),
+        ...(complianceStatus === "download_failed" ? ["District violation file download failed."] : []),
+        ...(!leaseInventoryVerified ? ["Lease-well inventory not yet completed."] : []),
+      ],
+      warnings: ["Output must be labeled preliminary, not full diligence."],
+    };
+  }
+
+  // STEP 4: Private document gate
+  // To reach Acquisition-Grade, LOE / revenue / ownership / title must be verified.
+  const privateGatesComplete = hasPrivateDocuments && hasLoeDocuments;
+
+  if (!privateGatesComplete) {
+    return {
+      label: "Public-Record Diligence",
+      canRenderNormalReport: true,
+      canShowOfferRange: false,
+      canShowNPV: false,
+      canClaimCleanCompliance: complianceStatus === "searched_no_records" && !hasDistrictViolations,
+      canClaimCurrentProduction: true,
+      canClaimSingleWellProduction: false,
+      blockingReasons: [],
+      warnings: [
+        "Private LOE/revenue/ownership/title documents not verified. Offer range and NPV are suppressed.",
+        "Upload LOE statements, revenue statements, and division orders to enable economics.",
+      ],
+    };
+  }
+
+  // STEP 5: All gates passed → Acquisition-Grade
+  return {
+    label: "Acquisition-Grade Diligence",
+    canRenderNormalReport: true,
+    canShowOfferRange: true,
+    canShowNPV: true,
+    canClaimCleanCompliance: complianceStatus === "searched_no_records" && !hasDistrictViolations,
+    canClaimCurrentProduction: true,
+    canClaimSingleWellProduction: false,
+    blockingReasons: [],
+    warnings: [],
+  };
+}
+
+// Legacy adapter — returns just the label string for backward compat
 function deriveFinalRunStatus(
   diligenceStatus: DiligenceStatusItem[],
   scanMode: import("./types").ScanMode,
-): "Preliminary Screen" | "Partial Underwriting" | "Full Diligence" {
-  // Quick scans are always preliminary — pipeline didn't run all modules
-  if (scanMode === "quick") return "Preliminary Screen";
-
-  const mandatory = diligenceStatus.filter(d =>
-    (MANDATORY_DILIGENCE_MODULES as readonly string[]).includes(d.category)
-  );
-
-  // Full Diligence: all mandatory modules are verified, searched_no_records, or not_applicable
-  const allFullyResolved = mandatory.every(d => FULL_DILIGENCE_TIERS.has(d.tier));
-  if (allFullyResolved && mandatory.length >= 3) return "Full Diligence";
-
-  // Partial Underwriting: production history at least partially_verified AND
-  // no mandatory module is in a hard-fail state (missing or query_failed)
+  gate?: FinalGateDecision,
+): DDReport["diligence_run_label"] {
+  if (gate) return gate.label;
+  // Fallback if gate not provided: derive from diligence status alone
+  if (scanMode === "quick") return "Quick Screen";
   const productionItem = diligenceStatus.find(d => d.category === "Production History");
-  const hasCriticalGap = mandatory.some(
-    d => d.tier === "missing" || d.tier === "query_failed"
-  );
-  if (
-    productionItem &&
-    (productionItem.tier === "partially_verified" || FULL_DILIGENCE_TIERS.has(productionItem.tier)) &&
-    !hasCriticalGap
-  ) {
-    return "Partial Underwriting";
-  }
-
-  return "Preliminary Screen";
+  const hasEvidence = diligenceStatus.some(d => d.tier === "verified" || d.tier === "partially_verified");
+  if (!hasEvidence) return "Quick Screen";
+  if (productionItem?.tier === "verified") return "Preliminary Diligence";
+  return "Quick Screen";
 }
 
 // ─── Helper: build a DataPoint ────────────────────────────────────────────────
@@ -318,6 +459,19 @@ export type BuildReportArgs = {
    * Provides formation name, wellbore profile, completion type, field number.
    */
   cmplPacketDetail?: import("../wells/trrc-imaged-records").CmplPacketDetail | null;
+  /**
+   * District violation file results (Manus spec §4.5 / §7.2).
+   * AUTHORITATIVE compliance source — full historical record, not just Aug 2015+.
+   * Golden fixture: Lease 60509 / District 8A → 39 matching records.
+   * failed download ≠ clean compliance.
+   */
+  districtViolations?: import("./trrc-district-violations").DistrictViolationResult | null;
+  /**
+   * Lease-well inventory — ALL wells on the subject lease (Manus spec §4.3).
+   * canClaimSingleWellProduction is ALWAYS false.
+   * Golden fixture: Lease 60509 / District 8A → 52 wells.
+   */
+  leaseWellInventory?: import("./trrc-lease-inventory").LeaseWellInventoryResult | null;
 };
 
 export function buildDDReport(args: BuildReportArgs): DDReport {
@@ -347,6 +501,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     trrcInactiveWells    = null,
     trrcFieldWells       = null,
     cmplPacketDetail     = null,
+    districtViolations   = null,
+    leaseWellInventory   = null,
   } = args;
 
   // Is this a Texas well? Used for severance tax rates.
@@ -4241,13 +4397,39 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     truthCheck = null;
   }
 
-  // ── Completion label (blueprint gate logic) ───────────────────────────────
+  // ── FinalGateDecision (Manus spec §11) ───────────────────────────────────
   //
-  // Must be derived AFTER diligenceStatus is fully populated and
-  // AFTER computedOfferGate is set — both feed into the label decision.
-  // "Full Diligence" requires all mandatory modules to be verified/searched/N/A.
-  // Economics (offer range) are suppressed unless computedOfferGate.gate_open.
-  const diligenceRunLabel = deriveFinalRunStatus(diligenceStatus, scanMode);
+  // Derived server-side AFTER all modules complete. Claude may only explain
+  // facts that the gate already permits. The label drives what the UI shows.
+  const productionVerifiedForGate = trrcWells.length > 0 &&
+    trrcWells.some(w => (w.monthly_rows?.length ?? 0) > 0);
+
+  const complianceStatusForGate: Parameters<typeof determineFinalGate>[0]["complianceStatus"] =
+    districtViolations?.status === "success"
+      ? (districtViolations.match_count > 0 ? "verified_found" : "searched_no_records")
+      : districtViolations?.status === "download_failed"
+        ? "download_failed"
+        : districtViolations?.status === "no_url_for_district"
+          ? "no_url"
+          : districtViolations?.status === "parse_error"
+            ? "parse_error"
+            : "unknown";
+
+  const finalGate = determineFinalGate({
+    scanMode,
+    diligenceStatus,
+    productionVerified: productionVerifiedForGate,
+    complianceStatus: complianceStatusForGate,
+    leaseInventoryVerified: leaseWellInventory !== null && !leaseWellInventory.query_failed,
+    leaseInventoryWellCount: leaseWellInventory?.well_count ?? 0,
+    hasDistrictViolations: (districtViolations?.match_count ?? 0) > 0,
+    districtFileDownloadFailed: districtViolations?.status === "download_failed",
+    contradictions,
+    hasPrivateDocuments: (args.input.documents ?? []).length > 0,
+    hasLoeDocuments: (extracted?.loe_statements?.length ?? 0) > 0,
+  });
+
+  const diligenceRunLabel = finalGate.label;
 
   // ── Assemble report ───────────────────────────────────────────────────────
 
@@ -4280,6 +4462,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     p5_operator_status: p5Status,
     offset_wells: offsetWellsSection,
     cmpl_packet_detail: assembledCmplDetail,
+    lease_well_inventory: leaseWellInventory ?? null,
+    district_violations: districtViolations ?? null,
     operational_timeline: timelineEvents,
     diligence_status: diligenceStatus,
     underwriting_narrative: underwritingNarrative,

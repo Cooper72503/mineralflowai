@@ -47,6 +47,10 @@ import { fetchTrrcInactiveWellByApi, fetchTrrcInactiveWellsByOperator } from "@/
 import type { TrrcInactiveWellRecord }     from "@/lib/underwriting/trrc-inactive-wells";
 import { fetchTrrcOffsetWellsByField }     from "@/lib/underwriting/trrc-field-wells";
 import type { TrrcFieldWellsResult }       from "@/lib/underwriting/trrc-field-wells";
+import { fetchDistrictViolations }         from "@/lib/underwriting/trrc-district-violations";
+import type { DistrictViolationResult }    from "@/lib/underwriting/trrc-district-violations";
+import { fetchLeaseWellInventory }         from "@/lib/underwriting/trrc-lease-inventory";
+import type { LeaseWellInventoryResult }   from "@/lib/underwriting/trrc-lease-inventory";
 import {
   fetchTrrcOperatorProfile,
   fetchTrrcAnnualProductionBestOf,
@@ -661,6 +665,8 @@ async function runPipeline(
   let inspectionResult: import("@/lib/wells/trrc-inspection").TrrcInspectionRecord[] = [];
   let operatorProfile: TrrcOperatorProfile | null = null;
   let annualProduction: TrrcAnnualProduction | null = null;
+  let districtViolationsResult: DistrictViolationResult | null = null;
+  let leaseInventoryResult: LeaseWellInventoryResult | null = null;
 
   [complianceResult, injectionResult, inspectionResult, operatorProfile, annualProduction] = await runStep(
     writer,
@@ -675,10 +681,16 @@ async function runPipeline(
         };
       }
 
-      // All five calls run concurrently — no call blocks any other.
+      // All seven calls run concurrently — no call blocks any other.
       // EXHAUSTION POLICY: every lookup tries all available identifier strategies
       // before accepting an empty result.
-      const [violations, injection, inspections, p5Profile, h15Annual] = await Promise.all([
+      //
+      // Entries 6 + 7 are the Manus-spec mandatory evidence modules:
+      //   6 — district violation file download (RRC official TXT artifact)
+      //   7 — lease-well inventory (all wells on the lease, not just the anchor API)
+      const _primaryDistCode = Array.from(leaseMap.values())[0]?.distCode ?? null;
+      const _primaryLeaseNo  = Array.from(leaseMap.values())[0]?.leaseNo  ?? null;
+      const [violations, injection, inspections, p5Profile, h15Annual, distViolsLocal, leaseInvLocal] = await Promise.all([
 
         // ── Violations ────────────────────────────────────────────────────────
         // Strategy 1: query every available API (up to 4) — different APIs on
@@ -826,7 +838,58 @@ async function runPipeline(
           if (!first) return null;
           try { return await fetchTrrcAnnualProductionBestOf(first.distCode, first.leaseNo); } catch { return null; }
         })(),
+
+        // ── ENTRY 6: District violation file (Manus spec §4.5 / §7.2) ────────
+        // Downloads the official RRC district violation TXT file, hashes it,
+        // parses every row, and filters by lease number + API variants.
+        //
+        // Critical rule: failed download ≠ clean compliance.
+        // Golden fixture: Lease 60509 / District 8A → 39 matching records.
+        (async (): Promise<DistrictViolationResult | null> => {
+          if (!_primaryDistCode || !_primaryLeaseNo) return null;
+          try {
+            return await withTimeout(
+              fetchDistrictViolations(_primaryDistCode, _primaryLeaseNo, apiNumbers, operatorName),
+              50_000,
+              `District ${_primaryDistCode} violation file`,
+            );
+          } catch { return null; }
+        })(),
+
+        // ── ENTRY 7: Lease-well inventory (Manus spec §4.3 / §8) ─────────────
+        // Discovers ALL wells on the lease from TRRC wellbore query.
+        //
+        // Critical rule: one API ≠ one well.
+        // Golden fixture: Lease 60509 / District 8A → 52 wells.
+        // canClaimSingleWellProduction is ALWAYS false.
+        (async (): Promise<LeaseWellInventoryResult | null> => {
+          if (!_primaryDistCode || !_primaryLeaseNo) return null;
+          try {
+            return await withTimeout(
+              fetchLeaseWellInventory(_primaryDistCode, _primaryLeaseNo),
+              35_000,
+              `Lease inventory Dist ${_primaryDistCode} Lease ${_primaryLeaseNo}`,
+            );
+          } catch { return null; }
+        })(),
       ]);
+
+      // ── Store new evidence in outer scope (captured by closure) ────────────
+      districtViolationsResult = distViolsLocal ?? null;
+      leaseInventoryResult     = leaseInvLocal  ?? null;
+
+      // Merge district file violations into the ICE violations array so that
+      // the downstream report builder sees the full combined violation set.
+      // De-duplicate by violation_id + date + type.
+      if (distViolsLocal?.matching_violations?.length) {
+        const dvSeen = new Set(
+          violations.map(v => `${v.violation_id ?? ""}|${v.date ?? ""}|${v.type}`)
+        );
+        for (const dv of distViolsLocal.matching_violations) {
+          const key = `${dv.violation_id ?? ""}|${dv.date ?? ""}|${dv.type}`;
+          if (!dvSeen.has(key)) { dvSeen.add(key); violations.push(dv); }
+        }
+      }
 
       const parts: string[] = [];
       if (violations.length > 0)   parts.push(`${violations.length} violation(s)`);
@@ -834,6 +897,23 @@ async function runPipeline(
       if (inspections.length > 0)  parts.push(`${inspections.length} ICE inspection record(s)`);
       if (p5Profile)               parts.push(`P-5 operator record found`);
       if (h15Annual?.rows.length)  parts.push(`H-15: ${h15Annual.rows.length} year(s) of annual production`);
+      // District violation file
+      if (distViolsLocal?.status === "success") {
+        parts.push(`District ${distViolsLocal.district} violation file: ${distViolsLocal.match_count} matching record(s) of ${distViolsLocal.total_rows_in_file.toLocaleString()} total`);
+      } else if (distViolsLocal?.status === "download_failed") {
+        parts.push(`District violation file DOWNLOAD FAILED — compliance unverified`);
+      } else if (distViolsLocal?.status === "no_url_for_district") {
+        parts.push(`District violation file: no URL found for district ${_primaryDistCode ?? "unknown"}`);
+      }
+      // Lease-well inventory
+      if (leaseInvLocal) {
+        if (leaseInvLocal.query_failed) {
+          parts.push(`Lease-well inventory query failed — well count unknown`);
+        } else {
+          parts.push(`Lease inventory: ${leaseInvLocal.well_count} well(s) on Lease ${leaseInvLocal.lease_number}`);
+        }
+      }
+
       const detail = parts.length > 0
         ? parts.join(", ")
         : "No compliance/inspection records found";
@@ -1115,6 +1195,8 @@ async function runPipeline(
     trrcInactiveWells:     inactiveWellsResult,
     trrcFieldWells:        fieldWellsResult,
     cmplPacketDetail:      cmplPacketDetailResult,
+    districtViolations:    districtViolationsResult,
+    leaseWellInventory:    leaseInventoryResult,
   });
 
   const totalMs = Date.now() - t0;

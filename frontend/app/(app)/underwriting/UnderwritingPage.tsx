@@ -331,19 +331,60 @@ function deriveReportCompletionLabel(
   severity: "complete" | "partial" | "blocked";
   blockingCount: number;
 } {
+  // Server-side gate always wins when present (Manus spec §14 / §11)
+  if (serverLabel) {
+    switch (serverLabel) {
+      case "Failed Verification":
+        return {
+          label: "Failed Verification",
+          sublabel: "A critical report claim is contradicted by official evidence. Report blocked.",
+          severity: "blocked",
+          blockingCount: 1,
+        };
+      case "Quick Screen":
+        return {
+          label: "Quick Screen",
+          sublabel: "Preliminary identity scan only. Full evidence pipeline not run.",
+          severity: "blocked",
+          blockingCount: 1,
+        };
+      case "Preliminary Diligence":
+        return {
+          label: "Preliminary Diligence",
+          sublabel: "Some official evidence parsed. One or more critical modules are incomplete.",
+          severity: "partial",
+          blockingCount: 1,
+        };
+      case "Public-Record Diligence":
+        return {
+          label: "Public-Record Diligence",
+          sublabel: "RRC identity, inventory, production, and compliance verified. Private docs still needed for offer.",
+          severity: "partial",
+          blockingCount: 0,
+        };
+      case "Acquisition-Grade Diligence":
+        return {
+          label: "Acquisition-Grade Diligence",
+          sublabel: "All public records, LOE, revenue, ownership, and title verified. Gate open.",
+          severity: "complete",
+          blockingCount: 0,
+        };
+    }
+  }
+
+  // Fallback: derive from diligence status items
   if (!items || items.length === 0) {
-    return { label: serverLabel ?? "Full Diligence", sublabel: "All available data sources were consulted.", severity: "complete", blockingCount: 0 };
+    return { label: "Quick Screen", sublabel: "No evidence modules completed.", severity: "blocked", blockingCount: 1 };
   }
 
   const mandatory = items.filter(i => MANDATORY_DILIGENCE_CATEGORIES.includes(i.category as typeof MANDATORY_DILIGENCE_CATEGORIES[number]));
-  // "searched_no_records" and "not_applicable" both count as resolved — same as "verified"
   const blocking  = mandatory.filter(i => !RESOLVED_TIERS.has(i.tier));
   const critical  = blocking.filter(i => i.urgency === "critical" || i.tier === "missing" || i.tier === "query_failed");
 
   if (critical.length > 0) {
     const fields = critical.map(i => i.category).join(", ");
     return {
-      label: "Preliminary Screen — Critical Diligence Missing",
+      label: "Preliminary Diligence",
       sublabel: `${critical.length} critical item(s) unresolved: ${fields}.`,
       severity: "blocked",
       blockingCount: critical.length,
@@ -351,15 +392,15 @@ function deriveReportCompletionLabel(
   }
   if (blocking.length > 0) {
     return {
-      label: "Partial Underwriting — Additional Diligence Required",
-      sublabel: `${blocking.length} mandatory item(s) not yet fully verified. Review missing diligence tab.`,
+      label: "Preliminary Diligence",
+      sublabel: `${blocking.length} mandatory item(s) not yet fully verified.`,
       severity: "partial",
       blockingCount: blocking.length,
     };
   }
   return {
-    label: serverLabel ?? "Full Diligence",
-    sublabel: "All mandatory diligence categories verified or confirmed no records — offer gate enabled.",
+    label: "Public-Record Diligence",
+    sublabel: "Public-record mandatory categories verified or confirmed no records.",
     severity: "complete",
     blockingCount: 0,
   };
@@ -530,8 +571,43 @@ function ProductionBarChart({ rows }: {
 
 function ProductionTab({ report }: { report: DDReport }) {
   const s = report.production;
+  const inv = report.lease_well_inventory;
   return (
     <>
+      {/* ── MULTI-WELL LEASE ATTRIBUTION WARNING ───────────────────────────── */}
+      {/* Manus spec §8: production is ALWAYS lease-level unless allocation evidence exists */}
+      {inv && (
+        <div style={{
+          padding: "0.75rem 1rem",
+          borderRadius: 7,
+          marginBottom: "1rem",
+          background: "#eff6ff",
+          border: "1px solid #bfdbfe",
+          fontSize: "0.83rem",
+          color: "#1e3a8a",
+          lineHeight: 1.6,
+        }}>
+          <strong>⚠ Lease-Level Production ({inv.well_count > 0 ? `${inv.well_count} wells` : "well count unknown"})</strong>
+          <br />
+          {inv.lease_level_warning}
+        </div>
+      )}
+      {!inv && (
+        <div style={{
+          padding: "0.65rem 0.9rem",
+          borderRadius: 6,
+          marginBottom: "0.85rem",
+          background: "#fef3c7",
+          border: "1px solid #fcd34d",
+          fontSize: "0.82rem",
+          color: "#92400e",
+          fontWeight: 600,
+        }}>
+          ⚠ Lease-well inventory not retrieved. Production figures represent RRC lease-level aggregate — not single-well production.
+          Cannot assert per-well rates.
+        </div>
+      )}
+
       <Section title="Production Summary" icon="⛽">
         <KvRow label="Total Monthly Oil (BBL)">
           <DataCell dp={s.total_monthly_oil_bbl} format={n => fmtN(n, 0)} unit="BBL/mo" />
@@ -781,8 +857,151 @@ function ComplianceTab({ report }: { report: DDReport }) {
   const s = report.compliance;
   const hasInspections = (s.inspection_records?.length ?? 0) > 0;
   const nonCompliantInspections = s.inspection_records?.filter(r => r.result === "non_compliant") ?? [];
+  const dv = report.district_violations;
+  const inv = report.lease_well_inventory;
   return (
     <>
+      {/* ── DISTRICT VIOLATION FILE (Manus spec §4.5 / §7.2) ──────────────── */}
+      {/* This is the AUTHORITATIVE compliance source — full historical record. */}
+      {/* A failed download is NOT clean compliance. */}
+      <Section title="District Violation File (Official RRC Evidence)" icon="📂">
+        {dv ? (
+          <>
+            {/* Status banner */}
+            <div style={{
+              padding: "0.65rem 0.9rem",
+              borderRadius: 6,
+              marginBottom: "0.75rem",
+              fontSize: "0.84rem",
+              fontWeight: 600,
+              background: dv.status === "download_failed" || dv.status === "parse_error"
+                ? "#fee2e2"
+                : dv.status === "no_url_for_district"
+                  ? "#fef3c7"
+                  : dv.match_count > 0
+                    ? "#fee2e2"
+                    : "#d1fae5",
+              color: dv.status === "download_failed" || dv.status === "parse_error"
+                ? COLORS.red
+                : dv.status === "no_url_for_district"
+                  ? "#92400e"
+                  : dv.match_count > 0
+                    ? COLORS.red
+                    : "#065f46",
+              border: "1px solid",
+              borderColor: dv.status === "download_failed" || dv.status === "parse_error"
+                ? "#fca5a5"
+                : dv.status === "no_url_for_district"
+                  ? "#fcd34d"
+                  : dv.match_count > 0
+                    ? "#fca5a5"
+                    : "#6ee7b7",
+            }}>
+              {dv.status === "download_failed"     && "⛔ DOWNLOAD FAILED — Compliance status UNVERIFIED. Cannot claim clean compliance."}
+              {dv.status === "parse_error"          && "⚠ PARSE ERROR — District file downloaded but could not be parsed. Compliance unverified."}
+              {dv.status === "no_url_for_district"  && "⚠ District violation file URL not found. Compliance unverified for this district."}
+              {dv.status === "success" && dv.match_count > 0 && `🚨 ${dv.match_count} violation record(s) found in District ${dv.district} official file.`}
+              {dv.status === "success" && dv.match_count === 0 && `✓ Confirmed clean — 0 matching records in District ${dv.district} official file (${dv.total_rows_in_file.toLocaleString()} total rows searched).`}
+            </div>
+
+            <KvRow label="Source"><a href={dv.source_url ?? "#"} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.78rem", color: "#1d4ed8", wordBreak: "break-all" }}>{dv.source_url ?? "—"}</a></KvRow>
+            <KvRow label="District">{dv.district}</KvRow>
+            <KvRow label="Status">{dv.status}</KvRow>
+            {dv.raw_sha256 && <KvRow label="File SHA-256"><span style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>{dv.raw_sha256.slice(0, 24)}…</span></KvRow>}
+            {dv.total_rows_in_file > 0 && <KvRow label="Total rows in file">{dv.total_rows_in_file.toLocaleString()}</KvRow>}
+            <KvRow label="Matching records">{dv.match_count}</KvRow>
+            <KvRow label="Confirmed clean">{dv.confirmed_clean ? "Yes" : "No"}</KvRow>
+            <KvRow label="Query time"><span style={{ fontSize: "0.75rem", color: COLORS.textMuted }}>{dv.query_timestamp}</span></KvRow>
+
+            {/* District violation records table */}
+            {dv.matching_violations.length > 0 && (
+              <div style={{ marginTop: "1rem" }}>
+                <div style={{ fontWeight: 700, fontSize: "0.85rem", marginBottom: "0.4rem", color: COLORS.red }}>
+                  {dv.matching_violations.length} Matching Violation Record(s)
+                </div>
+                <DdTable
+                  headers={["ID", "Date", "Type", "Description", "Status"]}
+                  rows={dv.matching_violations.map(v => [
+                    v.violation_id ?? "—",
+                    v.date ?? "—",
+                    v.type,
+                    v.description,
+                    <span key="st" style={{ color: v.status === "open" ? COLORS.red : v.status === "closed" ? COLORS.green : COLORS.textMuted, fontWeight: 600, textTransform: "capitalize" as const }}>{v.status}</span>,
+                  ])}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ padding: "0.65rem 0.9rem", borderRadius: 6, background: "#fef3c7", fontSize: "0.84rem", color: "#92400e", fontWeight: 600 }}>
+            ⚠ District violation file not downloaded. Compliance status UNVERIFIED — do not claim clean compliance.
+          </div>
+        )}
+      </Section>
+
+      {/* ── LEASE-WELL INVENTORY (Manus spec §4.3 / §8) ───────────────────── */}
+      {/* canClaimSingleWellProduction is ALWAYS false without allocation evidence */}
+      <Section title="Lease-Well Inventory" icon="🗂">
+        {inv ? (
+          <>
+            <div style={{
+              padding: "0.65rem 0.9rem",
+              borderRadius: 6,
+              marginBottom: "0.75rem",
+              fontSize: "0.84rem",
+              fontWeight: 600,
+              background: inv.query_failed ? "#fef3c7" : inv.well_count > 1 ? "#eff6ff" : "#f0fdf4",
+              color: inv.query_failed ? "#92400e" : inv.well_count > 1 ? "#1d4ed8" : "#065f46",
+              border: "1px solid",
+              borderColor: inv.query_failed ? "#fcd34d" : inv.well_count > 1 ? "#bfdbfe" : "#6ee7b7",
+            }}>
+              {inv.query_failed
+                ? "⚠ Lease-well inventory query failed — well count unknown."
+                : `${inv.well_count} well(s) discovered on Lease ${inv.lease_number} / District ${inv.district_code}`}
+            </div>
+
+            {/* Multi-well lease attribution warning */}
+            <div style={{ padding: "0.7rem 0.9rem", borderRadius: 6, background: "#eff6ff", fontSize: "0.82rem", color: "#1e3a8a", marginBottom: "0.75rem", lineHeight: 1.5 }}>
+              <strong>⚠ Multi-Well Lease Attribution:</strong> {inv.lease_level_warning}
+            </div>
+
+            <KvRow label="District">{inv.district_code}</KvRow>
+            <KvRow label="Lease">{inv.lease_number}</KvRow>
+            <KvRow label="Well count">{inv.query_failed ? "Unknown" : inv.well_count}</KvRow>
+            <KvRow label="Single-well production claim">
+              <span style={{ color: COLORS.red, fontWeight: 700 }}>NOT PERMITTED — Lease-level only</span>
+            </KvRow>
+            <KvRow label="Query time"><span style={{ fontSize: "0.75rem", color: COLORS.textMuted }}>{inv.query_timestamp}</span></KvRow>
+
+            {/* Well inventory table */}
+            {inv.wells.length > 0 && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <DdTable
+                  headers={["API-10", "Well #", "Type", "Status", "Operator", "County"]}
+                  rows={inv.wells.slice(0, 60).map(w => [
+                    w.api10,
+                    w.well_number ?? "—",
+                    w.well_type ?? "—",
+                    w.status ?? "—",
+                    w.operator_name ?? "—",
+                    w.county ?? "—",
+                  ])}
+                />
+                {inv.wells.length > 60 && (
+                  <div style={{ fontSize: "0.78rem", color: COLORS.textMuted, marginTop: "0.4rem" }}>
+                    Showing 60 of {inv.well_count} wells. Full inventory in evidence trace.
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ padding: "0.65rem 0.9rem", borderRadius: 6, background: "#fef3c7", fontSize: "0.84rem", color: "#92400e", fontWeight: 600 }}>
+            ⚠ Lease-well inventory not retrieved. Well count unknown — do not assert single-well production.
+          </div>
+        )}
+      </Section>
+
       {/* ── Field Inspection Records (ICE) ── */}
       <Section title="Field Inspection Records (ICE)" icon="🔍">
         <KvRow label="Most Recent Inspection">

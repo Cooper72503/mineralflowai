@@ -769,15 +769,26 @@ export type DDReport = {
   scan_mode: ScanMode;
 
   /**
-   * Completion label derived from module status gate logic.
-   * "Preliminary Screen"   — quick scan or critical mandatory modules are missing/failed.
-   * "Partial Underwriting" — production history is at least partially_verified; no critical gaps.
-   * "Full Diligence"       — all mandatory modules are verified, searched_no_records, or not_applicable.
+   * Completion label derived from module status gate logic (Manus spec FinalGateDecision).
    *
-   * The report NEVER says "Full Diligence" just because a report was generated.
-   * The gate logic drives this label — not the scan completing.
+   * "Quick Screen"            — identity resolved only; no evidence modules passed.
+   * "Preliminary Diligence"   — 1–2 evidence modules returned results; major gaps remain.
+   * "Public-Record Diligence" — production, violations, inventory all verified from public records;
+   *                             no failed downloads; seller docs not yet provided.
+   * "Failed Verification"     — a report claim is contradicted by raw evidence, OR a mandatory
+   *                             download failed (district violation file, production CSV).
+   * "Acquisition-Grade Diligence" — all public-record modules passed; seller docs verified;
+   *                                  no contradicted claims; gate fully open.
+   *
+   * The report NEVER claims a higher tier than the evidence supports.
+   * Gate logic drives this label — not the scan completing.
    */
-  diligence_run_label: "Preliminary Screen" | "Partial Underwriting" | "Full Diligence";
+  diligence_run_label:
+    | "Quick Screen"
+    | "Preliminary Diligence"
+    | "Public-Record Diligence"
+    | "Failed Verification"
+    | "Acquisition-Grade Diligence";
   overall_confidence: DDReportConfidence;
   overall_confidence_note: string;
 
@@ -834,6 +845,31 @@ export type DDReport = {
    * Upgrades formation evidence from model_estimate → trrc_imaged.
    */
   cmpl_packet_detail: import("@/lib/wells/trrc-imaged-records").CmplPacketDetail | null;
+
+  /**
+   * Lease-well inventory — ALL wells on the subject lease, discovered from TRRC.
+   *
+   * Critical: lease production is ALWAYS aggregate across all wells.
+   * `can_claim_single_well_production` is always false unless per-well allocation
+   * evidence (metered run tickets, pooling agreements with well-level breakdowns) exists.
+   *
+   * Golden fixture: Lease 60509 / District 8A → 52 wells.
+   * If this returns 1 well when the lease has 52, the implementation fails.
+   */
+  lease_well_inventory: import("@/lib/underwriting/trrc-lease-inventory").LeaseWellInventoryResult | null;
+
+  /**
+   * District violation file results — downloaded from TRRC official file transfer.
+   *
+   * This is the AUTHORITATIVE compliance source, covering the full historical record.
+   * The ICE portal (used for `compliance.violations`) only covers from Aug 2015 onward.
+   *
+   * CRITICAL: if `district_violations.status === "download_failed"`, the report
+   * MUST NOT claim clean compliance. Failed download ≠ no violations.
+   *
+   * Golden fixture: Lease 60509 / District 8A → 39 matching records.
+   */
+  district_violations: import("@/lib/underwriting/trrc-district-violations").DistrictViolationResult | null;
 
   /** Chronological event log — correlates workovers, violations, downtime, production changes */
   operational_timeline: OperationalTimelineEvent[];
