@@ -546,30 +546,73 @@ async function fetchLeaseProductionPage(
     distCode, leaseNo, startMonth, startYear, endMonth, endYear, oilOrGas,
   );
 
-  const headers: Record<string, string> = {
+  // ── Step 1: GET the search form to extract JSESSIONID from HTML action attr ──
+  //
+  // TRRC EWA uses Java Struts with URL-path session tracking.  The JSESSIONID is
+  // embedded in the form action attribute:
+  //   action="/EWA/specificLeaseQueryAction.do;jsessionid=XXXX"
+  // It is NOT reliably delivered via Set-Cookie.  Posting to the base URL without
+  // the session in the path returns the blank search form instead of data.
+  let activeSession: string | null = null;
+  try {
+    const getHeaders: Record<string, string> = {
+      "Accept":     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
+    };
+    if (sessionCookie) getHeaders["Cookie"] = sessionCookie;
+
+    const getRes = await fetch(`${BASE}/specificLeaseQueryAction.do`, {
+      method: "GET",
+      headers: getHeaders,
+      signal,
+    });
+    if (getRes.ok) {
+      const getHtml = await getRes.text();
+      // Extract session from form action: action="...;jsessionid=XXXX"
+      const actionMatch = getHtml.match(/jsessionid=([^"?&;]+)/i);
+      if (actionMatch) {
+        activeSession = actionMatch[1];
+      }
+      // Also check Set-Cookie as fallback
+      if (!activeSession) {
+        const setCookieGet = getRes.headers.get("set-cookie") ?? "";
+        const cookieMatch  = setCookieGet.match(/JSESSIONID=([^;,\s]+)/i);
+        if (cookieMatch) activeSession = cookieMatch[1];
+      }
+    }
+  } catch {
+    // Proceed with POST anyway — worst case we get the blank form back
+  }
+
+  // ── Step 2: POST to URL WITH jsessionid in path ─────────────────────────────
+  const postPath = activeSession
+    ? `${BASE}/specificLeaseQueryAction.do;jsessionid=${activeSession}`
+    : `${BASE}/specificLeaseQueryAction.do`;
+
+  const postHeaders: Record<string, string> = {
     "Content-Type": "application/x-www-form-urlencoded",
     "User-Agent":   "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
     "Accept":       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   };
-  if (sessionCookie) headers["Cookie"] = sessionCookie;
+  // Include session in Cookie header as well (belt-and-suspenders)
+  const cookieVal = activeSession ? `JSESSIONID=${activeSession}` : sessionCookie;
+  if (cookieVal) postHeaders["Cookie"] = cookieVal;
 
-  const res = await fetch(`${BASE}/specificLeaseQueryAction.do`, {
+  const res = await fetch(postPath, {
     method:  "POST",
-    headers,
+    headers: postHeaders,
     body:    body.toString(),
     signal,
   });
 
-  if (!res.ok) return { rows: [], nextPagePath: null, activeCookie: sessionCookie };
+  if (!res.ok) return { rows: [], nextPagePath: null, activeCookie: cookieVal };
 
-  // Capture JSESSIONID from this response — TRRC sets it here when no session existed.
-  // This is the key fix: we bootstrap the session from the production POST itself
-  // rather than requiring a separate initTrrcSession() call that can fail silently.
+  // Capture any updated JSESSIONID from the POST response
   const setCookieHeader = res.headers.get("set-cookie") ?? "";
   const sessionMatch    = setCookieHeader.match(/JSESSIONID=([^;,\s]+)/i);
   const activeCookie    = sessionMatch
     ? `JSESSIONID=${sessionMatch[1]}`
-    : (sessionCookie ?? null);
+    : (cookieVal ?? null);
 
   const html = await res.text();
   const rows = parseTrrcHtmlRows(html, oilOrGas);
@@ -781,27 +824,10 @@ export async function fetchTrrcProductionHistory(
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
-    // ── Strategy A: Official TRRC CSV download ────────────────────────────
-    //
-    // specificLeaseCSVAction.do returns the full production history in a single
-    // structured CSV response — no pagination, no HTML parsing, no session needed.
-    {
-      const [oilCsv, gasCsv] = await Promise.all([
-        fetchLeaseProductionCsv(lease.distCode, lease.leaseNo, startMonth, startYear, endMonth, endYear, "O"),
-        fetchLeaseProductionCsv(lease.distCode, lease.leaseNo, startMonth, startYear, endMonth, endYear, "G"),
-      ]);
-      const rows = mergeOilGasRows(oilCsv ?? [], gasCsv ?? []);
-      if (rows.length > 0) {
-        return {
-          api_number:    apiNumber,
-          district_code: lease.distCode,
-          lease_number:  lease.leaseNo,
-          rows,
-          months_count:  rows.length,
-          source:        "trrc_actual",
-        };
-      }
-    }
+    // ── Strategy A: Official TRRC CSV download — DISABLED ────────────────
+    // specificLeaseCSVAction.do always returns HTTP 500 on the live TRRC system.
+    // Skip directly to the HTML scraper which uses the correct jsessionid URL-path
+    // session flow and is confirmed working for the golden fixture (402 rows).
 
     // ── Strategy B: HTML scraper — self-bootstrapping POST ────────────────
     //
@@ -884,16 +910,9 @@ export async function fetchTrrcLatestByLease(
     const startYear  = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1;
 
+    // Strategy A (CSV via specificLeaseCSVAction.do) is disabled — endpoint always
+    // returns HTTP 500 on the live TRRC system.  Go straight to HTML scraper.
     let rows: TrrcMonthlyRow[] = [];
-
-    // ── Strategy A: CSV download (full history in one request) ───────────
-    {
-      const [oilCsv, gasCsv] = await Promise.all([
-        fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "O"),
-        fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "G"),
-      ]);
-      rows = mergeOilGasRows(oilCsv ?? [], gasCsv ?? []);
-    }
 
     // ── Strategy B: HTML scraper — self-bootstrapping POST ───────────────
     if (rows.length === 0) {
@@ -959,20 +978,9 @@ export async function fetchTrrcProductionByLease(
   const startYear  = startDate.getFullYear();
   const startMonth = startDate.getMonth() + 1;
 
-  // ── Strategy A: Official TRRC CSV download ──────────────────────────────
-  //
-  // specificLeaseCSVAction.do returns the full production history in a single
-  // structured CSV response.  No pagination, no HTML parsing, no session needed.
-  // This is the authoritative path — the same approach used by professional
-  // diligence tools including the Manus AI reference implementation.
-  {
-    const [oilCsv, gasCsv] = await Promise.all([
-      fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "O"),
-      fetchLeaseProductionCsv(distCode, leaseNo, startMonth, startYear, endMonth, endYear, "G"),
-    ]);
-    const rows = mergeOilGasRows(oilCsv ?? [], gasCsv ?? []);
-    if (rows.length > 0) return { rows, distCode, leaseNo };
-  }
+  // ── Strategy A: Official TRRC CSV download — DISABLED ─────────────────
+  // specificLeaseCSVAction.do always returns HTTP 500 on the live TRRC system.
+  // Skip directly to the HTML scraper with correct jsessionid URL-path session flow.
 
   // ── Strategy B: HTML scraper — self-bootstrapping POST ─────────────────
   //

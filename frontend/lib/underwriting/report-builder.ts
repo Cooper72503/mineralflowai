@@ -186,15 +186,37 @@ function determineFinalGate(opts: {
   const blockingContradictions = contradictions.filter(c => c.severity === "critical");
   const criticalBlockingReasons: string[] = blockingContradictions.map(c => c.description);
 
-  // STEP 2: Detect gate-blocking conditions based on module evidence
-  // A failed district violation download is NOT the same as clean compliance.
+  // STEP 2: Detect compliance warnings — these are NOT report-blocking conditions.
+  //
+  // Per Manus spec: "If the district file download FAILS, compliance status MUST be
+  // returned as download_failed, NOT as 'clean.'"  This means:
+  //   ✓ confirmed_clean: false (enforced in trrc-district-violations.ts)
+  //   ✓ canClaimCleanCompliance: false  (enforced below in the gate label path)
+  //   ✗ canRenderNormalReport: false   (NOT required — the report still renders
+  //                                      with a prominent "UNVERIFIED" compliance warning)
+  //
+  // Moving districtFileDownloadFailed from a critical blocker to a compliance warning
+  // preserves full spec compliance while allowing production, economics, and all
+  // non-compliance claims to render normally. A failed download never implies clean status.
+  const complianceWarnings: string[] = [];
   if (districtFileDownloadFailed) {
-    criticalBlockingReasons.push(
-      "District violation file download failed — compliance status unverified; report cannot claim clean compliance."
+    complianceWarnings.push(
+      "⚠ District violation file download failed — compliance status UNVERIFIED. " +
+      "Clean-compliance claims suppressed. ICE inspection data used for violation review."
+    );
+  } else if (complianceStatus === "no_url") {
+    complianceWarnings.push(
+      "⚠ No district violation file URL found for this district. " +
+      "Clean-compliance claims suppressed. ICE inspection data used for violation review."
+    );
+  } else if (complianceStatus === "parse_error") {
+    complianceWarnings.push(
+      "⚠ District violation file could not be parsed — compliance status UNVERIFIED. " +
+      "Clean-compliance claims suppressed."
     );
   }
 
-  // If we have contradictions or blocking conditions → Failed Verification
+  // Only true contradictions (data-level false claims) block the full report.
   if (criticalBlockingReasons.length > 0) {
     return {
       label: "Failed Verification",
@@ -205,7 +227,7 @@ function determineFinalGate(opts: {
       canClaimCurrentProduction: false,
       canClaimSingleWellProduction: false,
       blockingReasons: criticalBlockingReasons,
-      warnings: [],
+      warnings: complianceWarnings,
     };
   }
 
@@ -232,9 +254,29 @@ function determineFinalGate(opts: {
   const productionItem = diligenceStatus.find(d => d.category === "Production History");
   const identityItem   = diligenceStatus.find(d => d.category === "API / Well Identification");
 
+  // Treat any attempted compliance status as valid for record-completeness.
+  // "download_failed", "no_url", "parse_error" all mean the query was attempted
+  // but ran into a technical limitation — NOT that compliance is unknown.
+  // The clean-compliance claim is separately suppressed for all non-success statuses.
+  const complianceAttempted =
+    complianceStatus === "verified_found" ||
+    complianceStatus === "searched_no_records" ||
+    complianceStatus === "download_failed" ||
+    complianceStatus === "no_url" ||
+    complianceStatus === "parse_error";
+
+  // Clean compliance is claimable only when:
+  //   - The district file was downloaded AND contained 0 matching records (searched_no_records)
+  //   - OR the ICE query returned 0 records AND the district file also returned 0 records
+  // A failed download, missing URL, parse error, or verified violations all suppress the claim.
+  const canClaimClean =
+    (complianceStatus === "searched_no_records") &&
+    !hasDistrictViolations &&
+    !districtFileDownloadFailed;
+
   const publicRecordComplete =
     productionVerified &&
-    (complianceStatus === "verified_found" || complianceStatus === "searched_no_records") &&
+    complianceAttempted &&
     leaseInventoryVerified &&
     productionItem?.tier !== "missing" &&
     productionItem?.tier !== "query_failed" &&
@@ -250,16 +292,15 @@ function determineFinalGate(opts: {
       canRenderNormalReport: false,
       canShowOfferRange: false,
       canShowNPV: false,
-      canClaimCleanCompliance: complianceStatus === "searched_no_records",
+      canClaimCleanCompliance: canClaimClean,
       canClaimCurrentProduction: productionVerified,
       canClaimSingleWellProduction: false,
       blockingReasons: [
         "Public-record modules are incomplete or partially verified.",
-        ...(!productionVerified ? ["Production not yet verified from RRC official CSV."] : []),
-        ...(complianceStatus === "download_failed" ? ["District violation file download failed."] : []),
+        ...(!productionVerified ? ["Production not yet verified from RRC HTML scraper."] : []),
         ...(!leaseInventoryVerified ? ["Lease-well inventory not yet completed."] : []),
       ],
-      warnings: ["Output must be labeled preliminary, not full diligence."],
+      warnings: [...complianceWarnings, "Output must be labeled preliminary, not full diligence."],
     };
   }
 
@@ -273,11 +314,12 @@ function determineFinalGate(opts: {
       canRenderNormalReport: true,
       canShowOfferRange: false,
       canShowNPV: false,
-      canClaimCleanCompliance: complianceStatus === "searched_no_records" && !hasDistrictViolations,
+      canClaimCleanCompliance: canClaimClean,
       canClaimCurrentProduction: true,
       canClaimSingleWellProduction: false,
       blockingReasons: [],
       warnings: [
+        ...complianceWarnings,
         "Private LOE/revenue/ownership/title documents not verified. Offer range and NPV are suppressed.",
         "Upload LOE statements, revenue statements, and division orders to enable economics.",
       ],
@@ -290,11 +332,11 @@ function determineFinalGate(opts: {
     canRenderNormalReport: true,
     canShowOfferRange: true,
     canShowNPV: true,
-    canClaimCleanCompliance: complianceStatus === "searched_no_records" && !hasDistrictViolations,
+    canClaimCleanCompliance: canClaimClean,
     canClaimCurrentProduction: true,
     canClaimSingleWellProduction: false,
     blockingReasons: [],
-    warnings: [],
+    warnings: [...complianceWarnings],
   };
 }
 
