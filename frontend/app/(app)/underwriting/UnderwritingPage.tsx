@@ -377,6 +377,7 @@ type TabId =
   | "ownership_interests"
   | "swd_water"
   | "imaged_records"
+  | "proration_p5"
   | "documents_sources"
   | "missing_diligence"
   | "ic_memo"
@@ -398,6 +399,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "ownership_interests", label: "Ownership & Interests",  icon: "📜" },
   { id: "swd_water",           label: "SWD / Water",            icon: "💧" },
   { id: "imaged_records",      label: "Imaged Records",         icon: "📄" },
+  { id: "proration_p5",        label: "Proration / P-5",        icon: "🏛️" },
   { id: "documents_sources",   label: "Documents & Sources",    icon: "📂" },
   { id: "missing_diligence",   label: "Missing Diligence",      icon: "⚠️" },
   { id: "ic_memo",             label: "IC Memo",                icon: "🤔" },
@@ -1051,22 +1053,26 @@ function ImagedRecordsTab({ report }: { report: DDReport }) {
         </div>
 
         {/* Quick-access links */}
-        {(s.latest_completion_url || s.latest_plugging_url) && (
-          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
-            {s.latest_completion_url && (
-              <a href={s.latest_completion_url} target="_blank" rel="noopener noreferrer"
-                style={{ background: COLORS.greenDim, color: COLORS.green, border: `1px solid ${COLORS.green}40`, borderRadius: 6, padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 700, textDecoration: "none" }}>
-                Open W-2 Completion Report →
-              </a>
-            )}
-            {s.latest_plugging_url && (
-              <a href={s.latest_plugging_url} target="_blank" rel="noopener noreferrer"
-                style={{ background: COLORS.redDim, color: COLORS.red, border: `1px solid ${COLORS.red}40`, borderRadius: 6, padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 700, textDecoration: "none" }}>
-                Open P-4 Plugging Record →
-              </a>
-            )}
-          </div>
-        )}
+        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+          {s.latest_completion_url && (
+            <a href={s.latest_completion_url} target="_blank" rel="noopener noreferrer"
+              style={{ background: COLORS.greenDim, color: COLORS.green, border: `1px solid ${COLORS.green}40`, borderRadius: 6, padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 700, textDecoration: "none" }}>
+              Open Completion Report →
+            </a>
+          )}
+          {s.latest_plugging_url && (
+            <a href={s.latest_plugging_url} target="_blank" rel="noopener noreferrer"
+              style={{ background: COLORS.redDim, color: COLORS.red, border: `1px solid ${COLORS.red}40`, borderRadius: 6, padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 700, textDecoration: "none" }}>
+              Open P-4 Plugging Record →
+            </a>
+          )}
+          {s.neubus_viewer_url && (
+            <a href={s.neubus_viewer_url} target="_blank" rel="noopener noreferrer"
+              style={{ background: COLORS.accent + "15", color: COLORS.accent, border: `1px solid ${COLORS.accent}40`, borderRadius: 6, padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 700, textDecoration: "none" }}>
+              All Imaged Records (Neubus) →
+            </a>
+          )}
+        </div>
 
         {/* All records table */}
         {s.records.length > 0 ? (
@@ -1087,8 +1093,8 @@ function ImagedRecordsTab({ report }: { report: DDReport }) {
         ) : (
           <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
             {s.query_succeeded
-              ? "No filed documents found for this API in the TRRC image archive. This is common for older wells predating the digital imaging system."
-              : "Document image query failed. Try opening TRRC EWA directly: https://webapps2.rrc.texas.gov/EWA/rrcdocsQueryAction.do"}
+              ? "No completion packets found in TRRC CMPL for this API (covers Nov 2009 onward). Pre-2009 records may exist in Neubus — use the button above to search."
+              : "CMPL query failed. Use the Neubus link above to search imaged records directly."}
           </div>
         )}
       </Section>
@@ -1101,6 +1107,238 @@ function ImagedRecordsTab({ report }: { report: DDReport }) {
           <p style={{ marginBottom: "0.5rem" }}><strong style={{ color: COLORS.text }}>P-4 Plugging Record</strong> — If present, confirms the well has been plugged and abandoned. A P-4 for a well shown as &quot;active&quot; is a red flag requiring immediate clarification.</p>
           <p><strong style={{ color: COLORS.text }}>G-1 Gas Well Status</strong> — Initial potential test results filed with TRRC. Useful for verifying original gas deliverability and confirming formation.</p>
         </div>
+      </Section>
+    </>
+  );
+}
+
+function ProrationP5Tab({ report }: { report: DDReport }) {
+  const pro     = report.proration;
+  const p5      = report.p5_operator_status;
+  const plugging  = report.plugging_liability;
+  const offsets   = report.offset_wells;
+  const cmplDetail = report.cmpl_packet_detail;
+
+  const flagColors: Record<string, string> = { green: COLORS.green, yellow: COLORS.yellow, red: COLORS.red };
+
+  return (
+    <>
+      {/* ── P-5 Operator Status ─────────────────────────────────────────── */}
+      <Section title="P-5 Operator Organization Status" icon="🏛️">
+        {p5 ? (
+          <>
+            <div style={{ display: "flex", gap: "0.75rem", marginBottom: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{
+                background: (flagColors[p5.risk_flag] ?? COLORS.accent) + "18",
+                color: flagColors[p5.risk_flag] ?? COLORS.accent,
+                border: `1px solid ${flagColors[p5.risk_flag] ?? COLORS.accent}40`,
+                borderRadius: 6, padding: "0.25rem 0.75rem", fontSize: "0.72rem", fontWeight: 700
+              }}>
+                {p5.risk_flag === "green" ? "✓ Active" : p5.risk_flag === "red" ? "⚠ Risk Flag" : "⚡ Active-Ext / Hold"}
+              </span>
+              <span style={{ color: COLORS.textMuted, fontSize: "0.78rem" }}>TRRC EWA P-5 Organization Query (live)</span>
+            </div>
+            <DdTable
+              headers={["Field", "Value"]}
+              rows={[
+                ["Operator No.", p5.operator_no],
+                ["Operator Name", p5.operator_name],
+                ["Org Status", <span key="s" style={{ color: flagColors[p5.risk_flag], fontWeight: 700 }}>{p5.org_status}</span>],
+                ["Org Type", p5.org_type ?? "—"],
+                ["Mailing Address", [p5.mailing_address, p5.mailing_city, p5.mailing_state, p5.mailing_zip].filter(Boolean).join(", ") || "—"],
+                ["Phone", p5.phone ?? "—"],
+                ["TNR §91.114 Hold", <span key="tnr" style={{ color: p5.tnr_91114 ? COLORS.red : COLORS.green, fontWeight: 700 }}>{p5.tnr_91114 ? "YES — Blocks new permits" : "No"}</span>],
+                ["Mail Hold", <span key="mh" style={{ color: p5.mail_hold ? COLORS.yellow : COLORS.green, fontWeight: 700 }}>{p5.mail_hold ? "YES" : "No"}</span>],
+              ]}
+            />
+            {p5.tnr_91114 && (
+              <div style={{ background: COLORS.redDim, border: `1px solid ${COLORS.red}40`, borderRadius: 6, padding: "0.6rem 0.75rem", marginTop: "0.75rem", color: COLORS.red, fontSize: "0.8rem" }}>
+                ⚠ TNR §91.114 hold detected. TRRC will not issue new drilling or injection permits until all unsatisfied orders are resolved. Confirm status directly with operator.
+              </div>
+            )}
+            {p5.org_status === "Delinquent" && (
+              <div style={{ background: COLORS.redDim, border: `1px solid ${COLORS.red}40`, borderRadius: 6, padding: "0.6rem 0.75rem", marginTop: "0.75rem", color: COLORS.red, fontSize: "0.8rem" }}>
+                ⚠ Delinquent P-5 status — operator's annual renewal is overdue. May indicate financial distress or operational issues. Verify bond and compliance status before closing.
+              </div>
+            )}
+            {p5.org_status === "Active-Ext" && (
+              <div style={{ background: COLORS.yellow + "15", border: `1px solid ${COLORS.yellow}40`, borderRadius: 6, padding: "0.6rem 0.75rem", marginTop: "0.75rem", color: COLORS.yellow, fontSize: "0.8rem" }}>
+                ⚡ Active-Extension status — operator is on conditional extension. P-5 renewal is pending. Monitor for transition to Delinquent status.
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
+            P-5 operator status not yet fetched. Available on full diligence runs when an operator name is resolved.
+          </div>
+        )}
+      </Section>
+
+      {/* ── Proration Factors ──────────────────────────────────────────────── */}
+      <Section title="TRRC Proration Factors" icon="⚖️">
+        {pro && pro.records.length > 0 ? (
+          <>
+            <div style={{ color: COLORS.textMuted, fontSize: "0.75rem", marginBottom: "0.5rem" }}>
+              Source: TRRC EWA oilProQueryAction / gasProQueryAction (live query)
+            </div>
+            <DdTable
+              headers={["API", "District", "Field", "Well Type", "Potential", "GOR", "Acres", "Daily Allowable"]}
+              rows={pro.records.map(r => [
+                r.api8,
+                r.district,
+                r.field_name ?? "—",
+                <span key="wt" style={{
+                  background: (r.well_type ?? "").toUpperCase().includes("INJECTION") ? COLORS.accent + "18" : COLORS.greenDim,
+                  color: (r.well_type ?? "").toUpperCase().includes("INJECTION") ? COLORS.accent : COLORS.green,
+                  borderRadius: 5, padding: "0.12rem 0.4rem", fontSize: "0.7rem", fontWeight: 700
+                }}>{r.well_type ?? "—"}</span>,
+                r.potential !== null ? r.potential.toLocaleString() : "—",
+                r.gor !== null ? r.gor.toLocaleString() : "—",
+                r.acres !== null ? r.acres.toString() : "—",
+                r.daily_allowable ?? "—",
+              ])}
+            />
+            {pro.notes.map((n, i) => (
+              <div key={i} style={{ color: COLORS.textMuted, fontSize: "0.78rem", marginTop: "0.4rem" }}>• {n}</div>
+            ))}
+          </>
+        ) : pro && pro.query_succeeded ? (
+          <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
+            No proration records found for this API. Well may be on a field-wide prorationing schedule or exempt. Verify directly at TRRC EWA.
+          </div>
+        ) : (
+          <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
+            Proration data available on full diligence runs with API number and district code.
+          </div>
+        )}
+      </Section>
+
+      {/* ── Plugging Liability (TRRC Inactive Wells) ───────────────────────── */}
+      <Section title="TRRC Inactive Well / Plugging Liability" icon="🔩">
+        <div style={{ display: "flex", gap: "1rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.6rem 1rem" }}>
+            <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, textTransform: "uppercase", letterSpacing: 1 }}>Inactive Count</div>
+            <div style={{ fontSize: "1.4rem", fontWeight: 700, color: (plugging.inactive_well_count.value ?? 0) > 0 ? COLORS.red : COLORS.green }}>
+              {plugging.inactive_well_count.value ?? 0}
+            </div>
+          </div>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.6rem 1rem" }}>
+            <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, textTransform: "uppercase", letterSpacing: 1 }}>Est. Plug Cost</div>
+            <div style={{ fontSize: "1.4rem", fontWeight: 700, color: COLORS.text }}>
+              {plugging.total_estimated_plug_cost_usd.value != null
+                ? `$${plugging.total_estimated_plug_cost_usd.value.toLocaleString()}`
+                : "—"}
+            </div>
+          </div>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.6rem 1rem" }}>
+            <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, textTransform: "uppercase", letterSpacing: 1 }}>Orphan Risk</div>
+            <div style={{ fontSize: "1.4rem", fontWeight: 700, color: plugging.orphan_well_risk.value === "high" ? COLORS.red : plugging.orphan_well_risk.value === "medium" ? COLORS.yellow : COLORS.green }}>
+              {plugging.orphan_well_risk.value ?? "—"}
+            </div>
+          </div>
+        </div>
+
+        {plugging.wells.length > 0 ? (
+          <DdTable
+            headers={["API", "Well Name", "Status", "Shut-In Date", "Est. Plug Cost", "Compliance Due"]}
+            rows={plugging.wells.map(w => [
+              w.api,
+              w.well_name ?? "—",
+              <span key="s" style={{ color: COLORS.yellow, fontSize: "0.72rem", fontWeight: 700 }}>{w.status}</span>,
+              w.inactive_since ?? "—",
+              w.estimated_plug_cost_usd != null ? `$${w.estimated_plug_cost_usd.toLocaleString()}` : "—",
+              "—",
+            ])}
+          />
+        ) : (
+          <div style={{ background: COLORS.greenDim, border: `1px solid ${COLORS.green}40`, borderRadius: 6, padding: "0.6rem 0.75rem", color: COLORS.green, fontSize: "0.8rem" }}>
+            ✓ Well is NOT on the TRRC inactive well list. No plugging liability identified from TRRC records.
+          </div>
+        )}
+
+        {plugging.notes.map((n, i) => (
+          <div key={i} style={{ color: COLORS.textMuted, fontSize: "0.78rem", marginTop: "0.4rem" }}>• {n}</div>
+        ))}
+      </Section>
+
+      {/* ── CMPL W-2 Packet Detail (Gap 1) ─────────────────────────────────── */}
+      {cmplDetail && (
+        <Section title="CMPL W-2 Packet Detail" icon="📋">
+          <div style={{ color: COLORS.textMuted, fontSize: "0.75rem", marginBottom: "0.5rem" }}>
+            Source: TRRC CMPL publicSearchAction.do → loadPacket (live query, trrc_imaged evidence tier)
+          </div>
+          <DdTable
+            headers={["Field", "Value"]}
+            rows={[
+              ["Tracking No.", cmplDetail.tracking_no],
+              ["Formation (Field Name)", cmplDetail.formation ?? "—"],
+              ["Completion Type", cmplDetail.completion_type ?? "—"],
+              ["Completion Date", cmplDetail.completion_date ?? "—"],
+              ["Wellbore Profile", cmplDetail.wellbore_profile ?? "—"],
+              ["Well Type", cmplDetail.well_type ?? "—"],
+              ["Field No.", cmplDetail.field_no ?? "—"],
+              ["Drilling Permit No.", cmplDetail.permit_no ?? "—"],
+            ]}
+          />
+          {cmplDetail.formation && (
+            <div style={{ background: COLORS.greenDim, border: `1px solid ${COLORS.green}40`, borderRadius: 6, padding: "0.5rem 0.75rem", marginTop: "0.5rem", color: COLORS.green, fontSize: "0.78rem" }}>
+              ✓ Formation confirmed from TRRC CMPL W-2 record — evidence tier upgraded to <strong>trrc_imaged</strong>.
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* ── OFFSET / NEARBY ACTIVITY (Gap 2) ───────────────────────────────── */}
+      <Section title="OFFSET / NEARBY ACTIVITY" icon="🗺️">
+        <div style={{ background: COLORS.accent + "10", border: `1px solid ${COLORS.accent}30`, borderRadius: 6, padding: "0.5rem 0.75rem", marginBottom: "0.75rem", color: COLORS.accent, fontSize: "0.75rem", fontWeight: 600 }}>
+          ⚠ OFFSET / NEARBY ACTIVITY ONLY — these are wells in the same TRRC field formation, NOT subject-asset production. Do not use for rate or income estimates.
+        </div>
+        {offsets && offsets.wells.length > 0 ? (
+          <>
+            <div style={{ display: "flex", gap: "0.75rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+              <span style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "0.25rem 0.75rem", fontSize: "0.72rem", color: COLORS.textMuted }}>
+                Field: <strong style={{ color: COLORS.text }}>{offsets.field_name ?? offsets.field_no ?? "—"}</strong>
+              </span>
+              <span style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "0.25rem 0.75rem", fontSize: "0.72rem", color: COLORS.textMuted }}>
+                {offsets.total_count} well{offsets.total_count !== 1 ? "s" : ""} in field{offsets.truncated ? " (truncated at 100)" : ""}
+              </span>
+            </div>
+            <DdTable
+              headers={["API", "Operator", "Lease", "Well #", "Well Type", "Potential (BBL)", "Daily Allow."]}
+              rows={offsets.wells.slice(0, 50).map(w => [
+                w.is_subject_asset
+                  ? <span key="subj" style={{ color: COLORS.accent, fontWeight: 700 }}>{`42${w.api8}`} ★</span>
+                  : `42${w.api8}`,
+                w.operator_name ?? "—",
+                w.lease_name ?? w.lease_no ?? "—",
+                w.well_no ?? "—",
+                <span key="wt" style={{
+                  background: (w.well_type ?? "").toUpperCase().includes("PRODUC") ? COLORS.greenDim : COLORS.accent + "12",
+                  color: (w.well_type ?? "").toUpperCase().includes("PRODUC") ? COLORS.green : COLORS.accent,
+                  borderRadius: 5, padding: "0.1rem 0.35rem", fontSize: "0.68rem", fontWeight: 700
+                }}>{w.well_type ?? "—"}</span>,
+                w.potential_bbl !== null ? w.potential_bbl.toLocaleString() : "—",
+                w.daily_allowable ?? "—",
+              ])}
+            />
+            {offsets.notes.map((n, i) => (
+              <div key={i} style={{ color: COLORS.textMuted, fontSize: "0.78rem", marginTop: "0.4rem" }}>• {n}</div>
+            ))}
+            {offsets.wells.length > 50 && (
+              <div style={{ color: COLORS.textFaint, fontSize: "0.74rem", marginTop: "0.4rem" }}>
+                Showing first 50 of {offsets.wells.length} wells loaded. Full field data available in TRRC EWA.
+              </div>
+            )}
+          </>
+        ) : offsets && offsets.query_succeeded ? (
+          <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
+            No offset/nearby wells found in the same TRRC field. Field number may not be available from proration data.
+          </div>
+        ) : (
+          <div style={{ color: COLORS.textMuted, fontSize: "0.82rem", padding: "0.75rem 0" }}>
+            Offset/nearby well data available on full diligence runs when a field number is resolved from proration records.
+          </div>
+        )}
       </Section>
     </>
   );
@@ -6808,6 +7046,7 @@ export default function UnderwritingPage() {
               {activeTab === "ownership_interests"   && <OwnershipTab           report={report} />}
               {activeTab === "swd_water"             && <InjectionTab           report={report} />}
               {activeTab === "imaged_records"        && <ImagedRecordsTab       report={report} />}
+              {activeTab === "proration_p5"          && <ProrationP5Tab         report={report} />}
               {activeTab === "documents_sources"     && <DocumentsSourcesTab    report={report} />}
               {activeTab === "missing_diligence"     && <MissingItemsTab        report={report} />}
               {activeTab === "ic_memo"               && <IcMemoTab              report={report} />}

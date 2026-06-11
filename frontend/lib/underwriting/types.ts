@@ -808,6 +808,33 @@ export type DDReport = {
    */
   imaged_records: ImagedRecordsSection | null;
 
+  /**
+   * TRRC EWA oil/gas proration factor records.
+   * Null when not attempted (quick scan, no API + district code, or non-Texas well).
+   */
+  proration: ProrationSection | null;
+
+  /**
+   * TRRC P-5 operator organization status.
+   * Null when operator number not resolved or query failed.
+   */
+  p5_operator_status: P5OperatorStatus | null;
+
+  /**
+   * OFFSET / NEARBY ACTIVITY — all wells in the same TRRC field.
+   * ⚠ NEVER use as subject-asset production.
+   * Null when field number not available or query not attempted.
+   */
+  offset_wells: OffsetWellsSection | null;
+
+  /**
+   * CMPL W-2 packet detail extracted via loadPacket.
+   * Non-null when a completion packet was found and detail could be retrieved.
+   * Provides formation name (from TRRC Field Name), wellbore profile, completion type.
+   * Upgrades formation evidence from model_estimate → trrc_imaged.
+   */
+  cmpl_packet_detail: import("@/lib/wells/trrc-imaged-records").CmplPacketDetail | null;
+
   /** Chronological event log — correlates workovers, violations, downtime, production changes */
   operational_timeline: OperationalTimelineEvent[];
   /** Three-tier diligence status board: VERIFIED / PARTIALLY VERIFIED / MISSING */
@@ -1039,29 +1066,156 @@ export type BuyerQASection = {
 
 export type ImagedRecord = {
   api10: string;
-  doc_type: string;     // "W-1" | "W-2" | "G-1" | "P-4" | "W-10" | "OG-2" | "OTHER"
-  doc_label: string;    // e.g. "Completion Report"
+  doc_type: string;      // "W-1" | "W-2" | "G-1" | "P-4" | "W-10" | "OG-2" | "OTHER"
+  doc_label: string;     // e.g. "Completion Report (Oil / W-2)"
   filing_date: string | null;
   operator: string | null;
-  viewer_url: string;   // direct TRRC PDF viewer link
-  doc_id: string | null;
+  viewer_url: string;    // Neubus viewer link for the API (direct browser link)
+  doc_id: string | null; // CMPL tracking number / packet ID
+  lease_no: string | null;
+  lease_name: string | null;
+  status: string | null; // CMPL packet status (Approved, Pending, etc.)
 };
 
 export type ImagedRecordsSection = {
   /** Whether TRRC document query completed successfully */
   query_succeeded: boolean;
-  /** All filed documents found, sorted by type priority then date desc */
+  /** All filed documents found, sorted most-recent-first */
   records: ImagedRecord[];
-  /** W-2 (completion report) found — enables formation / perf depth from Layer 2 */
+  /** W-2 or G-1 (completion report) found in CMPL */
   has_completion_report: boolean;
-  /** P-4 (plugging record) found — confirms P&A status for liability */
+  /** P-4 (plugging record) found — always false from CMPL (plugging not in this system) */
   has_plugging_record: boolean;
-  /** Direct link to most recent W-2, if found */
+  /** Direct link to most recent completion record, or Neubus viewer URL */
   latest_completion_url: string | null;
   /** Direct link to most recent P-4, if found */
   latest_plugging_url: string | null;
+  /**
+   * Direct Neubus viewer URL for all historical imaged records for this set of APIs.
+   * Always populated. User can open this to see pre-2009 scanned records.
+   */
+  neubus_viewer_url: string | null;
   /** Diligence status tier for this module */
   diligence_tier: DiligenceStatusTier;
+};
+
+// ─── Proration Section ───────────────────────────────────────────────────────
+
+/**
+ * TRRC EWA proration factor record for one well.
+ * Populated by oilProQueryAction.do / gasProQueryAction.do.
+ */
+export type ProrationRecord = {
+  api8: string;
+  district: string;
+  lease_no: string;
+  lease_name: string | null;
+  well_no: string | null;
+  field_no: string | null;
+  field_name: string | null;
+  field_type: string | null;
+  operator_no: string | null;
+  operator_name: string | null;
+  unit_no: string | null;
+  /** Daily potential in BBL (oil) or MCF (gas). 0 for injection/observation wells. */
+  potential: number | null;
+  /** Gas/Oil Ratio */
+  gor: number | null;
+  acres: number | null;
+  /**
+   * Daily allowable as returned by TRRC.
+   * e.g. "14(B)(2) EXT 00/00" (extension type) or numeric "1234"
+   */
+  daily_allowable: string | null;
+  /** PRODUCER | INJECTION | OBSERVATION | UNIT PRODUCER | etc. */
+  well_type: string | null;
+  commodity: "oil" | "gas";
+};
+
+export type ProrationSection = {
+  records: ProrationRecord[];
+  /** True if the query ran and returned at least one record */
+  query_succeeded: boolean;
+  /** True if any record has a non-zero daily_allowable (numeric) */
+  has_allowable: boolean;
+  notes: string[];
+};
+
+// ─── P-5 Operator Status Section ─────────────────────────────────────────────
+
+/**
+ * TRRC P-5 operator organization record.
+ * Populated by organizationQueryAction.do.
+ */
+export type P5OperatorStatus = {
+  operator_no: string;
+  operator_name: string;
+  mailing_address: string | null;
+  mailing_city: string | null;
+  mailing_state: string | null;
+  mailing_zip: string | null;
+  /**
+   * Active          = current, compliant
+   * Active-Ext      = active on extension (conditional — renewal pending)
+   * Delinquent      = P-5 renewal overdue; may have permit restrictions
+   * Inactive        = no active operations
+   * Cancelled       = organization cancelled
+   */
+  org_status: string;
+  org_type: string | null;
+  /**
+   * Texas Natural Resources Code §91.114 flag.
+   * true = unsatisfied final orders exist → TRRC will not issue new permits.
+   */
+  tnr_91114: boolean;
+  mail_hold: boolean;
+  phone: string | null;
+  /** "green" | "yellow" | "red" risk flag derived from status + flags */
+  risk_flag: "green" | "yellow" | "red";
+};
+
+// ─── Offset / Nearby Wells (OFFSET / NEARBY ACTIVITY) ────────────────────────
+//
+// ⚠ ARCHITECTURE RULE: These wells are NEVER used as subject-asset production.
+//   They are always labeled "OFFSET / NEARBY ACTIVITY" in the UI.
+//   Sourced from TRRC EWA field-level proration query (same field number as subject).
+
+export type OffsetWellRecord = {
+  /** 8-digit API (county3 + well5, no "42" prefix) */
+  api8: string;
+  district: string;
+  lease_no: string;
+  lease_name: string | null;
+  well_no: string | null;
+  operator_no: string | null;
+  operator_name: string | null;
+  field_no: string;
+  field_name: string | null;
+  field_type: string | null;
+  unit_no: string | null;
+  potential_bbl: number | null;
+  gor: number | null;
+  acres: number | null;
+  daily_allowable: string | null;
+  /** PRODUCER | INJECTION | SHUT IN | OBSERVATION | etc. */
+  well_type: string | null;
+  /** True if this is the subject well (same API as the query) */
+  is_subject_asset: boolean;
+};
+
+export type OffsetWellsSection = {
+  /**
+   * ⚠ OFFSET / NEARBY ACTIVITY — not subject-asset production.
+   * Sourced from TRRC EWA field-level proration query.
+   */
+  wells: OffsetWellRecord[];
+  field_no: string | null;
+  field_name: string | null;
+  total_count: number;
+  /** True if ≥100 wells were returned (page may be truncated) */
+  truncated: boolean;
+  query_succeeded: boolean;
+  notes: string[];
 };
 
 // ─── Scan mode ───────────────────────────────────────────────────────────────

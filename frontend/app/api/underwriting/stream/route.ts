@@ -39,6 +39,14 @@ import { fetchTrrcInspectionsForApis }     from "@/lib/wells/trrc-inspection";
 import { fetchTrrcCompletionsForApis }     from "@/lib/wells/trrc-completions";
 import { fetchTrrcImagedRecordsMulti }     from "@/lib/wells/trrc-imaged-records";
 import type { TrrcImagedRecordsResult }    from "@/lib/wells/trrc-imaged-records";
+import { fetchTrrcP5ByOperatorNo, fetchTrrcP5ByOperatorName } from "@/lib/underwriting/trrc-p5";
+import type { TrrcP5Record }               from "@/lib/underwriting/trrc-p5";
+import { fetchTrrcProration }              from "@/lib/underwriting/trrc-proration";
+import type { TrrcProrationRecord }        from "@/lib/underwriting/trrc-proration";
+import { fetchTrrcInactiveWellByApi, fetchTrrcInactiveWellsByOperator } from "@/lib/underwriting/trrc-inactive-wells";
+import type { TrrcInactiveWellRecord }     from "@/lib/underwriting/trrc-inactive-wells";
+import { fetchTrrcOffsetWellsByField }     from "@/lib/underwriting/trrc-field-wells";
+import type { TrrcFieldWellsResult }       from "@/lib/underwriting/trrc-field-wells";
 import {
   fetchTrrcOperatorProfile,
   fetchTrrcAnnualProductionBestOf,
@@ -843,6 +851,11 @@ async function runPipeline(
   // ── 6. Pull completion / W-2 records + TRRC imaged records ──────────────
   let completionResult: import("@/lib/wells/trrc-completions").TrrcCompletionRecord[] = [];
   let imagedRecordsResult: TrrcImagedRecordsResult[] | null = null;
+  let p5StatusResult:      TrrcP5Record | null = null;
+  let prorationResult:     TrrcProrationRecord[] | null = null;
+  let inactiveWellsResult: TrrcInactiveWellRecord[] | null = null;
+  let fieldWellsResult:    TrrcFieldWellsResult | null = null;
+  let cmplPacketDetailResult: import("@/lib/wells/trrc-imaged-records").CmplPacketDetail | null = null;
 
   completionResult = await runStep(
     writer,
@@ -892,19 +905,82 @@ async function runPipeline(
         } catch { /* per-API timeout — continue to next */ }
       }
 
-      // Run imaged records query in parallel with completions pass 2 cleanup
-      // (TRRC document image search for W-1, W-2, G-1, P-4 viewer links)
-      let imagedResults: TrrcImagedRecordsResult[] | null = null;
-      if (apiNumbers.length > 0) {
-        try {
-          imagedResults = await withTimeout(
-            fetchTrrcImagedRecordsMulti(apiNumbers.slice(0, 4)),
-            30_000,
-            "TRRC imaged records (W-1/W-2/G-1/P-4)",
-          );
-        } catch { imagedResults = null; }
+      // Run imaged records, P-5, proration, and inactive-well queries in parallel
+      const firstLease = Array.from(leaseMap.values())[0];
+      const distCodeForPro = firstLease?.distCode ?? "";
+      const firstApi = apiNumbers[0] ?? "";
+
+      const [imagedResults, p5Rec, proRec, inactiveRec] = await Promise.allSettled([
+        // TRRC imaged records (W-1/W-2/G-1/P-4 viewer links)
+        apiNumbers.length > 0
+          ? withTimeout(
+              fetchTrrcImagedRecordsMulti(apiNumbers.slice(0, 4)),
+              30_000,
+              "TRRC imaged records (W-1/W-2/G-1/P-4)",
+            ).catch(() => null)
+          : Promise.resolve(null),
+
+        // TRRC P-5 operator organization status
+        (async (): Promise<TrrcP5Record | null> => {
+          if (!isTexasResolved) return null;
+          // Try by resolved operator name first
+          const name = trrcResolvedOperator ?? operatorName;
+          if (!name) return null;
+          return withTimeout(
+            fetchTrrcP5ByOperatorName(name),
+            15_000, "TRRC P-5 operator status",
+          ).catch(() => null);
+        })(),
+
+        // TRRC oil + gas proration factors
+        (async (): Promise<TrrcProrationRecord[] | null> => {
+          if (!isTexasResolved || !firstApi || !distCodeForPro) return null;
+          return withTimeout(
+            fetchTrrcProration(firstApi, distCodeForPro),
+            15_000, "TRRC proration factors",
+          ).catch(() => null);
+        })(),
+
+        // TRRC inactive well status for subject API
+        (async (): Promise<TrrcInactiveWellRecord[] | null> => {
+          if (!isTexasResolved || !firstApi) return null;
+          const res = await withTimeout(
+            fetchTrrcInactiveWellByApi(firstApi),
+            15_000, "TRRC inactive well check",
+          ).catch(() => ({ is_active_not_flagged: true, records: [] as TrrcInactiveWellRecord[] }));
+          return res.records;
+        })(),
+      ]);
+
+      imagedRecordsResult  = imagedResults.status  === "fulfilled" ? imagedResults.value  : null;
+      p5StatusResult       = p5Rec.status           === "fulfilled" ? p5Rec.value           : null;
+      prorationResult      = proRec.status          === "fulfilled" ? proRec.value          : null;
+      inactiveWellsResult  = inactiveRec.status     === "fulfilled" ? inactiveRec.value     : null;
+
+      // Extract CMPL packet detail from the most recent imaged record with a W-2 packet
+      if (imagedRecordsResult) {
+        for (const r of imagedRecordsResult) {
+          if (r.cmpl_packet_detail) {
+            cmplPacketDetailResult = r.cmpl_packet_detail;
+            break;
+          }
+        }
       }
-      imagedRecordsResult = imagedResults;
+
+      // Fetch offset/nearby wells using field number from proration result (Gap 2)
+      // ⚠ These are OFFSET / NEARBY ACTIVITY — never subject-asset production
+      const fieldNoFromPro = prorationResult?.find(r => r.field_no)?.field_no ?? null;
+      if (isTexasResolved && firstApi && fieldNoFromPro) {
+        try {
+          fieldWellsResult = await withTimeout(
+            fetchTrrcOffsetWellsByField(firstApi, fieldNoFromPro),
+            20_000,
+            "TRRC offset/nearby wells (same field)",
+          ).catch(() => null);
+        } catch {
+          fieldWellsResult = null;
+        }
+      }
 
       const found    = results.filter(r => r.packet_found);
       const notFound = results.filter(r => !r.packet_found);
@@ -923,8 +999,14 @@ async function runPipeline(
       if (notFound.length > 0) {
         parts.push(`${notFound.length} well(s) not found in CMPL online records`);
       }
-      const totalImagedDocs = imagedResults?.reduce((s, r) => s + r.records.length, 0) ?? 0;
+      const totalImagedDocs = (imagedResults.status === "fulfilled" ? imagedResults.value : null)
+        ?.reduce((s, r) => s + r.records.length, 0) ?? 0;
       if (totalImagedDocs > 0) parts.push(`${totalImagedDocs} imaged record(s) found`);
+      if (p5StatusResult)      parts.push(`P-5 status: ${p5StatusResult.org_status}`);
+      if (prorationResult && prorationResult.length > 0) parts.push(`proration: ${prorationResult.length} record(s)`);
+      if (inactiveWellsResult && inactiveWellsResult.length > 0) parts.push(`${inactiveWellsResult.length} inactive well(s)`);
+      if (fieldWellsResult && fieldWellsResult.wells.length > 0) parts.push(`${fieldWellsResult.total_count} offset/nearby well(s) in field ${fieldWellsResult.field_no}`);
+      if (cmplPacketDetailResult?.formation) parts.push(`CMPL formation: ${cmplPacketDetailResult.formation}`);
 
       return {
         result: results,
@@ -1028,6 +1110,11 @@ async function runPipeline(
     trrcOperatorProfile:   operatorProfile,
     trrcAnnualProduction:  annualProduction,
     imagedRecords:         imagedRecordsResult,
+    trrcP5Status:          p5StatusResult,
+    trrcProration:         prorationResult,
+    trrcInactiveWells:     inactiveWellsResult,
+    trrcFieldWells:        fieldWellsResult,
+    cmplPacketDetail:      cmplPacketDetailResult,
   });
 
   const totalMs = Date.now() - t0;

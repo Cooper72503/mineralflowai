@@ -59,6 +59,9 @@ import type {
   DocumentRequest,
   OfferGate,
   OfferGateField,
+  ProrationSection,
+  ProrationRecord,
+  P5OperatorStatus,
 } from "./types";
 import type { DocumentExtractionResult } from "./document-extraction";
 import type { NormalizedApi } from "./types";
@@ -67,6 +70,10 @@ import type { TrrcInjectionRecord } from "./trrc-injection";
 import type { TrrcInspectionRecord } from "@/lib/wells/trrc-inspection";
 import type { TrrcCompletionRecord } from "@/lib/wells/trrc-completions";
 import type { InspectionRecord } from "./types";
+import type { TrrcP5Record } from "./trrc-p5";
+import type { TrrcProrationRecord } from "./trrc-proration";
+import type { TrrcInactiveWellRecord } from "./trrc-inactive-wells";
+import type { TrrcFieldWell, TrrcFieldWellsResult } from "./trrc-field-wells";
 import { runDca } from "./decline-curve";
 import { runEconomics, DEFAULT_PRICE_DECKS, buildSensitivityMatrix } from "./economics-engine";
 import type { MonthlyCashFlowRow } from "./types";
@@ -295,6 +302,22 @@ export type BuildReportArgs = {
    * depth, and completion data.  Null when not attempted (quick scan).
    */
   imagedRecords?: import("../wells/trrc-imaged-records").TrrcImagedRecordsResult[] | null;
+  /** TRRC P-5 operator organization record */
+  trrcP5Status?: TrrcP5Record | null;
+  /** TRRC oil/gas proration factor records (oil + gas merged) */
+  trrcProration?: TrrcProrationRecord[] | null;
+  /** TRRC inactive well records for the subject API */
+  trrcInactiveWells?: TrrcInactiveWellRecord[] | null;
+  /**
+   * OFFSET / NEARBY ACTIVITY — all wells in the same TRRC field.
+   * ⚠ NEVER used as subject-asset production.
+   */
+  trrcFieldWells?: TrrcFieldWellsResult | null;
+  /**
+   * CMPL W-2 packet detail — extracted via loadPacket for most recent W-2.
+   * Provides formation name, wellbore profile, completion type, field number.
+   */
+  cmplPacketDetail?: import("../wells/trrc-imaged-records").CmplPacketDetail | null;
 };
 
 export function buildDDReport(args: BuildReportArgs): DDReport {
@@ -319,6 +342,11 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     trrcOperatorProfile  = null,
     trrcAnnualProduction = null,
     imagedRecords        = null,
+    trrcP5Status         = null,
+    trrcProration        = null,
+    trrcInactiveWells    = null,
+    trrcFieldWells       = null,
+    cmplPacketDetail     = null,
   } = args;
 
   // Is this a Texas well? Used for severance tax rates.
@@ -1106,6 +1134,9 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       ...(hasNonCompliantInspection
         ? [`⚠ Non-compliant inspection detected. Review defect details and confirm resolution with operator.`]
         : []),
+      ...(trrcP5Status
+        ? [`P-5 Organization Status: ${trrcP5Status.org_status} (${trrcP5Status.org_type ?? "type unknown"})${trrcP5Status.tnr_91114 ? " — ⚠ TNR §91.114 hold (unsatisfied orders, blocks new permits)" : ""}${trrcP5Status.mail_hold ? " — Mail hold active" : ""}`]
+        : []),
     ],
   };
 
@@ -1120,7 +1151,21 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
 
   // ── Plugging liability section ────────────────────────────────────────────
 
+  // TRRC inactive well records (from EWA inactiveWellQueryAction) — highest reliability
+  const trrcInactiveAsList: PluggingLiabilityWell[] = (trrcInactiveWells ?? []).map(w => ({
+    api: `42${w.api8}`,
+    well_name: w.lease_name ?? null,
+    status: `Inactive${w.inactivity_period ? ` — ${w.inactivity_period}` : ""}`,
+    inactive_since: w.shut_in_date ?? null,
+    estimated_plug_cost_usd: w.plugging_cost_usd ?? null,
+    rrc_plugging_order: false,
+    source: "trrc" as DataSource,
+    confidence: "high" as DataConfidence,
+  }));
+
   const plugWells: PluggingLiabilityWell[] = [
+    // TRRC inactive well lookup — authoritative
+    ...trrcInactiveAsList,
     ...(extracted?.inactive_well_mentions ?? []).map(w => ({
       api: w.api ?? "Unknown",
       well_name: w.well_name,
@@ -1131,19 +1176,21 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       source: "uploaded_doc" as DataSource,
       confidence: "low" as DataConfidence,
     })),
-    // From TRRC wells with no production
-    ...trrcWells
-      .filter(w => w.latest_monthly_oil_bbl === 0)
-      .map(w => ({
-        api: w.api,
-        well_name: w.well_name,
-        status: "Shut-In / No Recent Production",
-        inactive_since: w.latest_production_month,
-        estimated_plug_cost_usd: benchmark?.plug_cost_per_well ?? null,
-        rrc_plugging_order: false,
-        source: benchmark ? "inferred" as DataSource : "trrc" as DataSource,
-        confidence: benchmark ? "low" as DataConfidence : "medium" as DataConfidence,
-      })),
+    // From TRRC wells with no production (only if no TRRC inactive well records found)
+    ...(trrcInactiveAsList.length === 0
+      ? trrcWells
+          .filter(w => w.latest_monthly_oil_bbl === 0)
+          .map(w => ({
+            api: w.api,
+            well_name: w.well_name,
+            status: "Shut-In / No Recent Production",
+            inactive_since: w.latest_production_month,
+            estimated_plug_cost_usd: benchmark?.plug_cost_per_well ?? null,
+            rrc_plugging_order: false,
+            source: benchmark ? "inferred" as DataSource : "trrc" as DataSource,
+            confidence: benchmark ? "low" as DataConfidence : "medium" as DataConfidence,
+          }))
+      : []),
   ];
 
   const totalPlugCost = plugWells.reduce((s, w) => s + (w.estimated_plug_cost_usd ?? 0), 0);
@@ -1151,16 +1198,26 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     plugWells.length === 0 ? "low" :
     plugWells.length > 3  ? "high" : "medium";
 
+  const trrcInactiveCost = (trrcInactiveWells ?? []).reduce((s, w) => s + (w.plugging_cost_usd ?? 0), 0);
+  const plugCostSource: DataSource   = trrcInactiveAsList.length > 0 ? "trrc" : "uploaded_doc";
+  const plugCostConf: DataConfidence = trrcInactiveAsList.length > 0 ? "high" : "low";
+
   const pluggingSection: PluggingLiabilitySection = {
     wells: plugWells,
     total_estimated_plug_cost_usd: plugWells.length > 0 && totalPlugCost > 0
-      ? dp(totalPlugCost, "uploaded_doc", "low", "Operator estimates only — verify with RRC average costs")
+      ? dp(totalPlugCost, plugCostSource, plugCostConf,
+          trrcInactiveAsList.length > 0
+            ? `TRRC EWA inactive well cost calculation (${trrcInactiveAsList.length} well(s))`
+            : "Operator estimates only — verify with RRC average costs")
       : missingDp<number>(plugWells.length > 0 ? "Plug cost estimates not provided" : "No inactive wells identified"),
-    inactive_well_count: dp(plugWells.length, "trrc", "medium"),
+    inactive_well_count: dp(plugWells.length, trrcInactiveAsList.length > 0 ? "trrc" : "inferred", "medium"),
     orphan_well_risk: dp(orphanRisk, plugWells.length > 0 ? "inferred" : "trrc", "medium"),
-    notes: plugWells.length === 0
-      ? ["No inactive or shut-in wells identified in provided data. Confirm with TRRC P-5 organization report."]
-      : [`${plugWells.length} well(s) identified as inactive or shut-in. Verify plugging liability with RRC H-15 orders.`],
+    notes: [
+      ...(plugWells.length === 0
+        ? ["No inactive or shut-in wells found on TRRC inactive well list. Well is classified as active."]
+        : [`${plugWells.length} well(s) on TRRC inactive well list. Estimated plugging liability: $${totalPlugCost.toLocaleString()}.`]),
+      ...(trrcInactiveCost > 0 ? [`TRRC cost calculation (source of estimate): $${trrcInactiveCost.toLocaleString()}`] : []),
+    ],
   };
 
   // ── Injection / SWD section ───────────────────────────────────────────────
@@ -3409,13 +3466,17 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       tier = "partially_verified";
     }
 
+    // Collect neubus viewer URLs — use first available
+    const neubusUrl = imagedRecords.find(r => r.neubus_viewer_url)?.neubus_viewer_url ?? null;
+
     imagedRecordsSection = {
       query_succeeded:        anySucceeded,
       records:                allDocs,
       has_completion_report:  hasW2,
       has_plugging_record:    hasP4,
-      latest_completion_url:  w2Result?.latest_completion_url ?? null,
+      latest_completion_url:  w2Result?.latest_completion_url ?? neubusUrl,
       latest_plugging_url:    p4Result?.latest_plugging_url ?? null,
+      neubus_viewer_url:      neubusUrl,
       diligence_tier:         tier,
     };
 
@@ -3454,6 +3515,139 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       evidence_source: "not_found",
       document_requests: [],
     });
+  }
+
+  // ── Proration section ─────────────────────────────────────────────────────
+
+  let prorationSection: ProrationSection | null = null;
+
+  if (trrcProration !== null && trrcProration !== undefined) {
+    const proRecs: ProrationRecord[] = (trrcProration ?? []).map(r => ({
+      api8:            r.api8,
+      district:        r.district,
+      lease_no:        r.lease_no,
+      lease_name:      r.lease_name,
+      well_no:         r.well_no,
+      field_no:        r.field_no,
+      field_name:      r.field_name,
+      field_type:      r.field_type,
+      operator_no:     r.operator_no,
+      operator_name:   r.operator_name,
+      unit_no:         r.unit_no,
+      potential:       r.potential,
+      gor:             r.gor,
+      acres:           r.acres,
+      daily_allowable: r.daily_allowable,
+      well_type:       r.well_type,
+      commodity:       r.commodity,
+    }));
+
+    const hasAllowable = proRecs.some(r =>
+      r.daily_allowable !== null && /\d/.test(r.daily_allowable) && !/^0/.test(r.daily_allowable.trim())
+    );
+
+    const proNotes: string[] = [];
+    if (proRecs.length === 0) {
+      proNotes.push("No proration records found for this API number and district.");
+    } else {
+      const inj = proRecs.filter(r => (r.well_type ?? "").toUpperCase().includes("INJECTION"));
+      if (inj.length > 0) {
+        proNotes.push(`Well classified as ${inj[0].well_type ?? "INJECTION"} — potential and daily allowable are 0 (expected for non-producing wells).`);
+      }
+      const unitNo = proRecs[0]?.unit_no;
+      if (unitNo) proNotes.push(`Unit: ${unitNo}`);
+      const fieldName = proRecs[0]?.field_name;
+      if (fieldName) proNotes.push(`Field: ${fieldName}${proRecs[0]?.field_type ? ` (${proRecs[0].field_type})` : ""}`);
+    }
+
+    prorationSection = {
+      records:       proRecs,
+      query_succeeded: true,
+      has_allowable:   hasAllowable,
+      notes:           proNotes,
+    };
+  }
+
+  // ── Offset / Nearby Wells (OFFSET / NEARBY ACTIVITY) ─────────────────────
+  //
+  // ⚠ These wells are NEVER used as subject-asset production.
+  //   Always labeled "OFFSET / NEARBY ACTIVITY" in the UI.
+
+  let offsetWellsSection: import("./types").OffsetWellsSection | null = null;
+
+  if (trrcFieldWells && (trrcFieldWells.wells.length > 0 || trrcFieldWells.total_count > 0)) {
+    const offsetNotes: string[] = [];
+    if (trrcFieldWells.truncated) {
+      offsetNotes.push(`Query returned first 100 of ${trrcFieldWells.total_count} wells in field — full list available on TRRC EWA.`);
+    }
+    const prodCount = trrcFieldWells.wells.filter(w => !w.is_subject_asset && (w.well_type ?? "").toUpperCase().includes("PRODUC")).length;
+    const injCount  = trrcFieldWells.wells.filter(w => !w.is_subject_asset && (w.well_type ?? "").toUpperCase().includes("INJECT")).length;
+    if (prodCount > 0) offsetNotes.push(`${prodCount} producing well(s) in same formation.`);
+    if (injCount  > 0) offsetNotes.push(`${injCount} injection well(s) in same formation.`);
+
+    offsetWellsSection = {
+      wells: trrcFieldWells.wells.map((w: TrrcFieldWell) => ({
+        api8:          w.api8,
+        district:      w.district,
+        lease_no:      w.lease_no,
+        lease_name:    w.lease_name,
+        well_no:       w.well_no,
+        operator_no:   w.operator_no,
+        operator_name: w.operator_name,
+        field_no:      w.field_no,
+        field_name:    w.field_name,
+        field_type:    w.field_type,
+        unit_no:       w.unit_no,
+        potential_bbl: w.potential_bbl,
+        gor:           w.gor,
+        acres:         w.acres,
+        daily_allowable: w.daily_allowable,
+        well_type:     w.well_type,
+        is_subject_asset: w.is_subject_asset,
+      })),
+      field_no:       trrcFieldWells.field_no,
+      field_name:     trrcFieldWells.field_name,
+      total_count:    trrcFieldWells.total_count,
+      truncated:      trrcFieldWells.truncated,
+      query_succeeded: true,
+      notes:          offsetNotes,
+    };
+  }
+
+  // ── CMPL packet detail (Gap 1) ────────────────────────────────────────────
+  //
+  // Extracted from the loadPacket response — upgrades formation evidence tier
+  // from model_estimate → trrc_imaged when available.
+
+  const assembledCmplDetail = cmplPacketDetail ?? null;
+
+  // ── P-5 operator status ───────────────────────────────────────────────────
+
+  let p5Status: P5OperatorStatus | null = null;
+
+  if (trrcP5Status) {
+    // Inline the p5StatusFlag logic (avoids dynamic import in sync function)
+    const flag: "green" | "yellow" | "red" = (() => {
+      if (trrcP5Status.tnr_91114) return "red";
+      if (trrcP5Status.org_status === "Delinquent" || trrcP5Status.org_status === "Cancelled") return "red";
+      if (trrcP5Status.org_status === "Active-Ext" || trrcP5Status.mail_hold) return "yellow";
+      if (trrcP5Status.org_status === "Active") return "green";
+      return "yellow";
+    })();
+    p5Status = {
+      operator_no:     trrcP5Status.operator_no,
+      operator_name:   trrcP5Status.operator_name,
+      mailing_address: trrcP5Status.mailing_address,
+      mailing_city:    trrcP5Status.mailing_city,
+      mailing_state:   trrcP5Status.mailing_state,
+      mailing_zip:     trrcP5Status.mailing_zip,
+      org_status:      trrcP5Status.org_status,
+      org_type:        trrcP5Status.org_type,
+      tnr_91114:       trrcP5Status.tnr_91114,
+      mail_hold:       trrcP5Status.mail_hold,
+      phone:           trrcP5Status.phone,
+      risk_flag:       flag,
+    };
   }
 
   // ── Offer Gate Logic ──────────────────────────────────────────────────────
@@ -4082,6 +4276,10 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     formation_completion: formationCompletionSection,
     operator_profile: operatorProfileSection,
     imaged_records: imagedRecordsSection,
+    proration: prorationSection,
+    p5_operator_status: p5Status,
+    offset_wells: offsetWellsSection,
+    cmpl_packet_detail: assembledCmplDetail,
     operational_timeline: timelineEvents,
     diligence_status: diligenceStatus,
     underwriting_narrative: underwritingNarrative,
