@@ -259,6 +259,30 @@ export function detectContradictions(ctx: ContradictionContext): Contradiction[]
             "recent workover, require completion records and post-workover gauge tickets.",
           auto_suppresses_economics: false,
         });
+      } else if (ratio > 1.2) {
+        // ── §3.1.2 Logic of Skepticism — 20% discrepancy informational flag ──
+        // Any seller claim that diverges from TRRC by ≥20% must be explicitly flagged
+        // as UNVERIFIED until run tickets independently confirm the seller's stated rate.
+        // Even a 20% uplift is material at acquisition multiples of 3–6× annual NCF.
+        out.push({
+          id: id(),
+          severity: "informational",
+          field: "Current Production Rate",
+          description:
+            `Seller-stated rate (${claimed.toLocaleString()} BBL/month) exceeds TRRC-stabilized ` +
+            `rate (${stabilized.toLocaleString()} BBL/month) by ${((ratio - 1) * 100).toFixed(0)}%. ` +
+            `Seller claim is UNVERIFIED — TRRC public record is used as authoritative basis ` +
+            `until purchaser run tickets independently confirm the higher rate.`,
+          source_a:   "Seller / operator documents",
+          value_a:    claimed,
+          source_b:   "TRRC stabilized production rate (authoritative)",
+          value_b:    stabilized,
+          recommended_action:
+            "Cross-reference seller-stated rate against the last 3 months of signed purchaser " +
+            "run statements before using it in valuation. TRRC rate is treated as authoritative " +
+            "until run tickets confirm otherwise. A 20%+ uplift is material at 4–6× NCF multiples.",
+          auto_suppresses_economics: false,
+        });
       }
     }
   }

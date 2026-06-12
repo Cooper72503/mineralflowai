@@ -2308,6 +2308,52 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       : ["Economics unavailable — provide API numbers for TRRC production lookup and upload LOE statements for cost data."],
   };
 
+  // ── §3.3.2 Financial Metric Hard Suppression ──────────────────────────────
+  //
+  // Spec rule: NCF, NPV, and Offer Range MUST be suppressed (not merely warned)
+  // when BOTH LOE statements AND run tickets are absent. These metrics are
+  // mechanically derived from operating costs — without at least one cost source,
+  // every dollar figure is a pure benchmark guess and MUST NOT be shown as an
+  // offer basis.
+  //
+  // Hard block vs. soft warning:
+  //   - Soft warning (existing): NRI/WI unverified → note added, values shown
+  //   - Hard suppression (this): LOE + run tickets both absent → values NULLED
+  //
+  // Rationale (Manus spec §3.3.2):
+  //   "An offer range published without verified LOE is indistinguishable from
+  //    a made-up number. The product must refuse to show it."
+  {
+    const loeMissing = loePeriods.length === 0;
+    const runMissing = !(extracted?.run_tickets_present === true);
+
+    if (loeMissing && runMissing) {
+      const suppressNote =
+        "⛔ SUPPRESSED — LOE statements and run tickets not provided. " +
+        "Operating cost verification is required before NCF, NPV, and offer range can be calculated. " +
+        "Upload monthly LOE/JIB statements or purchaser run tickets to unlock these fields.";
+
+      acquisitionEconomicsSection.npv10_usd              = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.offer_range_low        = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.offer_range_mid        = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.offer_range_high       = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.monthly_net_income_usd = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.annual_net_income_usd  = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.breakeven_oil_price    = missingDp<number>(
+        "⛔ Breakeven price suppressed — LOE required to calculate."
+      );
+      acquisitionEconomicsSection.scenarios              = [];
+      acquisitionEconomicsSection.sensitivity_matrix     = undefined;
+      acquisitionEconomicsSection.monthly_cash_flow_schedule = undefined;
+      acquisitionEconomicsSection.notes = [
+        "⛔ NCF, NPV, and Offer Range suppressed per Manus spec §3.3.2 — LOE and run tickets not provided.",
+        "These metrics require verified operating costs. Without at least one LOE statement or run ticket,",
+        "any offer figure would be a benchmark estimate, not a verified calculation.",
+        "Upload LOE statements (JIB), run tickets, or purchaser statements to unlock offer calculations.",
+      ];
+    }
+  }
+
   // ── Risk scoring ──────────────────────────────────────────────────────────
 
   const riskInput = {
@@ -3848,6 +3894,169 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     };
   }
 
+  // ── §3.2.1 Waterflood / EOR Unit Detection ───────────────────────────────
+  //
+  // Spec rule: if the subject asset is inside a waterflood or EOR unit, the
+  // injection system is a Required Related Asset.  Production performance is
+  // NOT independent — it depends on the health of the injection program.
+  //
+  // Detection strategy (no new API calls):
+  //   1. Proration record has a non-null unit_no → well is in a unitized plan
+  //   2. Injection records exist in the same lease/area → active injection program
+  //   3. Both true simultaneously → high-confidence waterflood flag
+  //
+  // This uses data already fetched by step 5/6 — zero extra latency.
+  {
+    const unitNo         = trrcProration?.find(r => r.unit_no)?.unit_no ?? null;
+    const hasInjection   = trrcInjection.length > 0;
+
+    // Determine waterflood confidence level
+    const waterflooodConfidence: "confirmed" | "likely" | "possible" | "none" =
+      (unitNo && hasInjection) ? "confirmed"
+      : unitNo                  ? "likely"
+      : hasInjection            ? "possible"
+      : "none";
+
+    if (waterflooodConfidence !== "none") {
+      const injLeases = Array.from(
+        new Set(
+          trrcInjection
+            .map(r => r.lease_no)
+            .filter((ln): ln is string => !!ln)
+        )
+      );
+
+      // Build a summary description for the diligence item
+      const waterflooodDetail = (() => {
+        if (waterflooodConfidence === "confirmed") {
+          return `Unit ${unitNo} with ${trrcInjection.length} injection well(s) confirmed via TRRC proration and SWD records. ` +
+                 `Production performance is interdependent with injection program health. ` +
+                 (injLeases.length > 0
+                   ? `Injection source lease(s): ${injLeases.join(", ")}.`
+                   : "Injection lease identity not resolved — request from seller.");
+        }
+        if (waterflooodConfidence === "likely") {
+          return `TRRC proration record shows unit assignment (Unit ${unitNo}) — EOR/waterflood unit membership is likely. ` +
+                 `No injection records confirmed via EWA disposal query in this session.`;
+        }
+        // "possible" — injection wells found but no unit_no
+        return `${trrcInjection.length} SWD/injection well(s) found in lease area. ` +
+               `No TRRC unit assignment confirmed — may indicate localized disposal rather than a unit waterflood program. ` +
+               `Request H-1/H-10 filings from TRRC EWA to confirm unit membership.`;
+      })();
+
+      const waterflooodTier: import("./types").DiligenceStatusTier =
+        waterflooodConfidence === "confirmed" ? "partially_verified"
+        : "partially_verified";
+
+      diligenceStatus.push({
+        category:       "Waterflood / EOR System",
+        tier:           waterflooodTier,
+        status_detail:  waterflooodDetail,
+        source_label:   waterflooodConfidence === "confirmed" || waterflooodConfidence === "likely"
+          ? "TRRC Proration Records + SWD Query"
+          : "TRRC SWD Query",
+        action_required:
+          waterflooodConfidence === "confirmed"
+            ? `Obtain injection performance data (monthly injection volumes, wellhead pressure, MIT status) ` +
+              `for the ${trrcInjection.length} identified injection well(s). ` +
+              `If injection wells are on a separate lease (${injLeases.join(", ") || "unknown"}), ` +
+              `that lease is a Required Related Asset — it must be analyzed alongside this purchase.`
+            : waterflooodConfidence === "likely"
+              ? `Request H-1/H-10 EOR/waterflood unit filings from TRRC EWA to confirm unit membership ` +
+                `and identify injection wells. A confirmed waterflood unit requires injection performance review.`
+              : `Request H-1/H-10 unit filings from TRRC EWA to determine whether SWD wells are part of ` +
+                `a unitized injection program. If so, they are Required Related Assets.`,
+        urgency: waterflooodConfidence === "confirmed" ? "important" : "informational",
+        evidence_source: waterflooodConfidence === "confirmed" ? "trrc_structured" : "trrc_structured",
+        document_requests: [
+          {
+            field:         "Waterflood / Injection System",
+            document_type: "TRRC H-1/H-10 Unit Filing + Injection Well Permits",
+            description:   `Request H-10 Enhanced Recovery Application and injection well permits (Form W-14/W-17) ` +
+                           `for Unit ${unitNo ?? "[unit unknown]"} from TRRC EWA. Confirms injection well inventory, ` +
+                           `permitted volumes, and unit boundaries. Monthly injection reports (H-11) show active injection performance.`,
+            from:          "state_agency",
+            urgency:       waterflooodConfidence === "confirmed" ? "important" : "informational",
+          },
+          ...(waterflooodConfidence === "confirmed" && hasInjection ? [{
+            field:         "Injection Performance History",
+            document_type: "Monthly Injection Reports (H-11) / MIT Test Results",
+            description:   `Request 12 months of TRRC H-11 injection reports and the most recent MIT (Mechanical Integrity Test) ` +
+                           `for each injection well. Confirms injection volumes, wellhead pressures, and integrity status.`,
+            from:          "seller" as const,
+            urgency:       "important" as const,
+          }] : []),
+        ],
+      });
+    }
+  }
+
+  // ── §3.2.3 Required Related Assets ────────────────────────────────────────
+  //
+  // Spec rule: if injection wells on a DIFFERENT lease are part of the same
+  // disposal/waterflood system as the subject asset, those leases must be
+  // analyzed alongside this acquisition.  A buyer who purchases only the
+  // production lease without the injection lease inherits a production system
+  // with no guarantee that injection will continue.
+  //
+  // Detection: injection records with lease_no ≠ subject lease.
+  {
+    // Primary lease number (first resolved from TRRC)
+    const subjectLeaseNo = Array.from(
+      ((): Map<string, { distCode: string; leaseNo: string; operator: string }> => {
+        // We can only access leaseMap indirectly here — use trrcWells as proxy
+        const m = new Map<string, { distCode: string; leaseNo: string; operator: string }>();
+        for (const w of trrcWells) {
+          if (w.lease_number && w.district_code) {
+            m.set(w.api, { distCode: w.district_code, leaseNo: w.lease_number, operator: w.operator ?? "" });
+          }
+        }
+        return m;
+      })().values()
+    )[0]?.leaseNo ?? null;
+
+    if (subjectLeaseNo && trrcInjection.length > 0) {
+      const relatedLeases = Array.from(
+        new Set(
+          trrcInjection
+            .map(r => r.lease_no)
+            .filter((ln): ln is string => !!ln && ln !== subjectLeaseNo)
+        )
+      );
+
+      if (relatedLeases.length > 0) {
+        diligenceStatus.push({
+          category:      "Required Related Assets",
+          tier:          "partially_verified",
+          status_detail: `${relatedLeases.length} injection well lease(s) identified on separate TRRC lease(s) ` +
+                         `from the subject production lease (${subjectLeaseNo}): ${relatedLeases.join(", ")}. ` +
+                         `These injection leases are interdependent with this production asset.`,
+          source_label:  "TRRC SWD / Injection Well Query",
+          action_required:
+            `Confirm whether injection leases ${relatedLeases.join(", ")} are included in the purchase. ` +
+            `If not included, confirm a long-term disposal agreement will be conveyed. ` +
+            `A buyer purchasing the production lease without the injection infrastructure takes on ` +
+            `disposal cost risk and production decline risk if injection is curtailed.`,
+          urgency: "important",
+          evidence_source: "trrc_structured",
+          document_requests: [
+            {
+              field:         "Required Related Asset — Injection Lease",
+              document_type: "Assignment or Disposal Agreement",
+              description:   `Confirm whether injection lease(s) ${relatedLeases.join(", ")} are included ` +
+                             `in the PSA. If excluded, request a long-term SWD disposal agreement or equivalent ` +
+                             `commitment. Without injection infrastructure, declining water disposal capacity ` +
+                             `will directly increase LOE and may impair production.`,
+              from:          "seller",
+              urgency:       "important",
+            },
+          ],
+        });
+      }
+    }
+  }
+
   // ── Offer Gate Logic ──────────────────────────────────────────────────────
   //
   // Five gating fields: Production, LOE, Water Cut, Division Orders, Workover Risk.
@@ -3879,9 +4088,19 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     const blockingFields = gateFields.filter(f => f.blocking);
     const gateOpen       = blockingFields.length === 0;
 
+    // Check whether the §3.3.2 hard suppression fired (LOE + run tickets both absent)
+    const loeHardBlocked = loePeriods.length === 0 && !(extracted?.run_tickets_present === true);
+
     const gateMessage = gateOpen
       ? "All critical diligence fields verified — offer recommendation is enabled."
-      : `Offer locked — ${blockingFields.length} field(s) lack sufficient evidence: ${blockingFields.map(f => f.category).join(", ")}. Resolve these before issuing an offer.`;
+      : [
+          `Offer locked — ${blockingFields.length} field(s) lack sufficient evidence: ` +
+          `${blockingFields.map(f => f.category).join(", ")}.`,
+          loeHardBlocked
+            ? "⛔ NCF, NPV, and Offer Range are hard-suppressed: LOE statements and run tickets are both absent (Manus spec §3.3.2). Upload either to unlock economics."
+            : null,
+          "Resolve all blocking fields before issuing an offer.",
+        ].filter(Boolean).join(" ");
 
     computedOfferGate = {
       gate_open: gateOpen,
@@ -3905,6 +4124,12 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     v >= 1_000 ? `${(v / 1_000).toFixed(1)}K BBL` : `${Math.round(v)} BBL`;
 
   // Paragraph 1 — Asset Description & Identity
+  // Pre-compute waterflood context for use in para1 and para3
+  const _waterflooodUnit = trrcProration?.find(r => r.unit_no)?.unit_no ?? null;
+  const _hasInjection    = trrcInjection.length > 0;
+  const _isWaterflood    = !!(_waterflooodUnit || _hasInjection);
+  const _loeHardSuppressed = loePeriods.length === 0 && !(extracted?.run_tickets_present === true);
+
   const p1Parts: string[] = [];
   p1Parts.push(
     `This report evaluates ${assetDescription || "the subject oil and gas property"}.`
@@ -3920,6 +4145,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   }
   if (providedApis.length > 0) {
     p1Parts.push(`Well API: ${providedApis.slice(0, 3).join(", ")}${providedApis.length > 3 ? ` (+${providedApis.length - 3} more)` : ""}.`);
+  }
+  // §3.2.1 Waterflood flag in narrative
+  if (_isWaterflood) {
+    p1Parts.push(
+      _waterflooodUnit && _hasInjection
+        ? `⚠ WATERFLOOD / EOR SYSTEM DETECTED: TRRC proration records assign this well to Unit ${_waterflooodUnit} and ${trrcInjection.length} SWD/injection well(s) were identified in the lease area. Production performance is interdependent with the injection program — injection performance data (H-11 reports) and MIT status are Required Related Assets.`
+        : _hasInjection
+          ? `Note: ${trrcInjection.length} SWD/injection well(s) identified in lease area. Confirm whether this asset participates in a unitized waterflood program — if so, injection leases are Required Related Assets.`
+          : `Note: TRRC proration records assign this well to Unit ${_waterflooodUnit} — confirm waterflood/EOR unit membership and obtain H-1/H-10 filings.`
+    );
   }
   const para1 = p1Parts.join(" ");
 
@@ -3979,6 +4214,14 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       p3Parts.push(`LOE is estimated at $${loePerBoe.toFixed(2)}/BOE ` +
         `(${loePeriods.length > 0 ? `${loePeriods.length}-month statement average` : benchmark ? `${benchmark.basin} basin benchmark` : "estimated"}).`);
     }
+  } else if (_loeHardSuppressed) {
+    // §3.3.2: Hard suppression — LOE AND run tickets both absent
+    p3Parts.push(
+      "⛔ NCF, NPV, and Offer Range are SUPPRESSED — LOE statements and run tickets are both absent. " +
+      "Per underwriting policy, operating cost verification is required before any offer calculation can be shown. " +
+      "Production rate and decline data are available from TRRC public records; " +
+      "upload monthly LOE/JIB statements or purchaser run tickets to unlock economic analysis."
+    );
   } else {
     p3Parts.push("Economic analysis could not be completed — production and/or LOE data are required.");
   }
@@ -4323,6 +4566,61 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         why_not_used: "Offer range uses TRRC-based production. If TRRC diverges from run-statement actuals, this value is unreliable.",
       } : null,
     });
+
+    // ── §4 Audit Trail — Financial Suppression Decision ──────────────────
+    // Documents whether §3.3.2 hard suppression fired and why.
+    {
+      const loeMissing = loePeriods.length === 0;
+      const runMissing = !(extracted?.run_tickets_present === true);
+      keyInputs.push({
+        field: "Financial Suppression Gate (§3.3.2)",
+        category: "calculated",
+        source_label: "Manus Spec §3.3.2 Engine",
+        raw_value: `LOE statements: ${loePeriods.length} periods · Run tickets present: ${!runMissing}`,
+        transformation:
+          loeMissing && runMissing
+            ? "SUPPRESSED — both LOE statements and run tickets absent; NCF/NPV/Offer nulled"
+            : loeMissing
+              ? "PARTIAL — LOE missing but run tickets present; economics shown with low confidence"
+              : "PASS — LOE statements available; economics enabled",
+        final_value: loeMissing && runMissing ? "SUPPRESSED" : "ENABLED",
+        confidence: loeMissing && runMissing ? "none" : loeMissing ? "low" : "medium",
+        conflict: null,
+      });
+    }
+
+    // ── §4 Audit Trail — Waterflood Detection Decision ────────────────────
+    // Documents whether a waterflood / EOR system was detected and what evidence
+    // supports the determination.
+    {
+      const unitNo     = trrcProration?.find(r => r.unit_no)?.unit_no ?? null;
+      const injCount   = trrcInjection.length;
+      const confidence =
+        (unitNo && injCount > 0) ? "confirmed"
+        : unitNo                  ? "likely"
+        : injCount > 0            ? "possible"
+        : "none";
+
+      if (confidence !== "none") {
+        keyInputs.push({
+          field: "Waterflood / EOR System Detection (§3.2.1)",
+          category: "calculated",
+          source_label: "TRRC Proration + SWD Query",
+          raw_value: [
+            unitNo     ? `TRRC unit_no=${unitNo}` : "no unit_no in proration",
+            injCount > 0 ? `${injCount} SWD/injection well(s) found` : "no injection wells found",
+          ].join(" · "),
+          transformation: `Confidence: ${confidence}. Injection leases identified: ${
+            trrcInjection.map(r => r.lease_no).filter(Boolean).join(", ") || "none"
+          }. Required action: obtain H-10/H-11 filings and MIT test results.`,
+          final_value: confidence === "confirmed" ? "WATERFLOOD CONFIRMED"
+            : confidence === "likely" ? "WATERFLOOD LIKELY"
+            : "INJECTION DETECTED",
+          confidence: confidence === "confirmed" ? "high" : confidence === "likely" ? "medium" : "low",
+          conflict: null,
+        });
+      }
+    }
 
     return {
       production_lineage: productionLineage,
