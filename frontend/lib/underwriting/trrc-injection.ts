@@ -60,6 +60,7 @@ export async function fetchTrrcInjectionByApi(
         "User-Agent": "Mozilla/5.0",
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!res.ok) return [];
@@ -95,6 +96,7 @@ export async function fetchTrrcInjectionByOperator(
         "User-Agent": "Mozilla/5.0",
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!res.ok) return [];

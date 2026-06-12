@@ -129,6 +129,7 @@ export async function fetchTrrcP5ByOperatorNo(
         "User-Agent":   "Mozilla/5.0",
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!res.ok) return null;
@@ -165,6 +166,7 @@ export async function fetchTrrcP5ByOperatorName(
         "User-Agent":   "Mozilla/5.0",
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!res.ok) return null;

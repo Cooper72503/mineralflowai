@@ -68,6 +68,7 @@ export async function fetchTrrcOperatorProfile(
         "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!res.ok) return null;
@@ -173,6 +174,7 @@ export async function fetchTrrcAnnualProduction(
         "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!res.ok) return null;
