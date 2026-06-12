@@ -5400,7 +5400,7 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
   .disclaimer{font-size:8.5px;color:#9ca3af;margin-top:28px;border-top:1px solid #e5e7eb;padding-top:10px;line-height:1.6}
   @page{size:letter;margin:1.4cm 1.6cm}
   @media print{h2{page-break-after:avoid}.section{page-break-inside:avoid}#pdf-bar{display:none!important}#watermark{display:block!important}}
-  #watermark{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:72px;font-weight:900;color:rgba(59,130,246,0.07);white-space:nowrap;pointer-events:none;z-index:0;letter-spacing:0.05em;user-select:none}
+  #watermark{display:none;position:fixed;top:0.45cm;right:0.55cm;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:8.5px;font-weight:800;color:rgba(59,130,246,0.45);white-space:nowrap;pointer-events:none;z-index:9999;letter-spacing:0.06em;text-transform:uppercase;user-select:none}
   #pdf-bar{position:fixed;top:0;left:0;right:0;z-index:99999;background:#1d4ed8;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
   #pdf-bar .steps{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   #pdf-bar .step{background:rgba(255,255,255,0.15);border-radius:20px;padding:4px 12px;font-size:12px;white-space:nowrap}
