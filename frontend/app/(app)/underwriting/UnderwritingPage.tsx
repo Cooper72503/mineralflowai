@@ -5399,10 +5399,25 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
   .checklist-item{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid #f3f4f6;font-size:10px}
   .disclaimer{font-size:8.5px;color:#9ca3af;margin-top:28px;border-top:1px solid #e5e7eb;padding-top:10px;line-height:1.6}
   @page{size:letter;margin:1.4cm 1.6cm}
-  @media print{h2{page-break-after:avoid}.section{page-break-inside:avoid}}
+  @media print{h2{page-break-after:avoid}.section{page-break-inside:avoid}#pdf-bar{display:none!important}}
+  #pdf-bar{position:fixed;top:0;left:0;right:0;z-index:99999;background:#1d4ed8;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
+  #pdf-bar .steps{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  #pdf-bar .step{background:rgba(255,255,255,0.15);border-radius:20px;padding:4px 12px;font-size:12px;white-space:nowrap}
+  #pdf-bar .step strong{color:#fef08a}
+  #pdf-bar button{background:#fff;color:#1d4ed8;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0}
+  body{padding-top:56px}
 </style>
 </head>
 <body>
+<div id="pdf-bar">
+  <div class="steps">
+    <span>📄 To save as PDF:</span>
+    <span class="step">1. Click <strong>File → Print</strong> (or ⌘P)</span>
+    <span class="step">2. Click <strong>PDF ▼</strong> at bottom-left</span>
+    <span class="step">3. Choose <strong>Save as PDF…</strong></span>
+  </div>
+  <button onclick="window.print()">Open Print Dialog</button>
+</div>
 
 <h1>Acquisition Due Diligence Report</h1>
 <div class="meta">
@@ -5899,7 +5914,7 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
             <div style={{ fontSize: "1.4rem", marginBottom: "0.4rem" }}>📄</div>
             <div style={{ fontWeight: 700, color: COLORS.text, fontSize: "0.85rem", marginBottom: "0.35rem" }}>Save as PDF</div>
             <div style={{ fontSize: "0.74rem", color: COLORS.textMuted, marginBottom: "0.75rem", lineHeight: 1.55 }}>
-              Opens the full 13-section report and prompts you to save it as a PDF file to your computer.
+              Opens the report in a new tab with step-by-step instructions. In the print dialog: click <strong>PDF ▼</strong> at bottom-left → <strong>Save as PDF</strong>.
             </div>
             <button
               onClick={handleSavePdf}
