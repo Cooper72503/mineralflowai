@@ -891,7 +891,7 @@ async function runPipeline(
           try {
             return await withTimeout(
               fetchTrrcOperatorProfile(name),
-              20_000,
+              45_000,
               "TRRC P-5 operator profile",
             );
           } catch { return null; }
@@ -906,7 +906,7 @@ async function runPipeline(
           try {
             return await withTimeout(
               fetchTrrcAnnualProductionBestOf(first.distCode, first.leaseNo),
-              20_000,
+              45_000,
               "TRRC H-15 annual production",
             );
           } catch { return null; }
