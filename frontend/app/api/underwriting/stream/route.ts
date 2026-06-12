@@ -766,54 +766,29 @@ async function runPipeline(
           const leaseNoForViolations = firstLease?.leaseNo ?? null;
           const distCodeForViolations = firstLease?.distCode ?? null;
 
-          // S1 — single ICE query by lease number (covers all APIs on the lease)
-          // Uses fetchTrrcViolationsByLease which sends EMPTY qvapino field.
-          // Passing any API value to qvapino alongside a lease number causes ICE
-          // to AND the two filters → 0 results when the API mask doesn't match.
+          // S1 — single ICE query by lease number (covers all APIs on the lease).
+          // Empty qvapino field — passing any API alongside the lease causes ICE
+          // to AND both filters, returning 0 results.
           if (leaseNoForViolations) {
-            try {
-              addAll(await withTimeout(
-                fetchTrrcViolationsByLease(leaseNoForViolations),
-                30_000,
-                `TRRC violations lease ${leaseNoForViolations}`,
-              ));
-            } catch { /* timeout */ }
+            try { addAll(await fetchTrrcViolationsByLease(leaseNoForViolations)); } catch { /* network error */ }
           }
 
-          // S1b — per-API fallback: first 4 anchor APIs only (not all 52)
-          // Catches violations indexed by API but not by lease number.
+          // S1b — per-API fallback when S1 found nothing
           if (merged.length === 0) {
             for (const api of apiNumbers.slice(0, 4)) {
-              try {
-                addAll(await withTimeout(
-                  fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations),
-                  30_000,
-                  `TRRC violations API ${api}`,
-                ));
-              } catch { /* per-API timeout — continue to next */ }
+              try { addAll(await fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations)); } catch { /* continue */ }
             }
           }
 
-          // S2 — by operator + county, only when S1/S1b found nothing.
-          // Skipped when lease-number query already returned results — avoids
-          // adding an extra 20s wait on every report that has ICE violations.
+          // S2 — operator + county fallback when lease queries found nothing
           if (merged.length === 0 && operatorName && county) {
-            try {
-              addAll(await withTimeout(
-                fetchTrrcViolationsByOperator(operatorName, county),
-                20_000,
-                "TRRC violations by operator",
-              ));
-            } catch { /* timeout — violations from S1 still used */ }
+            try { addAll(await fetchTrrcViolationsByOperator(operatorName, county)); } catch { /* continue */ }
           }
 
           return merged;
         })(),
 
         // ── Injection wells ───────────────────────────────────────────────────
-        // Strategy 1: query every available API (up to 4).
-        // Strategy 2: operator + county fallback only when S1 returns nothing —
-        //   injection records are per-well and the operator scan can over-return.
         (async (): Promise<typeof injectionResult> => {
           type IR = import("@/lib/underwriting/trrc-injection").TrrcInjectionRecord;
           const seen  = new Set<string>();
@@ -825,109 +800,49 @@ async function runPipeline(
             }
           };
 
-          // S1 — by API: first 6 anchor APIs (injection wells are rare; don't need all 52)
           for (const api of apiNumbers.slice(0, 6)) {
-            try {
-              addAll(await withTimeout(
-                fetchTrrcInjectionByApi(api),
-                20_000,
-                `TRRC injection API ${api}`,
-              ));
-            } catch { /* per-API timeout — continue */ }
+            try { addAll(await fetchTrrcInjectionByApi(api)); } catch { /* continue */ }
           }
 
-          // S2 — operator + county when S1 found nothing
           if (merged.length === 0 && operatorName && county) {
-            try {
-              addAll(await withTimeout(
-                fetchTrrcInjectionByOperator(operatorName, county),
-                20_000,
-                "TRRC injection by operator",
-              ));
-            } catch { /* timeout */ }
+            try { addAll(await fetchTrrcInjectionByOperator(operatorName, county)); } catch { /* continue */ }
           }
 
           return merged;
         })(),
 
         // ── ICE field inspection records ──────────────────────────────────────
-        // ICE inspection records are indexed per-well API.  We check the first
-        // 10 wells (anchor APIs first, then inventory wells).
-        //
-        // Why capped at 10:
-        //   - Each API = 2 HTTP round-trips (GET session + POST search)
-        //   - 60 APIs × 2 requests / 4 concurrent = ~15 batches × ~700ms = ~10s+
-        //   - If ALL 60 return empty, a fallback loop re-runs all 60 sequentially —
-        //     that's 120+ serial requests and 60+ seconds with no outer timeout.
-        //   - ICE inspection records are per-individual-well; if the first 10 wells
-        //     on a lease have no inspection records, the remaining 50 won't either
-        //     (inspectors log by lease/district, not by every wellbore API).
-        // The district violation file (VIOLATIONS_DIST*.txt) captures compliance
-        // history at the lease level and is already fetched in parallel above.
+        // Checks all inventory wells (up to 60) at 4 concurrent.
+        // Each API = 2 HTTP round-trips (GET session + POST search).
+        // Route maxDuration = 300s — no artificial cap needed here.
         (async (): Promise<typeof inspectionResult> => {
-          type IR = import("@/lib/wells/trrc-inspection").TrrcInspectionRecord;
           if (allLeaseApis.length === 0) return [];
-
-          // Use up to 10 APIs: anchor APIs come first in allLeaseApis
-          const apisToCheck = allLeaseApis.slice(0, 10);
-
-          try {
-            return await withTimeout(
-              fetchTrrcInspectionsForApis(apisToCheck),
-              40_000,
-              "TRRC ICE inspections (first 10 lease wells)",
-            );
-          } catch {
-            return [];
-          }
+          try { return await fetchTrrcInspectionsForApis(allLeaseApis); } catch { return []; }
         })(),
 
         // ── P-5 Operator Organization ─────────────────────────────────────────
-        // Fetches the current P-5 org record for the resolved operator.
-        // Provides bond status, P-5 number, and contact info directly from TRRC.
         (async (): Promise<TrrcOperatorProfile | null> => {
           const name = trrcResolvedOperator ?? operatorName;
           if (!name) return null;
-          try {
-            return await withTimeout(
-              fetchTrrcOperatorProfile(name),
-              45_000,
-              "TRRC P-5 operator profile",
-            );
-          } catch { return null; }
+          try { return await fetchTrrcOperatorProfile(name); } catch { return null; }
         })(),
 
         // ── H-15 Annual Production ────────────────────────────────────────────
-        // Fetches cumulative annual production totals for the resolved lease.
-        // Longer historical view than the 36-month monthly window.
         (async (): Promise<TrrcAnnualProduction | null> => {
           const first = Array.from(leaseMap.values())[0];
           if (!first) return null;
-          try {
-            return await withTimeout(
-              fetchTrrcAnnualProductionBestOf(first.distCode, first.leaseNo),
-              45_000,
-              "TRRC H-15 annual production",
-            );
-          } catch { return null; }
+          try { return await fetchTrrcAnnualProductionBestOf(first.distCode, first.leaseNo); } catch { return null; }
         })(),
 
-        // ── ENTRY 6: District violation file (Manus spec §4.5 / §7.2) ────────
+        // ── District violation file (Manus spec §4.5 / §7.2) ─────────────────
         // Downloads the official RRC district violation TXT file, hashes it,
         // parses every row, and filters by lease number + API variants.
-        //
         // Critical rule: failed download ≠ clean compliance.
         // Golden fixture: Lease 60509 / District 8A → 39 matching records.
         (async (): Promise<DistrictViolationResult | null> => {
           if (!_primaryDistCode || !_primaryLeaseNo) return null;
           try {
-            // Pass allLeaseApis so the district file search matches against all
-            // 52 API numbers on the lease, not just the 1-4 anchor APIs.
-            return await withTimeout(
-              fetchDistrictViolations(_primaryDistCode, _primaryLeaseNo, allLeaseApis, operatorName),
-              50_000,
-              `District ${_primaryDistCode} violation file`,
-            );
+            return await fetchDistrictViolations(_primaryDistCode, _primaryLeaseNo, allLeaseApis, operatorName);
           } catch { return null; }
         })(),
 
