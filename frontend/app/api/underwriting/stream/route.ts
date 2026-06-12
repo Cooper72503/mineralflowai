@@ -137,13 +137,16 @@ async function runStep<T>(
 }
 
 /**
- * Pass-through — no timeout enforced on any step.
- * The ms and label parameters are retained for documentation purposes only.
- * Every lookup runs until the upstream source responds or the connection drops.
+ * Race a promise against a hard deadline.
+ * Throws with a labelled message if the deadline fires first.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function withTimeout<T>(promise: Promise<T>, _ms: number, _label: string): Promise<T> {
-  return promise;
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms)
+    ),
+  ]);
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────

@@ -321,6 +321,7 @@ export async function fetchTrrcInspectionsByApi(
         "Cache-Control":   "no-cache",
       },
       redirect: "follow",
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!getRes.ok) {
@@ -367,6 +368,7 @@ export async function fetchTrrcInspectionsByApi(
       method:  "POST",
       headers: postHeaders,
       body:    formData.toString(),
+      signal:  AbortSignal.timeout(20_000),
     });
 
     if (!postRes.ok) return [];
@@ -389,16 +391,28 @@ export async function fetchTrrcInspectionsByApi(
 
 /**
  * Fetch inspection records for multiple APIs.
- * Runs in parallel (up to 5), deduplicates, sorts most-recent-first.
+ * Concurrency-capped at 4 simultaneous requests — the TRRC ICE portal rate-limits
+ * or times out when flooded with 50+ simultaneous connections.
+ * Deduplicates results and sorts most-recent-first.
  */
 export async function fetchTrrcInspectionsForApis(
   apis: string[],
 ): Promise<TrrcInspectionRecord[]> {
   if (apis.length === 0) return [];
 
-  const results = await Promise.allSettled(
-    apis.map(api => fetchTrrcInspectionsByApi(api))
-  );
+  const CONCURRENCY = 4;
+  const queue = [...apis];
+  const settled: PromiseSettledResult<TrrcInspectionRecord[]>[] = [];
+
+  while (queue.length > 0) {
+    const batch = queue.splice(0, CONCURRENCY);
+    const batchResults = await Promise.allSettled(
+      batch.map(api => fetchTrrcInspectionsByApi(api))
+    );
+    settled.push(...batchResults);
+  }
+
+  const results = settled;
 
   const all: TrrcInspectionRecord[] = [];
   for (const r of results) {

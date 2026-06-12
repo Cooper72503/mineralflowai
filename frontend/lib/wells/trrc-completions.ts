@@ -343,6 +343,7 @@ export async function fetchTrrcCompletionByApi(
         "Accept":        "text/html,application/xhtml+xml",
         "User-Agent":    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       },
+      signal: AbortSignal.timeout(20_000),
       body: new URLSearchParams({
         "methodToCall":                         "search",
         "searchArgs.apiNoHndlr.inputValue":     api8,
@@ -388,6 +389,7 @@ export async function fetchTrrcCompletionByApi(
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer":   `${EWA_BASE}/drillingPermitsQueryAction.do`,
       },
+      signal: AbortSignal.timeout(20_000),
     });
 
     if (!cmplRes.ok) return baseRecord;
@@ -426,11 +428,21 @@ export async function fetchTrrcCompletionsForApis(
 ): Promise<TrrcCompletionRecord[]> {
   if (apis.length === 0) return [];
 
-  const results = await Promise.allSettled(
-    apis.map(api => fetchTrrcCompletionByApi(api))
-  );
+  // Cap at 4 concurrent requests — TRRC EWA returns errors or hangs
+  // when flooded with 50+ simultaneous connections.
+  const CONCURRENCY = 4;
+  const queue = [...apis];
+  const settled: PromiseSettledResult<TrrcCompletionRecord>[] = [];
 
-  return results
+  while (queue.length > 0) {
+    const batch = queue.splice(0, CONCURRENCY);
+    const batchResults = await Promise.allSettled(
+      batch.map(api => fetchTrrcCompletionByApi(api))
+    );
+    settled.push(...batchResults);
+  }
+
+  return settled
     .filter((r): r is PromiseFulfilledResult<TrrcCompletionRecord> => r.status === "fulfilled")
     .map(r => r.value);
 }

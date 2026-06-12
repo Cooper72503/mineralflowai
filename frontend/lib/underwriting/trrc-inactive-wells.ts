@@ -266,7 +266,8 @@ export async function fetchTrrcInactiveWellByApi(
         "Accept":       "text/html,application/xhtml+xml",
         "User-Agent":   "Mozilla/5.0",
       },
-      body: params.toString(),
+      body:   params.toString(),
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!res.ok) return { is_active_not_flagged: true, records: [] };
@@ -309,7 +310,8 @@ export async function fetchTrrcInactiveWellsByOperator(
         "Accept":       "text/html,application/xhtml+xml",
         "User-Agent":   "Mozilla/5.0",
       },
-      body: params.toString(),
+      body:   params.toString(),
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!res.ok) return [];
@@ -350,7 +352,8 @@ export async function fetchTrrcInactiveWellsByCounty(
         "Accept":       "text/html,application/xhtml+xml",
         "User-Agent":   "Mozilla/5.0",
       },
-      body: params.toString(),
+      body:   params.toString(),
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!res.ok) return [];
