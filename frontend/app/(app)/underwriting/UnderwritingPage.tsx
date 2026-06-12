@@ -5348,7 +5348,8 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
     }
   };
 
-  const handlePrint = () => {
+  // Shared HTML builder — used by both Save as PDF and Print
+  const buildReportHtml = () => {
     const title = `DD Report — ${report.subject.lease_name ?? report.subject.operator_name ?? "Property"}`;
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const fmtV = (v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}MM` : v >= 1_000 ? `$${Math.round(v/1_000)}K` : v < 0 ? `($${Math.round(Math.abs(v)/1_000)}K)` : `$${Math.round(v)}`;
@@ -5398,17 +5399,10 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
   .checklist-item{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid #f3f4f6;font-size:10px}
   .disclaimer{font-size:8.5px;color:#9ca3af;margin-top:28px;border-top:1px solid #e5e7eb;padding-top:10px;line-height:1.6}
   @page{size:letter;margin:1.4cm 1.6cm}
-  @media print{h2{page-break-after:avoid}.section{page-break-inside:avoid}#save-pdf-bar{display:none!important}}
-  #save-pdf-bar{position:sticky;top:0;z-index:9999;background:#1e40af;color:#fff;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;font-family:-apple-system,sans-serif;font-size:13px;gap:12px}
-  #save-pdf-bar button{background:#fff;color:#1e40af;border:none;border-radius:6px;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer}
+  @media print{h2{page-break-after:avoid}.section{page-break-inside:avoid}}
 </style>
-<script>window.addEventListener('load',function(){window.print()});</script>
 </head>
 <body>
-<div id="save-pdf-bar">
-  <span>📄 To save as PDF: choose <strong>Save as PDF</strong> as the destination in the print dialog (opening now…)</span>
-  <button onclick="window.print()">Save as PDF</button>
-</div>
 
 <h1>Acquisition Due Diligence Report</h1>
 <div class="meta">
@@ -5810,26 +5804,52 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
 </div>
 </body>
 </html>`;
+    return { html, slug: (report.subject.lease_name ?? report.report_id.slice(0, 8)).replace(/[^a-z0-9]/gi, "-").toLowerCase() };
+  };
 
-    // Use a Blob URL opened in a new tab so there are no popup-blocker issues
-    // and the browser has fully parsed/styled the document before print() fires.
+  // Save as PDF — opens the report in a new tab so the user can review it,
+  // then calls tab.print() from the opener (reliable cross-browser).
+  // The sticky banner inside the report disappears when printing.
+  const handleSavePdf = () => {
+    const { html, slug } = buildReportHtml();
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url  = URL.createObjectURL(blob);
     const tab  = window.open(url, "_blank");
     if (!tab) {
-      // Popup blocked — fall back: download the HTML file
+      // Popup blocked — download HTML file as fallback
       const a = document.createElement("a");
       a.href = url;
-      a.download = `dd-report-${report.subject.lease_name ?? report.report_id.slice(0, 8)}.html`;
+      a.download = `dd-report-${slug}.html`;
       a.click();
       URL.revokeObjectURL(url);
       return;
     }
-    // Revoke the object URL after the tab has loaded it
     tab.addEventListener("load", () => {
       URL.revokeObjectURL(url);
-      // Small delay so the browser has finished layout before the print dialog
-      setTimeout(() => { tab.print(); }, 250);
+      // Delay so layout is complete, then trigger Save as PDF dialog
+      setTimeout(() => { tab.print(); }, 400);
+    });
+  };
+
+  // Print — same tab approach but print dialog fires immediately.
+  // Identical to Save as PDF at the browser level; the user
+  // chooses the destination (printer vs. Save as PDF) in the dialog.
+  const handlePrint = () => {
+    const { html, slug } = buildReportHtml();
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url  = URL.createObjectURL(blob);
+    const tab  = window.open(url, "_blank");
+    if (!tab) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dd-report-${slug}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    tab.addEventListener("load", () => {
+      URL.revokeObjectURL(url);
+      setTimeout(() => { tab.print(); }, 400);
     });
   };
 
@@ -5874,18 +5894,33 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.85rem", marginBottom: "1rem" }}>
-          {/* PDF */}
+          {/* Save as PDF */}
           <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.accent}40`, borderRadius: 10, padding: "1.1rem" }}>
             <div style={{ fontSize: "1.4rem", marginBottom: "0.4rem" }}>📄</div>
             <div style={{ fontWeight: 700, color: COLORS.text, fontSize: "0.85rem", marginBottom: "0.35rem" }}>Save as PDF</div>
             <div style={{ fontSize: "0.74rem", color: COLORS.textMuted, marginBottom: "0.75rem", lineHeight: 1.55 }}>
-              Opens the full 13-section report and immediately prompts you to save as PDF. Choose <strong>Save as PDF</strong> as the destination.
+              Opens the full 13-section report and prompts you to save it as a PDF file to your computer.
+            </div>
+            <button
+              onClick={handleSavePdf}
+              style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 6, padding: "0.55rem 1rem", fontSize: "0.8rem", fontWeight: 700, cursor: "pointer", width: "100%" }}
+            >
+              Save as PDF →
+            </button>
+          </div>
+
+          {/* Print */}
+          <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.1rem" }}>
+            <div style={{ fontSize: "1.4rem", marginBottom: "0.4rem" }}>🖨️</div>
+            <div style={{ fontWeight: 700, color: COLORS.text, fontSize: "0.85rem", marginBottom: "0.35rem" }}>Print Report</div>
+            <div style={{ fontSize: "0.74rem", color: COLORS.textMuted, marginBottom: "0.75rem", lineHeight: 1.55 }}>
+              Opens the report and launches the print dialog. Select your printer or print to PDF manually.
             </div>
             <button
               onClick={handlePrint}
-              style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 6, padding: "0.55rem 1rem", fontSize: "0.8rem", fontWeight: 700, cursor: "pointer", width: "100%" }}
+              style={{ background: COLORS.surfaceAlt, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "0.55rem 1rem", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer", width: "100%" }}
             >
-              Download PDF →
+              Print →
             </button>
           </div>
 
