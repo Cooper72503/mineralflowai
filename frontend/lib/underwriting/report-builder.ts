@@ -950,7 +950,22 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       const prodNotes: string[] = [
         `LEASE-LEVEL DATA: RRC oil production is lease-level; this exhibit supports underwriting but is not a formal well-level reserve-engineering decline curve.${trrcWells.length > 0 ? ` Source: TRRC Specific Lease Production Query (${trrcWells.map(w => `Lease ${w.lease_number}, District ${w.district_code}`).join("; ")}).` : ""}`,
         "WATER: TRRC production reports do not include water disposition volumes. Water cut requires operator run tickets or division orders — do not compute from TRRC data alone.",
-        "TRRC data may lag current operations by 3–5 months. Verify most-recent production with operator prior to offer.",
+        // ── §3.1 Data Source & Lag Annotation (Gap #1 from Technical Assessment) ──
+        // Explicitly state the TRRC source, latest reported month, and the mandatory
+        // 3–5 month reporting lag — so that any "No Recent Production" appearance on
+        // public aggregators is reconciled against the known lag, not treated as
+        // evidence of well cessation.
+        (() => {
+          const latestMonth = wellRows[0]?.latest_production_month ?? null;
+          const leaseId     = trrcWells[0] ? `Dist ${trrcWells[0].district_code} / Lease ${trrcWells[0].lease_number}` : "unknown lease";
+          return (
+            `DATA SOURCE & LAG: Production figures from TRRC Specific Lease Production Query (${leaseId}). ` +
+            (latestMonth ? `Latest TRRC-reported month: ${latestMonth}. ` : "") +
+            `TRRC operators have a mandatory 45-day reporting window; data routinely lags current operations by 3–5 months. ` +
+            `"No Recent Production" from public aggregators reflects this lag — not actual well cessation. ` +
+            `Request current gauge tickets or run tickets dated within 30 days to confirm present-day status.`
+          );
+        })(),
       ];
 
       // ⚠️ CRITICAL: Multi-well lease attribution warning
@@ -969,6 +984,51 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
           `not just the ${suppliedApis || "subject"} well(s) being acquired. ` +
           `If this is a partial-lease acquisition, the production figures OVERSTATE the subject asset. ` +
           `Request per-well run tickets from the operator to allocate production to the acquired wellbores.`
+        );
+      }
+
+      // ── §4 Active Well Inventory Breakdown (Gap #4 from Technical Assessment) ─
+      // The assessment flagged that the report "lacks a clear inventory of *active*
+      // producing wells within the unit."  Use LeaseWellInventoryResult.wells[].status
+      // and well_type to compute and surface active vs. inactive counts explicitly.
+      if (leaseWellInventory && !leaseWellInventory.query_failed && leaseWellInventory.wells.length > 0) {
+        const lwiWells = leaseWellInventory.wells;
+
+        const isActiveStatus = (st: string | null): boolean => {
+          const s = (st ?? "").trim().toUpperCase();
+          return s === "A" || s === "ACTIVE" || s.startsWith("ACTIVE");
+        };
+        const isProducingType = (wt: string | null): boolean => {
+          const w = (wt ?? "").trim().toUpperCase();
+          return w.startsWith("O") || w.startsWith("G") || w === "OW" || w === "GW" || w === "OGW";
+        };
+        const isShutIn   = (st: string | null) => { const s = (st ?? "").toUpperCase(); return s === "S" || s === "SI" || s.includes("SHUT"); };
+        const isInactive = (st: string | null) => { const s = (st ?? "").toUpperCase(); return s === "IA" || s.includes("INACT"); };
+        const isPlugged  = (st: string | null) => { const s = (st ?? "").toUpperCase(); return s === "PA" || s === "P&A" || s.includes("PLUG"); };
+
+        const activeProdCount = lwiWells.filter(w => isActiveStatus(w.status) && isProducingType(w.well_type)).length;
+        const shutInCount     = lwiWells.filter(w => isShutIn(w.status)).length;
+        const inactiveCount   = lwiWells.filter(w => isInactive(w.status)).length;
+        const pluggedCount    = lwiWells.filter(w => isPlugged(w.status)).length;
+        const otherCount      = lwiWells.length - activeProdCount - shutInCount - inactiveCount - pluggedCount;
+
+        const inventoryParts: string[] = [
+          activeProdCount > 0 ? `${activeProdCount} active producing` : null,
+          shutInCount     > 0 ? `${shutInCount} shut-in` : null,
+          inactiveCount   > 0 ? `${inactiveCount} inactive` : null,
+          pluggedCount    > 0 ? `${pluggedCount} plugged & abandoned` : null,
+          otherCount      > 0 ? `${otherCount} other/unknown status` : null,
+        ].filter((p): p is string => p !== null);
+
+        prodNotes.push(
+          `WELL INVENTORY (TRRC Lease ${leaseWellInventory.lease_number} / Dist ${leaseWellInventory.district_code}): ` +
+          `${lwiWells.length} total wellbore(s) on lease — ${inventoryParts.join(", ")}. ` +
+          (activeProdCount === 0
+            ? `⚠️ TRRC wellbore status shows NO active producing wells on this lease. ` +
+              `Verify current production status with operator before advancing offer. `
+            : ``) +
+          `TRRC production volumes are lease-aggregate across all ${lwiWells.length} wellbore(s). ` +
+          `To attribute production to individual active wells, request per-wellbore run tickets metered separately by API.`
         );
       }
 
@@ -2028,6 +2088,32 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
               `or production from a shallower/different zone than expected. Confirm formation.`
             );
           }
+        }
+
+        // ── §3.1.2 Production Trend vs. DCA Reconciliation ─────────────────
+        // Technical Assessment Gap #1: the short-term "Increasing" trend and the
+        // DCA "declining" projection appear contradictory without explanation.
+        // These metrics measure different time windows:
+        //   • Short-term trend  = recent 3-month avg vs. prior 3-month avg (momentum signal)
+        //   • DCA decline rate  = Arps model fitted to the FULL production history
+        // Divergence is expected and legitimate when a recent restart or flush phase
+        // produces a positive short-term signal even as the long-term reserve trajectory
+        // is declining. The DCA model is authoritative for reserve projections; the
+        // short-term trend indicates current momentum only.
+        const shortTermTrend = wellRows[0]?.production_trend?.value ?? null;
+        if (shortTermTrend === "increasing" && dcaResult.decline_rate_monthly_pct > 0) {
+          notes.push(
+            `TREND RECONCILIATION: Short-term production trend is "Increasing" ` +
+            `(recent 3-month average vs. prior 3-month period). ` +
+            `This is NOT contradictory to the Arps DCA model showing ` +
+            `${dcaResult.decline_rate_monthly_pct.toFixed(1)}%/month long-term decline ` +
+            `(${dcaResult.decline_rate_annual_pct.toFixed(1)}%/year). ` +
+            `The short-term trend reflects recent production momentum — likely a restart recovery ` +
+            `or flush production phase. The DCA rate is fitted to the full ` +
+            `${dcaResult.months_of_data}-month production history and is the authoritative ` +
+            `basis for EUR and reserve projections. Short-term increases should be verified ` +
+            `against purchaser run tickets before being used as the base rate for offer calculations.`
+          );
         }
       } else {
         notes.push("Decline curve analysis requires ≥ 3 months of production history. Provide API number or upload production documents.");
@@ -3926,21 +4012,41 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         )
       );
 
+      // ── §3.2.1 / Gap #3: Build human-readable injection lease descriptions ──
+      // Include lease_name (extracted from TRRC HTML table cell) when available,
+      // so that the report explicitly identifies "Taylor W.J." rather than
+      // just a raw TRRC lease number.  This is the "System Thinking" linkage
+      // required by the Technical Assessment.
+      const injLeaseDescriptions: string[] = Array.from(
+        // De-duplicate by lease_no; prefer records with a lease_name
+        new Map(
+          trrcInjection
+            .filter((r): r is typeof r & { lease_no: string } => !!r.lease_no)
+            .map(r => [r.lease_no, r] as const)
+        ).values()
+      ).map(r =>
+        r.lease_name
+          ? `${r.lease_name} (TRRC Lease ${r.lease_no})`
+          : `TRRC Lease ${r.lease_no}`
+      );
+
+      const injLeaseSummary = injLeaseDescriptions.length > 0
+        ? injLeaseDescriptions.join("; ")
+        : "injection lease identity not resolved — request from seller";
+
       // Build a summary description for the diligence item
       const waterflooodDetail = (() => {
         if (waterflooodConfidence === "confirmed") {
           return `Unit ${unitNo} with ${trrcInjection.length} injection well(s) confirmed via TRRC proration and SWD records. ` +
                  `Production performance is interdependent with injection program health. ` +
-                 (injLeases.length > 0
-                   ? `Injection source lease(s): ${injLeases.join(", ")}.`
-                   : "Injection lease identity not resolved — request from seller.");
+                 `Injection source: ${injLeaseSummary}.`;
         }
         if (waterflooodConfidence === "likely") {
           return `TRRC proration record shows unit assignment (Unit ${unitNo}) — EOR/waterflood unit membership is likely. ` +
                  `No injection records confirmed via EWA disposal query in this session.`;
         }
         // "possible" — injection wells found but no unit_no
-        return `${trrcInjection.length} SWD/injection well(s) found in lease area. ` +
+        return `${trrcInjection.length} SWD/injection well(s) found in lease area (${injLeaseSummary}). ` +
                `No TRRC unit assignment confirmed — may indicate localized disposal rather than a unit waterflood program. ` +
                `Request H-1/H-10 filings from TRRC EWA to confirm unit membership.`;
       })();
@@ -3959,14 +4065,14 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         action_required:
           waterflooodConfidence === "confirmed"
             ? `Obtain injection performance data (monthly injection volumes, wellhead pressure, MIT status) ` +
-              `for the ${trrcInjection.length} identified injection well(s). ` +
-              `If injection wells are on a separate lease (${injLeases.join(", ") || "unknown"}), ` +
+              `for the ${trrcInjection.length} identified injection well(s) (${injLeaseSummary}). ` +
+              `If injection wells are on a separate lease from the subject, ` +
               `that lease is a Required Related Asset — it must be analyzed alongside this purchase.`
             : waterflooodConfidence === "likely"
               ? `Request H-1/H-10 EOR/waterflood unit filings from TRRC EWA to confirm unit membership ` +
                 `and identify injection wells. A confirmed waterflood unit requires injection performance review.`
-              : `Request H-1/H-10 unit filings from TRRC EWA to determine whether SWD wells are part of ` +
-                `a unitized injection program. If so, they are Required Related Assets.`,
+              : `Request H-1/H-10 unit filings from TRRC EWA to determine whether SWD wells (${injLeaseSummary}) ` +
+                `are part of a unitized injection program. If so, they are Required Related Assets.`,
         urgency: waterflooodConfidence === "confirmed" ? "important" : "informational",
         evidence_source: waterflooodConfidence === "confirmed" ? "trrc_structured" : "trrc_structured",
         document_requests: [

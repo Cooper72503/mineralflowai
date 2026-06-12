@@ -17,6 +17,8 @@ const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 export type TrrcInjectionRecord = {
   api10: string;
   well_name: string | null;
+  /** Lease name extracted from the TRRC wellbore query HTML table (best-effort). */
+  lease_name: string | null;
   permit_number: string | null;
   well_type: string;
   county: string | null;
@@ -135,16 +137,48 @@ function parseInjectionHtml(html: string, targetApi: string | null): TrrcInjecti
       if (!api10.endsWith(targetBare.slice(2))) continue;
     }
 
-    // Extract operator name from surrounding context
+    // Extract operator name from surrounding context (URL param)
     const operatorMatch = html.slice(
       Math.max(0, m.index - 300),
       m.index + 300
     ).match(/operatorName=([^&"]+)/);
     const operator = operatorMatch ? decodeURIComponent(operatorMatch[1]) : null;
 
+    // ── Extract well_name and lease_name from adjacent table cells ────────────
+    // TRRC EWA wellbore query rows have the API link in the first cell.
+    // The subsequent cells (in order) are typically:
+    //   [0] API No (with link — already consumed)
+    //   [1] Well No / Well Name
+    //   [2] Lease Name
+    //   [3] Operator
+    //   [4] County
+    //   [5..] other fields
+    // We locate the end of the <td> containing the link, then parse the next cells.
+    const htmlFromMatch = html.slice(m.index, m.index + 1500);
+    // Skip past the closing </td> of the cell that contains this link
+    const afterFirstCell = htmlFromMatch.replace(/^[\s\S]*?<\/td>/i, "");
+    const adjacentCells: string[] = [];
+    const cellPat = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    let cm: RegExpExecArray | null;
+    let cellCount = 0;
+    cellPat.lastIndex = 0;
+    while ((cm = cellPat.exec(afterFirstCell)) !== null && cellCount < 5) {
+      const raw = cm[1]
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#039;/g, "'")
+        .replace(/\s+/g, " ").trim();
+      adjacentCells.push(raw);
+      cellCount++;
+    }
+    // [0] = Well No / Well Name, [1] = Lease Name
+    const wellName   = adjacentCells[0] ?? null;
+    const leaseName  = adjacentCells[1] ?? null;
+
     results.push({
       api10,
-      well_name: null,
+      well_name:   wellName  || null,
+      lease_name:  leaseName || null,
       permit_number: null,
       well_type: "SWD",
       county: null,
