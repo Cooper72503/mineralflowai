@@ -888,17 +888,28 @@ async function runPipeline(
         (async (): Promise<TrrcOperatorProfile | null> => {
           const name = trrcResolvedOperator ?? operatorName;
           if (!name) return null;
-          try { return await fetchTrrcOperatorProfile(name); } catch { return null; }
+          try {
+            return await withTimeout(
+              fetchTrrcOperatorProfile(name),
+              20_000,
+              "TRRC P-5 operator profile",
+            );
+          } catch { return null; }
         })(),
 
         // ── H-15 Annual Production ────────────────────────────────────────────
         // Fetches cumulative annual production totals for the resolved lease.
         // Longer historical view than the 36-month monthly window.
         (async (): Promise<TrrcAnnualProduction | null> => {
-          // Use the first resolved lease from leaseMap
           const first = Array.from(leaseMap.values())[0];
           if (!first) return null;
-          try { return await fetchTrrcAnnualProductionBestOf(first.distCode, first.leaseNo); } catch { return null; }
+          try {
+            return await withTimeout(
+              fetchTrrcAnnualProductionBestOf(first.distCode, first.leaseNo),
+              20_000,
+              "TRRC H-15 annual production",
+            );
+          } catch { return null; }
         })(),
 
         // ── ENTRY 6: District violation file (Manus spec §4.5 / §7.2) ────────
