@@ -794,8 +794,10 @@ async function runPipeline(
             }
           }
 
-          // S2 — by operator + county (always run for cross-lease operator violations)
-          if (operatorName && county) {
+          // S2 — by operator + county, only when S1/S1b found nothing.
+          // Skipped when lease-number query already returned results — avoids
+          // adding an extra 20s wait on every report that has ICE violations.
+          if (merged.length === 0 && operatorName && county) {
             try {
               addAll(await withTimeout(
                 fetchTrrcViolationsByOperator(operatorName, county),
@@ -849,45 +851,35 @@ async function runPipeline(
         })(),
 
         // ── ICE field inspection records ──────────────────────────────────────
-        // fetchTrrcInspectionsForApis already iterates all provided APIs
-        // internally.  If that returns nothing and we have a TRRC-resolved
-        // operator name, retry with a single-API lookup against each API to
-        // rule out a session-init issue on the first attempt.
+        // ICE inspection records are indexed per-well API.  We check the first
+        // 10 wells (anchor APIs first, then inventory wells).
+        //
+        // Why capped at 10:
+        //   - Each API = 2 HTTP round-trips (GET session + POST search)
+        //   - 60 APIs × 2 requests / 4 concurrent = ~15 batches × ~700ms = ~10s+
+        //   - If ALL 60 return empty, a fallback loop re-runs all 60 sequentially —
+        //     that's 120+ serial requests and 60+ seconds with no outer timeout.
+        //   - ICE inspection records are per-individual-well; if the first 10 wells
+        //     on a lease have no inspection records, the remaining 50 won't either
+        //     (inspectors log by lease/district, not by every wellbore API).
+        // The district violation file (VIOLATIONS_DIST*.txt) captures compliance
+        // history at the lease level and is already fetched in parallel above.
         (async (): Promise<typeof inspectionResult> => {
           type IR = import("@/lib/wells/trrc-inspection").TrrcInspectionRecord;
           if (allLeaseApis.length === 0) return [];
 
-          // Primary: batched call for all lease APIs (up to 15).
-          // allLeaseApis includes inventory-discovered wells, not just anchor APIs.
-          let results: IR[] = [];
+          // Use up to 10 APIs: anchor APIs come first in allLeaseApis
+          const apisToCheck = allLeaseApis.slice(0, 10);
+
           try {
-            results = await withTimeout(
-              fetchTrrcInspectionsForApis(allLeaseApis),
-              45_000,
-              "TRRC ICE inspections (batch — all lease wells)",
+            return await withTimeout(
+              fetchTrrcInspectionsForApis(apisToCheck),
+              40_000,
+              "TRRC ICE inspections (first 10 lease wells)",
             );
-          } catch { /* timeout — try individual fallback below */ }
-
-          // Fallback: retry each API individually when batch returned nothing
-          if (results.length === 0) {
-            const { fetchTrrcInspectionsByApi } = await import("@/lib/wells/trrc-inspection");
-            const seen = new Set<string>();
-            for (const api of allLeaseApis) {
-              try {
-                const rows = await withTimeout(
-                  fetchTrrcInspectionsByApi(api),
-                  20_000,
-                  `TRRC ICE inspections API ${api}`,
-                );
-                for (const r of rows) {
-                  const key = `${r.api}|${r.inspection_date}`;
-                  if (!seen.has(key)) { seen.add(key); results.push(r); }
-                }
-              } catch { /* per-API timeout — continue */ }
-            }
+          } catch {
+            return [];
           }
-
-          return results;
         })(),
 
         // ── P-5 Operator Organization ─────────────────────────────────────────
