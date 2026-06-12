@@ -821,7 +821,8 @@ export async function fetchTrrcProductionHistory(
     const endMonth   = now.getMonth() + 1;
     const startDate  = new Date(now);
     startDate.setMonth(startDate.getMonth() - monthsBack);
-    const startYear  = startDate.getFullYear();
+    // TRRC EWA dropdown minimum year is 1993 — clamp to avoid silent rejection
+    const startYear  = Math.max(startDate.getFullYear(), 1993);
     const startMonth = startDate.getMonth() + 1;
 
     // ── Strategy A: Official TRRC CSV download — DISABLED ────────────────
@@ -975,7 +976,8 @@ export async function fetchTrrcProductionByLease(
   const endMonth   = now.getMonth() + 1;
   const startDate  = new Date(now);
   startDate.setMonth(startDate.getMonth() - monthsBack);
-  const startYear  = startDate.getFullYear();
+  // TRRC EWA dropdown minimum year is 1993 — clamp to avoid silent rejection
+  const startYear  = Math.max(startDate.getFullYear(), 1993);
   const startMonth = startDate.getMonth() + 1;
 
   // ── Strategy A: Official TRRC CSV download — DISABLED ─────────────────
