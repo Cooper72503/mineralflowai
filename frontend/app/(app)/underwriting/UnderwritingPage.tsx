@@ -5360,6 +5360,7 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
 <title>${title}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
+  @page{size:letter;margin:0.6in 0.65in}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;background:#fff;padding:2.2rem 2.4rem;font-size:10.5px;line-height:1.5}
   h1{font-size:19px;font-weight:900;margin-bottom:2px}
   h2{font-size:12.5px;font-weight:800;margin:20px 0 6px;padding:5px 0 5px 10px;background:#f8fafc;border-left:4px solid #3b82f6;color:#1e3a5f;text-transform:uppercase;letter-spacing:.05em;page-break-after:avoid}
@@ -5396,11 +5397,18 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
   .source-url{font-size:8px;color:#9ca3af;word-break:break-all}
   .checklist-item{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid #f3f4f6;font-size:10px}
   .disclaimer{font-size:8.5px;color:#9ca3af;margin-top:28px;border-top:1px solid #e5e7eb;padding-top:10px;line-height:1.6}
-  @page{margin:1.4cm 1.6cm}
-  @media print{h2{page-break-after:avoid}.section{page-break-inside:avoid}}
+  @page{size:letter;margin:1.4cm 1.6cm}
+  @media print{h2{page-break-after:avoid}.section{page-break-inside:avoid}#save-pdf-bar{display:none!important}}
+  #save-pdf-bar{position:sticky;top:0;z-index:9999;background:#1e40af;color:#fff;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;font-family:-apple-system,sans-serif;font-size:13px;gap:12px}
+  #save-pdf-bar button{background:#fff;color:#1e40af;border:none;border-radius:6px;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer}
 </style>
+<script>window.addEventListener('load',function(){window.print()});</script>
 </head>
 <body>
+<div id="save-pdf-bar">
+  <span>📄 To save as PDF: choose <strong>Save as PDF</strong> as the destination in the print dialog (opening now…)</span>
+  <button onclick="window.print()">Save as PDF</button>
+</div>
 
 <h1>Acquisition Due Diligence Report</h1>
 <div class="meta">
@@ -5868,16 +5876,16 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.85rem", marginBottom: "1rem" }}>
           {/* PDF */}
           <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.accent}40`, borderRadius: 10, padding: "1.1rem" }}>
-            <div style={{ fontSize: "1.4rem", marginBottom: "0.4rem" }}>🖨️</div>
-            <div style={{ fontWeight: 700, color: COLORS.text, fontSize: "0.85rem", marginBottom: "0.35rem" }}>13-Section PDF Report</div>
+            <div style={{ fontSize: "1.4rem", marginBottom: "0.4rem" }}>📄</div>
+            <div style={{ fontWeight: 700, color: COLORS.text, fontSize: "0.85rem", marginBottom: "0.35rem" }}>Save as PDF</div>
             <div style={{ fontSize: "0.74rem", color: COLORS.textMuted, marginBottom: "0.75rem", lineHeight: 1.55 }}>
-              Opens print-ready report in new tab. Press <strong>⌘P / Ctrl+P → Save as PDF</strong>. Includes all spec sections, source appendix, and disclaimers.
+              Opens the full 13-section report and immediately prompts you to save as PDF. Choose <strong>Save as PDF</strong> as the destination.
             </div>
             <button
               onClick={handlePrint}
               style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 6, padding: "0.55rem 1rem", fontSize: "0.8rem", fontWeight: 700, cursor: "pointer", width: "100%" }}
             >
-              Open Print Preview →
+              Download PDF →
             </button>
           </div>
 
