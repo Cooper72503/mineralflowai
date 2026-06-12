@@ -33,7 +33,7 @@
 import { NextResponse }                    from "next/server";
 import { createSupabaseFromRouteRequest }  from "@/lib/supabase/from-route-request";
 import { extractUnderwritingDataFromDocuments } from "@/lib/underwriting/document-extraction";
-import { fetchTrrcViolations, fetchTrrcViolationsByOperator } from "@/lib/underwriting/trrc-compliance";
+import { fetchTrrcViolations, fetchTrrcViolationsByLease, fetchTrrcViolationsByOperator } from "@/lib/underwriting/trrc-compliance";
 import { fetchTrrcInjectionByApi, fetchTrrcInjectionByOperator } from "@/lib/underwriting/trrc-injection";
 import { fetchTrrcInspectionsForApis }     from "@/lib/wells/trrc-inspection";
 import { fetchTrrcCompletionsForApis }     from "@/lib/wells/trrc-completions";
@@ -767,11 +767,13 @@ async function runPipeline(
           const distCodeForViolations = firstLease?.distCode ?? null;
 
           // S1 — single ICE query by lease number (covers all APIs on the lease)
+          // Uses fetchTrrcViolationsByLease which sends EMPTY qvapino field.
+          // Passing any API value to qvapino alongside a lease number causes ICE
+          // to AND the two filters → 0 results when the API mask doesn't match.
           if (leaseNoForViolations) {
             try {
-              // Pass a dummy API ("00-00000") so the function uses the leaseNo filter
               addAll(await withTimeout(
-                fetchTrrcViolations("4200000000", distCodeForViolations, leaseNoForViolations),
+                fetchTrrcViolationsByLease(leaseNoForViolations),
                 30_000,
                 `TRRC violations lease ${leaseNoForViolations}`,
               ));

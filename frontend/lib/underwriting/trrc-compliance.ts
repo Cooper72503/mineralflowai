@@ -428,6 +428,76 @@ export async function fetchTrrcViolations(
 }
 
 /**
+ * Look up ALL violations for a lease (by lease number) via ICE Tab 2.
+ *
+ * Leaves the API field EMPTY — querying by API AND lease simultaneously
+ * returns 0 results when the API doesn't match a violation record.
+ * This single call replaces 52 per-API calls and returns every violation
+ * filed against the lease regardless of which API it's linked to.
+ *
+ * Note: only covers violations from August 1, 2015 onward.
+ * The district violation file (VIOLATIONS_DIST*.txt) covers full history.
+ */
+export async function fetchTrrcViolationsByLease(
+  leaseNo: string,
+): Promise<TrrcViolation[]> {
+  try {
+    const session = await initIceSession();
+    if (!session) return [];
+
+    const viewState2 = await activateViolationsTab(session);
+    if (!viewState2) return [];
+
+    const body = new URLSearchParams();
+    body.append("javax.faces.partial.ajax",    "true");
+    body.append("javax.faces.source",          "IceQueryForm:j_idt39:j_idt181");
+    body.append("javax.faces.partial.execute", "IceQueryForm");
+    body.append("javax.faces.partial.render",  "IceQueryForm:j_idt39:violResults");
+    body.append("IceQueryForm:j_idt39:j_idt181", "IceQueryForm:j_idt39:j_idt181");
+    body.append("IceQueryForm", "IceQueryForm");
+    body.append("IceQueryForm:j_idt39:qvapino",       "");  // intentionally empty — lease-only search
+    body.append("IceQueryForm:j_idt39:qvopnm",        "");
+    body.append("IceQueryForm:j_idt39:qvopno",        "");
+    body.append("IceQueryForm:j_idt39:qvcnty_input",  "");
+    body.append("IceQueryForm:j_idt39:qvcnty_focus",  "");
+    body.append("IceQueryForm:j_idt39:qvdis_input",   "");
+    body.append("IceQueryForm:j_idt39:qvdis_focus",   "");
+    body.append("IceQueryForm:j_idt39:qvlsnm",        "");
+    body.append("IceQueryForm:j_idt39:qvlsno",        leaseNo.slice(0, 6));
+    body.append("IceQueryForm:j_idt39:qvdpno",        "");
+    body.append("IceQueryForm:j_idt39:qvindtf_input", "");
+    body.append("IceQueryForm:j_idt39:qvindtt_input", "");
+    body.append("IceQueryForm:j_idt39:qviRle_focus",  "");
+    body.append("IceQueryForm:j_idt39:qviRle_input",  "");
+    body.append("IceQueryForm:j_idt39_activeIndex",   "1");
+    body.append("javax.faces.ViewState", viewState2);
+
+    const res = await fetch(PDA_ICE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept":           "application/xml, text/xml, */*; q=0.01",
+        "Faces-Request":    "partial/ajax",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent":       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin":           "https://webapps2.rrc.texas.gov",
+        "Referer":          PDA_ICE_URL,
+        "Cookie":           `JSESSIONID=${session.jsessionId}`,
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const resultsHtml = extractPartialUpdate(xml, "IceQueryForm:j_idt39:violResults");
+    if (!resultsHtml) return [];
+    return parseViolResultsHtml(resultsHtml);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Look up violations by operator number (no specific API).
  * Used when only an operator number is known.
  * Queries ICE Tab 2 with the operator number field.

@@ -315,8 +315,10 @@ export async function fetchLeaseWellInventory(
     };
   };
 
-  // Strategy 1: POST query without session (self-bootstrapping)
-  const MAX_PAGES = 20; // 20 pages × 25 wells/page = 500 wells max
+  // Two-request strategy — mirrors the production fetch approach:
+  //   Request 1: POST to execute query → page 1 + session established
+  //   Request 2: GET with pager.pageSize=500&offset=0 → ALL wells at once
+  // This avoids the multi-page pagination loop that was slow on Vercel.
   const allWells: LeaseWellRecord[] = [];
   const seenApis = new Set<string>();
 
@@ -330,36 +332,24 @@ export async function fetchLeaseWellInventory(
   };
 
   try {
-    // First attempt: no session (TRRC often bootstraps session from POST)
-    let html = await queryWellboreByLease(normalizedDist, leaseNumber, null);
-
-    if (!html || html.trim().length < 100) {
-      // Second attempt: establish session first
-      const session = await initEwaSession();
-      html = await queryWellboreByLease(normalizedDist, leaseNumber, session);
-    }
+    // Request 1: POST (no session needed — TRRC bootstraps from POST)
+    const session = await initEwaSession();
+    const html = await queryWellboreByLease(normalizedDist, leaseNumber, session);
 
     if (!html || html.trim().length < 100) {
       return buildResult([], true);
     }
 
-    // Extract session cookie from the HTML response (TRRC may embed it in meta)
-    // For pagination, we need the session that was established with the first POST
-    // We re-use the session from initEwaSession if we had one
-    const session = await initEwaSession();
     addWells(parseWellboreHtml(html, normalizedDist, leaseNumber));
 
-    let nextPath = extractNextPagePath(html);
-    let page = 1;
-
-    while (nextPath && page < MAX_PAGES) {
-      const nextHtml = await fetchNextPage(nextPath, session);
-      if (!nextHtml) break;
-      const beforeCount = allWells.length;
-      addWells(parseWellboreHtml(nextHtml, normalizedDist, leaseNumber));
-      nextPath = extractNextPagePath(nextHtml);
-      page++;
-      if (allWells.length === beforeCount) break; // no new wells — done
+    // Request 2: if there is a next-page link, use pageSize=500 to get all wells at once
+    const nextPath = extractNextPagePath(html);
+    if (nextPath) {
+      const bigPath = nextPath
+        .replace(/pager\.pageSize=\d+/, "pager.pageSize=500")
+        .replace(/pager\.offset=\d+/,   "pager.offset=0");
+      const bigHtml = await fetchNextPage(bigPath, session);
+      if (bigHtml) addWells(parseWellboreHtml(bigHtml, normalizedDist, leaseNumber));
     }
 
     return buildResult(allWells, false);
