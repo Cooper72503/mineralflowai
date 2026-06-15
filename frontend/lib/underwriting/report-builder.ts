@@ -2284,9 +2284,30 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
           dcaResult?.model.r_squared != null && dcaResult.model.r_squared > 0.8 ? "medium" : "low",
           "10% discount, base price deck, Arps decline, downtime-adjusted. Unaudited — not an engineered reserve report.")
       : missingDp<number>(),
-    offer_range_low:  econResult ? dp(econResult.offer_range_low,  "inferred", "low", "Low: 2.5–3.5× stabilized annual NCF") : missingDp<number>(),
-    offer_range_mid:  econResult ? dp(econResult.offer_range_mid,  "inferred", "low", "Mid: 4–5× annual NCF or 75–80% NPV10") : missingDp<number>(),
-    offer_range_high: econResult ? dp(econResult.offer_range_high, "inferred", "low", "High: 5.5–7× annual NCF or 80–85% NPV10") : missingDp<number>(),
+    // Plugging cost auto-deduction — Manus spec §4: "This total MUST be subtracted
+    // from final valuation automatically." Only deduct when a real plug cost was
+    // computed from actual inactive wells; never deduct benchmark defaults alone.
+    offer_range_low:  econResult ? dp(
+      Math.max(0, econResult.offer_range_low  - totalPlugCost),
+      "inferred", "low",
+      totalPlugCost > 0
+        ? `Low: 2.5–3.5× stabilized annual NCF. ⚠ Plugging liability $${totalPlugCost.toLocaleString()} auto-deducted (${plugWells.length} inactive well${plugWells.length !== 1 ? "s" : ""} × $80k/well default).`
+        : "Low: 2.5–3.5× stabilized annual NCF",
+    ) : missingDp<number>(),
+    offer_range_mid:  econResult ? dp(
+      Math.max(0, econResult.offer_range_mid  - totalPlugCost),
+      "inferred", "low",
+      totalPlugCost > 0
+        ? `Mid: 4–5× annual NCF or 75–80% NPV10. ⚠ Plugging liability $${totalPlugCost.toLocaleString()} auto-deducted.`
+        : "Mid: 4–5× annual NCF or 75–80% NPV10",
+    ) : missingDp<number>(),
+    offer_range_high: econResult ? dp(
+      Math.max(0, econResult.offer_range_high - totalPlugCost),
+      "inferred", "low",
+      totalPlugCost > 0
+        ? `High: 5.5–7× annual NCF or 80–85% NPV10. ⚠ Plugging liability $${totalPlugCost.toLocaleString()} auto-deducted.`
+        : "High: 5.5–7× annual NCF or 80–85% NPV10",
+    ) : missingDp<number>(),
     breakeven_oil_price: econResult
       ? dp(econResult.breakeven_oil_price, "inferred", "medium", "Oil price at which net income = 0 (incl. transport, ad val, workover reserve)")
       : missingDp<number>(),
@@ -2975,11 +2996,19 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   const assetDescription = assetParts.join(", ");
 
   // Top risks — gather from risk section + compliance + downtime
+  // Manus spec §4 + §3: multi-well lease attribution warning MUST appear in top risks
+  // when the inventory shows more than one well (so the acquirer sees it immediately).
+  const leaseWellWarningEntry: string[] =
+    (leaseWellInventory && !leaseWellInventory.query_failed && leaseWellInventory.well_count > 1)
+      ? [leaseWellInventory.lease_level_warning]
+      : [];
+
   const topRisks: string[] = [
+    ...leaseWellWarningEntry,
     ...riskSection.red_flags.slice(0, 3),
     ...riskSection.yellow_flags.slice(0, 2),
     ...downtimeSection.underwriting_notes.filter(n => n.startsWith("⚠️")).slice(0, 2),
-  ].slice(0, 5);
+  ].slice(0, 6);
 
   const valueDrivers: string[] = [
     ...riskSection.green_flags.slice(0, 5),
@@ -4884,6 +4913,9 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     generated_at: new Date().toISOString(),
     scan_mode: scanMode,
     diligence_run_label: diligenceRunLabel,
+    // Confidence Score (0–100) — Manus spec §5: every report starts with this.
+    // = data_completeness_score already computed in executiveSummarySection.
+    confidence_score: executiveSummarySection.data_completeness_score,
     overall_confidence: overallConfidence,
     overall_confidence_note: overallNote,
     subject,

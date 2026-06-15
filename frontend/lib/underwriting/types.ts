@@ -789,6 +789,13 @@ export type DDReport = {
     | "Public-Record Diligence"
     | "Failed Verification"
     | "Acquisition-Grade Diligence";
+  /**
+   * Confidence Score (0–100) — Manus spec §5.
+   * Computed from the percentage of critical and important evidence modules that
+   * are verified. Penalizes missing critical documents (−20 pts each) and
+   * missing important documents (−8 pts each). Shown at the top of every report.
+   */
+  confidence_score: number;
   overall_confidence: DDReportConfidence;
   overall_confidence_note: string;
 
