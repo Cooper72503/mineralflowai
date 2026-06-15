@@ -515,11 +515,10 @@ export async function fetchTrrcInspectionsForApis(
     } catch { /* fall through to per-API */ }
   }
 
-  // Strategy 2: per-API fallback — capped at 8 to bound worst-case latency.
-  // 8 APIs × 30s timeout / 4 concurrent = 60s max, well within the step budget.
+  // Strategy 2: per-API fallback — uncapped, runs to completion.
+  // Only fires when lease-level query fails (wrong field name, portal change, etc.).
   const CONCURRENCY = 4;
-  const CAP         = 8;
-  const queue = [...apis].slice(0, CAP);
+  const queue = [...apis];
   const settled: PromiseSettledResult<TrrcInspectionRecord[]>[] = [];
 
   while (queue.length > 0) {
