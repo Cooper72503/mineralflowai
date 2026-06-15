@@ -37,6 +37,8 @@
  * Returns [] on failure — never throws.
  */
 
+import { withTrrcRetry } from "./trrc-utils";
+
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -215,6 +217,56 @@ function parseResultCount(html: string): number {
  *
  * Returns empty result on failure. Never throws.
  */
+async function _fetchFieldWells(
+  fieldNo:      string,
+  subjectApi8:  string | undefined,
+  signal:       AbortSignal,
+): Promise<TrrcFieldWellsResult> {
+  const empty: TrrcFieldWellsResult = {
+    field_no: fieldNo, field_name: null, wells: [], total_count: 0,
+    truncated: false, field_info: null,
+  };
+
+  const params = new URLSearchParams({
+    methodToCall:                 "search",
+    "searchArgs.fieldNumbersArg": fieldNo.trim(),
+    "pager.pageSize":             "100",
+  });
+
+  const res = await fetch(`${EWA_BASE}/oilProQueryAction.do`, {
+    method:  "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept":       "text/html,application/xhtml+xml",
+      "User-Agent":   "Mozilla/5.0",
+    },
+    body: params.toString(),
+    signal,
+  });
+
+  if (!res.ok) return empty;
+  const html = await res.text();
+  if (/no results found/i.test(html)) return empty;
+
+  const wells      = parseFieldWellsHtml(html, fieldNo, subjectApi8);
+  const totalCount = parseResultCount(html) || wells.length;
+
+  const sorted = [
+    ...wells.filter(w => !w.is_subject_asset && (w.well_type ?? "").toUpperCase().includes("PRODUC")),
+    ...wells.filter(w => !w.is_subject_asset && !(w.well_type ?? "").toUpperCase().includes("PRODUC")),
+    ...wells.filter(w => w.is_subject_asset),
+  ];
+
+  return {
+    field_no:    fieldNo,
+    field_name:  wells[0]?.field_name ?? null,
+    wells:       sorted,
+    total_count: totalCount,
+    truncated:   totalCount > 100,
+    field_info:  null,
+  };
+}
+
 export async function fetchTrrcFieldWells(
   fieldNo:      string,
   subjectApi8?: string,
@@ -226,51 +278,7 @@ export async function fetchTrrcFieldWells(
 
   if (!fieldNo?.trim()) return empty;
 
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                       "search",
-      "searchArgs.fieldNumbersArg":       fieldNo.trim(),
-      "pager.pageSize":                   "100",
-    });
-
-    const res = await fetch(`${EWA_BASE}/oilProQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body: params.toString(),
-    });
-
-    if (!res.ok) return empty;
-    const html = await res.text();
-
-    if (/no results found/i.test(html)) return empty;
-
-    const wells      = parseFieldWellsHtml(html, fieldNo, subjectApi8);
-    const totalCount = parseResultCount(html) || wells.length;
-
-    // Sort: producers first, then injection/shut-in, subject asset last (for easy skipping)
-    const sorted = [
-      ...wells.filter(w => !w.is_subject_asset && (w.well_type ?? "").toUpperCase().includes("PRODUC")),
-      ...wells.filter(w => !w.is_subject_asset && !(w.well_type ?? "").toUpperCase().includes("PRODUC")),
-      ...wells.filter(w => w.is_subject_asset),
-    ];
-
-    const firstName = wells[0]?.field_name ?? null;
-
-    return {
-      field_no:     fieldNo,
-      field_name:   firstName,
-      wells:        sorted,
-      total_count:  totalCount,
-      truncated:    totalCount > 100,
-      field_info:   null, // populated separately by fetchTrrcFieldInfo if needed
-    };
-  } catch {
-    return empty;
-  }
+  return withTrrcRetry(sig => _fetchFieldWells(fieldNo, subjectApi8, sig), empty);
 }
 
 /**

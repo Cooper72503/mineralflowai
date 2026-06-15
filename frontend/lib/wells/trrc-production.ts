@@ -826,9 +826,16 @@ export async function fetchTrrcProductionHistory(
   apiNumber: string,
   monthsBack = FULL_HISTORY_MONTHS,
 ): Promise<TrrcProductionResult | null> {
+  // Overall wall-clock timeout for the entire production fetch sequence.
+  // Each strategy (B and C) makes 2–4 HTTP requests; 120 s covers the worst case
+  // (Strategy B fails at 45 s → Strategy C retries two sessions + two big pages).
+  const controller = new AbortController();
+  const overallTimer = setTimeout(() => controller.abort(), 120_000);
+  const signal = controller.signal;
+
   try {
-    const lease = await getLeaseFromApiNumber(apiNumber);
-    if (!lease) return null;
+    const lease = await getLeaseFromApiNumber(apiNumber, signal);
+    if (!lease) { clearTimeout(overallTimer); return null; }
 
     const now        = new Date();
     const endYear    = now.getFullYear();
@@ -852,12 +859,12 @@ export async function fetchTrrcProductionHistory(
         fetchAllLeaseProduction(
           lease.distCode, lease.leaseNo, null,
           startMonth, startYear, endMonth, endYear,
-          "O", MAX_PRODUCTION_PAGES,
+          "O", MAX_PRODUCTION_PAGES, signal,
         ),
         fetchAllLeaseProduction(
           lease.distCode, lease.leaseNo, null,
           startMonth, startYear, endMonth, endYear,
-          "G", MAX_PRODUCTION_PAGES,
+          "G", MAX_PRODUCTION_PAGES, signal,
         ),
       ]);
       let rows = mergeOilGasRows(oilRows, gasRows);
@@ -865,23 +872,25 @@ export async function fetchTrrcProductionHistory(
       // ── Strategy C: HTML scraper — explicit session init ──────────────
       if (rows.length === 0) {
         const [oilSession, gasSession] = await Promise.all([
-          initTrrcSession(),
-          initTrrcSession(),
+          initTrrcSession(signal),
+          initTrrcSession(signal),
         ]);
         const [oilRowsC, gasRowsC] = await Promise.all([
           fetchAllLeaseProduction(
             lease.distCode, lease.leaseNo, oilSession,
             startMonth, startYear, endMonth, endYear,
-            "O", MAX_PRODUCTION_PAGES,
+            "O", MAX_PRODUCTION_PAGES, signal,
           ),
           fetchAllLeaseProduction(
             lease.distCode, lease.leaseNo, gasSession,
             startMonth, startYear, endMonth, endYear,
-            "G", MAX_PRODUCTION_PAGES,
+            "G", MAX_PRODUCTION_PAGES, signal,
           ),
         ]);
         rows = mergeOilGasRows(oilRowsC, gasRowsC);
       }
+
+      clearTimeout(overallTimer);
 
       if (rows.length === 0) return null;
 
@@ -895,8 +904,10 @@ export async function fetchTrrcProductionHistory(
       };
     }
 
+    clearTimeout(overallTimer);
     return null;
   } catch {
+    clearTimeout(overallTimer);
     return null;
   }
 }

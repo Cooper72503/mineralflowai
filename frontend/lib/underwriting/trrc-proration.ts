@@ -32,6 +32,8 @@
  * Returns [] on failure — never throws.
  */
 
+import { withTrrcRetry } from "./trrc-utils";
+
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -214,89 +216,90 @@ function parseProrationHtml(html: string, commodity: "oil" | "gas"): TrrcProrati
  *
  * Returns [] on failure or when no proration record exists. Never throws.
  */
-export async function fetchTrrcOilProration(
+async function _fetchOilProration(
   api10:    string,
   distCode: string,
-): Promise<TrrcProrationRecord[]> {
-  const digits = api10.replace(/\D/g, "");
-  // Strip "42" state prefix to get 8-digit API
-  const api8    = digits.startsWith("42") && digits.length === 10 ? digits.slice(2) : digits.slice(0, 8);
-  const prefix  = api8.slice(0, 3);
-  const suffix  = api8.slice(3, 8);
-
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                    "search",
-      "searchArgs.apiPrefixArg":       prefix,
-      "searchArgs.apiSuffixArg":       suffix,
-      "searchArgs.districtCodeArg":    distCode,
-    });
-
-    const res = await fetch(`${EWA_BASE}/oilProQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body: params.toString(),
-    });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    // Quick check — if server says "no results" skip parsing
-    if (/no results found/i.test(html)) return [];
-
-    return parseProrationHtml(html, "oil");
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Fetch gas proration (allowable) record(s) for a given well API number.
- *
- * @param api10     10-digit API number
- * @param distCode  TRRC district code
- *
- * Returns [] on failure. Never throws.
- */
-export async function fetchTrrcGasProration(
-  api10:    string,
-  distCode: string,
+  signal:   AbortSignal,
 ): Promise<TrrcProrationRecord[]> {
   const digits = api10.replace(/\D/g, "");
   const api8   = digits.startsWith("42") && digits.length === 10 ? digits.slice(2) : digits.slice(0, 8);
   const prefix = api8.slice(0, 3);
   const suffix = api8.slice(3, 8);
 
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                    "search",
-      "searchArgs.apiPrefixArg":       prefix,
-      "searchArgs.apiSuffixArg":       suffix,
-      "searchArgs.districtCodeArg":    distCode,
-    });
+  const params = new URLSearchParams({
+    methodToCall:                 "search",
+    "searchArgs.apiPrefixArg":    prefix,
+    "searchArgs.apiSuffixArg":    suffix,
+    "searchArgs.districtCodeArg": distCode,
+  });
 
-    const res = await fetch(`${EWA_BASE}/gasProQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body: params.toString(),
-    });
+  const res = await fetch(`${EWA_BASE}/oilProQueryAction.do`, {
+    method:  "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept":       "text/html,application/xhtml+xml",
+      "User-Agent":   "Mozilla/5.0",
+    },
+    body: params.toString(),
+    signal,
+  });
 
-    if (!res.ok) return [];
-    const html = await res.text();
-    if (/no results found/i.test(html)) return [];
+  if (!res.ok) return [];
+  const html = await res.text();
+  if (/no results found/i.test(html)) return [];
+  return parseProrationHtml(html, "oil");
+}
 
-    return parseProrationHtml(html, "gas");
-  } catch {
-    return [];
-  }
+async function _fetchGasProration(
+  api10:    string,
+  distCode: string,
+  signal:   AbortSignal,
+): Promise<TrrcProrationRecord[]> {
+  const digits = api10.replace(/\D/g, "");
+  const api8   = digits.startsWith("42") && digits.length === 10 ? digits.slice(2) : digits.slice(0, 8);
+  const prefix = api8.slice(0, 3);
+  const suffix = api8.slice(3, 8);
+
+  const params = new URLSearchParams({
+    methodToCall:                 "search",
+    "searchArgs.apiPrefixArg":    prefix,
+    "searchArgs.apiSuffixArg":    suffix,
+    "searchArgs.districtCodeArg": distCode,
+  });
+
+  const res = await fetch(`${EWA_BASE}/gasProQueryAction.do`, {
+    method:  "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept":       "text/html,application/xhtml+xml",
+      "User-Agent":   "Mozilla/5.0",
+    },
+    body: params.toString(),
+    signal,
+  });
+
+  if (!res.ok) return [];
+  const html = await res.text();
+  if (/no results found/i.test(html)) return [];
+  return parseProrationHtml(html, "gas");
+}
+
+export async function fetchTrrcOilProration(
+  api10:    string,
+  distCode: string,
+): Promise<TrrcProrationRecord[]> {
+  return withTrrcRetry(sig => _fetchOilProration(api10, distCode, sig), []);
+}
+
+/**
+ * Fetch gas proration (allowable) record(s) for a given well API number.
+ * Returns [] on failure. Never throws.
+ */
+export async function fetchTrrcGasProration(
+  api10:    string,
+  distCode: string,
+): Promise<TrrcProrationRecord[]> {
+  return withTrrcRetry(sig => _fetchGasProration(api10, distCode, sig), []);
 }
 
 /**

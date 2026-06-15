@@ -19,7 +19,11 @@
  *   This module NEVER asserts single-well production.
  */
 
+import { detectTrrcColumns } from "./trrc-utils";
+
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
+const SESSION_TIMEOUT_MS = 20_000;
+const QUERY_TIMEOUT_MS   = 45_000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -122,12 +126,28 @@ function parseWellboreHtml(
     }
   }
 
-  // Strategy 2: parse table rows for structured data (operator, well type, county)
-  // Look for <tr> rows containing API numbers in a structured table
+  // Strategy 2: parse table rows for structured data (operator, well type, county, status)
+  // Use header row detection to resolve column positions dynamically instead of
+  // relying on hardcoded offsets — robust if TRRC reorders columns.
   {
-    // Match <tr>...<td>...</td>...</tr> blocks
-    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    // TRRC wellbore table headers (confirmed June 2026):
+    // [API No] [Well Type] [District] [Operator] [Lease Name] [Lease No] [County] [Well No] [Status]
+    // Normalised: api_no, well_type, district, operator, lease_name, lease_no, county, well_no, status
+    const colMap = detectTrrcColumns(html);
+    // Index of "api_no" in the header row (used to compute relative offsets)
+    const headerApiIdx = colMap?.["api_no"] ?? 0;
+
+    // Default offsets relative to the API cell (used when header detection fails)
+    const OFFSETS = {
+      well_type: 1,
+      operator:  3,
+      county:    6,
+      well_no:   7,
+      status:    8,
+    } as const;
+
+    const rowRe    = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    const cellRe   = /<td[^>]*>([\s\S]*?)<\/td>/gi;
     const apiInCellRe = /(\d{2,3}-\d{5}|\d{8,10})/;
 
     let rowMatch: RegExpExecArray | null;
@@ -137,20 +157,19 @@ function parseWellboreHtml(
       let cellMatch: RegExpExecArray | null;
       cellRe.lastIndex = 0;
       while ((cellMatch = cellRe.exec(rowHtml)) !== null) {
-        // Strip HTML tags from cell content
-        const text = cellMatch[1]
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;/g, " ")
-          .replace(/&amp;/g, "&")
-          .replace(/\s+/g, " ")
-          .trim();
-        cells.push(text);
+        cells.push(
+          cellMatch[1]
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&amp;/g, "&")
+            .replace(/\s+/g, " ")
+            .trim(),
+        );
       }
       if (cells.length < 3) continue;
 
-      // Find which cell contains an API number
       let apiCell = -1;
-      let rawApi = "";
+      let rawApi  = "";
       for (let i = 0; i < cells.length; i++) {
         const m2 = cells[i].match(apiInCellRe);
         if (m2) { apiCell = i; rawApi = m2[1]; break; }
@@ -162,24 +181,33 @@ function parseWellboreHtml(
       if (seen.has(normalized.api10)) continue;
       seen.add(normalized.api10);
 
-      // Heuristically assign other columns based on position relative to API cell
-      // TRRC wellbore table: [API] [WellType] [District] [Operator] [LeaseName] [LeaseNo] [County] [WellNo] [Status]
-      const wellType    = cells[apiCell + 1] ?? null;
-      const operator    = cells[apiCell + 3] ?? null;
-      const county      = cells[apiCell + 6] ?? null;
-      const wellNo      = cells[apiCell + 7] ?? null;
-      const status      = cells[apiCell + 8] ?? null;
+      // Resolve each column: header-map position preferred, fallback to fixed offset
+      const resolve = (colName: keyof typeof OFFSETS): string | null => {
+        if (colMap) {
+          const hIdx = colMap[colName === "well_no" ? "well_no" : colName];
+          if (hIdx !== undefined) {
+            return cells[apiCell + (hIdx - headerApiIdx)] ?? null;
+          }
+        }
+        return cells[apiCell + OFFSETS[colName]] ?? null;
+      };
+
+      const wellType = resolve("well_type");
+      const operator = resolve("operator");
+      const county   = resolve("county");
+      const wellNo   = resolve("well_no");
+      const status   = resolve("status");
 
       wells.push({
         api10: normalized.api10,
-        api8: normalized.api8,
-        well_number: wellNo || null,
+        api8:  normalized.api8,
+        well_number:   wellNo    && wellNo.length    < 20  ? wellNo    : null,
         district_code: districtCode,
-        lease_number: leaseNumber,
-        operator_name: operator && operator.length < 80 ? operator : null,
-        county: county && county.length < 60 ? county : null,
-        well_type: wellType && wellType.length < 10 ? wellType : null,
-        status: status && status.length < 30 ? status : null,
+        lease_number:  leaseNumber,
+        operator_name: operator  && operator.length  < 80  ? operator  : null,
+        county:        county    && county.length    < 60  ? county    : null,
+        well_type:     wellType  && wellType.length  < 10  ? wellType  : null,
+        status:        status    && status.length    < 30  ? status    : null,
       });
     }
   }
@@ -201,6 +229,7 @@ async function initEwaSession(): Promise<string | null> {
         "Accept":     "text/html,application/xhtml+xml,*/*;q=0.8",
         "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
       },
+      signal: AbortSignal.timeout(SESSION_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const setCookie = res.headers.get("set-cookie") ?? "";
@@ -239,6 +268,7 @@ async function queryWellboreByLease(
       method: "POST",
       headers,
       body: body.toString(),
+      signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     return await res.text();
@@ -266,7 +296,10 @@ async function fetchNextPage(
   };
   if (sessionCookie) headers["Cookie"] = sessionCookie;
   try {
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
+    });
     if (!res.ok) return null;
     return await res.text();
   } catch {
