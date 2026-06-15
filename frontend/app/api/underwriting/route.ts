@@ -211,9 +211,10 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       })(),
 
       // TRRC ICE inspection records (field visits, pass/fail, defect notes)
+      // No leaseNo available in this path — falls back to per-API (capped at 8).
       (async () => {
         if (!isTexas || allApis.length === 0) return [];
-        return fetchTrrcInspectionsForApis(allApis);
+        return fetchTrrcInspectionsForApis(allApis, null);
       })(),
 
       // TRRC completions query (W-2 packet: formation, spud, depth, interval)

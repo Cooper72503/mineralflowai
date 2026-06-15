@@ -317,7 +317,7 @@ async function _fetchTrrcInspectionsByApi(
       "Cache-Control":   "no-cache",
     },
     redirect: "follow",
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!getRes.ok) return [];
@@ -360,7 +360,7 @@ async function _fetchTrrcInspectionsByApi(
     method:  "POST",
     headers: postHeaders,
     body:    formData.toString(),
-    signal:  AbortSignal.timeout(20_000),
+    signal:  AbortSignal.timeout(12_000),
   });
 
   if (!postRes.ok) return [];
@@ -397,23 +397,129 @@ export async function fetchTrrcInspectionsByApi(
   return withTrrcRetry(
     signal => _fetchTrrcInspectionsByApi(api10, signal),
     [],
-    { timeout: 60_000, retries: 2, backoffMs: 1_500 },
+    // Tightened from 60s → 30s: GET(10s) + POST(12s) + margin = ~25s max per well.
+    // Retries only on transient network errors, not on TRRC returning empty results.
+    { timeout: 30_000, retries: 1, backoffMs: 1_500 },
+  );
+}
+
+/**
+ * Fetch all ICE inspection records for a lease by lease number.
+ *
+ * The ICE inspection tab supports `qlsno` (lease number) as a search field —
+ * same pattern as `qvlsno` on the violations tab. One call returns every
+ * inspection record for the entire lease regardless of which API it's tied to.
+ * This replaces the per-API fan-out (up to 52 calls → 1 call).
+ *
+ * Returns null on transport failure (caller falls back to per-API).
+ */
+async function _fetchTrrcInspectionsByLease(
+  leaseNo: string,
+  _signal: AbortSignal,
+): Promise<TrrcInspectionRecord[] | null> {
+  const getRes = await fetch(`${PDA_ICE_URL}?action=init`, {
+    method: "GET",
+    headers: {
+      "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Cache-Control":   "no-cache",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!getRes.ok) return null;
+
+  const pageHtml = await getRes.text();
+  const viewState = extractViewState(pageHtml);
+  if (!viewState) return null;
+
+  const { tabViewId, inspBtnId } = extractIceIds(pageHtml);
+  const jsessionId = extractSessionId(getRes.headers);
+  const cookieHeader = jsessionId ? `JSESSIONID=${jsessionId}` : "";
+
+  const formData = new URLSearchParams();
+  formData.append("javax.faces.partial.ajax",    "true");
+  formData.append("javax.faces.source",          `IceQueryForm:${tabViewId}:${inspBtnId}`);
+  formData.append("javax.faces.partial.execute", "IceQueryForm");
+  formData.append("javax.faces.partial.render",  `IceQueryForm:${tabViewId}:inspResults`);
+  formData.append(`IceQueryForm:${tabViewId}:${inspBtnId}`, `IceQueryForm:${tabViewId}:${inspBtnId}`);
+  formData.append("IceQueryForm",                "IceQueryForm");
+  formData.append(`IceQueryForm:${tabViewId}:qapino`, "");       // intentionally empty — lease-only
+  formData.append(`IceQueryForm:${tabViewId}:qlsno`,  leaseNo.slice(0, 6));
+  formData.append("javax.faces.ViewState",       viewState);
+
+  const postHeaders: Record<string, string> = {
+    "Content-Type":      "application/x-www-form-urlencoded; charset=UTF-8",
+    "Accept":            "application/xml, text/xml, */*; q=0.01",
+    "Faces-Request":     "partial/ajax",
+    "X-Requested-With":  "XMLHttpRequest",
+    "Accept-Language":   "en-US,en;q=0.9",
+    "User-Agent":        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Origin":            "https://webapps2.rrc.texas.gov",
+    "Referer":           `${PDA_ICE_URL}?action=init`,
+  };
+  if (cookieHeader) postHeaders["Cookie"] = cookieHeader;
+
+  const postRes = await fetch(PDA_ICE_URL, {
+    method:  "POST",
+    headers: postHeaders,
+    body:    formData.toString(),
+    signal:  AbortSignal.timeout(12_000),
+  });
+
+  if (!postRes.ok) return null;
+
+  const xmlBody = await postRes.text();
+  const resultsHtml = extractPartialUpdate(xmlBody, `IceQueryForm:${tabViewId}:inspResults`);
+  if (!resultsHtml) return null;
+
+  // Parse results — use the leaseNo as the api placeholder since records span multiple wells
+  return parseIceResultsHtml(resultsHtml, leaseNo);
+}
+
+export async function fetchTrrcInspectionsByLease(
+  leaseNo: string,
+): Promise<TrrcInspectionRecord[] | null> {
+  return withTrrcRetry(
+    signal => _fetchTrrcInspectionsByLease(leaseNo, signal),
+    null,
+    { timeout: 30_000, retries: 1, backoffMs: 1_500 },
   );
 }
 
 /**
  * Fetch inspection records for multiple APIs.
- * Concurrency-capped at 4 simultaneous requests — the TRRC ICE portal rate-limits
- * or times out when flooded with 50+ simultaneous connections.
+ *
+ * Strategy:
+ *   1. If leaseNo is provided, try a single lease-level ICE query first
+ *      (1 call covers all wells on the lease — matches what violations does).
+ *   2. Fall back to per-API queries capped at 8 APIs with 4 concurrent.
+ *
+ * Per-API cap prevents the old 52-well × 35s = 30-minute scenario.
  * Deduplicates results and sorts most-recent-first.
  */
 export async function fetchTrrcInspectionsForApis(
   apis: string[],
+  leaseNo?: string | null,
 ): Promise<TrrcInspectionRecord[]> {
   if (apis.length === 0) return [];
 
+  // Strategy 1: lease-level query (single call, covers all wells)
+  if (leaseNo) {
+    try {
+      const leaseResults = await fetchTrrcInspectionsByLease(leaseNo);
+      // null = transport failure; [] = genuinely no records (stop here — don't re-query per API)
+      if (leaseResults !== null) return sortInspections(leaseResults);
+    } catch { /* fall through to per-API */ }
+  }
+
+  // Strategy 2: per-API fallback — capped at 8 to bound worst-case latency.
+  // 8 APIs × 30s timeout / 4 concurrent = 60s max, well within the step budget.
   const CONCURRENCY = 4;
-  const queue = [...apis];
+  const CAP         = 8;
+  const queue = [...apis].slice(0, CAP);
   const settled: PromiseSettledResult<TrrcInspectionRecord[]>[] = [];
 
   while (queue.length > 0) {
@@ -424,25 +530,23 @@ export async function fetchTrrcInspectionsForApis(
     settled.push(...batchResults);
   }
 
-  const results = settled;
-
   const all: TrrcInspectionRecord[] = [];
-  for (const r of results) {
+  for (const r of settled) {
     if (r.status === "fulfilled") all.push(...r.value);
   }
 
-  // Sort most-recent-first by date
-  all.sort((a, b) => {
+  return sortInspections(all);
+}
+
+function sortInspections(records: TrrcInspectionRecord[]): TrrcInspectionRecord[] {
+  return [...records].sort((a, b) => {
     if (!a.inspection_date && !b.inspection_date) return 0;
     if (!a.inspection_date) return 1;
     if (!b.inspection_date) return -1;
-    // MM/DD/YYYY — convert to YYYY/MM/DD for string comparison
     const toSortKey = (d: string) => {
       const [mm, dd, yyyy] = d.split("/");
       return `${yyyy}/${mm}/${dd}`;
     };
     return toSortKey(b.inspection_date).localeCompare(toSortKey(a.inspection_date));
   });
-
-  return all;
 }

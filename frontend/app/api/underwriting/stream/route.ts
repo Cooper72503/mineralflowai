@@ -812,12 +812,12 @@ async function runPipeline(
         })(),
 
         // ── ICE field inspection records ──────────────────────────────────────
-        // Checks all inventory wells (up to 60) at 4 concurrent.
-        // Each API = 2 HTTP round-trips (GET session + POST search).
-        // Route maxDuration = 300s — no artificial cap needed here.
+        // Tries lease-level ICE query first (1 call, covers all wells).
+        // Falls back to per-API queries capped at 8 if lease query fails.
+        // Worst-case: 8 APIs × 30s / 4 concurrent = 60s.
         (async (): Promise<typeof inspectionResult> => {
           if (allLeaseApis.length === 0) return [];
-          try { return await fetchTrrcInspectionsForApis(allLeaseApis); } catch { return []; }
+          try { return await fetchTrrcInspectionsForApis(allLeaseApis, _primaryLeaseNo); } catch { return []; }
         })(),
 
         // ── P-5 Operator Organization ─────────────────────────────────────────
