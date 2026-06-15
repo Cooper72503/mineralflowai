@@ -24,6 +24,8 @@
  * Returns null when the operator number is not found or the query fails.
  */
 
+import { withTrrcRetry } from "./trrc-utils";
+
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -104,85 +106,56 @@ function parseP5Html(html: string): TrrcP5Record[] {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+async function _fetchTrrcP5ByOperatorNo(operatorNo: string, _signal: AbortSignal): Promise<TrrcP5Record | null> {
+  const params = new URLSearchParams({
+    methodToCall:                    "search",
+    "searchArgs.operatorNumbersArg": operatorNo.trim(),
+  });
+  const res = await fetch(`${EWA_BASE}/organizationQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) return null;
+  const records = parseP5Html(await res.text());
+  return records[0] ?? null;
+}
+
 /**
  * Fetch the TRRC P-5 organization record for a given operator number.
- *
- * Returns null if the operator is not found or if the query fails.
- * Never throws.
+ * Returns null if the operator is not found or if the query fails. Never throws.
  */
-export async function fetchTrrcP5ByOperatorNo(
-  operatorNo: string,
-): Promise<TrrcP5Record | null> {
+export async function fetchTrrcP5ByOperatorNo(operatorNo: string): Promise<TrrcP5Record | null> {
   if (!operatorNo?.trim()) return null;
+  return withTrrcRetry(sig => _fetchTrrcP5ByOperatorNo(operatorNo, sig), null);
+}
 
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                      "search",
-      "searchArgs.operatorNumbersArg":   operatorNo.trim(),
-    });
-
-    const res = await fetch(`${EWA_BASE}/organizationQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) return null;
-
-    const html = await res.text();
-    const records = parseP5Html(html);
-    return records[0] ?? null;
-  } catch {
-    return null;
-  }
+async function _fetchTrrcP5ByOperatorName(operatorName: string, _signal: AbortSignal): Promise<TrrcP5Record | null> {
+  const params = new URLSearchParams({
+    methodToCall:                 "search",
+    "searchArgs.operatorNameArg": operatorName.trim(),
+  });
+  const res = await fetch(`${EWA_BASE}/organizationQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) return null;
+  const records = parseP5Html(await res.text());
+  if (records.length === 0) return null;
+  const upper = operatorName.trim().toUpperCase();
+  return records.find(r => r.operator_name.toUpperCase() === upper) ?? records[0];
 }
 
 /**
  * Fetch P-5 records for an operator by name.
- * Returns the best match (exact or first partial match) or null.
- * Never throws.
+ * Returns the best match (exact or first partial match) or null. Never throws.
  */
-export async function fetchTrrcP5ByOperatorName(
-  operatorName: string,
-): Promise<TrrcP5Record | null> {
+export async function fetchTrrcP5ByOperatorName(operatorName: string): Promise<TrrcP5Record | null> {
   if (!operatorName?.trim()) return null;
-
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                      "search",
-      "searchArgs.operatorNameArg":      operatorName.trim(),
-    });
-
-    const res = await fetch(`${EWA_BASE}/organizationQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) return null;
-
-    const html = await res.text();
-    const records = parseP5Html(html);
-
-    if (records.length === 0) return null;
-
-    // Prefer exact name match; fall back to first result
-    const upper = operatorName.trim().toUpperCase();
-    const exact = records.find(r => r.operator_name.toUpperCase() === upper);
-    return exact ?? records[0];
-  } catch {
-    return null;
-  }
+  return withTrrcRetry(sig => _fetchTrrcP5ByOperatorName(operatorName, sig), null);
 }
 
 /**

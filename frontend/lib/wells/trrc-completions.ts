@@ -25,9 +25,10 @@
  * Returns null on failure — callers always label missing data appropriately.
  */
 
+import { withTrrcRetry } from "../underwriting/trrc-utils";
+
 const EWA_BASE  = "https://webapps2.rrc.texas.gov/EWA";
 const CMPL_BASE = "https://webapps.rrc.texas.gov/CMPL";
-// No timeout — run until TRRC responds.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -295,128 +296,80 @@ function parseCmplResults(html: string): CmplPacket[] {
 
 // ── Main fetch function ───────────────────────────────────────────────────────
 
+async function _fetchTrrcCompletionByApi(api10Raw: string, _signal: AbortSignal): Promise<TrrcCompletionRecord> {
+  const api10 = normalizeApi10(api10Raw);
+  const api8  = toApi8(api10);
+  const sourceUrl = `${EWA_BASE}/drillingPermitsQueryAction.do`;
+  const notFound: TrrcCompletionRecord = {
+    api: api10, packet_found: false, spud_date: null, completion_date: null,
+    completion_interval: null, formation: null, total_depth_ft: null,
+    lift_type: null, operator: null, wellbore_profile: null,
+    permit_status: null, permit_approved_date: null, permit_number: null,
+    lease_name: null, source_url: sourceUrl,
+  };
+
+  // Step 1: EWA Drilling Permits query
+  const ewaRes = await fetch(`${EWA_BASE}/drillingPermitsQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+    signal: AbortSignal.timeout(20_000),
+    body: new URLSearchParams({ "methodToCall": "search", "searchArgs.apiNoHndlr.inputValue": api8, "pager.offset": "0", "pager.pageSize": "10" }).toString(),
+  });
+  if (!ewaRes.ok) return notFound;
+
+  const permits = parseEwaPermitResults(await ewaRes.text());
+  const permit = permits.find(p => p.api8 === api8) ?? permits[0] ?? null;
+  if (!permit) return notFound;
+
+  const baseRecord: TrrcCompletionRecord = {
+    ...notFound,
+    total_depth_ft: permit.total_depth_ft, operator: permit.operator,
+    wellbore_profile: permit.wellbore_profile, permit_status: permit.permit_status,
+    permit_approved_date: permit.permit_approved_date, permit_number: permit.permit_number,
+    lease_name: permit.lease_name,
+  };
+
+  // Step 2: CMPL query (only if EWA gave us a CMPL URL)
+  if (!permit.cmpl_url) return baseRecord;
+
+  const cmplRes = await fetch(permit.cmpl_url, {
+    method: "GET",
+    headers: { "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Referer": `${EWA_BASE}/drillingPermitsQueryAction.do` },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!cmplRes.ok) return baseRecord;
+
+  const packets = parseCmplResults(await cmplRes.text());
+  if (packets.length === 0) return baseRecord;
+
+  const latest = packets.reduce((best, p) => {
+    if (!best.submit_date) return p;
+    if (!p.submit_date) return best;
+    return p.submit_date > best.submit_date ? p : best;
+  });
+
+  return { ...baseRecord, packet_found: true, completion_date: latest.submit_date, operator: latest.operator ?? baseRecord.operator, lease_name: latest.lease_name ?? baseRecord.lease_name, source_url: `${CMPL_BASE}/ewaSearchAction.do` };
+}
+
 /**
  * Fetch completion (W-2) data for a single API number.
  *
- * Step 1: Query EWA Drilling Permits for W-1 permit record (total depth,
- *         operator, lease, wellbore profile, permit dates).
- * Step 2: If a permit record exists and has a Completion link, query the CMPL
- *         system to confirm W-2 packet presence and get completion date.
+ * Step 1: EWA Drilling Permits → W-1 permit record (total depth, operator, lease).
+ * Step 2: CMPL system → W-2 packet presence and completion date.
  *
- * Returns a TrrcCompletionRecord with packet_found=false when no online W-2
- * data is available (common for conventional wells whose completion records
- * are only in RRC imaged / paper archives).
- *
+ * Returns packet_found=false when no online W-2 data is available.
  * Never throws.
  */
-export async function fetchTrrcCompletionByApi(
-  api10Raw: string,
-): Promise<TrrcCompletionRecord> {
-  const api10     = normalizeApi10(api10Raw);
-  const api8      = toApi8(api10);
-  const sourceUrl = `${EWA_BASE}/drillingPermitsQueryAction.do`;
-
+export async function fetchTrrcCompletionByApi(api10Raw: string): Promise<TrrcCompletionRecord> {
+  const api10 = normalizeApi10(api10Raw);
   const notFound: TrrcCompletionRecord = {
-    api:                  api10,
-    packet_found:         false,
-    spud_date:            null,
-    completion_date:      null,
-    completion_interval:  null,
-    formation:            null,
-    total_depth_ft:       null,
-    lift_type:            null,
-    operator:             null,
-    wellbore_profile:     null,
-    permit_status:        null,
-    permit_approved_date: null,
-    permit_number:        null,
-    lease_name:           null,
-    source_url:           sourceUrl,
+    api: api10, packet_found: false, spud_date: null, completion_date: null,
+    completion_interval: null, formation: null, total_depth_ft: null,
+    lift_type: null, operator: null, wellbore_profile: null,
+    permit_status: null, permit_approved_date: null, permit_number: null,
+    lease_name: null, source_url: `${EWA_BASE}/drillingPermitsQueryAction.do`,
   };
-
-  try {
-    // ── Step 1: EWA Drilling Permits query ────────────────────────────────
-    const ewaRes = await fetch(`${EWA_BASE}/drillingPermitsQueryAction.do`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":        "text/html,application/xhtml+xml",
-        "User-Agent":    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      signal: AbortSignal.timeout(20_000),
-      body: new URLSearchParams({
-        "methodToCall":                         "search",
-        "searchArgs.apiNoHndlr.inputValue":     api8,
-        "pager.offset":                         "0",
-        "pager.pageSize":                       "10",
-      }).toString(),
-    });
-
-    if (!ewaRes.ok) { return notFound; }
-
-    const ewaHtml = await ewaRes.text();
-    const permits = parseEwaPermitResults(ewaHtml);
-
-    // Find the permit that matches our API
-    const permit = permits.find(p => p.api8 === api8) ?? permits[0] ?? null;
-
-    if (!permit) {
-      return notFound;
-    }
-
-    // Build a base record from EWA permit data
-    const baseRecord: TrrcCompletionRecord = {
-      ...notFound,
-      packet_found:         false, // will update if CMPL confirms W-2
-      total_depth_ft:       permit.total_depth_ft,
-      operator:             permit.operator,
-      wellbore_profile:     permit.wellbore_profile,
-      permit_status:        permit.permit_status,
-      permit_approved_date: permit.permit_approved_date,
-      permit_number:        permit.permit_number,
-      lease_name:           permit.lease_name,
-    };
-
-    // ── Step 2: CMPL query (only if EWA gave us a CMPL URL) ───────────────
-    if (!permit.cmpl_url) {
-      return baseRecord;
-    }
-
-    const cmplRes = await fetch(permit.cmpl_url, {
-      method: "GET",
-      headers: {
-        "Accept":    "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer":   `${EWA_BASE}/drillingPermitsQueryAction.do`,
-      },
-      signal: AbortSignal.timeout(20_000),
-    });
-
-    if (!cmplRes.ok) return baseRecord;
-
-    const cmplHtml = await cmplRes.text();
-    const packets  = parseCmplResults(cmplHtml);
-
-    if (packets.length === 0) return baseRecord;
-
-    // Use the most recent (last submitted) packet
-    const latest = packets.reduce((best, p) => {
-      if (!best.submit_date) return p;
-      if (!p.submit_date) return best;
-      return p.submit_date > best.submit_date ? p : best;
-    });
-
-    return {
-      ...baseRecord,
-      packet_found:    true,
-      completion_date: latest.submit_date,
-      operator:        latest.operator ?? baseRecord.operator,
-      lease_name:      latest.lease_name ?? baseRecord.lease_name,
-      source_url:      `${CMPL_BASE}/ewaSearchAction.do`,
-    };
-  } catch {
-    return notFound;
-  }
+  return withTrrcRetry(sig => _fetchTrrcCompletionByApi(api10Raw, sig), notFound);
 }
 
 /**

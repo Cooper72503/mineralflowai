@@ -27,6 +27,8 @@
  * a specific TRRC document for formation, depth, and completion data.
  */
 
+import { withTrrcRetry } from "../underwriting/trrc-utils";
+
 const CMPL_BASE = "https://webapps.rrc.texas.gov/CMPL";
 const CMPL_HOME = `${CMPL_BASE}/publicHomeAction.do`;
 const CMPL_SEARCH = `${CMPL_BASE}/publicSearchAction.do`;
@@ -342,22 +344,7 @@ function parseCmplResultsHtml(html: string, api10: string): TrrcImagedRecord[] {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Fetch TRRC completion records for a single API number.
- *
- * Queries CMPL (webapps.rrc.texas.gov/CMPL) for filed W-2/G-1 completion
- * packets.  Covers completions filed online from November 2, 2009 onward.
- *
- * Pre-2009 completions are in the Neubus imaged records system — we cannot
- * scrape Neubus server-side (it requires JavaScript).  Instead we always
- * populate `neubus_viewer_url` so the analyst can open historical records
- * in one click.
- *
- * Never throws.  Returns query_succeeded=false on any transport error.
- */
-export async function fetchTrrcImagedRecords(
-  api10Raw: string,
-): Promise<TrrcImagedRecordsResult> {
+async function _fetchTrrcImagedRecords(api10Raw: string, _signal: AbortSignal): Promise<TrrcImagedRecordsResult> {
   const api10 = api10Raw.replace(/\D/g, "").startsWith("42")
     ? api10Raw.replace(/\D/g, "").slice(0, 10).padEnd(10, "0")
     : `42${api10Raw.replace(/\D/g, "").slice(0, 8).padStart(8, "0")}`;
@@ -387,6 +374,7 @@ export async function fetchTrrcImagedRecords(
         "Cache-Control":   "no-cache",
       },
       redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
     });
 
     if (!homeRes.ok) return EMPTY(false);
@@ -409,6 +397,7 @@ export async function fetchTrrcImagedRecords(
           "Referer":         CMPL_HOME,
         },
         redirect: "follow",
+        signal: AbortSignal.timeout(20_000),
       }
     );
 
@@ -437,6 +426,7 @@ export async function fetchTrrcImagedRecords(
         "Referer":         CMPL_SEARCH,
       },
       body: searchBody.toString(),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!searchRes.ok) return EMPTY(false);
@@ -483,6 +473,7 @@ export async function fetchTrrcImagedRecords(
             "Referer":      CMPL_SEARCH,
           },
           body: packetBody.toString(),
+          signal: AbortSignal.timeout(20_000),
         });
 
         if (packetRes.ok) {
@@ -511,6 +502,32 @@ export async function fetchTrrcImagedRecords(
   } catch {
     return EMPTY(false);
   }
+}
+
+/**
+ * Fetch TRRC completion records for a single API number.
+ *
+ * Queries CMPL (webapps.rrc.texas.gov/CMPL) for filed W-2/G-1 completion
+ * packets.  Covers completions filed online from November 2, 2009 onward.
+ *
+ * Pre-2009 completions are in the Neubus imaged records system — we cannot
+ * scrape Neubus server-side (it requires JavaScript).  Instead we always
+ * populate `neubus_viewer_url` so the analyst can open historical records
+ * in one click.
+ *
+ * Never throws.  Returns query_succeeded=false on any transport error.
+ */
+export async function fetchTrrcImagedRecords(api10Raw: string): Promise<TrrcImagedRecordsResult> {
+  const api10 = api10Raw.replace(/\D/g, "").startsWith("42")
+    ? api10Raw.replace(/\D/g, "").slice(0, 10).padEnd(10, "0")
+    : `42${api10Raw.replace(/\D/g, "").slice(0, 8).padStart(8, "0")}`;
+  const api8 = toApi8(api10);
+  const EMPTY: TrrcImagedRecordsResult = {
+    api10, query_succeeded: false, records: [], has_completion_report: false,
+    has_plugging_record: false, latest_completion_url: null, latest_plugging_url: null,
+    neubus_viewer_url: neubusUrl(api8), cmpl_packet_detail: null,
+  };
+  return withTrrcRetry(sig => _fetchTrrcImagedRecords(api10Raw, sig), EMPTY, { timeout: 90_000 });
 }
 
 /**

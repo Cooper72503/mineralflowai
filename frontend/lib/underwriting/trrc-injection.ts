@@ -11,8 +11,9 @@
  * Returns [] on failure — never throws.
  */
 
+import { withTrrcRetry } from "./trrc-utils";
+
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
-// No timeout — run until TRRC responds.
 
 export type TrrcInjectionRecord = {
   api10: string;
@@ -34,80 +35,54 @@ export type TrrcInjectionRecord = {
   permit_status: string | null;
 };
 
-/**
- * Look up SWD / injection wells by API number.
- * Returns [] on timeout or parse error.
- */
-export async function fetchTrrcInjectionByApi(
-  api10: string,
-): Promise<TrrcInjectionRecord[]> {
-  try {
-    const bare = api10.replace(/[^0-9]/g, "").slice(-10);
-    const prefix = bare.slice(0, 2);
-    const suffix = bare.slice(2);
+async function _fetchTrrcInjectionByApi(api10: string, signal: AbortSignal): Promise<TrrcInjectionRecord[]> {
+  const bare = api10.replace(/[^0-9]/g, "").slice(-10);
+  const prefix = bare.slice(0, 2);
+  const suffix = bare.slice(2);
+  const params = new URLSearchParams({
+    "searchArgs.apiNoPrefixArg": prefix,
+    "searchArgs.apiNoSuffixArg": suffix,
+    "searchArgs.wellTypeCodeArg": "D",
+    "pager.offset": "0",
+    "pager.pageSize": "25",
+  });
+  const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) return [];
+  return parseInjectionHtml(await res.text(), api10);
+}
 
-    const params = new URLSearchParams({
-      "searchArgs.apiNoPrefixArg": prefix,
-      "searchArgs.apiNoSuffixArg": suffix,
-      "searchArgs.wellTypeCodeArg": "D",  // D = Disposal
-      "pager.offset": "0",
-      "pager.pageSize": "25",
-    });
+export async function fetchTrrcInjectionByApi(api10: string): Promise<TrrcInjectionRecord[]> {
+  return withTrrcRetry(sig => _fetchTrrcInjectionByApi(api10, sig), []);
+}
 
-    const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    return parseInjectionHtml(html, api10);
-  } catch {
-    return [];
-  }
+async function _fetchTrrcInjectionByOperator(operatorName: string, county: string, signal: AbortSignal): Promise<TrrcInjectionRecord[]> {
+  const params = new URLSearchParams({
+    "searchArgs.operatorNameArg": operatorName,
+    "searchArgs.countyNameArg": county,
+    "searchArgs.wellTypeCodeArg": "D",
+    "pager.offset": "0",
+    "pager.pageSize": "50",
+  });
+  const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) return [];
+  return parseInjectionHtml(await res.text(), null);
 }
 
 /**
  * Look up SWD / injection wells by operator + county.
  */
-export async function fetchTrrcInjectionByOperator(
-  operatorName: string,
-  county: string,
-): Promise<TrrcInjectionRecord[]> {
-  try {
-    const params = new URLSearchParams({
-      "searchArgs.operatorNameArg": operatorName,
-      "searchArgs.countyNameArg": county,
-      "searchArgs.wellTypeCodeArg": "D",  // D = Disposal
-      "pager.offset": "0",
-      "pager.pageSize": "50",
-    });
-
-    const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    return parseInjectionHtml(html, null);
-  } catch {
-    return [];
-  }
+export async function fetchTrrcInjectionByOperator(operatorName: string, county: string): Promise<TrrcInjectionRecord[]> {
+  return withTrrcRetry(sig => _fetchTrrcInjectionByOperator(operatorName, county, sig), []);
 }
 
 // ─── HTML parser ──────────────────────────────────────────────────────────────

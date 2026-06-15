@@ -45,6 +45,8 @@
  * Returns [] on failure — never throws.
  */
 
+import { withTrrcRetry } from "./trrc-utils";
+
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -233,103 +235,88 @@ function parseInactiveWellHtml(html: string): TrrcInactiveWellRecord[] {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Check if a specific well is on the TRRC inactive well list.
- *
- * @param api10  10-digit API number (42 + county3 + well5)
- *
- * Returns:
- *   { is_active_not_flagged: true, records: [] }  — well NOT on inactive list
- *   { is_active_not_flagged: false, records: [...] } — well IS flagged as inactive
- *
- * Never throws.
- */
-export async function fetchTrrcInactiveWellByApi(
-  api10: string,
-): Promise<TrrcInactiveWellResult> {
+const INACTIVE_FALLBACK: TrrcInactiveWellResult = { is_active_not_flagged: true, records: [] };
+
+async function _fetchTrrcInactiveWellByApi(api10: string, _signal: AbortSignal): Promise<TrrcInactiveWellResult> {
   const digits = api10.replace(/\D/g, "");
   const api8   = digits.startsWith("42") && digits.length === 10 ? digits.slice(2) : digits.slice(0, 8);
-  const prefix = api8.slice(0, 3);
-  const suffix = api8.slice(3, 8);
+  const params = new URLSearchParams({
+    methodToCall:                "search",
+    "searchArgs.apiNoPrefixArg": api8.slice(0, 3),
+    "searchArgs.apiNoSuffixArg": api8.slice(3, 8),
+  });
+  const res = await fetch(`${EWA_BASE}/inactiveWellQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) return INACTIVE_FALLBACK;
+  const html = await res.text();
+  if (isNoResults(html)) return INACTIVE_FALLBACK;
+  const records = parseInactiveWellHtml(html);
+  return { is_active_not_flagged: records.length === 0, records };
+}
 
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                    "search",
-      "searchArgs.apiNoPrefixArg":     prefix,
-      "searchArgs.apiNoSuffixArg":     suffix,
-    });
+/**
+ * Check if a specific well is on the TRRC inactive well list.
+ * Never throws.
+ */
+export async function fetchTrrcInactiveWellByApi(api10: string): Promise<TrrcInactiveWellResult> {
+  return withTrrcRetry(sig => _fetchTrrcInactiveWellByApi(api10, sig), INACTIVE_FALLBACK, { timeout: 15_000 });
+}
 
-    const res = await fetch(`${EWA_BASE}/inactiveWellQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body:   params.toString(),
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!res.ok) return { is_active_not_flagged: true, records: [] };
-    const html = await res.text();
-
-    if (isNoResults(html)) return { is_active_not_flagged: true, records: [] };
-
-    const records = parseInactiveWellHtml(html);
-    return { is_active_not_flagged: records.length === 0, records };
-  } catch {
-    return { is_active_not_flagged: true, records: [] };
-  }
+async function _fetchTrrcInactiveWellsByOperator(operatorNo: string, leaseType: "O" | "G", _signal: AbortSignal): Promise<TrrcInactiveWellRecord[]> {
+  const params = new URLSearchParams({
+    methodToCall:                    "search",
+    "searchArgs.operatorNumbersArg": operatorNo.trim(),
+    "searchArgs.inactiveTypeArg":    "2",
+    "searchArgs.leaseTypeArg":       leaseType,
+  });
+  const res = await fetch(`${EWA_BASE}/inactiveWellQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) return [];
+  const html = await res.text();
+  if (isNoResults(html)) return [];
+  return parseInactiveWellHtml(html);
 }
 
 /**
  * Fetch inactive wells for a given operator number.
- *
- * Only works when paired with leaseTypeArg (O=oil, G=gas).
- * Returns [] when the operator has no inactive wells (clean record).
- * Never throws.
+ * Returns [] when the operator has no inactive wells (clean record). Never throws.
  */
 export async function fetchTrrcInactiveWellsByOperator(
   operatorNo: string,
   leaseType:  "O" | "G" = "O",
 ): Promise<TrrcInactiveWellRecord[]> {
   if (!operatorNo?.trim()) return [];
+  return withTrrcRetry(sig => _fetchTrrcInactiveWellsByOperator(operatorNo, leaseType, sig), [], { timeout: 15_000 });
+}
 
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                      "search",
-      "searchArgs.operatorNumbersArg":   operatorNo.trim(),
-      "searchArgs.inactiveTypeArg":      "2",   // All inactive as of current date
-      "searchArgs.leaseTypeArg":         leaseType,
-    });
-
-    const res = await fetch(`${EWA_BASE}/inactiveWellQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body:   params.toString(),
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    if (isNoResults(html)) return [];
-    return parseInactiveWellHtml(html);
-  } catch {
-    return [];
-  }
+async function _fetchTrrcInactiveWellsByCounty(countyCode: string, leaseType: "O" | "G", _signal: AbortSignal): Promise<TrrcInactiveWellRecord[]> {
+  const params = new URLSearchParams({
+    methodToCall:                "search",
+    "searchArgs.leaseTypeArg":   leaseType,
+    "searchArgs.countyCodeArg":  countyCode.padStart(3, "0"),
+  });
+  const res = await fetch(`${EWA_BASE}/inactiveWellQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) return [];
+  const html = await res.text();
+  if (isNoResults(html)) return [];
+  return parseInactiveWellHtml(html);
 }
 
 /**
  * Fetch inactive wells for a county (oil wells).
- *
- * @param countyCode  3-digit TRRC county code (e.g. "399" for Scurry, "441" for Throckmorton)
- * @param leaseType   "O" = oil (default), "G" = gas
- *
  * Returns [] on failure or no results. Never throws.
  */
 export async function fetchTrrcInactiveWellsByCounty(
@@ -337,33 +324,7 @@ export async function fetchTrrcInactiveWellsByCounty(
   leaseType:  "O" | "G" = "O",
 ): Promise<TrrcInactiveWellRecord[]> {
   if (!countyCode?.trim()) return [];
-
-  try {
-    const params = new URLSearchParams({
-      methodToCall:                      "search",
-      "searchArgs.leaseTypeArg":         leaseType,
-      "searchArgs.countyCodeArg":        countyCode.padStart(3, "0"),
-    });
-
-    const res = await fetch(`${EWA_BASE}/inactiveWellQueryAction.do`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":       "text/html,application/xhtml+xml",
-        "User-Agent":   "Mozilla/5.0",
-      },
-      body:   params.toString(),
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    if (isNoResults(html)) return [];
-    return parseInactiveWellHtml(html);
-  } catch {
-    return [];
-  }
+  return withTrrcRetry(sig => _fetchTrrcInactiveWellsByCounty(countyCode, leaseType, sig), [], { timeout: 15_000 });
 }
 
 /**

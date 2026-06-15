@@ -400,6 +400,7 @@ export async function lookupWellsByLegalDescription(params: {
 
   try {
     const normalizedSurvey = normalizeSurveyName(params.survey_name);
+    const signal = AbortSignal.timeout(30_000);
 
     const polygons = await fetchOtlsPolygons({
       countyFips,
@@ -407,7 +408,7 @@ export async function lookupWellsByLegalDescription(params: {
       survey_level1:   normalizedSurvey,
       block:           params.block,
       section:         params.section,
-    });
+    }, signal);
 
     if (polygons.length === 0) {
       return null;
@@ -423,7 +424,7 @@ export async function lookupWellsByLegalDescription(params: {
 
       if (!overallCentroid) overallCentroid = polygonCentroid(rings);
       const bbox = polygonBbox(rings);
-      const wellFeatures = await fetchWellsInBbox(bbox);
+      const wellFeatures = await fetchWellsInBbox(bbox, signal);
 
       // The bbox query over-fetches (includes neighboring tracts).
       // Filter to wells whose surface location actually falls within THIS polygon

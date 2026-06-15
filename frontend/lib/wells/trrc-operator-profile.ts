@@ -17,6 +17,7 @@
  */
 
 import * as cheerio from "cheerio";
+import { withTrrcRetry } from "../underwriting/trrc-utils";
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
@@ -45,38 +46,29 @@ export type TrrcOperatorProfile = {
   last_filed_date: string | null;
 };
 
+async function _fetchTrrcOperatorProfile(operatorName: string, _signal: AbortSignal): Promise<TrrcOperatorProfile | null> {
+  const params = new URLSearchParams({
+    "searchArgs.operatorNameArg": operatorName.trim(),
+    "pager.offset": "0",
+    "pager.pageSize": "5",
+  });
+  const res = await fetch(`${EWA_BASE}/p5OrgQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) return null;
+  return parseP5Html(await res.text());
+}
+
 /**
  * Fetch TRRC P-5 operator organization record by operator name.
  * Returns null when no record is found or the request fails.
  */
-export async function fetchTrrcOperatorProfile(
-  operatorName: string,
-): Promise<TrrcOperatorProfile | null> {
+export async function fetchTrrcOperatorProfile(operatorName: string): Promise<TrrcOperatorProfile | null> {
   if (!operatorName.trim()) return null;
-  try {
-    const params = new URLSearchParams({
-      "searchArgs.operatorNameArg": operatorName.trim(),
-      "pager.offset": "0",
-      "pager.pageSize": "5",
-    });
-
-    const res = await fetch(`${EWA_BASE}/p5OrgQueryAction.do`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) return null;
-    const html = await res.text();
-    return parseP5Html(html);
-  } catch {
-    return null;
-  }
+  return withTrrcRetry(sig => _fetchTrrcOperatorProfile(operatorName, sig), null);
 }
 
 function parseP5Html(html: string): TrrcOperatorProfile | null {
@@ -144,12 +136,27 @@ export type TrrcAnnualProduction = {
   cum_gas_mcf: number;
 };
 
+async function _fetchTrrcAnnualProduction(distCode: string, leaseNo: string, reportType: "O" | "G", _signal: AbortSignal): Promise<TrrcAnnualProduction | null> {
+  const params = new URLSearchParams({
+    "searchArgs.districtCodeArg": distCode,
+    "searchArgs.leaseNumberArg":  leaseNo,
+    "searchArgs.reportTypeArg":   reportType,
+    "pager.offset":   "0",
+    "pager.pageSize": "50",
+  });
+  const res = await fetch(`${EWA_BASE}/h15ReportQueryAction.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)" },
+    body: params.toString(),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) return null;
+  return parseH15Html(await res.text(), distCode, leaseNo);
+}
+
 /**
  * Fetch H-15 annual production report for a specific lease (distCode + leaseNo).
  * Returns null when no data is found or the request fails.
- *
- * H-15 data goes back further than the 36-month production window and is used
- * to establish cumulative production and long-term decline context.
  */
 export async function fetchTrrcAnnualProduction(
   distCode: string,
@@ -157,32 +164,7 @@ export async function fetchTrrcAnnualProduction(
   reportType: "O" | "G" = "O",
 ): Promise<TrrcAnnualProduction | null> {
   if (!distCode || !leaseNo) return null;
-  try {
-    const params = new URLSearchParams({
-      "searchArgs.districtCodeArg":  distCode,
-      "searchArgs.leaseNumberArg":   leaseNo,
-      "searchArgs.reportTypeArg":    reportType,
-      "pager.offset":  "0",
-      "pager.pageSize": "50",
-    });
-
-    const res = await fetch(`${EWA_BASE}/h15ReportQueryAction.do`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)",
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) return null;
-    const html = await res.text();
-    return parseH15Html(html, distCode, leaseNo);
-  } catch {
-    return null;
-  }
+  return withTrrcRetry(sig => _fetchTrrcAnnualProduction(distCode, leaseNo, reportType, sig), null);
 }
 
 /**

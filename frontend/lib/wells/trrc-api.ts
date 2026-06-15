@@ -14,6 +14,7 @@
  */
 
 import type { WellLookupResult, WellSummary } from "./well-types";
+import { withTrrcRetry } from "../underwriting/trrc-utils";
 import { fetchTrrcLatestByLease } from "./trrc-production";
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
@@ -430,6 +431,7 @@ export async function lookupTrrcLeasesByApis(
           method:  "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body:    body.toString(),
+          signal:  AbortSignal.timeout(45_000),
         });
         if (!res.ok) return { api8, entries: [] as PdqWellEntry[] };
 
@@ -499,6 +501,7 @@ export async function lookupTrrcLeasesByApis(
         method:  "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body:    body.toString(),
+        signal:  AbortSignal.timeout(60_000),
       });
 
       if (res.ok) {
@@ -521,6 +524,49 @@ export async function lookupTrrcLeasesByApis(
   return result;
 }
 
+async function _lookupTrrcWells(county: string, countyCode: string, desc: string, _signal: AbortSignal): Promise<WellLookupResult> {
+  const body = new URLSearchParams({
+    methodToCall:                    "search",
+    "searchArgs.leaseTypeArg":       "",
+    "searchArgs.apiNoPrefixArg":     countyCode,
+    "searchArgs.districtCodeArg":    "None Selected",
+    "searchArgs.wellTypeArg":        "PR",
+    "searchArgs.fieldNumbersArg":    "",
+    "searchArgs.operatorNumbersArg": "",
+    "searchArgs.apiNoSuffixArg":     "",
+    "searchArgs.leaseNumberArg":     "",
+    "pager.pageSize":                "100",
+  });
+
+  const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body:    body.toString(),
+    signal:  AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) throw new Error(`TRRC PDQ HTTP ${res.status}`);
+  const html = await res.text();
+
+  const entries = parsePdqCountyEntries(html, 100);
+  const wells   = entries.map(e => entryToWell(e, county));
+
+  if (entries.length > 0) {
+    await enrichWithProduction(entries, wells, 15);
+  }
+
+  const withProduction = wells.filter(w => w.latest_monthly_oil_bbl != null).length;
+
+  return {
+    source:            "trrc",
+    wells,
+    query_description: desc,
+    note: wells.length === 0
+      ? "No producing wells found in this county via TRRC PDQ."
+      : `${wells.length} producing wells from Texas Railroad Commission PDQ. ${withProduction > 0 ? `${withProduction} with real monthly production data.` : "Monthly production data unavailable."}`,
+  };
+}
+
 export async function lookupTrrcWells(county: string): Promise<WellLookupResult> {
   const countyKey  = normalizeCounty(county);
   const countyCode = TX_COUNTY_CODES[countyKey];
@@ -535,58 +581,14 @@ export async function lookupTrrcWells(county: string): Promise<WellLookupResult>
     };
   }
 
-  try {
-    const body = new URLSearchParams({
-      methodToCall:                   "search",
-      "searchArgs.leaseTypeArg":      "",
-      "searchArgs.apiNoPrefixArg":    countyCode,   // county code only = county scan
-      "searchArgs.districtCodeArg":   "None Selected",
-      "searchArgs.wellTypeArg":       "PR",   // PRODUCING wells
-      "searchArgs.fieldNumbersArg":   "",
-      "searchArgs.operatorNumbersArg":"",
-      "searchArgs.apiNoSuffixArg":    "",
-      "searchArgs.leaseNumberArg":    "",
-      "pager.pageSize":               "100",
-    });
+  const errResult: WellLookupResult = { source: "unavailable", wells: [], query_description: desc, note: "Texas RRC data temporarily unavailable." };
 
-    const res = await fetch(`${EWA_BASE}/wellboreQueryAction.do`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body:    body.toString(),
-    });
-
-    if (!res.ok) throw new Error(`TRRC PDQ HTTP ${res.status}`);
-    const html = await res.text();
-
-    // Parse up to 100 entries; maxWells cap is a safety valve
-    const entries = parsePdqCountyEntries(html, 100);
-    const wells   = entries.map(e => entryToWell(e, county));
-
-    // Enrich up to 15 unique leases with real monthly production.
-    // With 100 wellbores in the sample pool, 15 leases gives better county
-    // coverage while staying within the 20-second enrichment timeout.
-    if (entries.length > 0) {
-      await enrichWithProduction(entries, wells, 15);
-    }
-
-    const withProduction = wells.filter(w => w.latest_monthly_oil_bbl != null).length;
-
-    return {
-      source:            "trrc",
-      wells,
-      query_description: desc,
-      note: wells.length === 0
-        ? "No producing wells found in this county via TRRC PDQ."
-        : `${wells.length} producing wells from Texas Railroad Commission PDQ. ${withProduction > 0 ? `${withProduction} with real monthly production data.` : "Monthly production data unavailable."}`,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.warn("[trrc-api] PDQ county lookup failed:", msg);
-    return {
-      source:            "unavailable",
-      wells:             [],
-      query_description: desc,
-      note:              `Texas RRC data temporarily unavailable: ${msg}`,
-    };
-  }
+  return withTrrcRetry(
+    sig => _lookupTrrcWells(county, countyCode, desc, sig).catch(err => {
+      console.warn("[trrc-api] PDQ county lookup failed:", err instanceof Error ? err.message : err);
+      throw err;
+    }),
+    errResult,
+    { timeout: 60_000 },
+  );
 }
