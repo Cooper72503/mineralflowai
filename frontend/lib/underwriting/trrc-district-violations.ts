@@ -21,6 +21,7 @@
 
 import crypto from "crypto";
 import type { TrrcViolation } from "./trrc-compliance";
+import { withTrrcRetry } from "./trrc-utils";
 
 // ── District violation file URL registry ──────────────────────────────────────
 //
@@ -280,6 +281,24 @@ async function downloadFileFromMftShare(
 ): Promise<string | null> {
   const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+  // ── Step 0: Try a direct REST-style URL first ─────────────────────────────
+  // Thru MFT sometimes serves files at a predictable path — this bypasses the
+  // full GoDrive UI protocol entirely and is immune to GoDrive UI changes.
+  const guidM = shareUrl.match(/link\/([a-f0-9-]{36})/i);
+  if (guidM) {
+    const directUrl = `${MFT_BASE}/link/${guidM[1]}/${encodeURIComponent(filename)}`;
+    try {
+      const directRes = await fetch(directUrl, {
+        headers: { "User-Agent": UA, "Accept": "text/plain,application/octet-stream,*/*" },
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (directRes.ok) {
+        const ct = directRes.headers.get("content-type") ?? "";
+        if (!ct.includes("text/html")) return await directRes.text();
+      }
+    } catch { /* fall through to GoDrive protocol */ }
+  }
+
   // ── Step 1: GET share page, capture session cookie + ViewState ────────────
   let jsessionid: string | null = null;
   let viewState:  string | null = null;
@@ -308,12 +327,7 @@ async function downloadFileFromMftShare(
     const vsMatch = html.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
     if (vsMatch) viewState = vsMatch[1];
 
-    // Find the row for the target filename:
-    //   <tr data-ri="N" data-rk="MMMM" ...>
-    //   ...
-    //   onclick="PrimeFaces.addSubmitParam('fileList',{'fileTable:N:j_id_XX':'fileTable:N:j_id_XX'})">FILENAME</a>
-    //
-    // We look for the <tr> just before the filename appears
+    // Detection strategy 1: primary regex — all attributes on/near the same element
     const filePattern = new RegExp(
       `data-ri="(\\d+)"[^>]*data-rk="(\\d+)"[^<]*(?:<[^>]+>)*[^<]*` +
       `addSubmitParam[^']*'fileList'[^{]*\\{([^}]+)\\}[^>]+>${filename.replace(/[.]/g, "\\.")}`,
@@ -323,49 +337,47 @@ async function downloadFileFromMftShare(
     if (rowMatch) {
       fileRowIdx = rowMatch[1];
       fileRowKey = rowMatch[2];
-      // Parse the component ID from {'fileTable:N:j_id_XX':'fileTable:N:j_id_XX'}
       const compMatch = rowMatch[3].match(/'(fileTable:[^']+)'/);
       if (compMatch) fileCompId = compMatch[1];
     }
 
-    // Fallback: scan the table for the filename text and extract row info
-    if (!fileRowKey) {
+    // Detection strategy 2: line-by-line scan (handles multiline row HTML)
+    if (!fileCompId) {
       const lines = html.split("\n");
       for (const line of lines) {
         if (!line.includes(filename)) continue;
-        // Look for data-rk in this region of the HTML
-        const rkMatch = line.match(/data-rk="(\d+)"/);
-        const riMatch = line.match(/data-ri="(\d+)"/);
-        const cpMatch = line.match(/addSubmitParam[^']*'fileList'[^{]*\{'(fileTable:[^']+)'/);
-        if (rkMatch && riMatch && cpMatch) {
-          fileRowKey = rkMatch[1];
-          fileRowIdx = riMatch[1];
-          fileCompId = cpMatch[1];
-          break;
-        }
+        if (!fileRowKey) { const m = line.match(/data-rk="(\d+)"/); if (m) fileRowKey = m[1]; }
+        if (!fileRowIdx) { const m = line.match(/data-ri="(\d+)"/); if (m) fileRowIdx = m[1]; }
+        if (!fileCompId) { const m = line.match(/'(fileTable:\d+:[^']+)'/); if (m) fileCompId = m[1]; }
+        if (fileCompId) break;
       }
     }
 
-    // Second fallback: search wider context around filename
-    if (!fileRowKey) {
+    // Detection strategy 3: wide context window around filename (catches split-line HTML)
+    if (!fileCompId || !fileRowKey) {
       const idx = html.indexOf(filename);
       if (idx > 0) {
-        const region = html.slice(Math.max(0, idx - 800), idx + 200);
-        const rkMatch  = region.match(/data-rk="(\d+)"/);
-        const riMatch  = region.match(/data-ri="(\d+)"/);
-        const cpMatch  = region.match(/'(fileTable:\d+:[^']+)'/);
-        if (rkMatch && riMatch && cpMatch) {
-          fileRowKey = rkMatch[1];
-          fileRowIdx = riMatch[1];
-          fileCompId = cpMatch[1];
-        }
+        const region = html.slice(Math.max(0, idx - 1500), idx + 500);
+        if (!fileRowKey) { const m = region.match(/data-rk="(\d+)"/); if (m) fileRowKey = m[1]; }
+        if (!fileRowIdx) { const m = region.match(/data-ri="(\d+)"/); if (m) fileRowIdx = m[1]; }
+        if (!fileCompId) { const m = region.match(/'(fileTable:\d+:[^']+)'/); if (m) fileCompId = m[1]; }
       }
+    }
+
+    // Detection strategy 4: last-resort — any fileTable component on the page
+    // If the GoDrive UI changed and we can't find the exact row, try the first
+    // fileTable component. It won't match our target row but some MFT deployments
+    // use the selection key (fileRowKey) as the authoritative download identifier.
+    if (!fileCompId) {
+      const anyComp = html.match(/'(fileTable:\d+:[^']+)'/);
+      if (anyComp) fileCompId = anyComp[1];
     }
   } catch {
     return null;
   }
 
-  // fileCompId is required; fileRowKey is optional (component ID alone is sufficient)
+  // Need at least a session + ViewState + some way to identify the file.
+  // fileCompId alone is sufficient (fileRowKey is best-effort).
   if (!jsessionid || !viewState || !fileCompId) return null;
 
   // ── Step 2: Submit fileList form to "click" the file ─────────────────────
@@ -526,9 +538,15 @@ export async function fetchDistrictViolations(
   const targetFilename = districtToFilename(normalizedDist);
   const sourceUrl = shareUrl; // for reporting
 
+  // Retry the download up to 2× on transient failures (network drop, timeout).
+  // If the share page itself fails, withTrrcRetry sees a TypeError/AbortError.
   let rawText: string | null = null;
   try {
-    rawText = await downloadFileFromMftShare(shareUrl, targetFilename);
+    rawText = await withTrrcRetry(
+      (_signal) => downloadFileFromMftShare(shareUrl, targetFilename),
+      null,
+      { timeout: 120_000, retries: 2, backoffMs: 2_000 },
+    );
   } catch { /* fall through */ }
 
   if (!rawText) {

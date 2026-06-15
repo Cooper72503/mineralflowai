@@ -17,8 +17,9 @@
  * Returns [] on failure — callers always label missing data appropriately.
  */
 
+import { extractIceIds, withTrrcRetry } from "../underwriting/trrc-utils";
+
 const PDA_ICE_URL = "https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml";
-// No timeout — run until TRRC responds.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -296,11 +297,96 @@ function parseIceResultsHtml(html: string, api10: string): TrrcInspectionRecord[
 // ── Main fetch function ───────────────────────────────────────────────────────
 
 /**
+ * Internal: performs the 2-step ICE inspection query.  Throws on transient
+ * network failures so withTrrcRetry can retry; returns [] for "no data" cases.
+ */
+async function _fetchTrrcInspectionsByApi(
+  api10: string,
+  _signal: AbortSignal,
+): Promise<TrrcInspectionRecord[]> {
+  const api8 = toApi8(api10);
+
+  // ── Step 1: GET the ICE page to establish a PDA session ──────────────────
+  // fetch() throws TypeError on network failure → withTrrcRetry retries
+  const getRes = await fetch(`${PDA_ICE_URL}?action=init`, {
+    method:  "GET",
+    headers: {
+      "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Cache-Control":   "no-cache",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!getRes.ok) return [];
+
+  const pageHtml = await getRes.text();
+  const viewState = extractViewState(pageHtml);
+  if (!viewState) return [];
+
+  // Extract live JSF component IDs — these change on every TRRC server redeploy.
+  // Falls back to last-known-good defaults (j_idt39 / j_idt95) on parse failure.
+  const { tabViewId, inspBtnId } = extractIceIds(pageHtml);
+
+  const jsessionId = extractSessionId(getRes.headers);
+  const cookieHeader = jsessionId ? `JSESSIONID=${jsessionId}` : "";
+
+  // ── Step 2: POST JSF partial-AJAX search using live component IDs ────────
+  const formData = new URLSearchParams();
+  formData.append("javax.faces.partial.ajax",    "true");
+  formData.append("javax.faces.source",          `IceQueryForm:${tabViewId}:${inspBtnId}`);
+  formData.append("javax.faces.partial.execute", "IceQueryForm");
+  formData.append("javax.faces.partial.render",  `IceQueryForm:${tabViewId}:inspResults`);
+  formData.append(`IceQueryForm:${tabViewId}:${inspBtnId}`, `IceQueryForm:${tabViewId}:${inspBtnId}`);
+  formData.append("IceQueryForm",                "IceQueryForm");
+  formData.append(`IceQueryForm:${tabViewId}:qapino`, api8);
+  formData.append("javax.faces.ViewState",       viewState);
+
+  const postHeaders: Record<string, string> = {
+    "Content-Type":      "application/x-www-form-urlencoded; charset=UTF-8",
+    "Accept":            "application/xml, text/xml, */*; q=0.01",
+    "Faces-Request":     "partial/ajax",
+    "X-Requested-With":  "XMLHttpRequest",
+    "Accept-Language":   "en-US,en;q=0.9",
+    "User-Agent":        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Origin":            "https://webapps2.rrc.texas.gov",
+    "Referer":           `${PDA_ICE_URL}?action=init`,
+  };
+  if (cookieHeader) postHeaders["Cookie"] = cookieHeader;
+
+  const postRes = await fetch(PDA_ICE_URL, {
+    method:  "POST",
+    headers: postHeaders,
+    body:    formData.toString(),
+    signal:  AbortSignal.timeout(20_000),
+  });
+
+  if (!postRes.ok) return [];
+
+  const xmlBody = await postRes.text();
+
+  // ── Step 3: Extract results HTML from <partial-response> XML ─────────────
+  const resultsHtml = extractPartialUpdate(
+    xmlBody,
+    `IceQueryForm:${tabViewId}:inspResults`
+  );
+  if (!resultsHtml) return [];
+
+  return parseIceResultsHtml(resultsHtml, api10);
+}
+
+/**
  * Fetch ICE inspection records for a specific API number from the TRRC PDA
  * portal.  Uses JSF/PrimeFaces AJAX protocol:
- *   GET  → obtain JSESSIONID + javax.faces.ViewState
- *   POST → AJAX search with API number
+ *   GET  → obtain JSESSIONID + javax.faces.ViewState + live component IDs
+ *   POST → AJAX search with API number using extracted IDs
  *
+ * Component IDs (tabViewId, inspBtnId) are extracted dynamically from the live
+ * page HTML so they remain correct after any TRRC server redeploy.
+ *
+ * Retries up to 2× on transient network failures with exponential backoff.
  * Returns [] when the well has no public inspection records or on any error.
  * Never throws.
  */
@@ -308,85 +394,11 @@ export async function fetchTrrcInspectionsByApi(
   api10Raw: string,
 ): Promise<TrrcInspectionRecord[]> {
   const api10 = normalizeApi10(api10Raw);
-  const api8  = toApi8(api10);
-
-  try {
-    // ── Step 1: GET the ICE page to establish a PDA session ────────────────
-    const getRes = await fetch(`${PDA_ICE_URL}?action=init`, {
-      method:  "GET",
-      headers: {
-        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Cache-Control":   "no-cache",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!getRes.ok) {
-      return [];
-    }
-
-    const pageHtml = await getRes.text();
-
-    // Extract ViewState from the GET response
-    const viewState = extractViewState(pageHtml);
-    if (!viewState) {
-      return [];
-    }
-
-    // Build cookie string from Set-Cookie headers on the GET response
-    const jsessionId = extractSessionId(getRes.headers);
-    const cookieHeader = jsessionId ? `JSESSIONID=${jsessionId}` : "";
-
-    // ── Step 2: POST JSF partial-AJAX search ───────────────────────────────
-    const formData = new URLSearchParams();
-    formData.append("javax.faces.partial.ajax",    "true");
-    formData.append("javax.faces.source",          "IceQueryForm:j_idt39:j_idt95");
-    formData.append("javax.faces.partial.execute", "IceQueryForm");
-    formData.append("javax.faces.partial.render",  "IceQueryForm:j_idt39:inspResults");
-    formData.append("IceQueryForm:j_idt39:j_idt95", "IceQueryForm:j_idt39:j_idt95");
-    formData.append("IceQueryForm",                "IceQueryForm");
-    // Search field — 8-digit API without "42" prefix
-    formData.append("IceQueryForm:j_idt39:qapino", api8);
-    formData.append("javax.faces.ViewState",       viewState);
-
-    const postHeaders: Record<string, string> = {
-      "Content-Type":      "application/x-www-form-urlencoded; charset=UTF-8",
-      "Accept":            "application/xml, text/xml, */*; q=0.01",
-      "Faces-Request":     "partial/ajax",
-      "X-Requested-With":  "XMLHttpRequest",
-      "Accept-Language":   "en-US,en;q=0.9",
-      "User-Agent":        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Origin":            "https://webapps2.rrc.texas.gov",
-      "Referer":           `${PDA_ICE_URL}?action=init`,
-    };
-    if (cookieHeader) postHeaders["Cookie"] = cookieHeader;
-
-    const postRes = await fetch(PDA_ICE_URL, {
-      method:  "POST",
-      headers: postHeaders,
-      body:    formData.toString(),
-      signal:  AbortSignal.timeout(20_000),
-    });
-
-    if (!postRes.ok) return [];
-
-    const xmlBody = await postRes.text();
-
-    // ── Step 3: Extract the results HTML from the XML response ─────────────
-    const resultsHtml = extractPartialUpdate(
-      xmlBody,
-      "IceQueryForm:j_idt39:inspResults"
-    );
-
-    if (!resultsHtml) return [];
-
-    return parseIceResultsHtml(resultsHtml, api10);
-  } catch {
-    return [];
-  }
+  return withTrrcRetry(
+    signal => _fetchTrrcInspectionsByApi(api10, signal),
+    [],
+    { timeout: 60_000, retries: 2, backoffMs: 1_500 },
+  );
 }
 
 /**

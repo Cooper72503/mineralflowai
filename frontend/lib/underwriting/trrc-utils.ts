@@ -117,6 +117,80 @@ export function detectTrrcColumns(html: string): Record<string, number> | null {
   return Object.keys(cols).length >= 2 ? cols : null;
 }
 
+// ── ICE portal dynamic component ID extraction ────────────────────────────────
+
+/**
+ * Live JSF/PrimeFaces component IDs for the TRRC ICE portal.
+ * The j_idt* segments are auto-generated and change on every server redeploy.
+ */
+export type IceIds = {
+  /** TabView component ID, e.g. "j_idt39" */
+  tabViewId: string;
+  /** Inspections search button ID (short segment), e.g. "j_idt95" */
+  inspBtnId: string;
+  /** Violations search button ID (short segment), e.g. "j_idt181" */
+  violBtnId: string;
+};
+
+/** Last-known-good defaults — used as fallback when live extraction fails. */
+export const ICE_ID_DEFAULTS: IceIds = {
+  tabViewId: "j_idt39",
+  inspBtnId: "j_idt95",
+  violBtnId: "j_idt181",
+};
+
+/**
+ * Extract auto-generated PrimeFaces component IDs from the TRRC ICE portal HTML.
+ *
+ * PrimeFaces assigns sequential j_idt* IDs to unnamed components on each server
+ * deployment. Hardcoding them causes silent breakage after any TRRC server update.
+ *
+ * Extracts:
+ *   tabViewId — from the hidden _activeIndex input (`IceQueryForm:j_idt39_activeIndex`)
+ *   inspBtnId — first submit button scoped to IceQueryForm:{tabViewId}:*
+ *   violBtnId — second submit button (violations tab, appears later in the DOM)
+ *
+ * Falls back to ICE_ID_DEFAULTS on any failure so callers always get usable IDs.
+ */
+export function extractIceIds(html: string): IceIds {
+  const result: IceIds = { ...ICE_ID_DEFAULTS };
+
+  // TabView ID from its hidden activeIndex input:
+  //   <input type="hidden" name="IceQueryForm:j_idt39_activeIndex" ...>
+  const tabM = html.match(/name=["']IceQueryForm:(\w+)_activeIndex["']/i);
+  if (tabM) result.tabViewId = tabM[1];
+
+  // Collect submit button IDs scoped to this form+tabView.
+  // PrimeFaces commandButton renders as <button type="submit" class="ui-button ...">
+  // or (older PF) as <input type="submit" ...>.
+  // The first one is the inspections button; the second is the violations button.
+  const btnIds: string[] = [];
+
+  const addBtnId = (attrs: string) => {
+    const idM = attrs.match(/(?:id|name)=["'](IceQueryForm:\w+:\w+)["']/i);
+    if (!idM) return;
+    const parts = idM[1].split(":");
+    if (parts.length !== 3 || parts[1] !== result.tabViewId) return;
+    if (!btnIds.includes(parts[2])) btnIds.push(parts[2]);
+  };
+
+  const btnRe = /<button([^>]+)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = btnRe.exec(html)) !== null) {
+    if (/type=["']submit["']|class=["'][^"']*ui-button/i.test(m[1])) addBtnId(m[1]);
+  }
+
+  const inputRe = /<input([^>]+)>/gi;
+  while ((m = inputRe.exec(html)) !== null) {
+    if (/type=["']submit["']/i.test(m[1])) addBtnId(m[1]);
+  }
+
+  if (btnIds.length >= 1) result.inspBtnId = btnIds[0];
+  if (btnIds.length >= 2) result.violBtnId = btnIds[1];
+
+  return result;
+}
+
 /**
  * Build a column resolver for a TRRC EWA data row, given a detected column map.
  *
