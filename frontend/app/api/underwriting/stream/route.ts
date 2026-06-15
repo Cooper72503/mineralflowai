@@ -1196,6 +1196,49 @@ async function runPipeline(
 
   const totalMs = Date.now() - t0;
 
+  // ── Server-side hard redaction ────────────────────────────────────────────
+  //
+  // The truth-check engine and offer gate have already decided what is safe to
+  // show. This block enforces those decisions AT THE PAYLOAD LEVEL so blocked
+  // data never leaves the server — the UI cannot accidentally display it.
+  //
+  // Rules (applied in order, not mutually exclusive):
+  //   1. block_economics → null entire economics + acquisition_economics sections
+  //   2. offer_gate closed → null the three offer range fields only
+  //   3. overall_verdict "block" → force diligence_run_label to "Failed Verification"
+  //
+  // We cast to `any` for mutation because the DDReport type treats these fields
+  // as non-nullable (they always exist post-build). The redacted payload is still
+  // valid JSON; consumers must handle null for these sections.
+
+  // 1. Economic redaction
+  if (report.truth_check?.gate?.block_economics) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (report as any).economics             = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (report as any).acquisition_economics = null;
+  }
+
+  // 2. Offer range redaction (independent of full economics block)
+  if (report.offer_gate?.gate_open === false && report.acquisition_economics != null) {
+    const blockedDp = {
+      value:      null,
+      source:     "missing" as const,
+      confidence: "none"    as const,
+      note:       "Offer gate closed — provide LOE statements and division order to unlock.",
+    };
+    const acq = report.acquisition_economics as Record<string, unknown>;
+    acq.offer_range_low  = blockedDp;
+    acq.offer_range_mid  = blockedDp;
+    acq.offer_range_high = blockedDp;
+  }
+
+  // 3. Label enforcement
+  if (report.truth_check?.overall_verdict === "block") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (report as any).diligence_run_label = "Failed Verification";
+  }
+
   await writer.write(progressEvent("generate_report", "complete", "Report complete",
     `Full underwriting completed in ${(totalMs / 1000).toFixed(1)}s`, { durationMs: totalMs }));
 
