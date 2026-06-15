@@ -439,6 +439,9 @@ async function _fetchTrrcInspectionsByLease(
   const jsessionId = extractSessionId(getRes.headers);
   const cookieHeader = jsessionId ? `JSESSIONID=${jsessionId}` : "";
 
+  // Mirror the full form body that the browser sends — same as per-API but
+  // with qlsno set and qapino empty. Missing fields cause the server to return
+  // an empty partial-response with no inspResults update block.
   const formData = new URLSearchParams();
   formData.append("javax.faces.partial.ajax",    "true");
   formData.append("javax.faces.source",          `IceQueryForm:${tabViewId}:${inspBtnId}`);
@@ -446,8 +449,26 @@ async function _fetchTrrcInspectionsByLease(
   formData.append("javax.faces.partial.render",  `IceQueryForm:${tabViewId}:inspResults`);
   formData.append(`IceQueryForm:${tabViewId}:${inspBtnId}`, `IceQueryForm:${tabViewId}:${inspBtnId}`);
   formData.append("IceQueryForm",                "IceQueryForm");
-  formData.append(`IceQueryForm:${tabViewId}:qapino`, "");       // intentionally empty — lease-only
-  formData.append(`IceQueryForm:${tabViewId}:qlsno`,  leaseNo.slice(0, 6));
+  // Search fields — all empty except qlsno (lease number)
+  formData.append(`IceQueryForm:${tabViewId}:qapino`,       "");
+  formData.append(`IceQueryForm:${tabViewId}:qopnm`,        "");
+  formData.append(`IceQueryForm:${tabViewId}:qopno`,        "");
+  formData.append(`IceQueryForm:${tabViewId}:qcnty_input`,  "");
+  formData.append(`IceQueryForm:${tabViewId}:qcnty_focus`,  "");
+  formData.append(`IceQueryForm:${tabViewId}:qcnty_filter`, "");
+  formData.append(`IceQueryForm:${tabViewId}:qdis_input`,   "");
+  formData.append(`IceQueryForm:${tabViewId}:qdis_focus`,   "");
+  formData.append(`IceQueryForm:${tabViewId}:qlsnm`,        "");
+  formData.append(`IceQueryForm:${tabViewId}:qlsno`,        leaseNo.slice(0, 6));
+  formData.append(`IceQueryForm:${tabViewId}:qidpno`,       "");
+  formData.append(`IceQueryForm:${tabViewId}:qcmplno`,      "");
+  formData.append(`IceQueryForm:${tabViewId}:qcmpli_input`, "");
+  formData.append(`IceQueryForm:${tabViewId}:qcmpli_focus`, "");
+  formData.append(`IceQueryForm:${tabViewId}:qiRle_input`,  "");
+  formData.append(`IceQueryForm:${tabViewId}:qiRle_focus`,  "");
+  formData.append(`IceQueryForm:${tabViewId}:qindtf_input`, "");
+  formData.append(`IceQueryForm:${tabViewId}:qindtt_input`, "");
+  formData.append(`IceQueryForm:${tabViewId}_activeIndex`,  "0");
   formData.append("javax.faces.ViewState",       viewState);
 
   const postHeaders: Record<string, string> = {
@@ -475,7 +496,6 @@ async function _fetchTrrcInspectionsByLease(
   const resultsHtml = extractPartialUpdate(xmlBody, `IceQueryForm:${tabViewId}:inspResults`);
   if (!resultsHtml) return null;
 
-  // Parse results — use the leaseNo as the api placeholder since records span multiple wells
   return parseIceResultsHtml(resultsHtml, leaseNo);
 }
 
