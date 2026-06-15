@@ -766,31 +766,26 @@ async function runPipeline(
           const leaseNoForViolations = firstLease?.leaseNo ?? null;
           const distCodeForViolations = firstLease?.distCode ?? null;
 
-          const run = async () => {
-            // S1 — single ICE query by lease number (covers all APIs on the lease).
-            // Empty qvapino field — passing any API alongside the lease causes ICE
-            // to AND both filters, returning 0 results.
-            if (leaseNoForViolations) {
-              try { addAll(await fetchTrrcViolationsByLease(leaseNoForViolations)); } catch { /* network error */ }
+          // S1 — single ICE query by lease number (covers all APIs on the lease).
+          // Empty qvapino field — passing any API alongside the lease causes ICE
+          // to AND both filters, returning 0 results.
+          if (leaseNoForViolations) {
+            try { addAll(await fetchTrrcViolationsByLease(leaseNoForViolations)); } catch { /* network error */ }
+          }
+
+          // S1b — per-API fallback when S1 found nothing
+          if (merged.length === 0) {
+            for (const api of apiNumbers.slice(0, 4)) {
+              try { addAll(await fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations)); } catch { /* continue */ }
             }
+          }
 
-            // S1b — per-API fallback when S1 found nothing
-            if (merged.length === 0) {
-              for (const api of apiNumbers.slice(0, 4)) {
-                try { addAll(await fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations)); } catch { /* continue */ }
-              }
-            }
+          // S2 — operator + county fallback when lease queries found nothing
+          if (merged.length === 0 && operatorName && county) {
+            try { addAll(await fetchTrrcViolationsByOperator(operatorName, county)); } catch { /* continue */ }
+          }
 
-            // S2 — operator + county fallback when lease queries found nothing
-            if (merged.length === 0 && operatorName && county) {
-              try { addAll(await fetchTrrcViolationsByOperator(operatorName, county)); } catch { /* continue */ }
-            }
-
-            return merged;
-          };
-
-          const timeout = new Promise<[]>(r => setTimeout(() => r([]), 40_000));
-          return Promise.race([run(), timeout]);
+          return merged;
         })(),
 
         // ── Injection wells ───────────────────────────────────────────────────
@@ -817,18 +812,11 @@ async function runPipeline(
         })(),
 
         // ── ICE field inspection records ──────────────────────────────────────
-        // Hard 40s deadline via Promise.race — inspection must not block the
-        // rest of the pipeline. Lease-level query (~20s) is the happy path.
-        // Per-API fallback is uncapped but gated by the 40s race.
+        // Lease-level query first (1 call, covers all wells on the lease).
+        // Per-API fallback only if lease query fails (null return).
         (async (): Promise<typeof inspectionResult> => {
           if (allLeaseApis.length === 0) return [];
-          const timeout = new Promise<[]>(r => setTimeout(() => r([]), 40_000));
-          try {
-            return await Promise.race([
-              fetchTrrcInspectionsForApis(allLeaseApis, _primaryLeaseNo),
-              timeout,
-            ]);
-          } catch { return []; }
+          try { return await fetchTrrcInspectionsForApis(allLeaseApis, _primaryLeaseNo); } catch { return []; }
         })(),
 
         // ── P-5 Operator Organization ─────────────────────────────────────────
