@@ -672,11 +672,11 @@ async function runPipeline(
       const totalLatest = wells.reduce((s, w) => s + (w.latest_monthly_oil_bbl ?? 0), 0);
       const totalMonths = wells.reduce((s, w) => s + (w.monthly_rows?.length ?? 0), 0);
       const wellList = wells
-        .map(w => `Lease ${w.lease_number}: ${w.latest_monthly_oil_bbl?.toLocaleString() ?? 0} BOPD`)
+        .map(w => `Lease ${w.lease_number}: ${w.latest_monthly_oil_bbl?.toLocaleString() ?? 0} Bbls/Month`)
         .join("; ");
       return {
         result: wells,
-        detail: `${wells.length} lease(s) — ${totalLatest.toLocaleString()} BOPD combined, ${totalMonths} monthly data points. ${wellList}`,
+        detail: `${wells.length} lease(s) — ${totalLatest.toLocaleString()} Bbls/Month combined, ${totalMonths} monthly data points. ${wellList}`,
       };
     },
     [],
