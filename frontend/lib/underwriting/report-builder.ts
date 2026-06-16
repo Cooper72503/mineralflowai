@@ -558,28 +558,50 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   // mergedWells replaces trrcWells for every production VALUE downstream
   // (monthly_rows, latest_monthly_oil_bbl, cum_oil_bbl) — trrcWells itself is
   // still used for identity matching (api/lease_number), which doesn't change.
-  // Build a set of normalized name tokens for the subject lease.
-  // When the uploaded document package contains multiple leases (e.g. a combined
-  // run statement for J J Steele AND Teagarden), the extraction returns production
-  // for all of them. Without filtering, non-subject lease production inflates
-  // the subject's monthly numbers. We filter by well_name match; entries with no
-  // well_name are always included (single-lease docs that didn't set a name).
-  const _normStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const subjectTokens = new Set<string>();
-  if (input.lease_name) subjectTokens.add(_normStr(input.lease_name));
+  // Filter doc production_months to only the subject lease before building docPeriodMap.
+  // Multi-lease document packages (e.g. a combined run statement covering J J Steele
+  // AND Teagarden) produce extraction entries for every property. Without filtering,
+  // the wrong lease's volumes override the subject's TRRC rows for shared periods.
+  //
+  // Match priority:
+  //   1. rrc_lease_number exact match (STATE LEASE from run statement header)
+  //   2. well_name normalized substring match (PROPERTY NAME from header)
+  //   3. No identifier on the entry → include (single-lease doc, safe to accept)
+  const _normStr   = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const _normLease = (s: string) => s.replace(/^0+/, "").split(":").pop()?.trim() ?? s;
+
+  const subjectLeaseNumbers = new Set<string>();
   for (const w of trrcWells) {
-    if (w.well_name) subjectTokens.add(_normStr(w.well_name));
+    if (w.lease_number) subjectLeaseNumbers.add(_normLease(w.lease_number));
+  }
+  for (const l of (input.rrc_lease_numbers ?? [])) {
+    subjectLeaseNumbers.add(_normLease(l));
+  }
+
+  const subjectNameTokens = new Set<string>();
+  if (input.lease_name) subjectNameTokens.add(_normStr(input.lease_name));
+  for (const w of trrcWells) {
+    if (w.well_name) subjectNameTokens.add(_normStr(w.well_name));
   }
 
   const docPeriodMap = new Map<string, { oil: number; gas: number; water: number }>();
   for (const pm of extracted?.production_months ?? []) {
-    if (pm.well_name && subjectTokens.size > 0) {
+    if (pm.rrc_lease_number && subjectLeaseNumbers.size > 0) {
+      // Primary: match on STATE LEASE number — strip leading zeros for comparison
+      const pmLease = _normLease(pm.rrc_lease_number);
+      const leaseMatch = Array.from(subjectLeaseNumbers).some(
+        l => pmLease === l || pmLease.endsWith(l) || l.endsWith(pmLease),
+      );
+      if (!leaseMatch) continue;
+    } else if (pm.well_name && subjectNameTokens.size > 0) {
+      // Fallback: property name match (for docs that didn't yield a lease number)
       const pmNorm = _normStr(pm.well_name);
-      const matches = Array.from(subjectTokens).some(
+      const nameMatch = Array.from(subjectNameTokens).some(
         t => pmNorm.includes(t) || t.includes(pmNorm),
       );
-      if (!matches) continue;
+      if (!nameMatch) continue;
     }
+    // If no identifier on the entry, include unconditionally (single-lease doc)
     const existing = docPeriodMap.get(pm.period) ?? { oil: 0, gas: 0, water: 0 };
     existing.oil   += pm.oil_bbl   ?? 0;
     existing.gas   += pm.gas_mcf   ?? 0;

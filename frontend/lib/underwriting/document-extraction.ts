@@ -35,13 +35,17 @@ export type DocumentExtractionResult = {
 
   // Production (from run tickets / purchaser statements / production reports)
   production_months: {
-    period: string;        // "YYYY-MM"
+    period: string;               // "YYYY-MM" — use SALES DATE / billing period, not ticket date
     oil_bbl: number | null;
     gas_mcf: number | null;
     water_bbl: number | null;
     oil_price_per_bbl: number | null;
     gross_revenue_usd: number | null;
-    well_name?: string | null;
+    net_revenue_usd: number | null;   // after severance/production taxes
+    severance_tax_usd: number | null; // state taxes withheld
+    api_gravity: number | null;       // corrected API gravity (CORR GRAV column)
+    rrc_lease_number: string | null;  // STATE LEASE number from document header (e.g. "001973")
+    well_name?: string | null;        // PROPERTY NAME from document header
     source_detail: string;
   }[];
 
@@ -185,17 +189,18 @@ Extract every structured field listed below. Be specific — pull exact dollar a
 
 IMPORTANT RULES:
 1. For LOE statements: extract EACH monthly period as a separate entry with ALL cost line items by category.
-2. For production: extract each month separately. Include well-level data if available.
-3. For API numbers: use 10-digit format (42-XXX-XXXXX). Include ALL you find.
-4. For RRC lease numbers: format as "distCode:leaseNo" (e.g. "06:123456") if district is known.
-5. For workover events: include every repair, recompletion, artificial lift change, stimulation, or intervention.
-6. For equipment: be specific — "14 HP Rod Pump Unit on 2-3/8 tubing" not just "pump."
-7. For ownership: extract decimals precisely (0.125000, not "1/8").
-8. For plugging liability: flag ANY well described as inactive, shut-in, P&A candidate, or with a pending H-15.
-9. For water cut: compute from oil_bbl and water_bbl if both present (water/(oil+water) × 100).
-10. For completion data: extract from W-1, W-2, completion reports, or any well record showing formation, depth, perforations, casing, or tubing specs.
-11. For operator notes: capture key qualitative statements operators made about production, workovers, equipment condition, or future plans.
-12. Document types to look for: LOE Statement, Joint Interest Billing, Run Ticket, Division Order, Purchaser Statement, Workover AFE, Equipment List, Well Test, Completion Report, W-1, W-2, Reserve Summary, Compliance Notice, Bond Certificate, Injection Permit, MIT Test Report, H-15 Plugging Form, P&A Report, Well Log.
+2. For production (run statements / purchaser statements): create ONE entry PER PROPERTY PER SALES PERIOD. Use the SALES DATE (billing period) as the period field, not the individual ticket dates. If multiple run tickets exist for the same property and sales period, SUM their NET BARRELS into a single entry. Each property in the document has its own header showing PROPERTY NAME and STATE LEASE number — keep them separate; never merge production across different properties.
+3. For run statement fields: capture rrc_lease_number from the "STATE LEASE" field in the property header, well_name from "PROPERTY NAME", api_gravity from the "CORR GRAV" column (weighted average if multiple tickets), net_revenue_usd from "NET VALUE" total, severance_tax_usd from "STATE TAXES" total, gross_revenue_usd from "GROSS VALUE" total, oil_price_per_bbl from "AVG PRICE".
+4. For API numbers: use 10-digit format (42-XXX-XXXXX). Include ALL you find.
+5. For RRC lease numbers (top-level array): include ALL STATE LEASE numbers found in the document. Format as "distCode:leaseNo" if district is known, otherwise just the lease number.
+6. For workover events: include every repair, recompletion, artificial lift change, stimulation, or intervention.
+7. For equipment: be specific — "14 HP Rod Pump Unit on 2-3/8 tubing" not just "pump."
+8. For ownership: extract decimals precisely (0.125000, not "1/8").
+9. For plugging liability: flag ANY well described as inactive, shut-in, P&A candidate, or with a pending H-15.
+10. For water cut: compute from oil_bbl and water_bbl if both present (water/(oil+water) × 100).
+11. For completion data: extract from W-1, W-2, completion reports, or any well record showing formation, depth, perforations, casing, or tubing specs.
+12. For operator notes: capture key qualitative statements operators made about production, workovers, equipment condition, or future plans.
+13. Document types to look for: LOE Statement, Joint Interest Billing, Run Ticket, Division Order, Purchaser Statement, Workover AFE, Equipment List, Well Test, Completion Report, W-1, W-2, Reserve Summary, Compliance Notice, Bond Certificate, Injection Permit, MIT Test Report, H-15 Plugging Form, P&A Report, Well Log.
 
 Return ONLY valid JSON with this exact structure (no markdown, no commentary):
 {
@@ -205,7 +210,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no commentary):
   "state": string | null,
   "api_numbers": string[],
   "rrc_lease_numbers": string[],
-  "production_months": [{ "period": "YYYY-MM", "oil_bbl": number|null, "gas_mcf": number|null, "water_bbl": number|null, "oil_price_per_bbl": number|null, "gross_revenue_usd": number|null, "well_name": string|null, "source_detail": string }],
+  "production_months": [{ "period": "YYYY-MM", "oil_bbl": number|null, "gas_mcf": number|null, "water_bbl": number|null, "oil_price_per_bbl": number|null, "gross_revenue_usd": number|null, "net_revenue_usd": number|null, "severance_tax_usd": number|null, "api_gravity": number|null, "rrc_lease_number": string|null, "well_name": string|null, "source_detail": string }],
   "loe_statements": [{ "period": "YYYY-MM", "total_loe_usd": number|null, "revenue_usd": number|null, "net_income_usd": number|null, "oil_price_per_bbl": number|null, "gas_price_per_mcf": number|null, "line_items": [{"category": string, "amount_usd": number}], "source_detail": string, "confidence": "high"|"medium"|"low" }],
   "electricity_cost_monthly": number | null,
   "chemical_cost_monthly": number | null,
@@ -268,7 +273,15 @@ function normalizeExtraction(parsed: DocumentExtractionResult): DocumentExtracti
     state: parsed.state ?? null,
     api_numbers: Array.isArray(parsed.api_numbers) ? parsed.api_numbers : [],
     rrc_lease_numbers: Array.isArray(parsed.rrc_lease_numbers) ? parsed.rrc_lease_numbers : [],
-    production_months: Array.isArray(parsed.production_months) ? parsed.production_months : [],
+    production_months: Array.isArray(parsed.production_months)
+      ? parsed.production_months.map(pm => ({
+          ...pm,
+          net_revenue_usd:   pm.net_revenue_usd   ?? null,
+          severance_tax_usd: pm.severance_tax_usd ?? null,
+          api_gravity:       pm.api_gravity       ?? null,
+          rrc_lease_number:  pm.rrc_lease_number  ?? null,
+        }))
+      : [],
     loe_statements: Array.isArray(parsed.loe_statements) ? parsed.loe_statements : [],
     electricity_cost_monthly: parsed.electricity_cost_monthly ?? null,
     chemical_cost_monthly: parsed.chemical_cost_monthly ?? null,
@@ -311,7 +324,7 @@ function mergeExtractionResults(results: DocumentExtractionResult[]): DocumentEx
   const prodMap = new Map<string, DocumentExtractionResult["production_months"][0]>();
   for (const r of valid) {
     for (const pm of r.production_months) {
-      const key = `${pm.period}|${pm.well_name ?? ""}`;
+      const key = `${pm.period}|${pm.rrc_lease_number ?? pm.well_name ?? ""}`;
       const existing = prodMap.get(key);
       if (!existing) { prodMap.set(key, pm); continue; }
       const score = (p: typeof pm) => [p.oil_bbl, p.gas_mcf, p.water_bbl, p.gross_revenue_usd].filter(v => v != null).length;
