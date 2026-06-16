@@ -46,7 +46,7 @@ export type TrrcOperatorProfile = {
   last_filed_date: string | null;
 };
 
-async function _fetchTrrcOperatorProfile(operatorName: string, _signal: AbortSignal): Promise<TrrcOperatorProfile | null> {
+async function _fetchTrrcOperatorProfile(operatorName: string, signal: AbortSignal): Promise<TrrcOperatorProfile | null> {
   const params = new URLSearchParams({
     "searchArgs.operatorNameArg": operatorName.trim(),
     "pager.offset": "0",
@@ -56,7 +56,7 @@ async function _fetchTrrcOperatorProfile(operatorName: string, _signal: AbortSig
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)" },
     body: params.toString(),
-    signal: AbortSignal.timeout(60_000),
+    signal, // use the signal passed by withTrrcRetry — was previously ignored in favor of a longer hardcoded timeout
   });
   if (!res.ok) return null;
   return parseP5Html(await res.text());
@@ -70,7 +70,7 @@ export async function fetchTrrcOperatorProfile(operatorName: string): Promise<Tr
   if (!operatorName.trim()) return null;
   // Single attempt — internal retries here, stacked with fetchTrrcAnnualProductionBestOf's
   // own sequential oil+gas calls, could push pull_inspections past Vercel's 300s maxDuration.
-  return withTrrcRetry(sig => _fetchTrrcOperatorProfile(operatorName, sig), null, { retries: 0 });
+  return withTrrcRetry(sig => _fetchTrrcOperatorProfile(operatorName, sig), null, { retries: 0, timeout: 25_000 });
 }
 
 function parseP5Html(html: string): TrrcOperatorProfile | null {
@@ -138,7 +138,7 @@ export type TrrcAnnualProduction = {
   cum_gas_mcf: number;
 };
 
-async function _fetchTrrcAnnualProduction(distCode: string, leaseNo: string, reportType: "O" | "G", _signal: AbortSignal): Promise<TrrcAnnualProduction | null> {
+async function _fetchTrrcAnnualProduction(distCode: string, leaseNo: string, reportType: "O" | "G", signal: AbortSignal): Promise<TrrcAnnualProduction | null> {
   const params = new URLSearchParams({
     "searchArgs.districtCodeArg": distCode,
     "searchArgs.leaseNumberArg":  leaseNo,
@@ -150,7 +150,7 @@ async function _fetchTrrcAnnualProduction(distCode: string, leaseNo: string, rep
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (compatible; MineralFlow-Diligence/1.0)" },
     body: params.toString(),
-    signal: AbortSignal.timeout(60_000),
+    signal, // use the signal passed by withTrrcRetry — was previously ignored in favor of a longer hardcoded timeout
   });
   if (!res.ok) return null;
   return parseH15Html(await res.text(), distCode, leaseNo);
@@ -166,7 +166,7 @@ export async function fetchTrrcAnnualProduction(
   reportType: "O" | "G" = "O",
 ): Promise<TrrcAnnualProduction | null> {
   if (!distCode || !leaseNo) return null;
-  return withTrrcRetry(sig => _fetchTrrcAnnualProduction(distCode, leaseNo, reportType, sig), null, { retries: 0 });
+  return withTrrcRetry(sig => _fetchTrrcAnnualProduction(distCode, leaseNo, reportType, sig), null, { retries: 0, timeout: 25_000 });
 }
 
 /**

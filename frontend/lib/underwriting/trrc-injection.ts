@@ -50,7 +50,7 @@ async function _fetchTrrcInjectionByApi(api10: string, signal: AbortSignal): Pro
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
     body: params.toString(),
-    signal: AbortSignal.timeout(60_000),
+    signal, // use the signal passed by withTrrcRetry — was previously ignored in favor of a longer hardcoded timeout
   });
   if (!res.ok) return [];
   return parseInjectionHtml(await res.text(), api10);
@@ -60,7 +60,7 @@ export async function fetchTrrcInjectionByApi(api10: string): Promise<TrrcInject
   // Single attempt — stream/route.ts already fans this out across multiple
   // APIs concurrently plus an operator+county fallback. Internal retries here
   // tripled worst-case latency, which could blow past Vercel's 300s maxDuration.
-  return withTrrcRetry(sig => _fetchTrrcInjectionByApi(api10, sig), [], { retries: 0 });
+  return withTrrcRetry(sig => _fetchTrrcInjectionByApi(api10, sig), [], { retries: 0, timeout: 25_000 });
 }
 
 async function _fetchTrrcInjectionByOperator(operatorName: string, county: string, signal: AbortSignal): Promise<TrrcInjectionRecord[]> {
@@ -75,7 +75,7 @@ async function _fetchTrrcInjectionByOperator(operatorName: string, county: strin
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0" },
     body: params.toString(),
-    signal: AbortSignal.timeout(60_000),
+    signal, // use the signal passed by withTrrcRetry — was previously ignored in favor of a longer hardcoded timeout
   });
   if (!res.ok) return [];
   return parseInjectionHtml(await res.text(), null);
@@ -85,7 +85,7 @@ async function _fetchTrrcInjectionByOperator(operatorName: string, county: strin
  * Look up SWD / injection wells by operator + county.
  */
 export async function fetchTrrcInjectionByOperator(operatorName: string, county: string): Promise<TrrcInjectionRecord[]> {
-  return withTrrcRetry(sig => _fetchTrrcInjectionByOperator(operatorName, county, sig), [], { retries: 0 });
+  return withTrrcRetry(sig => _fetchTrrcInjectionByOperator(operatorName, county, sig), [], { retries: 0, timeout: 25_000 });
 }
 
 // ─── HTML parser ──────────────────────────────────────────────────────────────
