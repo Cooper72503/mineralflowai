@@ -244,8 +244,162 @@ Return ONLY valid JSON with this exact structure (no markdown, no commentary):
 
 // ─── Main extraction function ─────────────────────────────────────────────────
 
-const MAX_CHARS_PER_DOC = 24_000;
-const MAX_TOTAL_CHARS   = 96_000;
+// Per-chunk limit: gpt-4o supports 128k context tokens (~500k chars); we use 80k
+// to leave headroom for the system prompt and output tokens.
+const CHUNK_SIZE    = 80_000;
+const CHUNK_OVERLAP = 2_000;  // overlap between adjacent chunks so values at boundaries aren't lost
+
+function chunkText(text: string): string[] {
+  if (text.length <= CHUNK_SIZE) return [text];
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    chunks.push(text.slice(start, start + CHUNK_SIZE));
+    start += CHUNK_SIZE - CHUNK_OVERLAP;
+  }
+  return chunks;
+}
+
+function normalizeExtraction(parsed: DocumentExtractionResult): DocumentExtractionResult {
+  return {
+    operator_name: parsed.operator_name ?? null,
+    lease_name: parsed.lease_name ?? null,
+    county: parsed.county ?? null,
+    state: parsed.state ?? null,
+    api_numbers: Array.isArray(parsed.api_numbers) ? parsed.api_numbers : [],
+    rrc_lease_numbers: Array.isArray(parsed.rrc_lease_numbers) ? parsed.rrc_lease_numbers : [],
+    production_months: Array.isArray(parsed.production_months) ? parsed.production_months : [],
+    loe_statements: Array.isArray(parsed.loe_statements) ? parsed.loe_statements : [],
+    electricity_cost_monthly: parsed.electricity_cost_monthly ?? null,
+    chemical_cost_monthly: parsed.chemical_cost_monthly ?? null,
+    labor_cost_monthly: parsed.labor_cost_monthly ?? null,
+    disposal_cost_monthly: parsed.disposal_cost_monthly ?? null,
+    compression_cost_monthly: parsed.compression_cost_monthly ?? null,
+    workover_events: Array.isArray(parsed.workover_events) ? parsed.workover_events : [],
+    equipment_items: Array.isArray(parsed.equipment_items) ? parsed.equipment_items : [],
+    inactive_well_mentions: Array.isArray(parsed.inactive_well_mentions) ? parsed.inactive_well_mentions : [],
+    bond_amount_usd: parsed.bond_amount_usd ?? null,
+    bond_type: parsed.bond_type ?? null,
+    bond_number: parsed.bond_number ?? null,
+    bonding_company: parsed.bonding_company ?? null,
+    violation_mentions: Array.isArray(parsed.violation_mentions) ? parsed.violation_mentions : [],
+    injection_well_mentions: Array.isArray(parsed.injection_well_mentions) ? parsed.injection_well_mentions : [],
+    ownership_records: Array.isArray(parsed.ownership_records) ? parsed.ownership_records : [],
+    reserve_report_present: !!parsed.reserve_report_present,
+    reserve_pv10: parsed.reserve_pv10 ?? null,
+    run_tickets_present: !!parsed.run_tickets_present,
+    purchaser_statements_present: !!parsed.purchaser_statements_present,
+    water_cut_pct: parsed.water_cut_pct ?? null,
+    completion_data: parsed.completion_data ?? null,
+    operator_notes: Array.isArray(parsed.operator_notes) ? parsed.operator_notes : [],
+  };
+}
+
+// Merge multiple extraction results (from chunks of the same doc, or across docs).
+// Strategy: deduplicate arrays by key, OR booleans, first-non-null for scalars.
+function mergeExtractionResults(results: DocumentExtractionResult[]): DocumentExtractionResult | null {
+  const valid = results.filter(Boolean);
+  if (valid.length === 0) return null;
+  if (valid.length === 1) return valid[0];
+
+  function firstNonNull<T>(...vals: (T | null | undefined)[]): T | null {
+    for (const v of vals) if (v != null) return v;
+    return null;
+  }
+
+  // Merge production_months — deduplicate by period, prefer entry with more non-null fields
+  const prodMap = new Map<string, DocumentExtractionResult["production_months"][0]>();
+  for (const r of valid) {
+    for (const pm of r.production_months) {
+      const key = `${pm.period}|${pm.well_name ?? ""}`;
+      const existing = prodMap.get(key);
+      if (!existing) { prodMap.set(key, pm); continue; }
+      const score = (p: typeof pm) => [p.oil_bbl, p.gas_mcf, p.water_bbl, p.gross_revenue_usd].filter(v => v != null).length;
+      if (score(pm) > score(existing)) prodMap.set(key, pm);
+    }
+  }
+
+  // Merge loe_statements — deduplicate by period
+  const loeMap = new Map<string, DocumentExtractionResult["loe_statements"][0]>();
+  for (const r of valid) {
+    for (const stmt of r.loe_statements) {
+      if (!loeMap.has(stmt.period)) loeMap.set(stmt.period, stmt);
+    }
+  }
+
+  // Deduplicate simple string arrays
+  const mergeStrArr = (...arrs: string[][]): string[] => Array.from(new Set(arrs.flat()));
+
+  // Merge other arrays (concat, no deduplication — duplicates handled downstream)
+  const concat = <T>(key: keyof DocumentExtractionResult): T[] =>
+    valid.flatMap(r => (r[key] as T[]) ?? []);
+
+  const merged: DocumentExtractionResult = {
+    operator_name:              firstNonNull(...valid.map(r => r.operator_name)),
+    lease_name:                 firstNonNull(...valid.map(r => r.lease_name)),
+    county:                     firstNonNull(...valid.map(r => r.county)),
+    state:                      firstNonNull(...valid.map(r => r.state)),
+    api_numbers:                mergeStrArr(...valid.map(r => r.api_numbers)),
+    rrc_lease_numbers:          mergeStrArr(...valid.map(r => r.rrc_lease_numbers)),
+    production_months:          Array.from(prodMap.values()),
+    loe_statements:             Array.from(loeMap.values()),
+    electricity_cost_monthly:   firstNonNull(...valid.map(r => r.electricity_cost_monthly)),
+    chemical_cost_monthly:      firstNonNull(...valid.map(r => r.chemical_cost_monthly)),
+    labor_cost_monthly:         firstNonNull(...valid.map(r => r.labor_cost_monthly)),
+    disposal_cost_monthly:      firstNonNull(...valid.map(r => r.disposal_cost_monthly)),
+    compression_cost_monthly:   firstNonNull(...valid.map(r => r.compression_cost_monthly)),
+    workover_events:            concat("workover_events"),
+    equipment_items:            concat("equipment_items"),
+    inactive_well_mentions:     concat("inactive_well_mentions"),
+    bond_amount_usd:            firstNonNull(...valid.map(r => r.bond_amount_usd)),
+    bond_type:                  firstNonNull(...valid.map(r => r.bond_type)),
+    bond_number:                firstNonNull(...valid.map(r => r.bond_number)),
+    bonding_company:            firstNonNull(...valid.map(r => r.bonding_company)),
+    violation_mentions:         concat("violation_mentions"),
+    injection_well_mentions:    concat("injection_well_mentions"),
+    ownership_records:          concat("ownership_records"),
+    reserve_report_present:     valid.some(r => r.reserve_report_present),
+    reserve_pv10:               firstNonNull(...valid.map(r => r.reserve_pv10)),
+    run_tickets_present:        valid.some(r => r.run_tickets_present),
+    purchaser_statements_present: valid.some(r => r.purchaser_statements_present),
+    water_cut_pct:              firstNonNull(...valid.map(r => r.water_cut_pct)),
+    completion_data:            firstNonNull(...valid.map(r => r.completion_data)),
+    operator_notes:             Array.from(new Set(valid.flatMap(r => r.operator_notes))),
+  };
+  return merged;
+}
+
+async function extractOneChunk(
+  client: OpenAI,
+  model: string,
+  label: string,
+  chunkText: string,
+): Promise<DocumentExtractionResult | null> {
+  try {
+    const completion = await client.chat.completions.create({
+      model,
+      temperature: 0.1,
+      max_tokens: 16_000,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user",   content: `=== DOCUMENT: ${label} ===\n${chunkText}` },
+      ],
+    });
+
+    const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+    if (!raw) {
+      console.error(`[underwriting-extraction] empty response for "${label}"`);
+      return null;
+    }
+
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const parsed = JSON.parse(cleaned) as DocumentExtractionResult;
+    return validateAndSanitizeExtraction(normalizeExtraction(parsed));
+  } catch (err) {
+    console.error(`[underwriting-extraction] chunk "${label}" failed:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
 
 export async function extractUnderwritingDataFromDocuments(
   documents: { filename: string; text: string; doc_type?: string }[],
@@ -253,81 +407,36 @@ export async function extractUnderwritingDataFromDocuments(
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || documents.length === 0) return null;
 
-  // Build the user message — concatenate docs up to token budget
-  const parts: string[] = [];
-  let totalChars = 0;
+  const client = new OpenAI({ apiKey, timeout: 90_000 });
+  const model  = process.env.OPENAI_OCR_MODEL ?? "gpt-4o";
+
+  // Extract each document independently, chunking large ones.
+  // All chunks run concurrently (bounded by OpenAI rate limits on their end).
+  const chunkPromises: Promise<DocumentExtractionResult | null>[] = [];
+
   for (const doc of documents) {
-    if (totalChars >= MAX_TOTAL_CHARS) break;
-    const trimmed = doc.text.slice(0, MAX_CHARS_PER_DOC);
-    parts.push(`=== DOCUMENT: ${doc.filename}${doc.doc_type ? ` [${doc.doc_type}]` : ""} ===\n${trimmed}`);
-    totalChars += trimmed.length;
-  }
-  const userMessage = parts.join("\n\n");
-
-  try {
-    const client = new OpenAI({ apiKey, timeout: 45_000 });
-    const model = process.env.OPENAI_OCR_MODEL ?? "gpt-4o-mini";
-
-    const completion = await client.chat.completions.create({
-      model,
-      temperature: 0.1,
-      max_tokens: 8000,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
+    const chunks = chunkText(doc.text);
+    const baseLabel = `${doc.filename}${doc.doc_type ? ` [${doc.doc_type}]` : ""}`;
+    chunks.forEach((chunk, i) => {
+      const label = chunks.length > 1 ? `${baseLabel} — Part ${i + 1}/${chunks.length}` : baseLabel;
+      chunkPromises.push(extractOneChunk(client, model, label, chunk));
     });
+  }
 
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "";
-    if (!raw) return null;
+  console.log(`[underwriting-extraction] running ${chunkPromises.length} extraction call(s) across ${documents.length} document(s)`);
 
-    const cleaned = raw
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/i, "")
-      .trim();
+  const settled = await Promise.allSettled(chunkPromises);
+  const results: DocumentExtractionResult[] = [];
+  for (const r of settled) {
+    if (r.status === "fulfilled" && r.value != null) results.push(r.value);
+  }
 
-    const parsed = JSON.parse(cleaned) as DocumentExtractionResult;
-
-    // Normalize raw AI output into strongly-typed result
-    const result: DocumentExtractionResult = {
-      operator_name: parsed.operator_name ?? null,
-      lease_name: parsed.lease_name ?? null,
-      county: parsed.county ?? null,
-      state: parsed.state ?? null,
-      api_numbers: Array.isArray(parsed.api_numbers) ? parsed.api_numbers : [],
-      rrc_lease_numbers: Array.isArray(parsed.rrc_lease_numbers) ? parsed.rrc_lease_numbers : [],
-      production_months: Array.isArray(parsed.production_months) ? parsed.production_months : [],
-      loe_statements: Array.isArray(parsed.loe_statements) ? parsed.loe_statements : [],
-      electricity_cost_monthly: parsed.electricity_cost_monthly ?? null,
-      chemical_cost_monthly: parsed.chemical_cost_monthly ?? null,
-      labor_cost_monthly: parsed.labor_cost_monthly ?? null,
-      disposal_cost_monthly: parsed.disposal_cost_monthly ?? null,
-      compression_cost_monthly: parsed.compression_cost_monthly ?? null,
-      workover_events: Array.isArray(parsed.workover_events) ? parsed.workover_events : [],
-      equipment_items: Array.isArray(parsed.equipment_items) ? parsed.equipment_items : [],
-      inactive_well_mentions: Array.isArray(parsed.inactive_well_mentions) ? parsed.inactive_well_mentions : [],
-      bond_amount_usd: parsed.bond_amount_usd ?? null,
-      bond_type: parsed.bond_type ?? null,
-      bond_number: parsed.bond_number ?? null,
-      bonding_company: parsed.bonding_company ?? null,
-      violation_mentions: Array.isArray(parsed.violation_mentions) ? parsed.violation_mentions : [],
-      injection_well_mentions: Array.isArray(parsed.injection_well_mentions) ? parsed.injection_well_mentions : [],
-      ownership_records: Array.isArray(parsed.ownership_records) ? parsed.ownership_records : [],
-      reserve_report_present: !!parsed.reserve_report_present,
-      reserve_pv10: parsed.reserve_pv10 ?? null,
-      run_tickets_present: !!parsed.run_tickets_present,
-      purchaser_statements_present: !!parsed.purchaser_statements_present,
-      water_cut_pct: parsed.water_cut_pct ?? null,
-      completion_data: parsed.completion_data ?? null,
-      operator_notes: Array.isArray(parsed.operator_notes) ? parsed.operator_notes : [],
-    };
-
-    // Sanitise AFTER parsing — catches AI hallucination / decimal-point errors
-    return validateAndSanitizeExtraction(result);
-  } catch (err) {
-    console.warn("[underwriting-extraction] failed:", err instanceof Error ? err.message : err);
+  if (results.length === 0) {
+    console.error("[underwriting-extraction] all chunks failed — returning null");
     return null;
   }
+
+  return mergeExtractionResults(results);
 }
 
 // ─── Post-extraction sanitisation ────────────────────────────────────────────
