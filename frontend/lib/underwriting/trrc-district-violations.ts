@@ -146,27 +146,40 @@ function splitLine(line: string, delimiter: string): string[] {
  * Handles pipe, comma, or tab delimiters.
  * Returns { headers, rows } where rows is one object per data line.
  */
-function parseDistrictFile(raw: string): {
-  headers: string[];
-  rows: Record<string, string>[];
-} {
+/**
+ * Parse a district violation file and filter to matching rows in a single pass.
+ *
+ * District files run 3+ MB with tens of thousands of rows, but a subject lease
+ * typically matches a handful. Materializing every row into a Record<string,string>
+ * array before filtering (the previous approach) held the entire district's parsed
+ * rows in memory at once — on top of everything else running concurrently in the
+ * pull_inspections step, this was a likely contributor to the function instance
+ * being OOM-killed by Vercel mid-run. Filtering inline lets each row object become
+ * garbage immediately after the match check instead of all being retained together.
+ */
+function parseAndFilterDistrictFile(
+  raw: string,
+  isMatch: (row: Record<string, string>) => boolean,
+): { totalRows: number; matching: TrrcViolation[] } {
   const lines = raw.replace(/\r/g, "").split("\n");
   const nonEmpty = lines.filter(l => l.trim().length > 0);
-  if (nonEmpty.length < 2) return { headers: [], rows: [] };
+  if (nonEmpty.length < 2) return { totalRows: 0, matching: [] };
 
   const delimiter = detectDelimiter(nonEmpty[0]);
   const headers   = splitLine(nonEmpty[0], delimiter)
     .map(h => h.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_"));
 
-  const rows: Record<string, string>[] = [];
+  let totalRows = 0;
+  const matching: TrrcViolation[] = [];
   for (let i = 1; i < nonEmpty.length; i++) {
     const cells = splitLine(nonEmpty[i], delimiter);
     if (cells.every(c => !c)) continue;
+    totalRows++;
     const obj: Record<string, string> = {};
     headers.forEach((h, idx) => { obj[h] = cells[idx] ?? ""; });
-    rows.push(obj);
+    if (isMatch(obj)) matching.push(rowToViolation(obj));
   }
-  return { headers, rows };
+  return { totalRows, matching };
 }
 
 /**
@@ -586,10 +599,45 @@ export async function fetchDistrictViolations(
   // ── 3. Hash the raw artifact ──────────────────────────────────────────────
   const rawSha256 = crypto.createHash("sha256").update(rawText, "utf8").digest("hex");
 
-  // ── 4. Parse the file ────────────────────────────────────────────────────
-  let parsed: { headers: string[]; rows: Record<string, string>[] };
+  // ── 4. Parse + filter the file in one pass (see parseAndFilterDistrictFile
+  //      doc comment for why this avoids materializing every row at once) ───
+  // Match criteria (any of):
+  //   a) Exact lease number match
+  //   b) API number digits match any provided API (or its county prefix)
+  //   c) Operator name fuzzy match (only when no lease number)
+  const leaseNoTrim     = leaseNo?.replace(/\s/g, "") ?? null;
+  const apiDigitSets    = apiNumbers.map(a => apiDigits(a)).filter(a => a.length >= 8);
+  const opNormalized    = operatorName ? normalizeOp(operatorName) : null;
+
+  const isRowMatch = (row: Record<string, string>): boolean => {
+    const rowLeaseNo  = col(row, ["oil_lease_gas_well_id", "lease_no", "lease_number", "lsno", "lease_gas_well_id", "well_id"]).replace(/\s/g, "");
+    const rowApiNo    = apiDigits(col(row, ["api_no", "api_number", "api"]));
+    const rowOpName   = normalizeOp(col(row, ["operator_name", "oper_name", "operator"]));
+
+    // a) Exact lease number
+    if (leaseNoTrim && rowLeaseNo && rowLeaseNo === leaseNoTrim) return true;
+
+    // b) API number match — compare full 10-digit or at least 8-digit prefix
+    if (rowApiNo.length >= 8) {
+      for (const apiD of apiDigitSets) {
+        if (rowApiNo === apiD || rowApiNo.startsWith(apiD.slice(0, 8))) return true;
+      }
+    }
+
+    // c) Operator fuzzy match (only when lease number not provided, to avoid over-matching)
+    if (!leaseNoTrim && opNormalized && rowOpName.length >= 4) {
+      if (rowOpName.includes(opNormalized) || opNormalized.includes(rowOpName)) return true;
+    }
+
+    return false;
+  };
+
+  let totalRows: number;
+  let matching: TrrcViolation[];
   try {
-    parsed = parseDistrictFile(rawText);
+    const result = parseAndFilterDistrictFile(rawText, isRowMatch);
+    totalRows = result.totalRows;
+    matching  = result.matching;
   } catch {
     return {
       status: "parse_error",
@@ -605,7 +653,6 @@ export async function fetchDistrictViolations(
     };
   }
 
-  const totalRows = parsed.rows.length;
   if (totalRows === 0) {
     return {
       status: "parse_error",
@@ -619,49 +666,6 @@ export async function fetchDistrictViolations(
       evidence_note: `District ${normalizedDist} violation file parsed but contained 0 data rows. Compliance UNVERIFIED.`,
       query_timestamp: timestamp,
     };
-  }
-
-  // ── 5. Filter rows to subject asset ──────────────────────────────────────
-  // Match criteria (any of):
-  //   a) Exact lease number match
-  //   b) API number digits match any provided API (or its county prefix)
-  //   c) Operator name fuzzy match (only when no lease number)
-  const leaseNoTrim     = leaseNo?.replace(/\s/g, "") ?? null;
-  const apiDigitSets    = apiNumbers.map(a => apiDigits(a)).filter(a => a.length >= 8);
-  const opNormalized    = operatorName ? normalizeOp(operatorName) : null;
-
-  const matching: TrrcViolation[] = [];
-
-  for (const row of parsed.rows) {
-    const rowLeaseNo  = col(row, ["oil_lease_gas_well_id", "lease_no", "lease_number", "lsno", "lease_gas_well_id", "well_id"]).replace(/\s/g, "");
-    const rowApiNo    = apiDigits(col(row, ["api_no", "api_number", "api"]));
-    const rowOpName   = normalizeOp(col(row, ["operator_name", "oper_name", "operator"]));
-
-    let isMatch = false;
-
-    // a) Exact lease number
-    if (leaseNoTrim && rowLeaseNo && rowLeaseNo === leaseNoTrim) {
-      isMatch = true;
-    }
-
-    // b) API number match — compare full 10-digit or at least 8-digit prefix
-    if (!isMatch && rowApiNo.length >= 8) {
-      for (const apiD of apiDigitSets) {
-        if (rowApiNo === apiD || rowApiNo.startsWith(apiD.slice(0, 8))) {
-          isMatch = true;
-          break;
-        }
-      }
-    }
-
-    // c) Operator fuzzy match (only when lease number not provided, to avoid over-matching)
-    if (!isMatch && !leaseNoTrim && opNormalized && rowOpName.length >= 4) {
-      if (rowOpName.includes(opNormalized) || opNormalized.includes(rowOpName)) {
-        isMatch = true;
-      }
-    }
-
-    if (isMatch) matching.push(rowToViolation(row));
   }
 
   const matchCount = matching.length;
