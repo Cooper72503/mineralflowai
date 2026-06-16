@@ -773,10 +773,17 @@ async function runPipeline(
             try { addAll(await fetchTrrcViolationsByLease(leaseNoForViolations)); } catch { /* network error */ }
           }
 
-          // S1b — per-API fallback when S1 found nothing
+          // S1b — per-API fallback when S1 found nothing.
+          // Run concurrently — sequential awaits here previously meant a slow/
+          // unresponsive TRRC server multiplied its per-call retry timeout
+          // (~184s worst case with withTrrcRetry) across up to 4 APIs in a row,
+          // which looked exactly like an indefinite hang to anyone watching the UI.
           if (merged.length === 0) {
-            for (const api of apiNumbers.slice(0, 4)) {
-              try { addAll(await fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations)); } catch { /* continue */ }
+            const results = await Promise.allSettled(
+              apiNumbers.slice(0, 4).map(api => fetchTrrcViolations(api, distCodeForViolations, leaseNoForViolations))
+            );
+            for (const r of results) {
+              if (r.status === "fulfilled") addAll(r.value);
             }
           }
 
@@ -800,8 +807,15 @@ async function runPipeline(
             }
           };
 
-          for (const api of apiNumbers.slice(0, 6)) {
-            try { addAll(await fetchTrrcInjectionByApi(api)); } catch { /* continue */ }
+          // Run concurrently — sequential awaits here previously meant a slow/
+          // unresponsive TRRC server multiplied its per-call retry timeout
+          // (~184s worst case with withTrrcRetry) across up to 6 APIs in a row,
+          // which looked exactly like an indefinite hang to anyone watching the UI.
+          {
+            const results = await Promise.allSettled(apiNumbers.slice(0, 6).map(api => fetchTrrcInjectionByApi(api)));
+            for (const r of results) {
+              if (r.status === "fulfilled") addAll(r.value);
+            }
           }
 
           if (merged.length === 0 && operatorName && county) {
@@ -953,17 +967,23 @@ async function runPipeline(
       // in Pass 1 (covers timeouts and partial batch failures).
       const coveredApis = new Set(results.map(r => r.api?.replace(/\D/g, "")));
       const { fetchTrrcCompletionByApi } = await import("@/lib/wells/trrc-completions");
-      for (const api of allLeaseApis) {
-        const api10 = api.replace(/\D/g, "");
-        if (coveredApis.has(api10)) continue; // already have a result for this API
-        try {
-          const r = await withTimeout(
-            fetchTrrcCompletionByApi(api),
-            25_000,
-            `TRRC completion API ${api} (retry)`,
-          );
-          if (r) results.push(r);
-        } catch { /* per-API timeout — continue to next */ }
+      const retryApis = allLeaseApis.filter(api => !coveredApis.has(api.replace(/\D/g, "")));
+      const RETRY_CONCURRENCY = 8;
+      const retryQueue = [...retryApis];
+      while (retryQueue.length > 0) {
+        const batch = retryQueue.splice(0, RETRY_CONCURRENCY);
+        const batchResults = await Promise.allSettled(
+          batch.map(api =>
+            withTimeout(
+              fetchTrrcCompletionByApi(api),
+              25_000,
+              `TRRC completion API ${api} (retry)`,
+            ),
+          ),
+        );
+        for (const r of batchResults) {
+          if (r.status === "fulfilled" && r.value) results.push(r.value);
+        }
       }
 
       // Run imaged records, P-5, proration, and inactive-well queries in parallel
