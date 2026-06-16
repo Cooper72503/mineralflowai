@@ -558,8 +558,28 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   // mergedWells replaces trrcWells for every production VALUE downstream
   // (monthly_rows, latest_monthly_oil_bbl, cum_oil_bbl) — trrcWells itself is
   // still used for identity matching (api/lease_number), which doesn't change.
+  // Build a set of normalized name tokens for the subject lease.
+  // When the uploaded document package contains multiple leases (e.g. a combined
+  // run statement for J J Steele AND Teagarden), the extraction returns production
+  // for all of them. Without filtering, non-subject lease production inflates
+  // the subject's monthly numbers. We filter by well_name match; entries with no
+  // well_name are always included (single-lease docs that didn't set a name).
+  const _normStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const subjectTokens = new Set<string>();
+  if (input.lease_name) subjectTokens.add(_normStr(input.lease_name));
+  for (const w of trrcWells) {
+    if (w.well_name) subjectTokens.add(_normStr(w.well_name));
+  }
+
   const docPeriodMap = new Map<string, { oil: number; gas: number; water: number }>();
   for (const pm of extracted?.production_months ?? []) {
+    if (pm.well_name && subjectTokens.size > 0) {
+      const pmNorm = _normStr(pm.well_name);
+      const matches = Array.from(subjectTokens).some(
+        t => pmNorm.includes(t) || t.includes(pmNorm),
+      );
+      if (!matches) continue;
+    }
     const existing = docPeriodMap.get(pm.period) ?? { oil: 0, gas: 0, water: 0 };
     existing.oil   += pm.oil_bbl   ?? 0;
     existing.gas   += pm.gas_mcf   ?? 0;
