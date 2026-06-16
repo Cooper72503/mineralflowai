@@ -60,7 +60,13 @@ export async function withTrrcRetry<T>(
       return result;
     } catch (err) {
       clearTimeout(timer);
-      if (attempt === retries) return fallback;
+      if (attempt === retries) {
+        console.error(
+          `[withTrrcRetry] giving up after attempt ${attempt + 1}/${retries + 1}:`,
+          err instanceof Error ? `${err.name}: ${err.message}` : err,
+        );
+        return fallback;
+      }
       // Only retry on transient connectivity / timeout errors.
       // Parse errors, type errors from our own code, etc. → bail fast.
       const isTransient =

@@ -279,7 +279,8 @@ async function initIceSession(): Promise<IceSession | null> {
     if (!jsessionId || !viewState) return null;
     const ids = extractIceIds(html);
     return { jsessionId, viewState, ids };
-  } catch {
+  } catch (err) {
+    console.error("[initIceSession]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 }
@@ -323,7 +324,8 @@ async function activateViolationsTab(session: IceSession): Promise<string | null
     if (!res.ok) return null;
     const xml = await res.text();
     return extractViewState(xml);
-  } catch {
+  } catch (err) {
+    console.error("[activateViolationsTab]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 }
@@ -412,7 +414,8 @@ async function fetchViolationsIce(
     if (!resultsHtml) return null;
 
     return parseViolResultsHtml(resultsHtml);
-  } catch {
+  } catch (err) {
+    console.error("[trrc-compliance]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 }
@@ -507,7 +510,8 @@ async function _violationsByLease(leaseNo: string): Promise<TrrcViolation[] | nu
     const resultsHtml = extractPartialUpdate(xml, `IceQueryForm:${tabViewId}:violResults`);
     if (!resultsHtml) return [];
     return parseViolResultsHtml(resultsHtml);
-  } catch {
+  } catch (err) {
+    console.error("[trrc-compliance]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 }
@@ -578,7 +582,8 @@ async function _violationsByOperator(operatorNo: string): Promise<TrrcViolation[
     const resultsHtml = extractPartialUpdate(xml, `IceQueryForm:${tabViewId}:violResults`);
     if (!resultsHtml) return [];
     return parseViolResultsHtml(resultsHtml);
-  } catch {
+  } catch (err) {
+    console.error("[trrc-compliance]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 }

@@ -385,7 +385,8 @@ async function downloadFileFromMftShare(
       const anyComp = html.match(/'(fileTable:\d+:[^']+)'/);
       if (anyComp) fileCompId = anyComp[1];
     }
-  } catch {
+  } catch (err) {
+    console.error("[downloadFileFromMftShare step1 GET]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 

@@ -238,7 +238,8 @@ async function initInspectionSession(): Promise<IceSession | null> {
     const { tabViewId, inspBtnId } = extractIceIds(html);
     const jsessionId = extractSessionId(res.headers);
     return { viewState, tabViewId, inspBtnId, cookieHeader: jsessionId ? `JSESSIONID=${jsessionId}` : "" };
-  } catch {
+  } catch (err) {
+    console.error("[initInspectionSession]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 }
@@ -285,7 +286,8 @@ async function postInspectionByApi(api10: string, session: IceSession): Promise<
     const resultsHtml = extractPartialUpdate(xml, `IceQueryForm:${tabViewId}:inspResults`);
     if (!resultsHtml) return [];
     return parseIceResultsHtml(resultsHtml, api10);
-  } catch {
+  } catch (err) {
+    console.error("[postInspectionByApi]", err instanceof Error ? `${err.name}: ${err.message}` : err);
     return [];
   }
 }
