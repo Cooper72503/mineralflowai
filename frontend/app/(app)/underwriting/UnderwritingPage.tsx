@@ -6390,6 +6390,8 @@ type PipelineStepState = {
   usedFallback?: boolean;
   fallbackReason?: string;
   durationMs?: number;
+  /** Client-side timestamp (Date.now()) when this step entered "running" — drives the live elapsed-time display. */
+  startedAt?: number;
 };
 
 const PIPELINE_STEP_LABELS: Record<string, string> = {
@@ -6429,6 +6431,15 @@ export default function UnderwritingPage() {
   // Full underwriting pipeline progress
   const [pipelineSteps, setPipelineSteps] = useState<PipelineStepState[]>(INITIAL_PIPELINE);
   const streamAbortRef = useRef<AbortController | null>(null);
+  // Ticking clock that drives the live "Working… Ns" elapsed-time display below —
+  // without this, a running step shows no indication of whether it's progressing
+  // or has actually stalled.
+  const [pipelineClockNow, setPipelineClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!loading) return;
+    const interval = setInterval(() => setPipelineClockNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [loading]);
   // Saved report state
   const [savedReportId, setSavedReportId]   = useState<string | null>(null);
   const [saveStatus, setSaveStatus]         = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -6585,7 +6596,9 @@ export default function UnderwritingPage() {
     setPipelineSteps(INITIAL_PIPELINE);
 
     const updateStep = (id: string, patch: Partial<PipelineStepState>) => {
-      setPipelineSteps(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+      setPipelineSteps(prev => prev.map(s => s.id === id
+        ? { ...s, ...patch, startedAt: patch.status === "running" ? Date.now() : s.startedAt }
+        : s));
     };
 
     try {
@@ -7013,7 +7026,9 @@ export default function UnderwritingPage() {
                             </div>
                             {isRunning && (
                               <div style={{ fontSize: "0.68rem", color: COLORS.accent, marginTop: 1 }}>
-                                Working…
+                                Working… {step.startedAt != null
+                                  ? `${Math.max(0, Math.floor((pipelineClockNow - step.startedAt) / 1000))}s`
+                                  : "0s"}
                               </div>
                             )}
                             {step.detail && (isComplete || isFailed) && (
