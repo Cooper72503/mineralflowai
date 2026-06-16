@@ -547,6 +547,42 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     leaseWellInventory   = null,
   } = args;
 
+  // ── Merge uploaded run tickets / purchaser statements into TRRC production ──
+  // Documents are the primary source for any month they cover — they're signed,
+  // metered records of actual volumes sold, stronger evidence than TRRC's
+  // self-reported (often rounded, lagged, or mis-allocated) monthly filings.
+  // TRRC fills in any month the documents don't cover. The existing
+  // contradiction-engine cross-check (sellerClaimedMonthlyBbl vs
+  // trrcStabilizedRateBbl, computed later) still runs so a material disagreement
+  // between the two sources is surfaced, not silently papered over.
+  // mergedWells replaces trrcWells for every production VALUE downstream
+  // (monthly_rows, latest_monthly_oil_bbl, cum_oil_bbl) — trrcWells itself is
+  // still used for identity matching (api/lease_number), which doesn't change.
+  const docPeriodMap = new Map<string, { oil: number; gas: number; water: number }>();
+  for (const pm of extracted?.production_months ?? []) {
+    const existing = docPeriodMap.get(pm.period) ?? { oil: 0, gas: 0, water: 0 };
+    existing.oil   += pm.oil_bbl   ?? 0;
+    existing.gas   += pm.gas_mcf   ?? 0;
+    existing.water += pm.water_bbl ?? 0;
+    docPeriodMap.set(pm.period, existing);
+  }
+
+  const mergedWells: TrrcWellProduction[] = trrcWells.map(w => {
+    const trrcRows = w.monthly_rows ?? [];
+    const rows = trrcRows.map(r => {
+      const period = `${r.year}-${String(r.month).padStart(2, "0")}`;
+      const docRow = docPeriodMap.get(period);
+      if (!docRow) return r;
+      return { ...r, oil_bbl: docRow.oil, gas_mcf: docRow.gas, water_bbl: docRow.water };
+    });
+    return {
+      ...w,
+      monthly_rows: rows,
+      latest_monthly_oil_bbl: rows.length > 0 ? rows[rows.length - 1].oil_bbl : w.latest_monthly_oil_bbl,
+      cum_oil_bbl: rows.reduce((s, r) => s + r.oil_bbl, 0),
+    };
+  });
+
   // Is this a Texas well? Used for severance tax rates.
   const resolvedState = (input.state ?? extracted?.state ?? "").toUpperCase().trim();
   const isTexasState  = resolvedState === "TX" || resolvedState === "TEXAS"
@@ -661,9 +697,9 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   };
 
   // ── Production section ────────────────────────────────────────────────────
+  // mergedWells (built above) already has doc-overridden monthly_rows.
 
-  const wellRows: WellProductionRow[] = trrcWells.map(w => {
-    // Build monthly trend from rows if available
+  const wellRows: WellProductionRow[] = mergedWells.map(w => {
     const rows = w.monthly_rows ?? [];
     const oilRows = rows.filter(r => r.oil_bbl > 0);
 
@@ -702,7 +738,17 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       waterCut = (latestRow.water_bbl / (latestRow.oil_bbl + latestRow.water_bbl)) * 100;
     }
 
+    const isDocPeriod = (r: typeof rows[number]) => docPeriodMap.has(`${r.year}-${String(r.month).padStart(2, "0")}`);
+    const overriddenRows = new Set(rows.filter(isDocPeriod));
+    const windowSourced = (windowRows: typeof rows): { source: "uploaded_doc" | "trrc"; note: string } =>
+      windowRows.some(r => overriddenRows.has(r))
+        ? { source: "uploaded_doc", note: "Includes month(s) from uploaded run tickets / purchaser statements, cross-checked against TRRC public record" }
+        : { source: "trrc", note: "Most recent reported month — TRRC data may lag 3–5 months" };
+
     const trrcSource = `TRRC Specific Lease Production Query — Lease ${w.lease_number ?? "?"}, District ${w.district_code ?? "?"}`;
+    const docSource  = "Uploaded run tickets / purchaser statements, cross-checked against TRRC public record";
+    const latestSrc  = windowSourced(latestRow ? [latestRow] : []);
+    const cumOilBbl  = rows.reduce((s, r) => s + r.oil_bbl, 0);
 
     return {
       api: w.api,
@@ -710,33 +756,36 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       lease_number: w.lease_number,
       district_code: w.district_code,
       operator: w.operator,
-      latest_monthly_oil_bbl: dp(w.latest_monthly_oil_bbl, "trrc", "high", trrcSource,
-        "Most recent reported month — TRRC data may lag 3–5 months",
-        TRRC_URLS.production),
-      latest_daily_oil_bbl: w.latest_monthly_oil_bbl > 0
+      latest_monthly_oil_bbl: dp(latestRow?.oil_bbl ?? 0, latestSrc.source, "high",
+        latestSrc.source === "uploaded_doc" ? docSource : trrcSource,
+        latestSrc.note,
+        latestSrc.source === "trrc" ? TRRC_URLS.production : undefined),
+      latest_daily_oil_bbl: (latestRow?.oil_bbl ?? 0) > 0
         ? dp(
-            Math.round((w.latest_monthly_oil_bbl / 30.44) * 10) / 10,
-            "trrc", "high", `${trrcSource} (÷ 30.44 days/month)`,
+            Math.round(((latestRow?.oil_bbl ?? 0) / 30.44) * 10) / 10,
+            latestSrc.source, "high",
+            `${latestSrc.source === "uploaded_doc" ? docSource : trrcSource} (÷ 30.44 days/month)`,
             "BOPD equivalent of latest reported monthly volume",
-            TRRC_URLS.production,
+            latestSrc.source === "trrc" ? TRRC_URLS.production : undefined,
           )
         : missingDp<number>("No oil production reported for latest month"),
       latest_monthly_gas_mcf: latestRow?.gas_mcf != null
-        ? dp(latestRow.gas_mcf, "trrc", "high", trrcSource, undefined, TRRC_URLS.production)
+        ? dp(latestRow.gas_mcf, latestSrc.source, "high", latestSrc.source === "uploaded_doc" ? docSource : trrcSource, undefined,
+            latestSrc.source === "trrc" ? TRRC_URLS.production : undefined)
         : missingDp<number>("Gas not reported on this lease"),
       latest_monthly_water_bbl: missingDp<number>(
         "TRRC production reports do not include water disposition volumes. Request water disposal records from operator."
       ),
       latest_production_month: w.latest_production_month,
       water_cut_pct: waterCut != null
-        ? dp(waterCut, "trrc", "high", trrcSource)
+        ? dp(waterCut, latestSrc.source, "high", latestSrc.source === "uploaded_doc" ? docSource : trrcSource)
         : missingDp<number>("Water volumes unavailable — request water disposition from operator"),
-      three_month_avg_bbl:      avg3  != null ? dp(avg3,  "trrc", "high", trrcSource) : missingDp<number>(),
-      six_month_avg_bbl:        avg6  != null ? dp(avg6,  "trrc", "high", trrcSource) : missingDp<number>(),
-      twelve_month_avg_bbl:     avg12 != null ? dp(avg12, "trrc", "high", trrcSource) : missingDp<number>(),
-      twenty_four_month_avg_bbl: avg24 != null ? dp(avg24, "trrc", "high", trrcSource) : missingDp<number>(),
-      production_trend: dp(trend, "trrc", avg6 ? "medium" : "low", trrcSource),
-      cum_oil_bbl: dp(w.cum_oil_bbl, "trrc", "high", trrcSource),
+      three_month_avg_bbl:      avg3  != null ? dp(avg3,  windowSourced(last3).source,  "high", trrcSource) : missingDp<number>(),
+      six_month_avg_bbl:        avg6  != null ? dp(avg6,  windowSourced(last6).source,  "high", trrcSource) : missingDp<number>(),
+      twelve_month_avg_bbl:     avg12 != null ? dp(avg12, windowSourced(last12).source, "high", trrcSource) : missingDp<number>(),
+      twenty_four_month_avg_bbl: avg24 != null ? dp(avg24, windowSourced(last24).source, "high", trrcSource) : missingDp<number>(),
+      production_trend: dp(trend, windowSourced(last6).source, avg6 ? "medium" : "low", trrcSource),
+      cum_oil_bbl: dp(cumOilBbl, overriddenRows.size > 0 ? "uploaded_doc" : "trrc", "high", trrcSource),
       formation: null,
       perforation_depth_ft: missingDp<number>("Not in TRRC production data"),
       monthly_history: rows.map(r => ({
@@ -754,16 +803,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   let docMonthlyRows: { year: number; month: number; oil_bbl: number; gas_mcf: number; water_bbl: number | null }[] = [];
 
   if (trrcWells.length === 0 && extracted?.production_months && extracted.production_months.length > 0) {
-    // Aggregate all wells per period
-    const byPeriod = new Map<string, { oil: number; gas: number; water: number }>();
-    for (const pm of extracted.production_months) {
-      const existing = byPeriod.get(pm.period) ?? { oil: 0, gas: 0, water: 0 };
-      existing.oil   += pm.oil_bbl   ?? 0;
-      existing.gas   += pm.gas_mcf   ?? 0;
-      existing.water += pm.water_bbl ?? 0;
-      byPeriod.set(pm.period, existing);
-    }
-    const sortedPeriods = Array.from(byPeriod.entries()).sort(([a], [b]) => a.localeCompare(b));
+    // Reuse the same per-period aggregation used above for the TRRC-merge path.
+    const sortedPeriods = Array.from(docPeriodMap.entries()).sort(([a], [b]) => a.localeCompare(b));
 
     docMonthlyRows = sortedPeriods.map(([period, d]) => {
       const [yr, mo] = period.split("-").map(Number);
@@ -832,20 +873,20 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     }
   }
 
-  // Aggregate production — prefer TRRC, fall back to doc data
-  const totalOil = trrcWells.length > 0
-    ? trrcWells.reduce((s, w) => s + w.latest_monthly_oil_bbl, 0)
+  // Aggregate production — prefer docs-merged TRRC, fall back to doc-only data
+  const totalOil = mergedWells.length > 0
+    ? mergedWells.reduce((s, w) => s + w.latest_monthly_oil_bbl, 0)
     : (docMonthlyRows.length > 0 ? (docMonthlyRows[docMonthlyRows.length - 1]?.oil_bbl ?? 0) : 0);
 
-  const totalGas = trrcWells.length > 0
-    ? trrcWells.reduce((s, w) => {
+  const totalGas = mergedWells.length > 0
+    ? mergedWells.reduce((s, w) => {
         const r = w.monthly_rows?.[w.monthly_rows.length - 1];
         return s + (r?.gas_mcf ?? 0);
       }, 0)
     : (docMonthlyRows.length > 0 ? (docMonthlyRows[docMonthlyRows.length - 1]?.gas_mcf ?? 0) : 0);
 
-  const totalWater = trrcWells.length > 0
-    ? trrcWells.reduce((s, w) => {
+  const totalWater = mergedWells.length > 0
+    ? mergedWells.reduce((s, w) => {
         const r = w.monthly_rows?.[w.monthly_rows.length - 1];
         return s + (r?.water_bbl ?? 0);
       }, 0)
@@ -1784,9 +1825,11 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   // computes stabilized trailing rates excluding non-representative months,
   // detects restart events, and assigns a production confidence label.
 
-  const trrcMonthlyRows = trrcWells.flatMap(w => w.monthly_rows ?? []);
+  const trrcMonthlyRows = mergedWells.flatMap(w => w.monthly_rows ?? []);
   const allMonthlyRows  = trrcMonthlyRows.length > 0 ? trrcMonthlyRows : docMonthlyRows;
-  const dcaDataSource   = trrcMonthlyRows.length > 0 ? "trrc" : "uploaded_doc";
+  const dcaDataSource   = trrcMonthlyRows.length > 0
+    ? (docPeriodMap.size > 0 ? "uploaded_doc" : "trrc")
+    : "uploaded_doc";
 
   let prodIntel: StabilizedProductionProfile | null = null;
   if (allMonthlyRows.length >= 3) {
@@ -2017,7 +2060,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         return dp(dcaResult.cum_oil_bbl, dcaSource as DataSource, dcaSource === "trrc" ? "high" : "medium",
           `Total ${dcaSource === "trrc" ? "TRRC-reported" : "document-derived"} cumulative production`);
       if (hasTrrc)
-        return dp(trrcWells.reduce((s, w) => s + w.cum_oil_bbl, 0), "trrc", "high");
+        return dp(mergedWells.reduce((s, w) => s + w.cum_oil_bbl, 0), docPeriodMap.size > 0 ? "uploaded_doc" : "trrc", "high");
       if (hasDocProd)
         return dp(docMonthlyRows.reduce((s, r) => s + r.oil_bbl, 0), "uploaded_doc", "medium");
       return missingDp<number>();
