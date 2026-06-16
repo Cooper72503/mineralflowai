@@ -57,7 +57,10 @@ async function _fetchTrrcInjectionByApi(api10: string, signal: AbortSignal): Pro
 }
 
 export async function fetchTrrcInjectionByApi(api10: string): Promise<TrrcInjectionRecord[]> {
-  return withTrrcRetry(sig => _fetchTrrcInjectionByApi(api10, sig), []);
+  // Single attempt — stream/route.ts already fans this out across multiple
+  // APIs concurrently plus an operator+county fallback. Internal retries here
+  // tripled worst-case latency, which could blow past Vercel's 300s maxDuration.
+  return withTrrcRetry(sig => _fetchTrrcInjectionByApi(api10, sig), [], { retries: 0 });
 }
 
 async function _fetchTrrcInjectionByOperator(operatorName: string, county: string, signal: AbortSignal): Promise<TrrcInjectionRecord[]> {
@@ -82,7 +85,7 @@ async function _fetchTrrcInjectionByOperator(operatorName: string, county: strin
  * Look up SWD / injection wells by operator + county.
  */
 export async function fetchTrrcInjectionByOperator(operatorName: string, county: string): Promise<TrrcInjectionRecord[]> {
-  return withTrrcRetry(sig => _fetchTrrcInjectionByOperator(operatorName, county, sig), []);
+  return withTrrcRetry(sig => _fetchTrrcInjectionByOperator(operatorName, county, sig), [], { retries: 0 });
 }
 
 // ─── HTML parser ──────────────────────────────────────────────────────────────

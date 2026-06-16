@@ -68,7 +68,9 @@ async function _fetchTrrcOperatorProfile(operatorName: string, _signal: AbortSig
  */
 export async function fetchTrrcOperatorProfile(operatorName: string): Promise<TrrcOperatorProfile | null> {
   if (!operatorName.trim()) return null;
-  return withTrrcRetry(sig => _fetchTrrcOperatorProfile(operatorName, sig), null);
+  // Single attempt — internal retries here, stacked with fetchTrrcAnnualProductionBestOf's
+  // own sequential oil+gas calls, could push pull_inspections past Vercel's 300s maxDuration.
+  return withTrrcRetry(sig => _fetchTrrcOperatorProfile(operatorName, sig), null, { retries: 0 });
 }
 
 function parseP5Html(html: string): TrrcOperatorProfile | null {
@@ -164,7 +166,7 @@ export async function fetchTrrcAnnualProduction(
   reportType: "O" | "G" = "O",
 ): Promise<TrrcAnnualProduction | null> {
   if (!distCode || !leaseNo) return null;
-  return withTrrcRetry(sig => _fetchTrrcAnnualProduction(distCode, leaseNo, reportType, sig), null);
+  return withTrrcRetry(sig => _fetchTrrcAnnualProduction(distCode, leaseNo, reportType, sig), null, { retries: 0 });
 }
 
 /**

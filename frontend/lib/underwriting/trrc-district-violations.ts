@@ -538,14 +538,16 @@ export async function fetchDistrictViolations(
   const targetFilename = districtToFilename(normalizedDist);
   const sourceUrl = shareUrl; // for reporting
 
-  // Retry the download up to 2× on transient failures (network drop, timeout).
-  // If the share page itself fails, withTrrcRetry sees a TypeError/AbortError.
+  // Single attempt. downloadFileFromMftShare chains up to 4 internal fetches
+  // (its own hardcoded timeouts, ~145s worst case) — retrying that 3x pushed
+  // this branch alone to ~441s, well past Vercel's 300s maxDuration, causing
+  // a silent platform kill with no error event (indistinguishable from a hang).
   let rawText: string | null = null;
   try {
     rawText = await withTrrcRetry(
       (_signal) => downloadFileFromMftShare(shareUrl, targetFilename),
       null,
-      { timeout: 120_000, retries: 2, backoffMs: 2_000 },
+      { timeout: 120_000, retries: 0 },
     );
   } catch { /* fall through */ }
 

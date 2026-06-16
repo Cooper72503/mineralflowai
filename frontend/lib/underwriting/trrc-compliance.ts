@@ -435,12 +435,12 @@ export async function fetchTrrcViolations(
   operatorNo?: string | null,
 ): Promise<TrrcViolation[]> {
   const api10 = normalizeApi10(api10Raw);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const result = await fetchViolationsIce(api10, { leaseNo, operatorNo });
-    if (result !== null) return result;
-    if (attempt < 2) await new Promise<void>(r => setTimeout(r, 1_500 * Math.pow(2, attempt)));
-  }
-  return [];
+  // Single attempt — the caller (stream/route.ts) already retries via 3 distinct
+  // strategies (lease number, per-API, operator+county). Stacking a 3x internal
+  // retry on top of that tripled worst-case latency to ~550s, which silently
+  // blew past Vercel's 300s maxDuration with no error ever surfaced.
+  const result = await fetchViolationsIce(api10, { leaseNo, operatorNo });
+  return result ?? [];
 }
 
 /**
@@ -515,13 +515,9 @@ async function _violationsByLease(leaseNo: string): Promise<TrrcViolation[] | nu
 export async function fetchTrrcViolationsByLease(
   leaseNo: string,
 ): Promise<TrrcViolation[]> {
-  // Retry up to 2× on session / transport failure (null return = transient)
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const result = await _violationsByLease(leaseNo);
-    if (result !== null) return result;
-    if (attempt < 2) await new Promise<void>(r => setTimeout(r, 1_500 * Math.pow(2, attempt)));
-  }
-  return [];
+  // Single attempt — see note in fetchTrrcViolations above.
+  const result = await _violationsByLease(leaseNo);
+  return result ?? [];
 }
 
 /**
@@ -596,10 +592,7 @@ export async function fetchTrrcViolationsByOperator(
   operatorNo: string,
   _county?: string,            // unused (county filter not needed when op# is known)
 ): Promise<TrrcViolation[]> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const result = await _violationsByOperator(operatorNo);
-    if (result !== null) return result;
-    if (attempt < 2) await new Promise<void>(r => setTimeout(r, 1_500 * Math.pow(2, attempt)));
-  }
-  return [];
+  // Single attempt — see note in fetchTrrcViolations above.
+  const result = await _violationsByOperator(operatorNo);
+  return result ?? [];
 }
