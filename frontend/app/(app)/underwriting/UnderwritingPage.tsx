@@ -2325,9 +2325,9 @@ function RecommendationTab({ report }: { report: DDReport }) {
           <div style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>out of 10</div>
         </div>
         {(() => {
-          const lo  = report.acquisition_economics.offer_range_low.value;
-          const hi  = report.acquisition_economics.offer_range_high.value;
-          const mid = report.acquisition_economics.offer_range_mid.value;
+          const lo  = report.acquisition_economics?.offer_range_low?.value;
+          const hi  = report.acquisition_economics?.offer_range_high?.value;
+          const mid = report.acquisition_economics?.offer_range_mid?.value;
           const validRange = typeof lo === "number" && lo > 0 &&
                              typeof hi === "number" && hi > 0 && hi >= lo &&
                              typeof mid === "number" && mid > 0;
@@ -5126,7 +5126,7 @@ function ExportTab({ report }: { report: DDReport }) {
   const [loiSigner,    setLoiSigner]    = useState("");
   const [loiSeller,    setLoiSeller]    = useState(report.subject.operator_name ?? "");
   const [loiPrice,     setLoiPrice]     = useState(
-    report.acquisition_economics.offer_range_mid.value
+    report.acquisition_economics?.offer_range_mid?.value
       ? Math.round(report.acquisition_economics.offer_range_mid.value).toString()
       : ""
   );
@@ -6091,7 +6091,7 @@ Production data: TRRC lease-level records as of ${new Date(report.generated_at).
           </div>
 
           {/* Offer price auto-fill indicator */}
-          {report.acquisition_economics.offer_range_mid.value && !loiPrice && (
+          {report.acquisition_economics?.offer_range_mid?.value && !loiPrice && (
             <div style={{ fontSize: "0.72rem", color: COLORS.yellow, marginBottom: "0.6rem" }}>
               ⚠️ Offer price not entered — LOI will show "[PURCHASE PRICE TBD]". Suggested mid-point from analysis: {fmt$(report.acquisition_economics.offer_range_mid.value)}
             </div>
@@ -6326,10 +6326,10 @@ function ReportHeader({ report }: { report: DDReport }) {
           </div>
         )}
         {/* Offer range */}
-        {report.acquisition_economics.offer_range_mid.value && (
+        {report.acquisition_economics?.offer_range_mid?.value && (
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: "0.85rem", fontWeight: 700, color: COLORS.green }}>
-              {fmt$(report.acquisition_economics.offer_range_low.value ?? 0)} – {fmt$(report.acquisition_economics.offer_range_high.value ?? 0)}
+              {fmt$(report.acquisition_economics.offer_range_low?.value ?? 0)} – {fmt$(report.acquisition_economics.offer_range_high?.value ?? 0)}
             </div>
             <div style={{ fontSize: "0.6rem", color: COLORS.textMuted, textTransform: "uppercase" }}>Offer Range</div>
           </div>
