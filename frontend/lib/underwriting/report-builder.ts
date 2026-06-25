@@ -90,6 +90,8 @@ import { runTruthCheck } from "./truth-check-engine";
 import type { TruthCheckResult } from "./truth-check-engine";
 import { classifyReserves } from "./reserve-classification";
 import type { ReserveClassification } from "./reserve-classification";
+import { buildTitleRisk } from "./title-risk";
+import type { TitleRiskResult } from "./title-risk";
 
 // ─── TRRC production well (from existing well lookup) ─────────────────────────
 
@@ -5229,6 +5231,26 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   const diligenceRunLabel = finalGate.label;
 
   // ── Reserve Classification (SEC Rule 4-10) ────────────────────────────────
+  // ── Title risk assessment ─────────────────────────────────────────────────
+  let titleRisk: TitleRiskResult | null = null;
+  try {
+    const primaryProduction = trrcWells.flatMap(w => w.monthly_rows ?? []);
+    titleRisk = buildTitleRisk({
+      apiNumbers:     providedApis,
+      state:          resolvedState ?? input.state ?? null,
+      ownership:      ownershipSection,
+      statedOperator: operatorName,
+      trrcOperator:   trrcResolvedOperator ?? null,
+      statedCounty:   county,
+      trrcCounty:     trrcResolvedCounty ?? null,
+      hasProduction:  primaryProduction.length > 0,
+      nriOverride:    nriOverride ?? null,
+      wiOverride:     wiOverride ?? null,
+    });
+  } catch (e) {
+    console.error("[title-risk] failed:", e);
+  }
+
   let reserveClassification: ReserveClassification | null = null;
   if (dcaResult && econResult) {
     try {
@@ -5321,6 +5343,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     contradictions,
     reserve_classification: reserveClassification,
     peer_benchmark:        peerBenchmark ?? null,
+    title_risk:            titleRisk,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,
       trrc_match_tier: matchTier,

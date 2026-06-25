@@ -986,6 +986,18 @@ export type DDReport = {
    */
   peer_benchmark: import("./peer-benchmarking").PeerBenchmarkResult | null;
 
+  /**
+   * Automated title / mineral ownership risk assessment.
+   *
+   * Evaluates available diligence data for title risk signals: missing division
+   * orders, NRI plausibility, ORRI stacking, operator mismatches, county/survey
+   * identification, and HBP confirmation gaps. Generates a prioritized document
+   * request checklist for the buyer.
+   *
+   * NOT a title opinion. A licensed title attorney is always required before closing.
+   */
+  title_risk: import("./title-risk").TitleRiskResult | null;
+
   /** Debug / audit trail */
   _meta: {
     trrc_lookup_attempted: boolean;

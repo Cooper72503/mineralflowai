@@ -16,6 +16,7 @@ import type {
 } from "@/lib/underwriting/types";
 import type { BuyerQA } from "@/lib/underwriting/buyer-qa-engine";
 import type { DowntimePeriod } from "@/lib/underwriting/downtime-engine";
+import type { TitleRiskResult, TitleRiskSignal, TitleDocumentRequest } from "@/lib/underwriting/title-risk";
 
 const WellGisMapInner = dynamic(() => import("./WellGisMapInner"), { ssr: false });
 
@@ -1651,10 +1652,227 @@ function ProrationP5Tab({ report }: { report: DDReport }) {
   );
 }
 
-function OwnershipTab({ report }: { report: DDReport }) {
-  const s = report.ownership;
+// ─── Title Risk Signal Panel ──────────────────────────────────────────────────
+
+const RISK_SEVERITY_STYLE: Record<
+  TitleRiskSignal["severity"],
+  { color: string; bg: string; border: string; label: string }
+> = {
+  critical: { color: "#ef4444", bg: "rgba(239,68,68,0.10)",  border: "rgba(239,68,68,0.30)",  label: "CRITICAL" },
+  warning:  { color: "#f59e0b", bg: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.30)", label: "WARNING"  },
+  info:     { color: "#4f8ef7", bg: "rgba(79,142,247,0.10)", border: "rgba(79,142,247,0.30)", label: "INFO"     },
+};
+
+const OVERALL_RISK_STYLE: Record<
+  TitleRiskResult["overall_risk"],
+  { color: string; bg: string; border: string; label: string }
+> = {
+  critical: { color: "#ef4444", bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.40)",  label: "CRITICAL RISK"  },
+  high:     { color: "#ef4444", bg: "rgba(239,68,68,0.08)",  border: "rgba(239,68,68,0.25)",  label: "HIGH RISK"      },
+  medium:   { color: "#f59e0b", bg: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.30)", label: "MEDIUM RISK"    },
+  low:      { color: "#22c55e", bg: "rgba(34,197,94,0.08)",  border: "rgba(34,197,94,0.25)",  label: "LOW RISK"       },
+};
+
+const DOC_URGENCY_STYLE: Record<
+  TitleDocumentRequest["urgency"],
+  { color: string; label: string }
+> = {
+  critical:      { color: "#ef4444", label: "CRITICAL"      },
+  important:     { color: "#f59e0b", label: "IMPORTANT"     },
+  informational: { color: "#4f8ef7", label: "INFORMATIONAL" },
+};
+
+function TitleRiskPanel({ tr }: { tr: TitleRiskResult }) {
+  const overall = OVERALL_RISK_STYLE[tr.overall_risk];
+
   return (
     <>
+      {/* ── Overall risk banner ── */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "0.75rem",
+        padding: "0.9rem 1.1rem", marginBottom: "1rem",
+        background: overall.bg, border: `1.5px solid ${overall.border}`,
+        borderRadius: 8,
+      }}>
+        <span style={{ fontSize: "1.25rem" }}>
+          {tr.overall_risk === "critical" ? "🚨" : tr.overall_risk === "high" ? "⚠️" : tr.overall_risk === "medium" ? "⚠️" : "✅"}
+        </span>
+        <div>
+          <div style={{ fontSize: "0.75rem", fontWeight: 800, letterSpacing: "0.07em", color: overall.color }}>
+            TITLE / OWNERSHIP RISK — {overall.label}
+          </div>
+          <div style={{ fontSize: "0.8rem", color: COLORS.textMuted, marginTop: 2 }}>
+            {tr.county_name ? `${tr.county_name} County` : ""}
+            {tr.county_name && tr.api_number ? " · " : ""}
+            {tr.api_number ? `API ${tr.api_number}` : ""}
+            {tr.operator_name_trrc ? ` · Operator: ${tr.operator_name_trrc}` : ""}
+          </div>
+        </div>
+        <div style={{ marginLeft: "auto", textAlign: "right" }}>
+          {tr.is_hbp && (
+            <span style={{ fontSize: "0.65rem", fontWeight: 700, color: "#22c55e", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 4, padding: "0.1rem 0.45rem" }}>
+              HBP
+            </span>
+          )}
+          {tr.division_orders_on_file && (
+            <span style={{ fontSize: "0.65rem", fontWeight: 700, color: "#4f8ef7", background: "rgba(79,142,247,0.1)", border: "1px solid rgba(79,142,247,0.3)", borderRadius: 4, padding: "0.1rem 0.45rem", marginLeft: "0.35rem" }}>
+              DIV ORD ON FILE
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Automated fact cross-check ── */}
+      <Section title="Automated Cross-Check" icon="🔬">
+        <KvRow label="NRI (confirmed)">
+          <span style={{ fontSize: "0.85rem", color: tr.nri_decimal != null ? COLORS.text : COLORS.textMuted }}>
+            {tr.nri_decimal != null
+              ? `${(tr.nri_decimal * 100).toFixed(4)}%`
+              : "Not confirmed"
+            }
+            {tr.nri_in_plausible_range === false && (
+              <span style={{ color: "#ef4444", marginLeft: "0.5rem", fontSize: "0.75rem" }}>
+                ⚠️ Outside typical 12.5%–25% range
+              </span>
+            )}
+            {tr.nri_in_plausible_range === true && (
+              <span style={{ color: "#22c55e", marginLeft: "0.5rem", fontSize: "0.75rem" }}>✓ Plausible range</span>
+            )}
+          </span>
+        </KvRow>
+        <KvRow label="WI (confirmed)">
+          <span style={{ fontSize: "0.85rem", color: tr.wi_decimal != null ? COLORS.text : COLORS.textMuted }}>
+            {tr.wi_decimal != null ? `${(tr.wi_decimal * 100).toFixed(4)}%` : "Not confirmed"}
+          </span>
+        </KvRow>
+        {tr.lease_burden_pct != null && (
+          <KvRow label="Gross Lease Burden (WI−NRI)/WI">
+            <span style={{ fontSize: "0.85rem", color: COLORS.text }}>
+              {tr.lease_burden_pct.toFixed(2)}%
+              {tr.lease_burden_pct > 25 && (
+                <span style={{ color: "#f59e0b", marginLeft: "0.5rem", fontSize: "0.75rem" }}>⚠️ Exceeds 25% — verify ORRI</span>
+              )}
+            </span>
+          </KvRow>
+        )}
+        <KvRow label="Division Orders on File">
+          <span style={{ color: tr.division_orders_on_file ? "#22c55e" : "#ef4444", fontWeight: 700, fontSize: "0.85rem" }}>
+            {tr.division_orders_on_file ? `Yes (${tr.multiple_owners ? "multiple owners" : "single owner"})` : "No — required"}
+          </span>
+        </KvRow>
+        <KvRow label="ORRI Detected">
+          <span style={{ color: tr.orri_detected ? "#f59e0b" : COLORS.textMuted, fontSize: "0.85rem" }}>
+            {tr.orri_detected ? "Yes — verify burden" : "None in provided docs"}
+          </span>
+        </KvRow>
+        {tr.operator_match != null && (
+          <KvRow label="Operator Match (Stated vs TRRC)">
+            <span style={{ color: tr.operator_match ? "#22c55e" : "#ef4444", fontWeight: 700, fontSize: "0.85rem" }}>
+              {tr.operator_match
+                ? `Match — ${tr.operator_name_trrc}`
+                : `Mismatch: "${tr.operator_name_stated}" vs TRRC "${tr.operator_name_trrc}"`
+              }
+            </span>
+          </KvRow>
+        )}
+        {tr.county_name && (
+          <KvRow label="County (from API)">
+            <span style={{ fontSize: "0.85rem", color: COLORS.text }}>
+              {tr.county_name}
+              {tr.county_code ? ` (code ${tr.county_code})` : ""}
+            </span>
+          </KvRow>
+        )}
+        <KvRow label="HBP Status">
+          <span style={{ color: tr.is_hbp ? "#22c55e" : COLORS.textMuted, fontSize: "0.85rem" }}>
+            {tr.is_hbp ? "Held by Production — lease copy required to confirm" : "No production confirmed"}
+          </span>
+        </KvRow>
+      </Section>
+
+      {/* ── Risk signals ── */}
+      <Section title="Risk Signals" icon="⚠️">
+        {tr.signals.map(sig => {
+          const style = RISK_SEVERITY_STYLE[sig.severity];
+          return (
+            <div key={sig.id} style={{
+              marginBottom: "0.75rem",
+              background: style.bg,
+              border: `1px solid ${style.border}`,
+              borderLeft: `3px solid ${style.color}`,
+              borderRadius: 6,
+              padding: "0.7rem 0.9rem",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.3rem" }}>
+                <span style={{
+                  fontSize: "0.6rem", fontWeight: 800, color: style.color,
+                  background: `${style.color}1a`, border: `1px solid ${style.color}40`,
+                  borderRadius: 3, padding: "0.08rem 0.4rem", letterSpacing: "0.06em",
+                }}>
+                  {style.label}
+                </span>
+                <span style={{ fontSize: "0.82rem", fontWeight: 700, color: COLORS.text }}>
+                  {sig.flag}
+                </span>
+              </div>
+              <div style={{ fontSize: "0.8rem", color: COLORS.textMuted, marginBottom: "0.3rem", lineHeight: 1.5 }}>
+                {sig.detail}
+              </div>
+              <div style={{ fontSize: "0.76rem", color: style.color, fontWeight: 600 }}>
+                Action: {sig.action}
+              </div>
+              <div style={{ fontSize: "0.7rem", color: "#6b7280", marginTop: "0.25rem" }}>
+                Data basis: {sig.data_basis}
+              </div>
+            </div>
+          );
+        })}
+      </Section>
+
+      {/* ── Document request checklist ── */}
+      <Section title="Document Checklist (Auto-Generated)" icon="📋">
+        <div style={{ fontSize: "0.78rem", color: COLORS.textMuted, marginBottom: "0.75rem" }}>
+          Documents required before offer or closing. Sorted by urgency.
+        </div>
+        <DdTable
+          headers={["Document", "Request From", "Priority", "Reason"]}
+          rows={[...tr.document_requests]
+            .sort((a, b) => {
+              const order = { critical: 0, important: 1, informational: 2 };
+              return order[a.urgency] - order[b.urgency];
+            })
+            .map(d => {
+              const u = DOC_URGENCY_STYLE[d.urgency];
+              return [
+                <span key="doc" style={{ fontWeight: 600 }}>{d.document}</span>,
+                d.from.replace(/_/g, " "),
+                <span key="urgency" style={{ color: u.color, fontWeight: 700, fontSize: "0.72rem" }}>
+                  {u.label}
+                </span>,
+                <span key="reason" style={{ color: COLORS.textMuted, fontSize: "0.78rem" }}>{d.reason}</span>,
+              ];
+            })}
+        />
+      </Section>
+
+      {/* ── Disclaimer ── */}
+      <div style={{
+        fontSize: "0.72rem", color: "#6b7280", lineHeight: 1.6,
+        background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 6, padding: "0.75rem 1rem", marginTop: "0.5rem",
+      }}>
+        <strong style={{ color: "#8892a4" }}>DISCLAIMER: </strong>{tr.disclaimer}
+      </div>
+    </>
+  );
+}
+
+function OwnershipTab({ report }: { report: DDReport }) {
+  const s = report.ownership;
+  const tr = report.title_risk;
+  return (
+    <>
+      {tr && <TitleRiskPanel tr={tr} />}
       <Section title="Interest Summary" icon="📜">
         <KvRow label="Working Interest (WI)">
           <DataCell dp={s.working_interest_decimal} format={n => `${(n * 100).toFixed(4)}%`} />
