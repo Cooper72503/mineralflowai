@@ -172,6 +172,13 @@ export type EconomicsSection = {
   gas_price_received: DataPoint<number>;
   run_tickets_present: DataPoint<boolean>;
   purchaser_statements_present: DataPoint<boolean>;
+  // Phase 2: verified revenue metrics from run statements (metered, signed records)
+  run_statement_months: number;               // number of subject-lease run statement periods
+  avg_run_net_revenue_usd: DataPoint<number>; // avg monthly net revenue from run statements
+  avg_run_gross_revenue_usd: DataPoint<number>; // avg monthly gross revenue from run statements
+  avg_run_severance_tax_usd: DataPoint<number>; // avg monthly severance tax from run statements
+  effective_sev_rate_pct: DataPoint<number>;  // actual tax rate (gross → net), cross-checks 4.6% TX
+  run_vs_rrc_discrepancy_count: number;       // periods where run statement bbl vs TRRC bbl differ >5%
   notes: string[];
 };
 
@@ -517,6 +524,10 @@ export type DcaSection = {
   cum_oil_bbl: DataPoint<number>;
   // Monthly projections: month 1–60 from current
   projections: { month: number; rate_bbl: number }[];
+  /** Probabilistic remaining reserves from DCA parameter variation (P90=conservative, P10=optimistic) */
+  p10_remaining_bbl: DataPoint<number>;
+  p50_remaining_bbl: DataPoint<number>;
+  p90_remaining_bbl: DataPoint<number>;
   notes: string[];
 };
 
@@ -565,6 +576,8 @@ export type AcquisitionEconomicsSection = {
   sensitivity_matrix?: import("./economics-engine").SensitivityMatrix;
   /** 24-month projected cash flow schedule (base deck, Arps decline) */
   monthly_cash_flow_schedule?: MonthlyCashFlowRow[];
+  /** BTAX / ATAX analysis under SEC statutory depletion (15% of gross revenue) */
+  tax_analysis: import("./economics-engine").TaxAnalysis | null;
   notes: string[];
 };
 
@@ -949,6 +962,30 @@ export type DDReport = {
    */
   contradictions: import("./contradiction-engine").Contradiction[];
 
+  /**
+   * SEC-methodology reserve classification (Rule 4-10).
+   *
+   * Classifies producing reserves as PDP/PDNP/subeconomic and provides
+   * P10/P50/P90 probabilistic estimates from DCA parameter variation.
+   * Null when DCA could not be run (< 3 months of production data).
+   *
+   * IMPORTANT: This is an unaudited screening estimate. A licensed reserve
+   * engineer (PE) certification is required for banking or SEC filings.
+   */
+  reserve_classification: import("./reserve-classification").ReserveClassification | null;
+
+  /**
+   * Peer benchmarking — offset well type curve and subject well percentile ranking.
+   *
+   * Finds offset wells within 5 miles, runs DCA on each, and builds P10/P50/P90
+   * production type curves. Reports where the subject well sits in the peer EUR
+   * and IP distributions.
+   *
+   * Null when subject well has no TRRC spatial location, no API number, or
+   * when the query was not attempted (non-Texas, quick scan).
+   */
+  peer_benchmark: import("./peer-benchmarking").PeerBenchmarkResult | null;
+
   /** Debug / audit trail */
   _meta: {
     trrc_lookup_attempted: boolean;
@@ -1281,6 +1318,7 @@ export type PipelineStepId =
   | "build_decline"       // 7  Decline-curve analysis (DCA)
   | "run_economics"       // 8  EIA prices + EDGAR + acquisition economics
   | "check_diligence"     // 9  Missing-item tracker + risk scoring
+  | "peer_benchmarking"   // 9b Offset well type curve + subject percentile ranking
   | "generate_report";    // 10 Final IC memo + report assembly
 
 export type PipelineStepStatus =

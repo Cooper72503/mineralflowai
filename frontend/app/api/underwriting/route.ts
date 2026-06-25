@@ -25,6 +25,11 @@ import { lookupTrrcLeasesByApis }           from "@/lib/wells/trrc-api";
 import { fetchTrrcProductionByLease }       from "@/lib/wells/trrc-production";
 import { fetchFinancialContext }            from "@/lib/underwriting/financial-lookup";
 import { getBenchmarkFromApi, getBenchmarkFromCounty } from "@/lib/underwriting/benchmarks";
+import { fetchBestWvdepProduction }         from "@/lib/wells/wvdep-production";
+import { fetchBestOccProduction }           from "@/lib/wells/occ-production";
+import { fetchBestNdicProduction }          from "@/lib/wells/ndic-production";
+import { fetchBestOcdProduction }           from "@/lib/wells/ocd-production";
+import { fetchBestCogccProduction }         from "@/lib/wells/cogcc-production";
 import type { UnderwritingInput, UnderwritingResponse } from "@/lib/underwriting/types";
 
 export const runtime    = "nodejs";
@@ -56,11 +61,32 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
     const wiOverride   = typeof body.wi_decimal  === "number" && body.wi_decimal  > 0 && body.wi_decimal  <= 1
       ? body.wi_decimal  : null;
 
+    const detectState = (apis: string[], st: string | null) => {
+      // API prefix is authoritative — checked first.
+      // State name is a hint used only when no API is provided.
+      const prefixes = apis.map(a => a.replace(/\D/g, "").slice(0, 2));
+      if (prefixes.some(p => p === "42"))               return "TX";
+      if (prefixes.some(p => p === "35"))               return "OK";
+      if (prefixes.some(p => p === "47"))               return "WV";
+      if (prefixes.some(p => p === "33"))               return "ND";
+      if (prefixes.some(p => p === "30"))               return "NM";
+      if (prefixes.some(p => p === "05"))               return "CO";
+      if (prefixes.some(p => p === "49"))               return "WY";
+      if (prefixes.some(p => p === "17"))               return "LA";
+      if (st && /^texas$|^tx$/i.test(st))              return "TX";
+      if (st && /^oklahoma$|^ok$/i.test(st))            return "OK";
+      if (st && /^west.?virginia$|^wv$/i.test(st))      return "WV";
+      if (st && /^north.?dakota$|^nd$/i.test(st))       return "ND";
+      if (st && /^new.?mexico$|^nm$/i.test(st))         return "NM";
+      if (st && /^colorado$|^co$/i.test(st))            return "CO";
+      if (st && /^wyoming$|^wy$/i.test(st))             return "WY";
+      if (st && /^louisiana$|^la$/i.test(st))           return "LA";
+      return null;
+    };
+
     // Texas if state explicitly says so, OR if any API number starts with "42"
-    // (the Texas state code). This lets users get TRRC data without filling in state.
-    const isTexas =
-      (!!state && /^texas$|^tx$/i.test(state.trim())) ||
-      apiNumbers.some(a => a.replace(/\D/g, "").startsWith("42"));
+    const resolvedState = detectState(apiNumbers, state);
+    const isTexas = resolvedState === "TX";
 
     // ── Phase 1: AI document extraction ───────────────────────────────────
 
@@ -92,9 +118,48 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       : (resolvedCounty ? getBenchmarkFromCounty(resolvedCounty) : null);
 
     const [trrcResult, complianceResult, injectionResult, inspectionResult, completionResult, financialContext] = await Promise.all([
-      // TRRC production
+      // Production — Texas via TRRC, other states via their own agencies
       (async (): Promise<TrrcWellProduction[]> => {
-        if (!isTexas) return [];
+        if (!isTexas) {
+          // Non-Texas: dispatch to the appropriate state agency fetcher
+          const buildRow = (api: string, agencyLabel: string, rows: Array<{ year: number; month: number; oil_bbl: number; gas_mcf: number | null; water_bbl?: number | null }>, cumOil: number): TrrcWellProduction => {
+            const sorted = [...rows].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+            const latest = sorted[sorted.length - 1];
+            return {
+              api,
+              well_name: `API ${api} (${agencyLabel})`,
+              lease_number: null,
+              district_code: null,
+              operator: resolvedOperator,
+              latest_monthly_oil_bbl: latest?.oil_bbl ?? 0,
+              latest_production_month: latest ? `${latest.year}-${String(latest.month).padStart(2, "0")}` : null,
+              cum_oil_bbl: cumOil,
+              monthly_rows: sorted.map(r => ({ year: r.year, month: r.month, oil_bbl: r.oil_bbl, gas_mcf: r.gas_mcf ?? 0, water_bbl: r.water_bbl ?? null })),
+            };
+          };
+
+          if (resolvedState === "WV" && allApis.length > 0) {
+            const res = await fetchBestWvdepProduction(allApis, 36).catch(() => null);
+            if (res?.rows.length) return [buildRow(res.api_number, "WV DEP", res.rows, res.rows.reduce((s, r) => s + r.oil_bbl, 0))];
+          }
+          if (resolvedState === "OK" && allApis.length > 0) {
+            const res = await fetchBestOccProduction(allApis, 36).catch(() => null);
+            if (res?.rows.length) return [buildRow(res.api_number, "OCC", res.rows, res.rows.reduce((s, r) => s + r.oil_bbl, 0))];
+          }
+          if (resolvedState === "ND" && allApis.length > 0) {
+            const res = await fetchBestNdicProduction(allApis, 36).catch(() => null);
+            if (res?.rows.length) return [buildRow(res.api_number, "NDIC", res.rows, res.rows.reduce((s, r) => s + r.oil_bbl, 0))];
+          }
+          if (resolvedState === "NM" && allApis.length > 0) {
+            const res = await fetchBestOcdProduction(allApis, 36).catch(() => null);
+            if (res?.rows.length) return [buildRow(res.api_number, "NM OCD", res.rows, res.rows.reduce((s, r) => s + r.oil_bbl, 0))];
+          }
+          if (resolvedState === "CO" && allApis.length > 0) {
+            const res = await fetchBestCogccProduction(allApis, 36).catch(() => null);
+            if (res?.rows.length) return [buildRow(res.api_number, "CO COGCC", res.rows, res.rows.reduce((s, r) => s + r.oil_bbl, 0))];
+          }
+          return [];
+        }
 
         // Helper: fetch production for a resolved lease entry
         const fetchWell = async (
@@ -229,7 +294,6 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
 
     // ── Phase 3: Build report ─────────────────────────────────────────────
 
-    const model = process.env.OPENAI_OCR_MODEL ?? "gpt-4o-mini";
     const report = buildDDReport({
       input: {
         api_numbers:        allApis,
@@ -251,10 +315,42 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
       nriOverride: nriOverride ?? undefined,
       wiOverride:  wiOverride  ?? undefined,
       processingTimeMs: Date.now() - t0,
-      aiModel: model,
+      aiModel: process.env.EXTRACTION_MODEL ?? "claude-sonnet-4-6",
       // This endpoint is always Quick Scan — full underwriting uses /api/underwriting/stream
       scanMode: "quick",
     });
+
+    // ── Server-side truth-check redaction ────────────────────────────────
+    // Same rules as /api/underwriting/stream — blocked data never leaves the
+    // server regardless of which route the caller hit.
+    //
+    // 1. block_economics → null entire economics + acquisition_economics sections
+    // 2. offer_gate closed → null the three offer range fields only
+    // 3. overall_verdict "block" → force diligence_run_label to "Failed Verification"
+    if (report.truth_check?.gate?.block_economics) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (report as any).economics             = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (report as any).acquisition_economics = null;
+    }
+
+    if (report.offer_gate?.gate_open === false && report.acquisition_economics != null) {
+      const blockedDp = {
+        value:      null,
+        source:     "missing" as const,
+        confidence: "none"    as const,
+        note:       "Offer gate closed — provide LOE statements and division order to unlock.",
+      };
+      const acq = report.acquisition_economics as Record<string, unknown>;
+      acq.offer_range_low  = blockedDp;
+      acq.offer_range_mid  = blockedDp;
+      acq.offer_range_high = blockedDp;
+    }
+
+    if (report.truth_check?.overall_verdict === "block") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (report as any).diligence_run_label = "Failed Verification";
+    }
 
     return NextResponse.json({ ok: true, report });
 

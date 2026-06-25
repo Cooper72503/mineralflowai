@@ -110,6 +110,49 @@ export type SensitivityMatrix = {
   cells: SensitivityCell[][];
 };
 
+// ─── Tax Analysis (BTAX / ATAX) ──────────────────────────────────────────────
+
+/**
+ * After-tax cash flow analysis under SEC/IRS statutory depletion rules.
+ *
+ * Statutory depletion (IRC §613A): 15% of gross revenue, not to exceed 100%
+ * of net income from the property. Applies to royalty and WI owners.
+ *
+ * Two federal rate scenarios:
+ *   Corporate C-Corp: 21% flat rate
+ *   Individual pass-through: 37% top rate × (1 − 20% QBI deduction) = 29.6% effective
+ *
+ * State income taxes are excluded — vary by state and entity structure.
+ * All figures are approximations for screening; consult a tax professional.
+ */
+export type TaxAnalysis = {
+  depletion_method: "statutory_15pct";
+  monthly_gross_revenue_usd: number;
+  monthly_depletion_usd: number;          // 15% × gross, capped at net income
+  depletion_cap_applied: boolean;         // true if statutory 15% exceeded net income
+
+  // C-Corp scenario (21% federal)
+  monthly_taxable_income_corp: number;
+  monthly_federal_tax_corp: number;
+  monthly_atax_income_corp: number;
+  annual_atax_income_corp: number;
+  npv10_atax_corp: number;
+  effective_rate_corp_pct: number;        // actual tax / pre-tax income
+
+  // Individual / pass-through scenario (29.6% after QBI)
+  monthly_taxable_income_indiv: number;
+  monthly_federal_tax_indiv: number;
+  monthly_atax_income_indiv: number;
+  annual_atax_income_indiv: number;
+  npv10_atax_indiv: number;
+  effective_rate_indiv_pct: number;
+
+  // Tax shield (incremental NPV lost to tax)
+  npv10_btax: number;
+  npv_tax_shield_corp: number;
+  npv_tax_shield_indiv: number;
+};
+
 export type EconomicsOutput = {
   scenarios: ScenarioResult[];
   // Base-case summary (from Base price deck)
@@ -135,6 +178,8 @@ export type EconomicsOutput = {
   // Effective input rates (with downtime haircut applied)
   effective_oil_bbl: number;
   downtime_haircut_applied: number;
+  // After-tax analysis
+  tax_analysis: TaxAnalysis | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -422,6 +467,63 @@ export function buildSensitivityMatrix(
   };
 }
 
+// ─── Tax Analysis ─────────────────────────────────────────────────────────────
+
+function computeTaxAnalysis(
+  base: ScenarioResult,
+  baseCashFlows: number[],
+): TaxAnalysis {
+  const grossRev   = base.monthly_gross_revenue_usd;
+  const netIncome  = base.monthly_net_income_usd;
+
+  // Statutory depletion: 15% of gross revenue, not to exceed net income
+  const depletionRaw = grossRev * 0.15;
+  const depletion    = Math.min(depletionRaw, Math.max(netIncome, 0));
+  const capApplied   = depletionRaw > netIncome && netIncome > 0;
+
+  // Corporate (21%)
+  const taxableIncCorp = Math.max(netIncome - depletion, 0);
+  const taxCorp        = taxableIncCorp * 0.21;
+  const ataxCorp       = netIncome - taxCorp;
+  const rateCorp       = netIncome > 0 ? (taxCorp / netIncome) * 100 : 0;
+
+  // Individual pass-through (37% × 80% = 29.6% after §199A QBI deduction)
+  const taxableIncIndiv = Math.max(netIncome - depletion, 0);
+  const taxIndiv        = taxableIncIndiv * 0.296;
+  const ataxIndiv       = netIncome - taxIndiv;
+  const rateIndiv       = netIncome > 0 ? (taxIndiv / netIncome) * 100 : 0;
+
+  // Project after-tax cash flows (apply same tax ratio to each future month's CF)
+  const ataxCFsCorp  = baseCashFlows.map(cf => cf > 0 ? cf - cf * (taxCorp  / Math.max(netIncome, 1)) : cf);
+  const ataxCFsIndiv = baseCashFlows.map(cf => cf > 0 ? cf - cf * (taxIndiv / Math.max(netIncome, 1)) : cf);
+
+  const npv10Btax   = calcNpv(baseCashFlows, 0.10);
+  const npv10Corp   = calcNpv(ataxCFsCorp,  0.10);
+  const npv10Indiv  = calcNpv(ataxCFsIndiv, 0.10);
+
+  return {
+    depletion_method:             "statutory_15pct",
+    monthly_gross_revenue_usd:    Math.round(grossRev),
+    monthly_depletion_usd:        Math.round(depletion),
+    depletion_cap_applied:        capApplied,
+    monthly_taxable_income_corp:  Math.round(taxableIncCorp),
+    monthly_federal_tax_corp:     Math.round(taxCorp),
+    monthly_atax_income_corp:     Math.round(ataxCorp),
+    annual_atax_income_corp:      Math.round(ataxCorp * 12),
+    npv10_atax_corp:              Math.round(npv10Corp),
+    effective_rate_corp_pct:      Math.round(rateCorp * 10) / 10,
+    monthly_taxable_income_indiv: Math.round(taxableIncIndiv),
+    monthly_federal_tax_indiv:    Math.round(taxIndiv),
+    monthly_atax_income_indiv:    Math.round(ataxIndiv),
+    annual_atax_income_indiv:     Math.round(ataxIndiv * 12),
+    npv10_atax_indiv:             Math.round(npv10Indiv),
+    effective_rate_indiv_pct:     Math.round(rateIndiv * 10) / 10,
+    npv10_btax:                   Math.round(npv10Btax),
+    npv_tax_shield_corp:          Math.round(npv10Btax - npv10Corp),
+    npv_tax_shield_indiv:         Math.round(npv10Btax - npv10Indiv),
+  };
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export function runEconomics(input: EconomicsInput): EconomicsOutput {
@@ -467,6 +569,10 @@ export function runEconomics(input: EconomicsInput): EconomicsOutput {
       ), 360)
     : 360;
 
+  const taxAnalysis = base.monthly_net_income_usd > 0 && base.monthly_cash_flows?.length
+    ? computeTaxAnalysis(base, base.monthly_cash_flows)
+    : null;
+
   return {
     scenarios,
     monthly_revenue_usd:          base.monthly_net_revenue_usd,
@@ -488,5 +594,6 @@ export function runEconomics(input: EconomicsInput): EconomicsOutput {
     wi_decimal:                   wi,
     effective_oil_bbl:            Math.round(effOil),
     downtime_haircut_applied:     downtime,
+    tax_analysis:                 taxAnalysis,
   };
 }

@@ -65,6 +65,10 @@ import { getBenchmarkFromApi, getBenchmarkFromCounty } from "@/lib/underwriting/
 import { fetchBestWvdepProduction }         from "@/lib/wells/wvdep-production";
 import { fetchBestOccProduction }           from "@/lib/wells/occ-production";
 import { fetchBestNdicProduction }          from "@/lib/wells/ndic-production";
+import { fetchBestOcdProduction }           from "@/lib/wells/ocd-production";
+import { fetchBestCogccProduction }         from "@/lib/wells/cogcc-production";
+import { buildPeerBenchmark }               from "@/lib/underwriting/peer-benchmarking";
+import type { PeerBenchmarkResult }         from "@/lib/underwriting/peer-benchmarking";
 import type {
   UnderwritingInput,
   PipelineEvent,
@@ -215,15 +219,25 @@ async function runPipeline(
   // ── State detection helpers ─────────────────────────────────────────────────
   // API prefixes: TX=42, OK=35, WV=47, ND=33
   const detectState = (apis: string[], st: string | null) => {
+    // API prefix is authoritative — checked first.
+    // State name is a hint used only when no API is provided.
     const prefixes = apis.map(a => a.replace(/\D/g, "").slice(0, 2));
-    if (st && /^texas$|^tx$/i.test(st))         return "TX";
-    if (st && /^oklahoma$|^ok$/i.test(st))       return "OK";
-    if (st && /^west.?virginia$|^wv$/i.test(st)) return "WV";
-    if (st && /^north.?dakota$|^nd$/i.test(st))  return "ND";
-    if (prefixes.some(p => p === "42"))           return "TX";
-    if (prefixes.some(p => p === "35"))           return "OK";
-    if (prefixes.some(p => p === "47"))           return "WV";
-    if (prefixes.some(p => p === "33"))           return "ND";
+    if (prefixes.some(p => p === "42"))               return "TX";
+    if (prefixes.some(p => p === "35"))               return "OK";
+    if (prefixes.some(p => p === "47"))               return "WV";
+    if (prefixes.some(p => p === "33"))               return "ND";
+    if (prefixes.some(p => p === "30"))               return "NM";
+    if (prefixes.some(p => p === "05"))               return "CO";
+    if (prefixes.some(p => p === "49"))               return "WY";
+    if (prefixes.some(p => p === "17"))               return "LA";
+    if (st && /^texas$|^tx$/i.test(st))              return "TX";
+    if (st && /^oklahoma$|^ok$/i.test(st))            return "OK";
+    if (st && /^west.?virginia$|^wv$/i.test(st))      return "WV";
+    if (st && /^north.?dakota$|^nd$/i.test(st))       return "ND";
+    if (st && /^new.?mexico$|^nm$/i.test(st))         return "NM";
+    if (st && /^colorado$|^co$/i.test(st))            return "CO";
+    if (st && /^wyoming$|^wy$/i.test(st))             return "WY";
+    if (st && /^louisiana$|^la$/i.test(st))           return "LA";
     return null;
   };
 
@@ -497,6 +511,58 @@ async function runPipeline(
             };
           }
           return { result: [], detail: "No production found in NDIC records for provided API numbers", usedFallback: true };
+        }
+
+        if (resolvedState === "NM" && apiNumbers.length > 0) {
+          const nmResult = await withTimeout(
+            fetchBestOcdProduction(apiNumbers, 36),
+            35_000, "NM OCD production",
+          ).catch(() => null);
+          if (nmResult && nmResult.rows.length > 0) {
+            const sorted = nmResult.rows;
+            const latest = sorted[sorted.length - 1];
+            return {
+              result: [{
+                api: nmResult.api_number,
+                well_name: `API ${nmResult.api_number} (NM OCD)`,
+                lease_number: null,
+                district_code: null,
+                operator: operatorName,
+                latest_monthly_oil_bbl: latest.oil_bbl,
+                latest_production_month: `${latest.year}-${String(latest.month).padStart(2, "0")}`,
+                cum_oil_bbl: sorted.reduce((s, r) => s + r.oil_bbl, 0),
+                monthly_rows: sorted.map(r => ({ year: r.year, month: r.month, oil_bbl: r.oil_bbl, gas_mcf: r.gas_mcf ?? 0, water_bbl: r.water_bbl ?? null })),
+              }] as TrrcWellProduction[],
+              detail: `NM OCD: ${nmResult.months_count} months for API ${nmResult.api_number}`,
+            };
+          }
+          return { result: [], detail: "No production found in NM OCD records for provided API numbers", usedFallback: true };
+        }
+
+        if (resolvedState === "CO" && apiNumbers.length > 0) {
+          const coResult = await withTimeout(
+            fetchBestCogccProduction(apiNumbers, 36),
+            35_000, "CO COGCC production",
+          ).catch(() => null);
+          if (coResult && coResult.rows.length > 0) {
+            const sorted = coResult.rows;
+            const latest = sorted[sorted.length - 1];
+            return {
+              result: [{
+                api: coResult.api_number,
+                well_name: `API ${coResult.api_number} (CO COGCC)`,
+                lease_number: null,
+                district_code: null,
+                operator: operatorName,
+                latest_monthly_oil_bbl: latest.oil_bbl,
+                latest_production_month: `${latest.year}-${String(latest.month).padStart(2, "0")}`,
+                cum_oil_bbl: sorted.reduce((s, r) => s + r.oil_bbl, 0),
+                monthly_rows: sorted.map(r => ({ year: r.year, month: r.month, oil_bbl: r.oil_bbl, gas_mcf: r.gas_mcf ?? 0, water_bbl: null })),
+              }] as TrrcWellProduction[],
+              detail: `CO COGCC: ${coResult.months_count} months for API ${coResult.api_number}`,
+            };
+          }
+          return { result: [], detail: "No production found in CO COGCC records for provided API numbers", usedFallback: true };
         }
 
         return {
@@ -1160,10 +1226,43 @@ async function runPipeline(
   await writer.write(progressEvent("check_diligence", "complete", "Checking missing diligence",
     "Diligence tracker built from all collected data", { durationMs: 0 }));
 
+  // ── 9b. Peer benchmarking (TX only — offset well type curve) ──────────────
+  let peerBenchmark: PeerBenchmarkResult | null = null;
+
+  if (isTexasResolved && apiNumbers.length > 0 && trrcWells.length > 0) {
+    peerBenchmark = await runStep(
+      writer,
+      "peer_benchmarking",
+      "Benchmarking against offset wells",
+      async () => {
+        const subjectMonthly = trrcWells.flatMap(w => w.monthly_rows ?? []);
+        const result = await withTimeout(
+          buildPeerBenchmark({
+            subjectApi:    apiNumbers[0],
+            subjectMonthly,
+            benchmark:     benchmark ?? null,
+          }),
+          45_000,
+          "Peer benchmarking (ArcGIS + TRRC offset production)",
+        );
+        const peerCount = result?.peer_count ?? 0;
+        const dcaCount  = result?.peers_with_dca ?? 0;
+        const detail    = result?.data_quality === "insufficient"
+          ? result.note ?? "Insufficient offset well data for type curve"
+          : `${peerCount} offset wells found, ${dcaCount} with DCA — ${result?.type_curve?.confidence ?? "low"} confidence type curve`;
+        return {
+          result,
+          detail,
+          usedFallback: !result || result.data_quality === "insufficient",
+          fallbackReason: result?.note ?? undefined,
+        };
+      },
+      null,
+    );
+  }
+
   // ── 10. Generate report ────────────────────────────────────────────────────
   await writer.write(progressEvent("generate_report", "running", "Generating report…"));
-
-  const model = process.env.OPENAI_OCR_MODEL ?? "gpt-4o-mini";
 
   // Derive seller-claimed monthly production from document extraction.
   // Use the most recent production month present in seller documents (sorted
@@ -1196,7 +1295,7 @@ async function runPipeline(
     nriOverride:          nriOverride ?? undefined,
     wiOverride:           wiOverride  ?? undefined,
     processingTimeMs:     Date.now() - t0,
-    aiModel:              model,
+    aiModel:              process.env.EXTRACTION_MODEL ?? "claude-sonnet-4-6",
     scanMode:             "full",
     trrcResolvedOperator:  trrcResolvedOperator,
     trrcResolvedCounty:    trrcResolvedCounty,
@@ -1211,6 +1310,7 @@ async function runPipeline(
     cmplPacketDetail:      cmplPacketDetailResult,
     districtViolations:    districtViolationsResult,
     leaseWellInventory:    leaseInventoryResult,
+    peerBenchmark:         peerBenchmark ?? null,
   });
 
   const totalMs = Date.now() - t0;

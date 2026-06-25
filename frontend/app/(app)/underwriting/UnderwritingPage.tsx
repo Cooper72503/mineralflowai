@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useContext, createContext, useEffect, useRef } from "react";
+import { useState, useCallback, useContext, createContext, useEffect, useRef, Suspense } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { ProductionDeclineChart, DcaProjectionChart, CashFlowChart } from "./UnderwritingCharts";
 import type {
@@ -15,6 +16,8 @@ import type {
 } from "@/lib/underwriting/types";
 import type { BuyerQA } from "@/lib/underwriting/buyer-qa-engine";
 import type { DowntimePeriod } from "@/lib/underwriting/downtime-engine";
+
+const WellGisMapInner = dynamic(() => import("./WellGisMapInner"), { ssr: false });
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -413,6 +416,7 @@ type TabId =
   | "asset_overview"
   | "production_decline"
   | "economics_valuation"
+  | "gis_map"
   | "operations_workovers"
   | "compliance_risk"
   | "ownership_interests"
@@ -435,6 +439,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "production_decline",  label: "Production & Decline",   icon: "⛽" },
   { id: "production_audit",    label: "Production Audit",       icon: "🔬" },
   { id: "economics_valuation", label: "Economics & Valuation",  icon: "💰" },
+  { id: "gis_map",             label: "GIS / Well Map",         icon: "🗺️" },
   { id: "operations_workovers",label: "Operations & Workovers", icon: "🔧" },
   { id: "compliance_risk",     label: "Compliance & Risk",      icon: "🔒" },
   { id: "ownership_interests", label: "Ownership & Interests",  icon: "📜" },
@@ -780,6 +785,72 @@ function EconomicsTab({ report }: { report: DDReport }) {
           <DataCell dp={s.purchaser_statements_present} format={v => v ? "Yes" : "Not provided"} />
         </KvRow>
       </Section>
+
+      {s.run_statement_months > 0 && (
+        <Section title={`Run Statement Verified Revenue (${s.run_statement_months} period${s.run_statement_months !== 1 ? "s" : ""})`} icon="📄">
+          <KvRow label="Avg Monthly Gross Revenue">
+            <DataCell dp={s.avg_run_gross_revenue_usd} format={fmt$} />
+          </KvRow>
+          <KvRow label="Avg Monthly Severance Tax">
+            <DataCell dp={s.avg_run_severance_tax_usd} format={fmt$} />
+          </KvRow>
+          <KvRow label="Avg Monthly Net Revenue">
+            <DataCell dp={s.avg_run_net_revenue_usd} format={fmt$} />
+          </KvRow>
+          <KvRow label="Effective Severance Tax Rate">
+            <DataCell dp={s.effective_sev_rate_pct} format={v => `${v.toFixed(2)}%`} />
+          </KvRow>
+          {s.run_vs_rrc_discrepancy_count > 0 && (
+            <KvRow label="Volume Discrepancy Summary">
+              <span style={{ color: "#ef4444", fontWeight: 600 }}>
+                {s.run_vs_rrc_discrepancy_count} period{s.run_vs_rrc_discrepancy_count !== 1 ? "s" : ""} with &gt;5% run vs TRRC variance
+              </span>
+            </KvRow>
+          )}
+        </Section>
+      )}
+
+      {/* Per-period run vs TRRC volume discrepancy table — built from contradiction engine results */}
+      {(() => {
+        const discrepancies = (report.contradictions ?? [])
+          .filter(c => c.id?.startsWith("PROD_VOL_MISMATCH_"))
+          .sort((a, b) => a.field < b.field ? -1 : 1);
+        if (discrepancies.length === 0) return null;
+        return (
+          <Section title={`Volume Discrepancies: Run Statement vs TRRC (${discrepancies.length})`} icon="⚡">
+            <div style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "0.75rem" }}>
+              Run statement volumes vs TRRC official filing per period. &gt;20% = critical (suppresses economics).
+            </div>
+            <DdTable
+              headers={["Period", "Run Stmt BBL", "TRRC BBL", "Delta %", "Severity"]}
+              rows={discrepancies.map(c => {
+                const runBbl  = c.value_a != null ? Number(c.value_a) : null;
+                const trrcBbl = c.value_b != null ? Number(c.value_b) : null;
+                const deltaPct = runBbl != null && trrcBbl != null && runBbl > 0
+                  ? Math.round(Math.abs(trrcBbl - runBbl) / runBbl * 100) : null;
+                const period = c.field.replace("Production Volume — ", "");
+                const isCritical = c.severity === "critical";
+                return [
+                  period,
+                  runBbl  != null ? runBbl.toFixed(0)  : <span style={{ color: COLORS.textFaint }}>—</span>,
+                  trrcBbl != null ? trrcBbl.toFixed(0) : <span style={{ color: COLORS.textFaint }}>—</span>,
+                  deltaPct != null
+                    ? <span style={{ color: isCritical ? COLORS.red : COLORS.yellow, fontWeight: 600 }}>{deltaPct}%</span>
+                    : <span style={{ color: COLORS.textFaint }}>—</span>,
+                  <span key="sev" style={{
+                    fontSize: "0.68rem", fontWeight: 700,
+                    color: isCritical ? COLORS.red : COLORS.yellow,
+                    background: isCritical ? COLORS.redDim : COLORS.yellowDim,
+                    padding: "0.2rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const,
+                  }}>
+                    {isCritical ? "⛔ Critical" : "⚠️ Important"}
+                  </span>,
+                ];
+              })}
+            />
+          </Section>
+        );
+      })()}
 
       {s.loe_statements.length > 0 && (
         <Section title={`LOE Statements (${s.loe_statements.length} periods)`} icon="📃">
@@ -3482,6 +3553,50 @@ function DcaTab({ report }: { report: DDReport }) {
           </div>
         </Section>
       )}
+
+      {(dca.p10_remaining_bbl.value != null || dca.p50_remaining_bbl.value != null) && (
+        <Section title="Probabilistic Remaining Reserves (P10 / P50 / P90)" icon="📊">
+          <div style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "0.75rem" }}>
+            Derived from Arps decline parameter variation. P90 = conservative (Di × 1.5), P50 = base case, P10 = optimistic (Di × 0.65).
+            P10 means 90% probability reserves will exceed this volume; P90 means 10% probability.
+            Not audited — for screening and portfolio sizing only.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
+            {([
+              { label: "P10 Remaining (Optimistic)", dp: dca.p10_remaining_bbl, color: COLORS.green },
+              { label: "P50 Remaining (Base Case)",  dp: dca.p50_remaining_bbl, color: COLORS.accent },
+              { label: "P90 Remaining (Conservative)",dp: dca.p90_remaining_bbl, color: COLORS.yellow },
+            ] as { label: string; dp: typeof dca.p10_remaining_bbl; color: string }[]).map(({ label, dp, color }) => (
+              <div key={label} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1rem" }}>
+                <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: dp.value != null ? color : COLORS.textFaint }}>
+                  {dp.value != null ? `${fmtN(dp.value)} BBL` : "—"}
+                </div>
+                {dp.note && <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, marginTop: 4 }}>{dp.note}</div>}
+              </div>
+            ))}
+          </div>
+          <DdTable
+            headers={["Metric", "P10 (Optimistic)", "P50 (Base)", "P90 (Conservative)"]}
+            rows={[[
+              "Remaining Reserves (BBL)",
+              dca.p10_remaining_bbl.value != null ? fmtN(dca.p10_remaining_bbl.value) : "—",
+              dca.p50_remaining_bbl.value != null ? fmtN(dca.p50_remaining_bbl.value) : "—",
+              dca.p90_remaining_bbl.value != null ? fmtN(dca.p90_remaining_bbl.value) : "—",
+            ], [
+              "P10 / P90 Spread",
+              (() => {
+                const p10 = dca.p10_remaining_bbl.value;
+                const p90 = dca.p90_remaining_bbl.value;
+                if (p10 == null || p90 == null || p90 === 0) return "—";
+                return `${(p10 / p90).toFixed(1)}× (${p90 > 0 ? Math.round((p10 - p90) / p90 * 100) : 0}% range)`;
+              })(),
+              "—",
+              "—",
+            ]]}
+          />
+        </Section>
+      )}
     </div>
   );
 }
@@ -3732,6 +3847,69 @@ function AcqEconomicsTab({ report }: { report: DDReport }) {
         <KvRow label="Working Interest (WI)"><DataCell dp={econ.wi_decimal} format={v => `${(v * 100).toFixed(2)}%`} /></KvRow>
         <KvRow label="Economic Life Remaining"><DataCell dp={econ.months_remaining} format={v => `${v} months (~${(v / 12).toFixed(1)} yrs)`} /></KvRow>
       </Section>
+
+      {/* BTAX / ATAX Tax Analysis */}
+      {econ.tax_analysis && (
+        <Section title="After-Tax Analysis — BTAX / ATAX (Statutory Depletion)" icon="🧾">
+          <div style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "0.75rem" }}>
+            Statutory depletion: 15% of gross revenue (IRC §613A), limited to net income.
+            C-Corp rate: 21%. Individual pass-through: 29.6% (37% × 80% after §199A QBI deduction).
+            State income taxes excluded. Consult a tax professional before relying on these figures.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
+            {([
+              { label: "NPV10 (Pre-Tax / BTAX)", value: econ.tax_analysis.npv10_btax, color: COLORS.accent },
+              { label: "NPV10 ATAX — C-Corp (21%)", value: econ.tax_analysis.npv10_atax_corp, color: COLORS.green },
+              { label: "NPV10 ATAX — Individual (29.6%)", value: econ.tax_analysis.npv10_atax_indiv, color: COLORS.yellow },
+            ] as { label: string; value: number; color: string }[]).map(({ label, value, color }) => (
+              <div key={label} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1rem" }}>
+                <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color }}>{fmt$(value)}</div>
+              </div>
+            ))}
+          </div>
+          <DdTable
+            headers={["", "BTAX (Pre-Tax)", "ATAX C-Corp (21%)", "ATAX Individual (29.6%)"]}
+            rows={[
+              [
+                "Monthly Net Income",
+                fmt$(econ.tax_analysis.npv10_btax > 0 ? econ.monthly_net_income_usd.value ?? 0 : 0),
+                fmt$(econ.tax_analysis.monthly_atax_income_corp),
+                fmt$(econ.tax_analysis.monthly_atax_income_indiv),
+              ],
+              [
+                "Annual Net Income",
+                fmt$(econ.annual_net_income_usd.value ?? 0),
+                fmt$(econ.tax_analysis.annual_atax_income_corp),
+                fmt$(econ.tax_analysis.annual_atax_income_indiv),
+              ],
+              [
+                "NPV10",
+                fmt$(econ.tax_analysis.npv10_btax),
+                fmt$(econ.tax_analysis.npv10_atax_corp),
+                fmt$(econ.tax_analysis.npv10_atax_indiv),
+              ],
+              [
+                "Effective Tax Rate",
+                "0%",
+                `${econ.tax_analysis.effective_rate_corp_pct.toFixed(1)}%`,
+                `${econ.tax_analysis.effective_rate_indiv_pct.toFixed(1)}%`,
+              ],
+              [
+                "Monthly Depletion (§613A)",
+                `${fmt$(econ.tax_analysis.monthly_depletion_usd)}${econ.tax_analysis.depletion_cap_applied ? " (capped)" : ""}`,
+                "—", "—",
+              ],
+              [
+                "Tax Shield vs. BTAX NPV10",
+                "—",
+                `(${fmt$(econ.tax_analysis.npv_tax_shield_corp)})`,
+                `(${fmt$(econ.tax_analysis.npv_tax_shield_indiv)})`,
+              ],
+            ]}
+          />
+        </Section>
+      )}
 
       {econ.notes.length > 0 && (
         <div style={{ background: COLORS.surfaceAlt, borderRadius: 6, padding: "0.75rem 1rem", fontSize: "0.78rem", color: COLORS.textMuted }}>
@@ -4773,9 +4951,331 @@ function ProductionDeclineTab({ report }: { report: DDReport }) {
   );
 }
 
+function ReserveClassificationTab({ report }: { report: DDReport }) {
+  const rc = report.reserve_classification;
+  if (!rc) {
+    return (
+      <Section title="SEC Reserve Classification (Rule 4-10)" icon="🏛️">
+        <p style={{ color: COLORS.textMuted, fontSize: "0.82rem" }}>
+          Reserve classification requires at least 3 months of production history and a successful DCA fit.
+          Upload run statements or provide API numbers for TRRC production data to enable this analysis.
+        </p>
+      </Section>
+    );
+  }
+
+  const catColor: Record<string, string> = {
+    PDP: COLORS.green,
+    PDNP: COLORS.yellow,
+    subeconomic: COLORS.red,
+    insufficient_data: COLORS.textMuted,
+  };
+  const catLabel: Record<string, string> = {
+    PDP: "Proved Developed Producing (PDP)",
+    PDNP: "Proved Developed Non-Producing (PDNP)",
+    subeconomic: "Subeconomic at Current Prices",
+    insufficient_data: "Insufficient Data for Classification",
+  };
+  const confidenceColor = { high: COLORS.green, moderate: COLORS.yellow, low: COLORS.textMuted };
+
+  return (
+    <div>
+      {/* Header card */}
+      <Section title="SEC Reserve Classification (Rule 4-10)" icon="🏛️">
+        <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+          <div style={{ background: COLORS.surface, border: `2px solid ${catColor[rc.category]}`, borderRadius: 12, padding: "1rem 1.5rem" }}>
+            <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+              Reserve Category
+            </div>
+            <div style={{ fontSize: "1.25rem", fontWeight: 800, color: catColor[rc.category] }}>
+              {catLabel[rc.category]}
+            </div>
+            <div style={{ fontSize: "0.72rem", color: confidenceColor[rc.confidence], marginTop: 4 }}>
+              Confidence: {rc.confidence.toUpperCase()} · R²={rc.r_squared.toFixed(2)} · {rc.months_of_production_data} months data
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "0.75rem 1rem" }}>
+              <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>P1 PDP Remaining</div>
+              <div style={{ fontSize: "1rem", fontWeight: 800, color: COLORS.green }}>
+                {rc.p1_pdp_remaining_bbl > 0 ? `${fmtN(rc.p1_pdp_remaining_bbl)} BBL` : "—"}
+              </div>
+            </div>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "0.75rem 1rem" }}>
+              <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>P1 PDP NPV10</div>
+              <div style={{ fontSize: "1rem", fontWeight: 800, color: COLORS.accent }}>
+                {rc.p1_pdp_npv10_usd > 0 ? fmt$(rc.p1_pdp_npv10_usd) : "—"}
+              </div>
+            </div>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "0.75rem 1rem" }}>
+              <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Reserve Life Index</div>
+              <div style={{ fontSize: "1rem", fontWeight: 800, color: COLORS.text }}>
+                {rc.reserve_life_index_years > 0 ? `${rc.reserve_life_index_years.toFixed(1)} yrs` : "—"}
+              </div>
+            </div>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "0.75rem 1rem" }}>
+              <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>PV10 per BOE</div>
+              <div style={{ fontSize: "1rem", fontWeight: 800, color: COLORS.text }}>
+                {rc.pv10_per_boe > 0 ? `$${rc.pv10_per_boe.toFixed(2)}/BOE` : "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+        <p style={{ fontSize: "0.72rem", color: COLORS.textFaint, margin: "0.5rem 0 0 0", borderTop: `1px solid ${COLORS.border}`, paddingTop: "0.5rem" }}>
+          ⚠️ {rc.sec_methodology_note}
+        </p>
+      </Section>
+
+      {/* P10 / P50 / P90 */}
+      <Section title="Probabilistic Reserve Volumes (P10 / P50 / P90)" icon="📊">
+        <div style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "0.75rem" }}>
+          Based on Arps DCA parameter variation. P10 = optimistic (90% probability of exceeding);
+          P90 = conservative (10% probability of exceeding). P10/P90 ratio of {rc.p10_p90_ratio}×
+          reflects uncertainty in the production forecast.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
+          {([
+            { label: "P10 (Optimistic)", value: rc.p10_remaining_bbl, color: COLORS.green },
+            { label: "P50 (Base Case)",  value: rc.p50_remaining_bbl, color: COLORS.accent },
+            { label: "P90 (Conservative)",value: rc.p90_remaining_bbl, color: COLORS.yellow },
+          ] as { label: string; value: number; color: string }[]).map(({ label, value, color }) => (
+            <div key={label} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1rem", textAlign: "center" }}>
+              <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{label}</div>
+              <div style={{ fontSize: "1.25rem", fontWeight: 800, color }}>{fmtN(value)} BBL</div>
+            </div>
+          ))}
+        </div>
+        <DdTable
+          headers={["Category", "Volume (BBL)", "vs. P50"]}
+          rows={[
+            ["P10 Upside vs. P50", fmtN(Math.max(0, rc.p10_remaining_bbl - rc.p50_remaining_bbl)),
+              <span key="u" style={{ color: COLORS.green }}>+{fmtN(Math.max(0, rc.p10_remaining_bbl - rc.p50_remaining_bbl))} BBL</span>],
+            ["P50 Base Case", fmtN(rc.p50_remaining_bbl), "—"],
+            ["P90 Downside vs. P50", fmtN(Math.max(0, rc.p50_remaining_bbl - rc.p90_remaining_bbl)),
+              <span key="d" style={{ color: COLORS.yellow }}>-{fmtN(Math.max(0, rc.p50_remaining_bbl - rc.p90_remaining_bbl))} BBL</span>],
+            ["3P Total (P1 + risked P2)", fmtN(rc.total_3p_bbl), "—"],
+          ]}
+        />
+      </Section>
+
+      {/* Classification criteria */}
+      <Section title="Classification Evidence" icon="✅">
+        {rc.qualifying_criteria.length > 0 && (
+          <div style={{ marginBottom: "0.75rem" }}>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.green, marginBottom: "0.4rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Qualifying Criteria Met
+            </div>
+            {rc.qualifying_criteria.map((c, i) => (
+              <div key={i} style={{ fontSize: "0.78rem", color: COLORS.text, padding: "0.3rem 0", display: "flex", gap: "0.5rem" }}>
+                <span style={{ color: COLORS.green }}>✓</span> {c}
+              </div>
+            ))}
+          </div>
+        )}
+        {rc.disqualifying_flags.length > 0 && (
+          <div>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.red, marginBottom: "0.4rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Disqualifying Flags / Risk Factors
+            </div>
+            {rc.disqualifying_flags.map((f, i) => (
+              <div key={i} style={{ fontSize: "0.78rem", color: COLORS.text, padding: "0.3rem 0", display: "flex", gap: "0.5rem" }}>
+                <span style={{ color: COLORS.red }}>✗</span> {f}
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function PeerBenchmarkTab({ report }: { report: DDReport }) {
+  const pb = report.peer_benchmark;
+
+  if (!pb) {
+    return (
+      <Section title="Peer Benchmarking / Type Curve" icon="📊">
+        <p style={{ color: COLORS.textMuted, fontSize: "0.82rem" }}>
+          Peer benchmarking requires a Texas API number with TRRC production data. Provide an API number to enable offset well type curve analysis.
+        </p>
+      </Section>
+    );
+  }
+
+  const qualityColor = pb.data_quality === "high" ? COLORS.green
+    : pb.data_quality === "medium" ? COLORS.yellow
+    : pb.data_quality === "low" ? COLORS.yellow
+    : COLORS.red;
+
+  const percentileLabel = (pct: number | null) => {
+    if (pct == null) return "—";
+    if (pct >= 75) return `${pct}th pctl (top quartile)`;
+    if (pct >= 50) return `${pct}th pctl (above median)`;
+    if (pct >= 25) return `${pct}th pctl (below median)`;
+    return `${pct}th pctl (bottom quartile)`;
+  };
+
+  const tc = pb.type_curve;
+
+  return (
+    <Section title="Peer Benchmarking / Type Curve" icon="📊">
+      {pb.note && (
+        <div style={{ padding: "0.6rem 0.8rem", background: COLORS.surfaceAlt, borderRadius: 6, marginBottom: "1rem", fontSize: "0.82rem", color: COLORS.textMuted }}>
+          {pb.note}
+        </div>
+      )}
+
+      {/* Header stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.6rem", marginBottom: "1.2rem" }}>
+        {([
+          ["Offset Wells Found", `${pb.peer_count} within ${pb.radius_miles} mi`],
+          ["Wells with DCA", `${pb.peers_with_dca}`],
+          ["Data Quality", pb.data_quality.toUpperCase()],
+          ["IP vs Peers", pb.subject_ip_percentile != null ? percentileLabel(pb.subject_ip_percentile) : "—"],
+          ["EUR vs Peers", pb.subject_eur_percentile != null ? percentileLabel(pb.subject_eur_percentile) : "—"],
+          ["Outperforms Peers", pb.outperforms_peers == null ? "—" : pb.outperforms_peers ? "Yes" : "No"],
+        ] as [string, string][]).map(([label, val]) => (
+          <div key={label} style={{ background: COLORS.surfaceAlt, borderRadius: 6, padding: "0.6rem 0.75rem" }}>
+            <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: "0.92rem", fontWeight: 600, color: label === "Data Quality" ? qualityColor : COLORS.text }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Subject well vs peer distribution */}
+      {(pb.subject_ip_bbl != null || pb.subject_eur_bbl != null) && tc && (
+        <div style={{ marginBottom: "1.2rem" }}>
+          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Subject Well vs Peer Distribution</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+            <thead>
+              <tr>
+                {["Metric", "P90 (Low)", "P50 (Base)", "P10 (High)", "Subject Well", "Percentile"].map(h => (
+                  <th key={h} style={{ textAlign: h === "Metric" ? "left" : "right", padding: "0.3rem 0.5rem", color: COLORS.textMuted, fontWeight: 500, borderBottom: `1px solid ${COLORS.border}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pb.subject_ip_bbl != null && (
+                <tr>
+                  <td style={{ padding: "0.35rem 0.5rem", color: COLORS.text }}>Peak Monthly (BBL)</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.textMuted }}>{tc.p90_peak_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.text }}>{tc.p50_peak_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.green }}>{tc.p10_peak_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.accent, fontWeight: 600 }}>{pb.subject_ip_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: pb.subject_ip_percentile != null && pb.subject_ip_percentile >= 50 ? COLORS.green : COLORS.yellow }}>{pb.subject_ip_percentile != null ? `${pb.subject_ip_percentile}th` : "—"}</td>
+                </tr>
+              )}
+              {pb.subject_eur_bbl != null && (
+                <tr style={{ background: COLORS.surfaceAlt }}>
+                  <td style={{ padding: "0.35rem 0.5rem", color: COLORS.text }}>EUR (BBL)</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.textMuted }}>{tc.p90_eur_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.text }}>{tc.p50_eur_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.green }}>{tc.p10_eur_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.accent, fontWeight: 600 }}>{pb.subject_eur_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: pb.subject_eur_percentile != null && pb.subject_eur_percentile >= 50 ? COLORS.green : COLORS.yellow }}>{pb.subject_eur_percentile != null ? `${pb.subject_eur_percentile}th` : "—"}</td>
+                </tr>
+              )}
+              {tc.avg_decline_annual_pct != null && (
+                <tr>
+                  <td style={{ padding: "0.35rem 0.5rem", color: COLORS.text }}>Avg Annual Decline (%)</td>
+                  <td colSpan={3} style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.textMuted }}>Peer avg: {tc.avg_decline_annual_pct.toFixed(1)}%/yr</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", color: COLORS.text }}>—</td>
+                  <td style={{ textAlign: "right", padding: "0.35rem 0.5rem" }}>—</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div style={{ fontSize: "0.72rem", color: COLORS.textMuted, marginTop: "0.4rem" }}>
+            Type curve from {tc.well_count} offset wells · {tc.confidence.toUpperCase()} confidence
+            {tc.data_quality_note ? ` · ${tc.data_quality_note}` : ""}
+          </div>
+        </div>
+      )}
+
+      {/* Offset well table */}
+      {pb.peer_wells.length > 0 && (
+        <div>
+          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Offset Wells</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
+            <thead>
+              <tr>
+                {["API", "Dist (mi)", "Dir", "First Prod", "Peak BBL/mo", "EUR (BBL)", "Decline/yr", "Active"].map(h => (
+                  <th key={h} style={{ textAlign: h === "API" || h === "Dir" ? "left" : "right", padding: "0.3rem 0.4rem", color: COLORS.textMuted, fontWeight: 500, borderBottom: `1px solid ${COLORS.border}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pb.peer_wells.map((w, i) => (
+                <tr key={w.api} style={{ background: i % 2 === 0 ? "transparent" : COLORS.surfaceAlt }}>
+                  <td style={{ padding: "0.3rem 0.4rem", color: COLORS.textMuted, fontFamily: "monospace" }}>{w.api}</td>
+                  <td style={{ textAlign: "right", padding: "0.3rem 0.4rem", color: COLORS.text }}>{w.distance_mi.toFixed(1)}</td>
+                  <td style={{ padding: "0.3rem 0.4rem", color: COLORS.text }}>{w.direction}</td>
+                  <td style={{ textAlign: "right", padding: "0.3rem 0.4rem", color: COLORS.textMuted }}>{w.first_prod_year ?? "—"}</td>
+                  <td style={{ textAlign: "right", padding: "0.3rem 0.4rem", color: COLORS.text }}>{w.peak_month_bbl.toLocaleString()}</td>
+                  <td style={{ textAlign: "right", padding: "0.3rem 0.4rem", color: w.eur_bbl != null ? COLORS.text : COLORS.textFaint }}>{w.eur_bbl?.toLocaleString() ?? "—"}</td>
+                  <td style={{ textAlign: "right", padding: "0.3rem 0.4rem", color: COLORS.textMuted }}>{w.decline_annual_pct != null ? `${w.decline_annual_pct}%` : "—"}</td>
+                  <td style={{ textAlign: "right", padding: "0.3rem 0.4rem", color: w.is_active ? COLORS.green : COLORS.textFaint }}>{w.is_active ? "Yes" : "No"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function GisMapTab({ report }: { report: DDReport }) {
+  const pb = report.peer_benchmark;
+
+  if (!pb || pb.subject_lat == null || pb.subject_lng == null) {
+    return (
+      <Section title="GIS / Acreage Map" icon="🗺️">
+        <p style={{ color: COLORS.textMuted, fontSize: "0.82rem" }}>
+          Map requires a Texas API number with a resolved well location. Provide an API number and run the full pipeline to enable the GIS view.
+        </p>
+      </Section>
+    );
+  }
+
+  const p50Eur = pb.type_curve?.p50_eur_bbl ?? null;
+  const mapPeers = pb.peer_wells.filter(w => w.lat != null && w.lng != null);
+
+  return (
+    <Section title="GIS / Acreage Map" icon="🗺️">
+      <div style={{ marginBottom: "0.6rem", fontSize: "0.8rem", color: COLORS.textMuted }}>
+        Subject well (★) at ({pb.subject_lat.toFixed(4)}°N, {pb.subject_lng.toFixed(4)}°W) ·{" "}
+        {mapPeers.length} offset well{mapPeers.length !== 1 ? "s" : ""} within {pb.radius_miles} miles shown
+        {p50Eur != null ? ` · Peer color coded vs P50 EUR (${p50Eur.toLocaleString()} BBL)` : ""}
+      </div>
+      <Suspense fallback={<div style={{ height: 420, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.textMuted, background: COLORS.surfaceAlt, borderRadius: 8 }}>Loading map…</div>}>
+        <WellGisMapInner
+          subjectLat={pb.subject_lat}
+          subjectLng={pb.subject_lng}
+          subjectApi={pb.subject_api}
+          subjectEur={pb.subject_eur_bbl}
+          subjectIp={pb.subject_ip_bbl}
+          peerWells={mapPeers}
+          radiusMiles={pb.radius_miles}
+          p50Eur={p50Eur}
+        />
+      </Suspense>
+      {pb.peer_wells.length === 0 && (
+        <p style={{ color: COLORS.textMuted, fontSize: "0.78rem", marginTop: "0.6rem" }}>
+          No offset wells within {pb.radius_miles}-mile radius to display.
+        </p>
+      )}
+    </Section>
+  );
+}
+
 function EconomicsValuationTab({ report }: { report: DDReport }) {
   return (
     <>
+      <ReserveClassificationTab report={report} />
+      <div style={{ height: "1.5rem" }} />
+      <PeerBenchmarkTab report={report} />
+      <div style={{ height: "1.5rem" }} />
       <AcqEconomicsTab report={report} />
       <div style={{ height: "1.5rem" }} />
       <EconomicsTab report={report} />
@@ -7352,6 +7852,7 @@ export default function UnderwritingPage() {
               {activeTab === "production_decline"    && <ProductionDeclineTab   report={report} />}
               {activeTab === "production_audit"      && <ProductionAuditTab     report={report} />}
               {activeTab === "economics_valuation"   && <EconomicsValuationTab  report={report} />}
+              {activeTab === "gis_map"               && <GisMapTab              report={report} />}
               {activeTab === "operations_workovers"  && <OperationsWorkoverTab  report={report} />}
               {activeTab === "compliance_risk"       && <ComplianceRiskTab      report={report} />}
               {activeTab === "ownership_interests"   && <OwnershipTab           report={report} />}

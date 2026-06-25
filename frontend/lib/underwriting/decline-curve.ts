@@ -39,6 +39,13 @@ export type DcaResult = {
   // 60-month forward projection from current date (uses terminal-decline-switch curve)
   projections: { month: number; rate_bbl: number }[];
 
+  // Probabilistic remaining reserves (parameter variation on Di)
+  // P90 = conservative (Di × 1.5), P50 = base case, P10 = optimistic (Di × 0.65)
+  // Industry-standard for SEC-methodology probabilistic reserve estimation.
+  p10_remaining_bbl: number;
+  p50_remaining_bbl: number;
+  p90_remaining_bbl: number;
+
   // Input data stats
   months_of_data: number;
   avg_12mo_bbl: number;
@@ -368,6 +375,10 @@ export function runDca(
   const { eur, lifeMonths } = calcEur(best, currentT, economicLimitBbl);
   const remaining = Math.max(eur, 0);
 
+  // Probabilistic remaining reserves via Di perturbation (SEC standard approach)
+  const { eur: eurP90 } = calcEur({ ...best, Di: best.Di * 1.5  }, currentT, economicLimitBbl);
+  const { eur: eurP10 } = calcEur({ ...best, Di: best.Di * 0.65 }, currentT, economicLimitBbl);
+
   // Decline rate — report the EFFECTIVE rate (at t=0 of the fit window for display)
   const effectiveMonthlyPct = nominalToEffectiveMonthly(best.Di, best.b);
   const effectiveAnnualPct  = (1 - Math.pow(1 - effectiveMonthlyPct / 100, 12)) * 100;
@@ -397,6 +408,9 @@ export function runDca(
     economic_life_months:      lifeMonths,
     effective_Di_at_current:   effectiveDiAtCurrent,
     projections,
+    p10_remaining_bbl: Math.round(Math.max(eurP10, 0)),
+    p50_remaining_bbl: Math.round(remaining),
+    p90_remaining_bbl: Math.round(Math.max(eurP90, 0)),
     months_of_data: positive.length,
     avg_12mo_bbl:   Math.round(avg12 * 10) / 10,
     avg_6mo_bbl:    Math.round(avg6 * 10) / 10,

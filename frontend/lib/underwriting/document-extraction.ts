@@ -5,11 +5,16 @@
  * equipment lists, purchaser statements, reserve reports, etc.) and extracts
  * every structured field needed for the DD report.
  *
- * One OpenAI call per document bundle (we concatenate up to ~8k tokens worth).
+ * Pass 1 — Extraction: claude-sonnet-4-6 with 180k-char context window
+ *   (Claude's 200k-token context eliminates chunking for virtually all O&G packages)
+ * Pass 2 — Verification: targeted re-read of raw text to confirm financial
+ *   figures (net_revenue_usd, gross_revenue_usd, severance_tax_usd) before
+ *   they flow into economics. Catches hallucination and magnitude errors.
+ *
  * Returns null on failure — callers degrade gracefully to "Not provided."
  */
 
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import type {
   DataSource,
   DataConfidence,
@@ -249,10 +254,11 @@ Return ONLY valid JSON with this exact structure (no markdown, no commentary):
 
 // ─── Main extraction function ─────────────────────────────────────────────────
 
-// Per-chunk limit: gpt-4o supports 128k context tokens (~500k chars); we use 80k
-// to leave headroom for the system prompt and output tokens.
-const CHUNK_SIZE    = 80_000;
-const CHUNK_OVERLAP = 2_000;  // overlap between adjacent chunks so values at boundaries aren't lost
+// Claude Sonnet 4.6 has a 200k-token context window (~800k chars).
+// We use 180k chars per chunk to leave headroom for the system prompt + output.
+// For typical O&G document packages this means a single call — no chunking.
+const CHUNK_SIZE    = 180_000;
+const CHUNK_OVERLAP = 2_000;
 
 function chunkText(text: string): string[] {
   if (text.length <= CHUNK_SIZE) return [text];
@@ -383,23 +389,27 @@ function mergeExtractionResults(results: DocumentExtractionResult[]): DocumentEx
 }
 
 async function extractOneChunk(
-  client: OpenAI,
+  client: Anthropic,
   model: string,
   label: string,
-  chunkText: string,
+  text: string,
 ): Promise<DocumentExtractionResult | null> {
   try {
-    const completion = await client.chat.completions.create({
+    const message = await client.messages.create({
       model,
-      temperature: 0.1,
       max_tokens: 16_000,
+      system: SYSTEM_PROMPT,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user",   content: `=== DOCUMENT: ${label} ===\n${chunkText}` },
+        { role: "user", content: `=== DOCUMENT: ${label} ===\n${text}` },
       ],
     });
 
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+    const raw = message.content
+      .filter(b => b.type === "text")
+      .map(b => (b as { type: "text"; text: string }).text)
+      .join("")
+      .trim();
+
     if (!raw) {
       console.error(`[underwriting-extraction] empty response for "${label}"`);
       return null;
@@ -414,17 +424,174 @@ async function extractOneChunk(
   }
 }
 
+// ─── Pass 2: Financial field verification ─────────────────────────────────────
+//
+// For each production_month that has financial figures, ask Claude to locate
+// those exact numbers in the raw source text and confirm or correct them.
+// This catches hallucination (model invents a number not in the document) and
+// magnitude errors (off by 10×, decimal shift, etc.).
+//
+// Returns the extraction with any corrected values applied.
+
+const VERIFY_SYSTEM = `You are verifying financial figures extracted from an oil & gas run statement or purchaser statement. You will be given the raw document text and a list of extracted entries. For each entry, locate the EXACT numbers in the source text. Return ONLY valid JSON — no commentary, no markdown.`;
+
+type VerifyEntry = {
+  period: string;
+  rrc_lease_number: string | null;
+  well_name: string | null;
+  extracted_gross: number | null;
+  extracted_net: number | null;
+  extracted_sev_tax: number | null;
+};
+
+type VerifyResult = {
+  period: string;
+  rrc_lease_number: string | null;
+  gross_revenue_usd: number | null;       // confirmed or corrected value; null if not found in text
+  net_revenue_usd: number | null;
+  severance_tax_usd: number | null;
+  status: "confirmed" | "corrected" | "not_found";
+  note?: string;
+};
+
+async function verifyFinancialFields(
+  client: Anthropic,
+  model: string,
+  documents: { filename: string; text: string; doc_type?: string }[],
+  extracted: DocumentExtractionResult,
+): Promise<DocumentExtractionResult> {
+  const toVerify: VerifyEntry[] = extracted.production_months
+    .filter(pm => pm.gross_revenue_usd != null || pm.net_revenue_usd != null || pm.severance_tax_usd != null)
+    .map(pm => ({
+      period:             pm.period,
+      rrc_lease_number:   pm.rrc_lease_number ?? null,
+      well_name:          pm.well_name ?? null,
+      extracted_gross:    pm.gross_revenue_usd,
+      extracted_net:      pm.net_revenue_usd,
+      extracted_sev_tax:  pm.severance_tax_usd,
+    }));
+
+  if (toVerify.length === 0) return extracted;
+
+  // Verify each document independently — eliminates the 60k combined-text cap.
+  // Run statement / purchaser statement docs are typically 10–80k chars each; we
+  // allow 150k per document so even large multi-month statements are fully covered.
+  // Prefer docs typed as financial; fall back to all docs if none are typed that way.
+  const financialDocs = documents.filter(d =>
+    /run.?ticket|run.?statement|purchaser.?statement/i.test(`${d.filename} ${d.doc_type ?? ""}`)
+  );
+  const docsToSearch = financialDocs.length > 0 ? financialDocs : documents;
+  const MAX_DOC_CHARS = 150_000;
+
+  const entriesJson = JSON.stringify(toVerify, null, 2);
+  const verifyBase =
+    `For each entry, find the property section in the raw text identified by rrc_lease_number (STATE LEASE field) ` +
+    `and the matching billing period. Locate GROSS VALUE, NET VALUE, and STATE TAXES for that period. ` +
+    `If the extracted value matches the document exactly, set status="confirmed". ` +
+    `If you find a different value in the text, set status="corrected" and return the correct value. ` +
+    `If you cannot locate the entry in this document, set status="not_found" and return null for that field. ` +
+    `Return a JSON array matching this type exactly:\n` +
+    `[{ "period": string, "rrc_lease_number": string|null, "gross_revenue_usd": number|null, ` +
+    `"net_revenue_usd": number|null, "severance_tax_usd": number|null, ` +
+    `"status": "confirmed"|"corrected"|"not_found", "note": string|undefined }]`;
+
+  // Run one verification call per document in parallel
+  const docResults = await Promise.allSettled(
+    docsToSearch.map(async (doc) => {
+      const verifyPrompt =
+        `Raw document text:\n${doc.text.slice(0, MAX_DOC_CHARS)}\n\n` +
+        `Extracted financial entries to verify:\n${entriesJson}\n\n${verifyBase}`;
+      const message = await client.messages.create({
+        model,
+        max_tokens: 4_000,
+        system: VERIFY_SYSTEM,
+        messages: [{ role: "user", content: verifyPrompt }],
+      });
+      const raw = message.content
+        .filter(b => b.type === "text")
+        .map(b => (b as { type: "text"; text: string }).text)
+        .join("")
+        .trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+      return JSON.parse(cleaned) as VerifyResult[];
+    })
+  );
+
+  // Merge across documents: "confirmed"/"corrected" from any doc wins over "not_found".
+  // A period is only nulled if every document says "not_found".
+  const verifyMap = new Map<string, VerifyResult>();
+  for (const settled of docResults) {
+    if (settled.status !== "fulfilled") continue;
+    for (const vr of settled.value) {
+      const key = `${vr.period}|${vr.rrc_lease_number ?? ""}`;
+      const existing = verifyMap.get(key);
+      if (!existing || (existing.status === "not_found" && vr.status !== "not_found")) {
+        verifyMap.set(key, vr);
+      }
+    }
+  }
+
+  if (verifyMap.size === 0) {
+    console.error("[underwriting-verification] all per-document calls failed — using unverified extraction");
+    return extracted;
+  }
+
+  // Apply corrections to production_months
+  const correctedMonths = extracted.production_months.map(pm => {
+    const key = `${pm.period}|${pm.rrc_lease_number ?? ""}`;
+    const vr = verifyMap.get(key);
+    if (!vr) return pm;
+
+    if (vr.status === "corrected") {
+      console.warn(
+        `[underwriting-verification] corrected ${pm.period} lease=${pm.rrc_lease_number ?? "?"}: ` +
+        `gross ${pm.gross_revenue_usd}→${vr.gross_revenue_usd}, ` +
+        `net ${pm.net_revenue_usd}→${vr.net_revenue_usd}, ` +
+        `sev_tax ${pm.severance_tax_usd}→${vr.severance_tax_usd}` +
+        (vr.note ? ` (${vr.note})` : ""),
+      );
+      return {
+        ...pm,
+        gross_revenue_usd:  vr.gross_revenue_usd,
+        net_revenue_usd:    vr.net_revenue_usd,
+        severance_tax_usd:  vr.severance_tax_usd,
+      };
+    }
+
+    if (vr.status === "not_found") {
+      console.warn(
+        `[underwriting-verification] ${pm.period} lease=${pm.rrc_lease_number ?? "?"} ` +
+        `NOT FOUND in any source document — nulling financial fields to prevent hallucination`,
+      );
+      return { ...pm, gross_revenue_usd: null, net_revenue_usd: null, severance_tax_usd: null };
+    }
+
+    return pm; // "confirmed" — no change needed
+  });
+
+  return { ...extracted, production_months: correctedMonths };
+}
+
 export async function extractUnderwritingDataFromDocuments(
   documents: { filename: string; text: string; doc_type?: string }[],
 ): Promise<DocumentExtractionResult | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || documents.length === 0) return null;
+  if (documents.length === 0) return null;
 
-  const client = new OpenAI({ apiKey, timeout: 90_000 });
-  const model  = process.env.OPENAI_OCR_MODEL ?? "gpt-4o";
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    // Throw so the calling pipeline step surfaces this as a visible failure
+    // rather than silently returning null and hiding the config gap.
+    throw new Error(
+      "ANTHROPIC_API_KEY is not configured — AI document extraction is disabled. " +
+      "Add the key to .env.local to enable run statement and LOE extraction."
+    );
+  }
 
-  // Extract each document independently, chunking large ones.
-  // All chunks run concurrently (bounded by OpenAI rate limits on their end).
+  const client = new Anthropic({ apiKey, timeout: 120_000 });
+  const model  = process.env.EXTRACTION_MODEL ?? "claude-sonnet-4-6";
+
+  // Pass 1 — Extract each document independently, chunking only if > 180k chars.
+  // With Claude's 200k-token context, virtually all O&G packages fit in one call.
   const chunkPromises: Promise<DocumentExtractionResult | null>[] = [];
 
   for (const doc of documents) {
@@ -436,7 +603,7 @@ export async function extractUnderwritingDataFromDocuments(
     });
   }
 
-  console.log(`[underwriting-extraction] running ${chunkPromises.length} extraction call(s) across ${documents.length} document(s)`);
+  console.log(`[underwriting-extraction] pass 1: ${chunkPromises.length} call(s) across ${documents.length} document(s) (model: ${model})`);
 
   const settled = await Promise.allSettled(chunkPromises);
   const results: DocumentExtractionResult[] = [];
@@ -445,11 +612,26 @@ export async function extractUnderwritingDataFromDocuments(
   }
 
   if (results.length === 0) {
-    console.error("[underwriting-extraction] all chunks failed — returning null");
+    console.error("[underwriting-extraction] all extraction calls failed — returning null");
     return null;
   }
 
-  return mergeExtractionResults(results);
+  const merged = mergeExtractionResults(results);
+  if (!merged) return null;
+
+  // Pass 2 — Verify financial fields against raw text.
+  // Use the combined raw text of all documents (first 60k chars used inside the verifier).
+  const hasFinancialData = merged.production_months.some(
+    pm => pm.gross_revenue_usd != null || pm.net_revenue_usd != null || pm.severance_tax_usd != null,
+  );
+
+  if (hasFinancialData) {
+    const periodCount = merged.production_months.filter(pm => pm.net_revenue_usd != null || pm.gross_revenue_usd != null).length;
+    console.log(`[underwriting-extraction] pass 2: verifying financial fields for ${periodCount} period(s) across ${documents.length} document(s)`);
+    return verifyFinancialFields(client, model, documents, merged);
+  }
+
+  return merged;
 }
 
 // ─── Post-extraction sanitisation ────────────────────────────────────────────

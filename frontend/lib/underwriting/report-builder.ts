@@ -88,6 +88,8 @@ import { detectContradictions } from "./contradiction-engine";
 import type { Contradiction } from "./contradiction-engine";
 import { runTruthCheck } from "./truth-check-engine";
 import type { TruthCheckResult } from "./truth-check-engine";
+import { classifyReserves } from "./reserve-classification";
+import type { ReserveClassification } from "./reserve-classification";
 
 // ─── TRRC production well (from existing well lookup) ─────────────────────────
 
@@ -514,6 +516,12 @@ export type BuildReportArgs = {
    * Golden fixture: Lease 60509 / District 8A → 52 wells.
    */
   leaseWellInventory?: import("./trrc-lease-inventory").LeaseWellInventoryResult | null;
+  /**
+   * Peer benchmarking result — offset well type curve and subject well percentile.
+   * Computed in the pipeline before buildDDReport is called (async network calls).
+   * Null when not attempted or subject well has no spatial location.
+   */
+  peerBenchmark?: import("./peer-benchmarking").PeerBenchmarkResult | null;
 };
 
 export function buildDDReport(args: BuildReportArgs): DDReport {
@@ -545,6 +553,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     cmplPacketDetail     = null,
     districtViolations   = null,
     leaseWellInventory   = null,
+    peerBenchmark        = null,
   } = args;
 
   // ── Merge uploaded run tickets / purchaser statements into TRRC production ──
@@ -607,6 +616,86 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     existing.gas   += pm.gas_mcf   ?? 0;
     existing.water += pm.water_bbl ?? 0;
     docPeriodMap.set(pm.period, existing);
+  }
+
+  // ── Revenue metrics from subject-lease run statements ─────────────────────
+  // Use the same per-lease filter that built docPeriodMap.  Captures net_revenue_usd,
+  // gross_revenue_usd, and severance_tax_usd — the exact figures on each run statement.
+  // These are metered, signed records: higher evidence tier than price × volume × NRI.
+  const subjectRunMonths: Array<{
+    period: string;
+    oil_bbl: number | null;
+    net_revenue_usd: number | null;
+    gross_revenue_usd: number | null;
+    severance_tax_usd: number | null;
+  }> = [];
+
+  for (const pm of extracted?.production_months ?? []) {
+    // Same per-lease filter used by docPeriodMap above
+    if (pm.rrc_lease_number && subjectLeaseNumbers.size > 0) {
+      const pmLease = _normLease(pm.rrc_lease_number);
+      const leaseMatch = Array.from(subjectLeaseNumbers).some(
+        l => pmLease === l || pmLease.endsWith(l) || l.endsWith(pmLease),
+      );
+      if (!leaseMatch) continue;
+    } else if (pm.well_name && subjectNameTokens.size > 0) {
+      const pmNorm = _normStr(pm.well_name);
+      const nameMatch = Array.from(subjectNameTokens).some(
+        t => pmNorm.includes(t) || t.includes(pmNorm),
+      );
+      if (!nameMatch) continue;
+    }
+    if (pm.net_revenue_usd != null || pm.gross_revenue_usd != null) {
+      subjectRunMonths.push({
+        period:           pm.period,
+        oil_bbl:          pm.oil_bbl ?? null,
+        net_revenue_usd:  pm.net_revenue_usd ?? null,
+        gross_revenue_usd: pm.gross_revenue_usd ?? null,
+        severance_tax_usd: pm.severance_tax_usd ?? null,
+      });
+    }
+  }
+
+  // Average monthly net revenue from run statements (subject lease only)
+  const runNetRevPeriods   = subjectRunMonths.filter(m => m.net_revenue_usd != null);
+  const runGrossRevPeriods = subjectRunMonths.filter(m => m.gross_revenue_usd != null);
+  const runSevTaxPeriods   = subjectRunMonths.filter(m => m.severance_tax_usd != null);
+
+  const avgRunNetRevenue   = runNetRevPeriods.length > 0
+    ? runNetRevPeriods.reduce((s, m) => s + (m.net_revenue_usd ?? 0), 0) / runNetRevPeriods.length
+    : null;
+  const avgRunGrossRevenue = runGrossRevPeriods.length > 0
+    ? runGrossRevPeriods.reduce((s, m) => s + (m.gross_revenue_usd ?? 0), 0) / runGrossRevPeriods.length
+    : null;
+  const avgRunSevTax       = runSevTaxPeriods.length > 0
+    ? runSevTaxPeriods.reduce((s, m) => s + (m.severance_tax_usd ?? 0), 0) / runSevTaxPeriods.length
+    : null;
+
+  // Effective severance tax rate from run statements — cross-checks statutory 4.6% Texas rate.
+  // If it deviates by >1 pp, the NRI or settlement pricing may differ from the standard assumption.
+  const effectiveSevRateFromDocs =
+    avgRunSevTax != null && avgRunGrossRevenue != null && avgRunGrossRevenue > 0
+      ? avgRunSevTax / avgRunGrossRevenue
+      : null;
+
+  // Volume reconciliation: compare run statement volumes vs TRRC for shared periods.
+  // Discrepancies > 5% flag as a lie-detector finding (Phase 2 spec §1 — Logic of Skepticism).
+  const runVsRrcDiscrepancies: Array<{ period: string; doc_bbl: number; trrc_bbl: number; delta_pct: number }> = [];
+  const trrcRowsByPeriod = new Map<string, number>();
+  for (const w of trrcWells) {
+    for (const r of w.monthly_rows ?? []) {
+      const period = `${r.year}-${String(r.month).padStart(2, "0")}`;
+      trrcRowsByPeriod.set(period, (trrcRowsByPeriod.get(period) ?? 0) + r.oil_bbl);
+    }
+  }
+  for (const m of subjectRunMonths) {
+    if (m.oil_bbl == null || m.oil_bbl <= 0) continue;
+    const trrcBbl = trrcRowsByPeriod.get(m.period);
+    if (trrcBbl == null || trrcBbl <= 0) continue;
+    const deltaPct = Math.abs(m.oil_bbl - trrcBbl) / trrcBbl * 100;
+    if (deltaPct > 5) {
+      runVsRrcDiscrepancies.push({ period: m.period, doc_bbl: m.oil_bbl, trrc_bbl: trrcBbl, delta_pct: Math.round(deltaPct) });
+    }
   }
 
   const mergedWells: TrrcWellProduction[] = trrcWells.map(w => {
@@ -1145,6 +1234,23 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     ? loePeriods.reduce((s, v) => s + (v.net_income_usd ?? 0), 0) / loePeriods.filter(s => s.net_income_usd != null).length
     : null;
 
+  // ── Run statement revenue note for economics (Phase 2) ───────────────────
+  // When net_revenue_usd is available from run statements, it is direct evidence
+  // of what the operator actually received — no NRI/price model needed.
+  // Used as a cross-check and, when LOE is also present, enables verified NCF.
+  const runRevenueNote: string | undefined =
+    avgRunNetRevenue != null
+      ? `Avg monthly net revenue from ${runNetRevPeriods.length} run statement period(s): $${Math.round(avgRunNetRevenue).toLocaleString()}/mo` +
+        (avgRunGrossRevenue != null ? ` (gross $${Math.round(avgRunGrossRevenue).toLocaleString()}/mo)` : "") +
+        (avgRunSevTax != null ? `, severance tax $${Math.round(avgRunSevTax).toLocaleString()}/mo` : "") +
+        (effectiveSevRateFromDocs != null
+          ? `. Effective tax rate ${(effectiveSevRateFromDocs * 100).toFixed(2)}%` +
+            (Math.abs(effectiveSevRateFromDocs - 0.046) > 0.01
+              ? ` ⚠️ deviates from TX statutory 4.6% — verify NRI / division order`
+              : ` (consistent with TX statutory 4.6%)`)
+          : "")
+      : undefined;
+
   // LOE per BOE — from statements, then EDGAR public company data, then basin benchmark
   let loePerBoe: number | null = null;
   let avgLoeEffective = avgLoe;
@@ -1279,6 +1385,31 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     })(),
     run_tickets_present: dp(extracted?.run_tickets_present ?? false, extracted?.run_tickets_present ? "uploaded_doc" : "missing", extracted?.run_tickets_present ? "high" : "none"),
     purchaser_statements_present: dp(extracted?.purchaser_statements_present ?? false, extracted?.purchaser_statements_present ? "uploaded_doc" : "missing", extracted?.purchaser_statements_present ? "high" : "none"),
+    // Phase 2 — verified revenue from run statements
+    run_statement_months: runNetRevPeriods.length,
+    avg_run_net_revenue_usd: avgRunNetRevenue != null
+      ? dp(avgRunNetRevenue, "run_statement", runNetRevPeriods.length >= 6 ? "high" : "medium",
+          runRevenueNote)
+      : missingDp<number>("No net revenue data in uploaded run statements"),
+    avg_run_gross_revenue_usd: avgRunGrossRevenue != null
+      ? dp(avgRunGrossRevenue, "run_statement", "medium")
+      : missingDp<number>(),
+    avg_run_severance_tax_usd: avgRunSevTax != null
+      ? dp(avgRunSevTax, "run_statement", "medium")
+      : missingDp<number>(),
+    effective_sev_rate_pct: effectiveSevRateFromDocs != null
+      ? dp(
+          Math.round(effectiveSevRateFromDocs * 10000) / 100,
+          "run_statement",
+          Math.abs(effectiveSevRateFromDocs - 0.046) <= 0.01 ? "high" : "medium",
+          effectiveSevRateFromDocs != null
+            ? (Math.abs(effectiveSevRateFromDocs - 0.046) > 0.01
+                ? `⚠️ ${(effectiveSevRateFromDocs * 100).toFixed(2)}% effective rate deviates from TX statutory 4.6% — verify NRI / division order`
+                : `${(effectiveSevRateFromDocs * 100).toFixed(2)}% effective — consistent with TX statutory 4.6%`)
+            : undefined,
+        )
+      : missingDp<number>(),
+    run_vs_rrc_discrepancy_count: runVsRrcDiscrepancies.length,
     notes: [],
   };
 
@@ -2108,6 +2239,15 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       return missingDp<number>();
     })(),
     projections: dcaResult?.projections ?? [],
+    p10_remaining_bbl: dcaResult
+      ? dp(dcaResult.p10_remaining_bbl, "inferred", "low", "Optimistic — Di × 0.65 (10th percentile of decline uncertainty)")
+      : missingDp<number>(),
+    p50_remaining_bbl: dcaResult
+      ? dp(dcaResult.p50_remaining_bbl, "inferred", "low", "Base case (50th percentile)")
+      : missingDp<number>(),
+    p90_remaining_bbl: dcaResult
+      ? dp(dcaResult.p90_remaining_bbl, "inferred", "low", "Conservative — Di × 1.5 (90th percentile of decline uncertainty)")
+      : missingDp<number>(),
     notes: (() => {
       const notes: string[] = [];
       // ── Decline-support disclaimer (spec-required) ─────────────────────────
@@ -2495,9 +2635,25 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
             `Ad val $${econResult.monthly_ad_valorem_usd.toLocaleString()} · ` +
             `Workover reserve $${econResult.monthly_workover_reserve_usd.toLocaleString()}`,
           ] : []),
+          // Phase 2: surface run statement verified revenue when available
+          ...(avgRunNetRevenue != null ? [
+            `Run statement verified revenue (${runNetRevPeriods.length} period avg): ` +
+            `gross $${Math.round(avgRunGrossRevenue ?? 0).toLocaleString()}/mo → ` +
+            `severance tax $${Math.round(avgRunSevTax ?? 0).toLocaleString()}/mo → ` +
+            `net $${Math.round(avgRunNetRevenue).toLocaleString()}/mo` +
+            (avgLoe != null
+              ? ` · document-verified NCF = net revenue − LOE = $${Math.round(avgRunNetRevenue - avgLoe).toLocaleString()}/mo`
+              : " · upload LOE statements to compute verified NCF"),
+          ] : []),
+          ...(runVsRrcDiscrepancies.length > 0 ? [
+            `⚡ ${runVsRrcDiscrepancies.length} period(s) where run statement volume differs from TRRC filing by >5%: ` +
+            runVsRrcDiscrepancies.map(d => `${d.period} (doc ${d.doc_bbl.toFixed(0)} vs TRRC ${d.trrc_bbl.toFixed(0)} BBL, ${d.delta_pct}%)`).join("; ") +
+            ". See Cross-Source Contradictions tab.",
+          ] : []),
           "Offer ranges calibrated to PE-backed WI acquisition multiples. All economics preliminary — not a substitute for a certified petroleum engineer reserve report.",
         ]
       : ["Economics unavailable — provide API numbers for TRRC production lookup and upload LOE statements for cost data."],
+    tax_analysis: econResult?.tax_analysis ?? null,
   };
 
   // ── §3.3.2 Financial Metric Hard Suppression ──────────────────────────────
@@ -2508,16 +2664,22 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   // every dollar figure is a pure benchmark guess and MUST NOT be shown as an
   // offer basis.
   //
+  // Phase 2 extension: Also suppress when run statement volumes diverge from
+  // TRRC by ≥20% in any period — a material discrepancy means production basis
+  // for the model cannot be trusted until reconciled.
+  //
   // Hard block vs. soft warning:
   //   - Soft warning (existing): NRI/WI unverified → note added, values shown
   //   - Hard suppression (this): LOE + run tickets both absent → values NULLED
+  //   - Hard suppression (phase 2): ≥20% volume mismatch → values NULLED
   //
-  // Rationale (Manus spec §3.3.2):
+  // Rationale (Manus spec §3.3.2 + Lie Detector §1):
   //   "An offer range published without verified LOE is indistinguishable from
   //    a made-up number. The product must refuse to show it."
   {
     const loeMissing = loePeriods.length === 0;
     const runMissing = !(extracted?.run_tickets_present === true);
+    const criticalVolumeDiscrepancy = runVsRrcDiscrepancies.some(d => d.delta_pct >= 20);
 
     if (loeMissing && runMissing) {
       const suppressNote =
@@ -2542,6 +2704,32 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
         "These metrics require verified operating costs. Without at least one LOE statement or run ticket,",
         "any offer figure would be a benchmark estimate, not a verified calculation.",
         "Upload LOE statements (JIB), run tickets, or purchaser statements to unlock offer calculations.",
+      ];
+    } else if (criticalVolumeDiscrepancy) {
+      // Phase 2 — Lie Detector: cannot model economics when production volumes
+      // are materially contested between run statement and TRRC records.
+      const worstDisc = runVsRrcDiscrepancies.reduce((a, b) => a.delta_pct > b.delta_pct ? a : b);
+      const suppressNote =
+        `⛔ SUPPRESSED — Run statement volume diverges from TRRC by ${worstDisc.delta_pct}% in ${worstDisc.period} ` +
+        `(doc: ${worstDisc.doc_bbl.toFixed(0)} BBL, TRRC: ${worstDisc.trrc_bbl.toFixed(0)} BBL). ` +
+        "A >20% production volume discrepancy means the decline model cannot use a trusted production basis. " +
+        "Reconcile run statement vs. TRRC filing before offer range can be published.";
+
+      acquisitionEconomicsSection.npv10_usd              = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.offer_range_low        = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.offer_range_mid        = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.offer_range_high       = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.monthly_net_income_usd = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.annual_net_income_usd  = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.breakeven_oil_price    = missingDp<number>(suppressNote);
+      acquisitionEconomicsSection.scenarios              = [];
+      acquisitionEconomicsSection.sensitivity_matrix     = undefined;
+      acquisitionEconomicsSection.monthly_cash_flow_schedule = undefined;
+      acquisitionEconomicsSection.notes = [
+        `⛔ NCF, NPV, and Offer Range suppressed — production volume discrepancy ≥20% detected (${worstDisc.period}).`,
+        "Per underwriting policy (Lie Detector mode), economics cannot be published when the production basis",
+        "is materially contested between the uploaded run statement and TRRC official filing.",
+        "See Cross-Source Contradictions tab for details. Resolve and re-run analysis.",
       ];
     }
   }
@@ -3088,7 +3276,16 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       ? [leaseWellInventory.lease_level_warning]
       : [];
 
+  // Phase 2: volume discrepancies are critical risks — surface them first
+  const volumeDiscrepancyRisks: string[] = runVsRrcDiscrepancies
+    .filter(d => d.delta_pct >= 10)
+    .slice(0, 2)
+    .map(d =>
+      `⚡ Volume discrepancy ${d.period}: run statement ${d.doc_bbl.toFixed(0)} BBL vs TRRC ${d.trrc_bbl.toFixed(0)} BBL (${d.delta_pct}% diff) — requires reconciliation`
+    );
+
   const topRisks: string[] = [
+    ...volumeDiscrepancyRisks,
     ...leaseWellWarningEntry,
     ...riskSection.red_flags.slice(0, 3),
     ...riskSection.yellow_flags.slice(0, 2),
@@ -4412,6 +4609,18 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   if (econResult) {
     const baseScen = econResult.scenarios.find(s => s.deck.label === "Base");
     const stressScen = econResult.scenarios.find(s => s.deck.label === "Stress");
+    // Phase 2: surface run statement verified revenue first if available
+    if (avgRunNetRevenue != null) {
+      p3Parts.push(
+        `Run statement verified revenue (${runNetRevPeriods.length}-period average): ` +
+        `gross $${Math.round(avgRunGrossRevenue ?? 0).toLocaleString()}/mo → ` +
+        `severance tax $${Math.round(avgRunSevTax ?? 0).toLocaleString()}/mo → ` +
+        `net revenue $${Math.round(avgRunNetRevenue).toLocaleString()}/mo.` +
+        (avgLoe != null
+          ? ` After LOE ($${Math.round(avgLoe).toLocaleString()}/mo), document-verified NCF = $${Math.round(avgRunNetRevenue - avgLoe).toLocaleString()}/mo.`
+          : " LOE not yet provided — upload statements to compute verified NCF.")
+      );
+    }
     if (baseScen) {
       p3Parts.push(
         `At Base case pricing ($${(baseDeckOil + (basinDiff ?? -4)).toFixed(0)}/BBL net), monthly net income is estimated at ${fmt$(baseScen.monthly_net_income_usd)} ` +
@@ -4895,6 +5104,34 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     trrcResolvedCounty,
   });
 
+  // Phase 2 — Lie Detector: run statement ↔ TRRC volume reconciliation
+  // If metered run statement volumes differ from official TRRC filings by >5%
+  // for the same month, it is a discrepancy that must be surfaced, not papered over.
+  // Common causes: RRC reporting lag, rounding conventions, correction tickets.
+  for (const d of runVsRrcDiscrepancies) {
+    const severity: Contradiction["severity"] = d.delta_pct >= 20 ? "critical" : "important";
+    contradictions.push({
+      id: `PROD_VOL_MISMATCH_${d.period}`,
+      severity,
+      field: `Production Volume — ${d.period}`,
+      description:
+        `Run statement shows ${d.doc_bbl.toFixed(2)} BBL for ${d.period}, ` +
+        `but TRRC official filing shows ${d.trrc_bbl.toFixed(2)} BBL — ` +
+        `a ${d.delta_pct}% difference. ` +
+        (d.delta_pct >= 20
+          ? "A >20% variance is material and requires reconciliation before any offer."
+          : "Confirm whether this reflects a correction ticket, RRC rounding, or an allocation error."),
+      source_a:  "Run Statement (uploaded document)",
+      value_a:   d.doc_bbl,
+      source_b:  "TRRC Official Production Filing",
+      value_b:   d.trrc_bbl,
+      recommended_action:
+        "Request operator explanation. If run statement is authoritative, verify TRRC filing was correctly submitted. " +
+        "If TRRC is authoritative, check for correction run tickets in the document package.",
+      auto_suppresses_economics: d.delta_pct >= 20,
+    });
+  }
+
   // Surface critical contradictions in risk red_flags (they don't duplicate
   // existing flags since they are cross-source findings, not single-source ones)
   const criticalContradictions = contradictions.filter(c => c.severity === "critical");
@@ -4991,6 +5228,46 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
 
   const diligenceRunLabel = finalGate.label;
 
+  // ── Reserve Classification (SEC Rule 4-10) ────────────────────────────────
+  let reserveClassification: ReserveClassification | null = null;
+  if (dcaResult && econResult) {
+    try {
+      const hasShutInOrder = complianceSection.violations?.some(v =>
+        /shut.?in|s\.?i\.|suspension/i.test(`${v.type ?? ""} ${v.description ?? ""}`)
+      ) ?? false;
+      const hasCriticalViolations = (complianceSection.open_violation_count?.value ?? 0) > 5
+        || (districtViolations?.match_count ?? 0) > 10;
+
+      reserveClassification = classifyReserves({
+        dcaResult,
+        econResult,
+        complianceHasShutInOrder:       hasShutInOrder,
+        complianceHasCriticalViolations: hasCriticalViolations,
+      });
+    } catch (e) {
+      console.error("[reserve-classification] failed:", e);
+    }
+  }
+
+  // ── Apply finalGate suppressions ──────────────────────────────────────────
+  // finalGate.canShowOfferRange / canShowNPV now actually gate the values so
+  // these flags are not dead. The truth-check server-side redaction in both
+  // routes handles the block_economics case; these flags cover the additional
+  // diligence-tier cases (e.g. Public-Record Diligence with no private docs).
+  if (!finalGate.canShowOfferRange && acquisitionEconomicsSection != null) {
+    const gatedDp = missingDp<number>(
+      "Offer range unavailable at this diligence level — provide LOE statements and division orders."
+    );
+    acquisitionEconomicsSection.offer_range_low  = gatedDp;
+    acquisitionEconomicsSection.offer_range_mid  = gatedDp;
+    acquisitionEconomicsSection.offer_range_high = gatedDp;
+  }
+  if (!finalGate.canShowNPV && acquisitionEconomicsSection != null) {
+    acquisitionEconomicsSection.npv10_usd = missingDp<number>(
+      "NPV10 unavailable at this diligence level — requires verified production and LOE data."
+    );
+  }
+
   // ── Assemble report ───────────────────────────────────────────────────────
 
   return {
@@ -5042,6 +5319,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     offer_gate: computedOfferGate,
     truth_check: truthCheck,
     contradictions,
+    reserve_classification: reserveClassification,
+    peer_benchmark:        peerBenchmark ?? null,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,
       trrc_match_tier: matchTier,
