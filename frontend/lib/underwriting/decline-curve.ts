@@ -316,6 +316,22 @@ function nominalToEffectiveMonthly(Di: number, b: number): number {
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 /**
+ * Maximum months used for DCA model fitting.
+ *
+ * When a well has more history than this, we fit the Arps model on the most
+ * recent window only. This prevents the 1990s–2010s peak production era from
+ * distorting the fitted decline curve for long-lived waterfloods, CBM wells,
+ * and other assets with non-monotonic production histories.
+ *
+ * Full history is still used for cumulative stats (cum_oil_bbl, peak_bbl,
+ * months_of_data) — only the model fit is windowed.
+ *
+ * 36 months (3 years) captures enough trend to fit a reliable Arps curve
+ * while staying current. SPE recommends 18–36 months for mature wells.
+ */
+const DCA_FIT_WINDOW_MONTHS = 36;
+
+/**
  * Run Arps DCA on monthly production rows.
  *
  * Accepts rows with an optional `calendar_t` field. When present, calendar_t
@@ -326,6 +342,9 @@ function nominalToEffectiveMonthly(Di: number, b: number): number {
  *
  * Without calendar_t, falls back to sequential 0-indexed time (legacy behaviour).
  * Use the production-engine.ts `dca_rows` output for calendar-correct inputs.
+ *
+ * Model fitting is limited to the most recent DCA_FIT_WINDOW_MONTHS of positive
+ * production. Cumulative, peak, and months-of-data stats use the full history.
  */
 export function runDca(
   monthlyRows: { year: number; month: number; oil_bbl: number; calendar_t?: number }[],
@@ -339,12 +358,21 @@ export function runDca(
 
   if (positive.length < 3) return null;
 
-  const rates = positive.map(r => r.oil_bbl);
+  // Full-history stats (cumulative, peak, etc.)
+  const allRates = positive.map(r => r.oil_bbl);
+
+  // Model fit window — use only the most recent N months to avoid distortion
+  // from historical peak production eras on long-lived assets.
+  const fitRows = positive.length > DCA_FIT_WINDOW_MONTHS
+    ? positive.slice(-DCA_FIT_WINDOW_MONTHS)
+    : positive;
+
+  const rates = fitRows.map(r => r.oil_bbl);
   // Use calendar_t when available (preserves gaps) — otherwise use sequential index
-  const hasCalendarT = positive.every(r => r.calendar_t != null);
+  const hasCalendarT = fitRows.every(r => r.calendar_t != null);
   const rawTimes = hasCalendarT
-    ? positive.map(r => r.calendar_t!)
-    : positive.map((_, i) => i);
+    ? fitRows.map(r => r.calendar_t!)
+    : fitRows.map((_, i) => i);
   // Normalize times to start at 0 so qi is the initial rate at the start of the fit window
   const t0 = rawTimes[0];
   const times = rawTimes.map(t => t - t0);
@@ -359,13 +387,13 @@ export function runDca(
     a.sse <= b.sse ? a : b,
   );
 
-  // Stats from input data
-  const last12 = positive.slice(-12);
-  const last6  = positive.slice(-6);
-  const avg12  = last12.reduce((s, r) => s + r.oil_bbl, 0) / last12.length;
-  const avg6   = last6.reduce((s, r) => s + r.oil_bbl, 0) / last6.length;
-  const peak   = Math.max(...rates);
-  const current = rates[rates.length - 1];
+  // Stats from FULL history (not the fit window)
+  const last12  = positive.slice(-12);
+  const last6   = positive.slice(-6);
+  const avg12   = last12.reduce((s, r) => s + r.oil_bbl, 0) / last12.length;
+  const avg6    = last6.reduce((s, r) => s + r.oil_bbl, 0) / last6.length;
+  const peak    = Math.max(...allRates);
+  const current = rates[rates.length - 1];           // last month in the FIT window = most recent
   const cum     = sorted.reduce((s, r) => s + r.oil_bbl, 0);
 
   // How far along the decline curve are we?

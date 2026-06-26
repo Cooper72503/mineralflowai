@@ -2001,7 +2001,31 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
   // detects restart events, and assigns a production confidence label.
 
   const trrcMonthlyRows = mergedWells.flatMap(w => w.monthly_rows ?? []);
-  const allMonthlyRows  = trrcMonthlyRows.length > 0 ? trrcMonthlyRows : docMonthlyRows;
+
+  // Aggregate multi-lease rows into one row per calendar month.
+  // Without this, a 2-lease asset has 2 rows per month in the time series,
+  // which corrupts DCA regression with duplicate timestamps and halves the
+  // apparent economic life by treating each row as a distinct time step.
+  const aggregateByMonth = (
+    rows: { year: number; month: number; oil_bbl: number; gas_mcf?: number | null }[],
+  ) => {
+    const map = new Map<string, { year: number; month: number; oil_bbl: number; gas_mcf: number | null }>();
+    for (const r of rows) {
+      const key = `${r.year}-${String(r.month).padStart(2, "0")}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.oil_bbl += r.oil_bbl;
+        if (r.gas_mcf != null) existing.gas_mcf = (existing.gas_mcf ?? 0) + r.gas_mcf;
+      } else {
+        map.set(key, { year: r.year, month: r.month, oil_bbl: r.oil_bbl, gas_mcf: r.gas_mcf ?? null });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+  };
+
+  const allMonthlyRows  = trrcMonthlyRows.length > 0
+    ? aggregateByMonth(trrcMonthlyRows)
+    : aggregateByMonth(docMonthlyRows);
   const dcaDataSource   = trrcMonthlyRows.length > 0
     ? (docPeriodMap.size > 0 ? "uploaded_doc" : "trrc")
     : "uploaded_doc";
@@ -2187,10 +2211,11 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       : missingDp<number>(),
     eur_bbl: dcaResult
       ? dp(dcaResult.eur_bbl, "inferred", dcaResult.model.r_squared > 0.8 ? "medium" : "low",
-          `Arps EUR to 5 BBL/mo economic limit`)
+          `Total life-of-well EUR (historical cum ${dcaResult.cum_oil_bbl.toLocaleString()} BBL + remaining ${dcaResult.remaining_reserves_bbl.toLocaleString()} BBL). Buyers: use Remaining Reserves, not this number.`)
       : missingDp<number>("Requires 3+ months of production history"),
     remaining_reserves_bbl: dcaResult
-      ? dp(dcaResult.remaining_reserves_bbl, "inferred", "low", "EUR minus historical cum — unaudited")
+      ? dp(dcaResult.remaining_reserves_bbl, "inferred", dcaResult.model.r_squared > 0.7 ? "medium" : "low",
+          `Arps DCA forward projection to 5 BBL/mo economic limit (last ${Math.min(dcaResult.months_of_data, 36)}-month fit window)`)
       : missingDp<number>(),
     economic_life_months: dcaResult
       ? dp(dcaResult.economic_life_months, "inferred", "low")

@@ -32,6 +32,7 @@
 
 import { NextResponse }                    from "next/server";
 import { createSupabaseFromRouteRequest }  from "@/lib/supabase/from-route-request";
+import { fetchTrialStatus }                from "@/lib/trial/trial-status";
 import { extractUnderwritingDataFromDocuments } from "@/lib/underwriting/document-extraction";
 import { fetchTrrcViolations, fetchTrrcViolationsByLease, fetchTrrcViolationsByOperator } from "@/lib/underwriting/trrc-compliance";
 import { fetchTrrcInjectionByApi, fetchTrrcInjectionByOperator } from "@/lib/underwriting/trrc-injection";
@@ -156,11 +157,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request): Promise<Response> {
-  // ── Auth ──────────────────────────────────────────────────────────────────
+  // ── Auth + trial gate ─────────────────────────────────────────────────────
   const supabase = await createSupabaseFromRouteRequest(request);
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
     return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
+  }
+  const trialStatus = await fetchTrialStatus(supabase, user.id);
+  if (trialStatus.state === "expired" || trialStatus.state === "no_trial") {
+    return NextResponse.json({ ok: false, error: "Subscription required." }, { status: 402 });
   }
 
   const body = (await request.json().catch(() => ({}))) as UnderwritingInput;

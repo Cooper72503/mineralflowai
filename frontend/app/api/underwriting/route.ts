@@ -31,6 +31,7 @@ import { fetchBestNdicProduction }          from "@/lib/wells/ndic-production";
 import { fetchBestOcdProduction }           from "@/lib/wells/ocd-production";
 import { fetchBestCogccProduction }         from "@/lib/wells/cogcc-production";
 import type { UnderwritingInput, UnderwritingResponse } from "@/lib/underwriting/types";
+import { fetchTrialStatus }               from "@/lib/trial/trial-status";
 
 export const runtime    = "nodejs";
 export const dynamic    = "force-dynamic";
@@ -45,6 +46,10 @@ export async function POST(request: Request): Promise<NextResponse<UnderwritingR
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
+    }
+    const trialStatus = await fetchTrialStatus(supabase, user.id);
+    if (trialStatus.state === "expired" || trialStatus.state === "no_trial") {
+      return NextResponse.json({ ok: false, error: "Subscription required." }, { status: 402 });
     }
 
     const body = (await request.json().catch(() => ({}))) as UnderwritingInput;
