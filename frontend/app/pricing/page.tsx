@@ -7,20 +7,27 @@ import { createClient } from "@/lib/supabase/client";
 
 const PILOT_FEATURES = [
   "7-day free trial — no charge until day 8",
-  "Unlimited document analyses",
-  "AI extraction — lease terms, acreage, royalty, ownership",
-  "Deal Brief — AI interpretation with risk, recommendation & grades",
-  "Deal scoring with pursue / skip reasoning",
-  "Pre-underwriting valuation with market-rate multiples",
-  "Offer calculator with sensitivity matrix",
-  "Quick Screen — instant legal description analysis (TX, ND, OK, WV, OH)",
-  "PDF export of screen reports",
+  // Underwriting engine
+  "Full TRRC production history — complete lease-level record, not just 36 months",
+  "Seller claim verification — TRRC cross-check flags overstatements automatically",
+  "Arps DCA — exponential / hyperbolic / harmonic; best-fit by SSE; P10/P50/P90 reserves",
+  "Title & mineral ownership risk — NRI, ORRI, division order, operator match, HBP",
+  "Multi-scenario NPV — stress / base / strip / upside, EIA-anchored pricing",
+  "Gated offer range — blocked until production, ownership, and LOE are each verified",
+  "Six-dimension risk score with pursue / review / pass recommendation",
+  "Evidence tracking — every field tagged by source",
+  // Document intelligence
+  "AI document extraction — LOE, run tickets, division orders, workover AFEs, W-2 completions",
+  // Compliance & data
+  "Live Texas RRC — production, compliance, injections, P-5 operator status",
+  "ICE field inspection records and open violation tracker",
+  "Plugging liability estimate per API number",
+  // Deal management
   "Kanban deal pipeline",
-  "Live well data (Texas RRC, North Dakota NDIC, Oklahoma OCC, West Virginia DEP, Ohio DNR)",
-  "Royalty statement parsing & market value analysis",
   "Lease expiration alerts (90 / 30 / 7 days)",
   "Parcel map (PLSS centroid)",
   "Notes per document",
+  // Support
   "Priority email support",
   "Dedicated onboarding",
 ];

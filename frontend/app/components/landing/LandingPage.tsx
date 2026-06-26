@@ -32,14 +32,15 @@ export function LandingPage() {
                 Underwriting-Grade Deal Analysis in Minutes
               </h1>
               <p className={styles.subhead}>
-                Enter an API number or RRC lease ID. Mineral Flow AI pulls 36 months
-                of TRRC production, runs Arps decline curve analysis, builds a
-                multi-scenario NPV model, and returns an offer range — verified
-                against live EIA pricing and basin benchmarks.
+                Enter an API number or RRC lease ID. Mineral Flow AI pulls the full
+                TRRC production history, verifies seller claims against public records,
+                runs Arps decline curve analysis, assesses title and mineral ownership
+                risk, and returns a gated offer range — blocked until production,
+                division orders, and LOE are each sourced and verified.
               </p>
               <p className={styles.trustLine}>
-                Live TRRC data &nbsp;·&nbsp; Arps DCA with terminal decline &nbsp;·&nbsp;
-                NPV10 / offer range &nbsp;·&nbsp; Six-dimension risk score &nbsp;·&nbsp; Evidence-tracked per field
+                Full TRRC history &nbsp;·&nbsp; Seller claim verification &nbsp;·&nbsp;
+                Title &amp; ownership risk &nbsp;·&nbsp; Arps DCA &nbsp;·&nbsp; Gated offer range &nbsp;·&nbsp; Evidence-tracked per field
               </p>
               <div className={styles.ctaRow}>
                 <a className={styles.btnPrimary} href={MAIL_DEMO}>
@@ -51,10 +52,11 @@ export function LandingPage() {
               </div>
               <div className={styles.chips} aria-hidden>
                 <span className={styles.chip}>Production analysis</span>
+                <span className={styles.chip}>Seller truth check</span>
+                <span className={styles.chip}>Title risk</span>
                 <span className={styles.chip}>Arps DCA</span>
                 <span className={styles.chip}>NPV model</span>
-                <span className={styles.chip}>Offer range</span>
-                <span className={styles.chip}>Risk score</span>
+                <span className={styles.chip}>Gated offer range</span>
                 <span className={styles.chip}>Document extraction</span>
               </div>
             </div>
@@ -137,12 +139,13 @@ export function LandingPage() {
                 <IconWell />
               </div>
               <div>
-                <h3>Live TRRC production — 36 months</h3>
+                <h3>Full TRRC production history</h3>
                 <p>
-                  Pulls monthly production directly from the Texas Railroad Commission
-                  by API number or RRC lease ID. Every month is classified: active,
-                  downtime, restart, flush, or incomplete — with calendar gaps
-                  preserved for accurate decline modeling.
+                  Pulls the complete monthly production record from the Texas Railroad
+                  Commission by API number or RRC lease ID — not just the trailing 36
+                  months. Every month is classified: active, downtime, restart, flush,
+                  or incomplete, with calendar gaps preserved so the decline model sees
+                  the true time axis. Multi-lease assets are aggregated before DCA fitting.
                 </p>
               </div>
             </div>
@@ -231,11 +234,12 @@ export function LandingPage() {
       >
         <div className={styles.wrap}>
           <h2 className={styles.sectionTitle} id="how-heading">
-            From API number to offer range in four steps
+            From API number to gated offer recommendation in four steps
           </h2>
           <p className={styles.sectionLead}>
             The platform runs the full evaluation automatically. You provide the
-            identifiers and documents; it does the rest.
+            identifiers and documents; it does the rest — and tells you exactly
+            what&apos;s still missing before the offer is written.
           </p>
           <div className={styles.steps}>
             <div className={styles.stepCard}>
@@ -256,7 +260,7 @@ export function LandingPage() {
             <div className={styles.stepCard}>
               <div className={styles.stepNum}>4</div>
               <h3>Review the full report</h3>
-              <p>Decline curve, NPV model, offer range, risk score, evidence sources, and a prioritized document request list for anything still missing.</p>
+              <p>Seller claim verification, title risk, decline curve, NPV model, and a gated offer range — unlocked only after production, ownership, and LOE are each sourced. Missing items generate a specific document request list.</p>
             </div>
           </div>
         </div>
@@ -346,6 +350,118 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* ── Seller truth check ───────────────────────────────────────── */}
+      <section
+        id="truth-check"
+        className={`${styles.section} ${styles.sectionAlt}`}
+        aria-labelledby="truth-heading"
+      >
+        <div className={styles.wrap}>
+          <h2 className={styles.sectionTitle} id="truth-heading">
+            Seller claims verified against TRRC before the offer is written
+          </h2>
+          <p className={styles.sectionLead}>
+            Sellers routinely overstate production. The platform pulls the public
+            TRRC record, compares it to whatever rate the seller claimed, and flags
+            discrepancies — automatically, on every deal.
+          </p>
+          <div className={styles.confGrid}>
+            <div className={styles.confCard}>
+              <h3>What it checks</h3>
+              <ul>
+                <li>Current combined rate vs. seller's stated rate — by lease, by well</li>
+                <li>Last reported production month and staleness (TRRC reporting lag flagged)</li>
+                <li>Zero-production months — downtime the seller didn't mention</li>
+                <li>Compliance record vs. "clean title" seller claim</li>
+                <li>Operator name match between stated and TRRC record</li>
+              </ul>
+            </div>
+            <div className={styles.confCard}>
+              <h3>What a discrepancy looks like</h3>
+              <ul>
+                <li>Seller claims 25 BOPD — TRRC shows 14.3 BOPD, last reported 13 months ago</li>
+                <li>Seller claims clean compliance — TRRC shows 3 open violations</li>
+                <li>Seller claims 73 combined BOPD — TRRC shows 59.9 (18% overstatement)</li>
+                <li>Verdict: block — economics suppressed until overstatement is explained</li>
+              </ul>
+            </div>
+          </div>
+          <div className={styles.noteBox} style={{ marginTop: "1.5rem" }}>
+            Truth-check items that can be verified with public data are marked true or false
+            automatically. Items that require seller documents are marked unsupported — not assumed
+            clean. The offer gate stays closed until each critical item resolves.
+          </div>
+        </div>
+      </section>
+
+      {/* ── Title risk ────────────────────────────────────────────────── */}
+      <section
+        id="title-risk"
+        className={styles.section}
+        aria-labelledby="title-heading"
+      >
+        <div className={styles.wrap}>
+          <h2 className={styles.sectionTitle} id="title-heading">
+            Mineral ownership and title risk assessed automatically
+          </h2>
+          <p className={styles.sectionLead}>
+            Before a dollar moves, the platform cross-checks seven title signals
+            against the documents you have — and tells you exactly which ones
+            require a licensed title attorney to resolve.
+          </p>
+          <div className={styles.valGrid}>
+            <div className={styles.valCard}>
+              <strong>Division order verification</strong>
+              <p>
+                No division order on file means decimal interest is unconfirmed.
+                The platform flags this as critical and blocks NRI-dependent
+                economics until an executed division order is uploaded.
+              </p>
+            </div>
+            <div className={styles.valCard}>
+              <strong>NRI / WI plausibility check</strong>
+              <p>
+                NRI is cross-checked against typical working interest structures.
+                An NRI above the WI or outside the plausible range for the lease
+                type is flagged for investigation before closing.
+              </p>
+            </div>
+            <div className={styles.valCard}>
+              <strong>ORRI and burden detection</strong>
+              <p>
+                Overriding royalty interests reduce net revenue. The platform
+                detects ORRI language in uploaded documents and flags the implied
+                lease burden so it flows into the NPV model correctly.
+              </p>
+            </div>
+            <div className={styles.valCard}>
+              <strong>Operator name cross-check</strong>
+              <p>
+                The stated operator is compared to the TRRC record. A mismatch
+                may indicate an unreported operator change or an acquisition
+                that hasn't been reflected in the public record.
+              </p>
+            </div>
+            <div className={styles.valCard}>
+              <strong>HBP status and lease copy requirement</strong>
+              <p>
+                Production confirms HBP status, but HBP doesn't eliminate lease
+                review — pugh clauses, depth limitations, and primary term
+                provisions still require the underlying lease document.
+              </p>
+            </div>
+            <div className={styles.valCard}>
+              <strong>Title opinion gate</strong>
+              <p>
+                No automated analysis substitutes for a formal title examination.
+                The platform generates a specific document checklist and flags
+                when a licensed title attorney must be engaged before closing.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── TRRC & Compliance ─────────────────────────────────────────── */}
       <section
         className={`${styles.section} ${styles.sectionAlt}`}
@@ -357,7 +473,7 @@ export function LandingPage() {
           </h2>
           <p className={styles.sectionLead}>
             Every Texas underwriting pulls the full regulatory picture from the
-            Railroad Commission automatically, in parallel, in under 18 seconds.
+            Railroad Commission automatically, in parallel, in minutes.
           </p>
           <div className={styles.confGrid}>
             <div className={styles.confCard}>
