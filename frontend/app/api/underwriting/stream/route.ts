@@ -1270,13 +1270,20 @@ async function runPipeline(
   await writer.write(progressEvent("generate_report", "running", "Generating report…"));
 
   // Derive seller-claimed monthly production from document extraction.
-  // Use the most recent production month present in seller documents (sorted
-  // descending by period) as the seller's stated current rate.
+  // Priority: structured production_months (run tickets) → narrative BOPD claim (acq packages).
   const sellerClaimedMonthlyBbl: number | null = (() => {
     const months = extracted?.production_months ?? [];
-    if (months.length === 0) return null;
-    const sorted = [...months].sort((a, b) => b.period.localeCompare(a.period));
-    return sorted[0]?.oil_bbl ?? null;
+    if (months.length > 0) {
+      const sorted = [...months].sort((a, b) => b.period.localeCompare(a.period));
+      return sorted[0]?.oil_bbl ?? null;
+    }
+    // Fall back to seller's narrative rate claim: use midpoint of stated BOPD range × 30.44
+    const minBopd = extracted?.seller_stated_current_rate_bopd_min;
+    const maxBopd = extracted?.seller_stated_current_rate_bopd_max;
+    if (minBopd != null && maxBopd != null) return ((minBopd + maxBopd) / 2) * 30.44;
+    if (minBopd != null) return minBopd * 30.44;
+    if (maxBopd != null) return maxBopd * 30.44;
+    return null;
   })();
 
   const report = buildDDReport({
@@ -1305,6 +1312,8 @@ async function runPipeline(
     trrcResolvedOperator:  trrcResolvedOperator,
     trrcResolvedCounty:    trrcResolvedCounty,
     sellerClaimedMonthlyBbl,
+    sellerAskPriceUsd:        extracted?.seller_ask_price_usd ?? null,
+    sellerStatedWiPct:        extracted?.seller_stated_wi_pct ?? null,
     trrcOperatorProfile:   operatorProfile,
     trrcAnnualProduction:  annualProduction,
     imagedRecords:         imagedRecordsResult,

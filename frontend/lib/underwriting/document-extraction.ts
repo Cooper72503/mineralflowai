@@ -182,6 +182,18 @@ export type DocumentExtractionResult = {
     }[];
   } | null;
 
+  // Acquisition / seller narrative claims (from offer packages, marketing docs)
+  seller_ask_price_usd: number | null;
+  seller_stated_current_rate_bopd_min: number | null;
+  seller_stated_current_rate_bopd_max: number | null;
+  seller_stated_post_workover_bopd_min: number | null;
+  seller_stated_post_workover_bopd_max: number | null;
+  seller_stated_wi_pct: number | null;     // working interest % buyer acquires
+  seller_stated_nri_pct: number | null;    // NRI % (if stated)
+  seller_stated_payout_months_min: number | null;
+  seller_stated_payout_months_max: number | null;
+  seller_stated_workover_cost_usd: number | null;
+
   // Operator notes / commentary extracted from documents
   operator_notes: string[];
 };
@@ -205,7 +217,8 @@ IMPORTANT RULES:
 10. For water cut: compute from oil_bbl and water_bbl if both present (water/(oil+water) × 100).
 11. For completion data: extract from W-1, W-2, completion reports, or any well record showing formation, depth, perforations, casing, or tubing specs.
 12. For operator notes: capture key qualitative statements operators made about production, workovers, equipment condition, or future plans.
-13. Document types to look for: LOE Statement, Joint Interest Billing, Run Ticket, Division Order, Purchaser Statement, Workover AFE, Equipment List, Well Test, Completion Report, W-1, W-2, Reserve Summary, Compliance Notice, Bond Certificate, Injection Permit, MIT Test Report, H-15 Plugging Form, P&A Report, Well Log.
+13. Document types to look for: LOE Statement, Joint Interest Billing, Run Ticket, Division Order, Purchaser Statement, Workover AFE, Equipment List, Well Test, Completion Report, W-1, W-2, Reserve Summary, Compliance Notice, Bond Certificate, Injection Permit, MIT Test Report, H-15 Plugging Form, P&A Report, Well Log, Acquisition Package, Offering Memorandum.
+14. For acquisition/offering packages: extract the seller's asking price (seller_ask_price_usd), stated current production rate (seller_stated_current_rate_bopd_min/max — use both ends of any range), projected post-workover rate (seller_stated_post_workover_bopd_min/max), working interest being sold (seller_stated_wi_pct), stated NRI (seller_stated_nri_pct), stated payout period in months (seller_stated_payout_months_min/max), and stated workover cost (seller_stated_workover_cost_usd). Convert BOPD to monthly BBL where needed for other fields, but keep BOPD figures in these seller fields. If a range is given (e.g. "16–24 BOPD"), capture both ends. If a single value, put it in both _min and _max.
 
 Return ONLY valid JSON with this exact structure (no markdown, no commentary):
 {
@@ -249,6 +262,16 @@ Return ONLY valid JSON with this exact structure (no markdown, no commentary):
     "casing": [{"type": string, "size_inches": number|null, "weight_lbs_ft": number|null, "grade": string|null, "depth_set_ft": number|null}],
     "tubing": [{"size_inches": number|null, "depth_ft": number|null, "material": string|null}]
   } | null,
+  "seller_ask_price_usd": number | null,
+  "seller_stated_current_rate_bopd_min": number | null,
+  "seller_stated_current_rate_bopd_max": number | null,
+  "seller_stated_post_workover_bopd_min": number | null,
+  "seller_stated_post_workover_bopd_max": number | null,
+  "seller_stated_wi_pct": number | null,
+  "seller_stated_nri_pct": number | null,
+  "seller_stated_payout_months_min": number | null,
+  "seller_stated_payout_months_max": number | null,
+  "seller_stated_workover_cost_usd": number | null,
   "operator_notes": string[]
 }`;
 
@@ -310,6 +333,16 @@ function normalizeExtraction(parsed: DocumentExtractionResult): DocumentExtracti
     purchaser_statements_present: !!parsed.purchaser_statements_present,
     water_cut_pct: parsed.water_cut_pct ?? null,
     completion_data: parsed.completion_data ?? null,
+    seller_ask_price_usd: parsed.seller_ask_price_usd ?? null,
+    seller_stated_current_rate_bopd_min: parsed.seller_stated_current_rate_bopd_min ?? null,
+    seller_stated_current_rate_bopd_max: parsed.seller_stated_current_rate_bopd_max ?? null,
+    seller_stated_post_workover_bopd_min: parsed.seller_stated_post_workover_bopd_min ?? null,
+    seller_stated_post_workover_bopd_max: parsed.seller_stated_post_workover_bopd_max ?? null,
+    seller_stated_wi_pct: parsed.seller_stated_wi_pct ?? null,
+    seller_stated_nri_pct: parsed.seller_stated_nri_pct ?? null,
+    seller_stated_payout_months_min: parsed.seller_stated_payout_months_min ?? null,
+    seller_stated_payout_months_max: parsed.seller_stated_payout_months_max ?? null,
+    seller_stated_workover_cost_usd: parsed.seller_stated_workover_cost_usd ?? null,
     operator_notes: Array.isArray(parsed.operator_notes) ? parsed.operator_notes : [],
   };
 }
@@ -383,6 +416,16 @@ function mergeExtractionResults(results: DocumentExtractionResult[]): DocumentEx
     purchaser_statements_present: valid.some(r => r.purchaser_statements_present),
     water_cut_pct:              firstNonNull(...valid.map(r => r.water_cut_pct)),
     completion_data:            firstNonNull(...valid.map(r => r.completion_data)),
+    seller_ask_price_usd:                   firstNonNull(...valid.map(r => r.seller_ask_price_usd)),
+    seller_stated_current_rate_bopd_min:    firstNonNull(...valid.map(r => r.seller_stated_current_rate_bopd_min)),
+    seller_stated_current_rate_bopd_max:    firstNonNull(...valid.map(r => r.seller_stated_current_rate_bopd_max)),
+    seller_stated_post_workover_bopd_min:   firstNonNull(...valid.map(r => r.seller_stated_post_workover_bopd_min)),
+    seller_stated_post_workover_bopd_max:   firstNonNull(...valid.map(r => r.seller_stated_post_workover_bopd_max)),
+    seller_stated_wi_pct:                   firstNonNull(...valid.map(r => r.seller_stated_wi_pct)),
+    seller_stated_nri_pct:                  firstNonNull(...valid.map(r => r.seller_stated_nri_pct)),
+    seller_stated_payout_months_min:        firstNonNull(...valid.map(r => r.seller_stated_payout_months_min)),
+    seller_stated_payout_months_max:        firstNonNull(...valid.map(r => r.seller_stated_payout_months_max)),
+    seller_stated_workover_cost_usd:        firstNonNull(...valid.map(r => r.seller_stated_workover_cost_usd)),
     operator_notes:             Array.from(new Set(valid.flatMap(r => r.operator_notes))),
   };
   return merged;

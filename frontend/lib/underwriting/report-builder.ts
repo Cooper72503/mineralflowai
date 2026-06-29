@@ -479,6 +479,10 @@ export type BuildReportArgs = {
    * in the uploaded documents.  Used to detect production mismatches vs. TRRC.
    */
   sellerClaimedMonthlyBbl?: number | null;
+  /** Seller's asking price from an acquisition package, if extracted. */
+  sellerAskPriceUsd?: number | null;
+  /** Seller's stated WI% being sold, if extracted. */
+  sellerStatedWiPct?: number | null;
   /** P-5 operator organization record from TRRC */
   trrcOperatorProfile?: import("../wells/trrc-operator-profile").TrrcOperatorProfile | null;
   /** H-15 annual production record from TRRC */
@@ -545,6 +549,8 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     trrcResolvedOperator = null,
     trrcResolvedCounty   = null,
     sellerClaimedMonthlyBbl = null,
+    sellerAskPriceUsd    = null,
+    sellerStatedWiPct    = null,
     trrcOperatorProfile  = null,
     trrcAnnualProduction = null,
     imagedRecords        = null,
@@ -5214,6 +5220,10 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
       reportCompliance:             complianceSection,
       reportEconomics:              economicsSection,
       offerGate:                    computedOfferGate,
+      sellerClaimedMonthlyBbl,
+      sellerAskPriceUsd:            sellerAskPriceUsd ?? (extracted?.seller_ask_price_usd ?? null),
+      p50RemainingBbl:              (dcaSection.p50_remaining_bbl?.value ?? null) as number | null,
+      buyerWiDecimal:               wiOverride ?? (extracted?.seller_stated_wi_pct != null ? extracted.seller_stated_wi_pct / 100 : null),
     });
   } catch (err) {
     console.error("[truth-check] unexpected error:", err);

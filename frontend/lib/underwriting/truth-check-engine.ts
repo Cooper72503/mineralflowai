@@ -102,6 +102,14 @@ export type TruthCheckInput = {
   reportCompliance: ComplianceSection;
   reportEconomics: EconomicsSection;
   offerGate: OfferGate | null;
+  /** Seller's stated current rate from document extraction (BBL/month). */
+  sellerClaimedMonthlyBbl?: number | null;
+  /** Seller's stated asking price from document extraction (USD). */
+  sellerAskPriceUsd?: number | null;
+  /** P50 remaining reserves from DCA (BBL) — for ask-vs-reserves cross-check. */
+  p50RemainingBbl?: number | null;
+  /** Buyer's WI decimal (e.g. 0.70) — for revenue sanity check. */
+  buyerWiDecimal?: number | null;
 };
 
 // ─── Internal analytics ───────────────────────────────────────────────────────
@@ -193,6 +201,10 @@ export function runTruthCheck(input: TruthCheckInput): TruthCheckResult {
     reportCompliance,
     reportEconomics,
     offerGate,
+    sellerClaimedMonthlyBbl = null,
+    sellerAskPriceUsd = null,
+    p50RemainingBbl = null,
+    buyerWiDecimal = null,
   } = input;
 
   const claims: TruthCheckedClaim[] = [];
@@ -481,6 +493,103 @@ export function runTruthCheck(input: TruthCheckInput): TruthCheckResult {
         "TRRC violation lookup ran and returned zero records for this lease/API. " +
         "Clean-compliance claim is supported by official records.",
       blocking: false,
+    });
+  }
+
+  // ── 6a. Seller stated rate vs TRRC (acquisition package cross-check) ────────
+  //
+  // When the uploaded document is an acquisition/offering package, the extractor
+  // captures the seller's narrative production claim (e.g. "16–24 BOPD").
+  // Cross-check that against the TRRC 3-month average to detect overstatements.
+
+  if (sellerClaimedMonthlyBbl != null && trrcHasRows && analytics.threeMonthAvgOil != null) {
+    const trrcAvg = analytics.threeMonthAvgOil;
+    const divergence = sellerClaimedMonthlyBbl > 0
+      ? (sellerClaimedMonthlyBbl - trrcAvg) / sellerClaimedMonthlyBbl
+      : 0;
+
+    let verdict: ClaimVerdict;
+    let explanation: string;
+
+    if (trrcAvg === 0 && sellerClaimedMonthlyBbl > 0) {
+      verdict = "false";
+      explanation =
+        `Seller stated ${Math.round(sellerClaimedMonthlyBbl)} BBL/mo but TRRC 3-month average ` +
+        "is ZERO — wells appear offline or non-producing. Hard contradiction.";
+    } else if (divergence > 0.4) {
+      verdict = "contradicted";
+      explanation =
+        `Seller stated ${Math.round(sellerClaimedMonthlyBbl)} BBL/mo but TRRC 3-month avg is ` +
+        `${Math.round(trrcAvg)} BBL/mo — seller overstates production by ` +
+        `${(divergence * 100).toFixed(0)}% vs. official records.`;
+    } else if (divergence > 0.15) {
+      verdict = "stale";
+      explanation =
+        `Seller stated ${Math.round(sellerClaimedMonthlyBbl)} BBL/mo vs. TRRC 3-month avg ` +
+        `${Math.round(trrcAvg)} BBL/mo (${(divergence * 100).toFixed(0)}% gap). Possible lag or workover downtime.`;
+    } else {
+      verdict = "true";
+      explanation =
+        `Seller stated ${Math.round(sellerClaimedMonthlyBbl)} BBL/mo, consistent with TRRC 3-month avg ` +
+        `${Math.round(trrcAvg)} BBL/mo (${(Math.abs(divergence) * 100).toFixed(0)}% variance).`;
+    }
+
+    claims.push({
+      field: "seller_stated_rate",
+      claim_label: "Seller's stated current rate vs. TRRC",
+      report_value: `${Math.round(sellerClaimedMonthlyBbl)} BBL/mo`,
+      evidence_value: `${Math.round(trrcAvg)} BBL/mo (TRRC 3-mo avg)`,
+      verdict,
+      explanation,
+      blocking: verdict === "false" || verdict === "contradicted",
+    });
+  }
+
+  // ── 6b. Ask price vs. P50 reserve value ──────────────────────────────────
+  //
+  // If the seller's ask price exceeds the gross P50 reserve value at current
+  // strip pricing (before any discount rate or LOE), flag it.
+
+  if (sellerAskPriceUsd != null && p50RemainingBbl != null && p50RemainingBbl > 0) {
+    const oilPricePerBbl = 72; // WTI anchor used by the engine
+    const wi = buyerWiDecimal ?? 1.0;
+    const grossP50Usd = p50RemainingBbl * oilPricePerBbl * wi;
+    const ratio = sellerAskPriceUsd / grossP50Usd;
+
+    let verdict: ClaimVerdict;
+    let explanation: string;
+
+    if (ratio > 1.5) {
+      verdict = "false";
+      explanation =
+        `Seller ask ($${(sellerAskPriceUsd / 1000).toFixed(0)}K) is ${(ratio).toFixed(1)}× the gross P50 reserve value ` +
+        `($${(grossP50Usd / 1000).toFixed(0)}K at $${oilPricePerBbl}/bbl, ${(wi * 100).toFixed(0)}% WI). ` +
+        "Insufficient reserves to recover acquisition cost before LOE.";
+    } else if (ratio > 1.0) {
+      verdict = "contradicted";
+      explanation =
+        `Seller ask ($${(sellerAskPriceUsd / 1000).toFixed(0)}K) exceeds the undiscounted gross P50 reserve value ` +
+        `($${(grossP50Usd / 1000).toFixed(0)}K). After LOE and discount rate, NPV is likely negative at this price.`;
+    } else if (ratio > 0.6) {
+      verdict = "stale";
+      explanation =
+        `Ask ($${(sellerAskPriceUsd / 1000).toFixed(0)}K) vs. P50 gross reserves ($${(grossP50Usd / 1000).toFixed(0)}K): ` +
+        `${(ratio * 100).toFixed(0)}% ratio. Thin margin after LOE and discount — verify operating costs before proceeding.`;
+    } else {
+      verdict = "true";
+      explanation =
+        `Ask ($${(sellerAskPriceUsd / 1000).toFixed(0)}K) is within P50 gross reserve value ` +
+        `($${(grossP50Usd / 1000).toFixed(0)}K). Room for LOE and discount rate.`;
+    }
+
+    claims.push({
+      field: "ask_vs_reserves",
+      claim_label: "Ask price vs. P50 reserve value",
+      report_value: `$${(sellerAskPriceUsd / 1000).toFixed(0)}K ask`,
+      evidence_value: `$${(grossP50Usd / 1000).toFixed(0)}K P50 gross (${p50RemainingBbl.toLocaleString()} BBL × $${oilPricePerBbl} × ${(wi * 100).toFixed(0)}% WI)`,
+      verdict,
+      explanation,
+      blocking: verdict === "false" || verdict === "contradicted",
     });
   }
 
