@@ -28,10 +28,16 @@ import { parseLegalDescription, inferCountyAndStateFromTexts, extractAcreageFrom
 import { geocodeProperty } from "@/lib/location/property-geocode";
 import { lookupWellsByLegalDescription } from "@/lib/wells/trrc-abstract-lookup";
 import { lookupTrrcLeasesByApis } from "@/lib/wells/trrc-api";
+import { lookupTrrcWells } from "@/lib/wells/trrc-api";
 import { fetchTrrcProductionByLease } from "@/lib/wells/trrc-production";
 import { runDca } from "./decline-curve";
 import { inferFormationProfile } from "./formation-intelligence";
 import { haversineDistanceMiles } from "@/lib/wells/nearby-wells";
+
+export type AcreageProgressEvent = {
+  step: "parse" | "geocode" | "formation" | "well_discovery" | "production" | "dca" | "valuation" | "done";
+  detail: string;
+};
 
 // ─── Statewide wells spatial query (reused from abstract-lookup pattern) ──────
 
@@ -621,15 +627,89 @@ function buildInvestmentNarrative(
   return [para1, para2, para3, para4];
 }
 
+// ─── County-level well fallback ───────────────────────────────────────────────
+
+async function fetchCountyOffsetWells(
+  county: string,
+  state: string,
+): Promise<OffsetWellProfile[]> {
+  const result = await lookupTrrcWells(county).catch(() => null);
+  if (!result || result.wells.length === 0) return [];
+
+  // Filter to wells with recent production, take top 20 by latest monthly oil
+  const candidates = result.wells
+    .filter(w => (w.latest_monthly_oil_bbl ?? 0) > 0)
+    .sort((a, b) => (b.latest_monthly_oil_bbl ?? 0) - (a.latest_monthly_oil_bbl ?? 0))
+    .slice(0, 20);
+
+  if (candidates.length === 0) return [];
+
+  const apis = candidates.map(w => w.api);
+  const prodMap = await fetchOffsetProduction(apis, 15).catch(() => new Map<string, { year: number; month: number; oil_bbl: number }[]>());
+
+  const profiles: OffsetWellProfile[] = [];
+  for (const w of candidates) {
+    const history = prodMap.get(w.api) ?? [];
+    const firstProdYear  = history.length > 0 ? history[0].year : null;
+    const lastProdYear   = history.length > 0 ? history[history.length - 1].year : null;
+    const recencyWeight  = calcRecencyWeight(firstProdYear, lastProdYear);
+    const positive       = history.filter(r => r.oil_bbl > 0);
+    const cum            = history.reduce((s, r) => s + r.oil_bbl, 0);
+    const peak           = positive.length > 0 ? Math.max(...positive.map(r => r.oil_bbl)) : 0;
+    const last12         = positive.slice(-12);
+    const avg12          = last12.length > 0 ? last12.reduce((s, r) => s + r.oil_bbl, 0) / last12.length : null;
+    const isActive       = positive.length > 0 && (2026 - (lastProdYear ?? 0)) <= 2;
+
+    let eurBbl: number | null = null;
+    let declineType: OffsetWellProfile["decline_type"] = null;
+    let declineAnnualPct: number | null = null;
+
+    if (positive.length >= 3) {
+      const dcaResult = runDca(positive);
+      if (dcaResult) {
+        eurBbl = dcaResult.eur_bbl;
+        declineType = dcaResult.model.type;
+        declineAnnualPct = dcaResult.decline_rate_annual_pct;
+      }
+    }
+
+    profiles.push({
+      api:              w.api,
+      operator:         w.operator ?? "Unknown Operator",
+      distance_mi:      999,
+      direction:        "?",
+      lat:              w.lat ?? 0,
+      lng:              w.lng ?? 0,
+      monthly_history:  history,
+      cum_oil_bbl:      cum,
+      peak_month_bbl:   peak,
+      last_12mo_avg_bbl: avg12 != null ? Math.round(avg12) : null,
+      eur_bbl:          eurBbl,
+      decline_type:     declineType,
+      decline_annual_pct: declineAnnualPct,
+      months_of_data:   history.length,
+      proximity_zone:   "BEYOND",
+      is_active:        isActive,
+      first_prod_year:  firstProdYear,
+      last_prod_year:   lastProdYear,
+      recency_weight:   recencyWeight,
+    });
+  }
+
+  return profiles;
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export async function runAcreageValuation(
   input: AcreageInput,
+  onProgress?: (event: AcreageProgressEvent) => void,
 ): Promise<AcreageValuationReport> {
   const t0 = Date.now();
   const reportId = `acr-${Date.now().toString(36)}`;
 
   // ── 1. Parse legal description ────────────────────────────────────────────
+  onProgress?.({ step: "parse", detail: "Parsing legal description…" });
   const rawDesc = input.legal_description ?? "";
   const parsed  = parseLegalDescription(rawDesc);
   const { county: inferredCounty, state: inferredState } =
@@ -653,6 +733,7 @@ export async function runAcreageValuation(
     (hasAbstract || hasPlss) ? "HIGH" : county ? "MEDIUM" : "LOW";
 
   // ── 2. Geocode ────────────────────────────────────────────────────────────
+  onProgress?.({ step: "geocode", detail: "Geocoding legal description…" });
   let location: AcreageLocation | null = null;
   let geocodingSource = "none";
   let trrcLookupAttempted = false;
@@ -705,11 +786,16 @@ export async function runAcreageValuation(
   }
 
   // ── 3. Formation inference ────────────────────────────────────────────────
+  onProgress?.({ step: "formation", detail: `Classifying formation for ${county ?? "unknown county"}, ${state ?? "TX"}…` });
   const formation = inferFormationProfile(county, state, input.formation_hint ?? null);
 
   // ── 4. Fetch nearby wells ─────────────────────────────────────────────────
+  onProgress?.({ step: "well_discovery", detail: location
+    ? `Searching for offset wells within 5 miles of ${location.description}…`
+    : county ? `No precise geocode — querying ${county} county wells…` : "Searching for offset wells…" });
   let offsetWells: OffsetWellProfile[] = [];
   let wellsWithProduction = 0;
+  let usedCountyFallback = false;
   const SEARCH_RADIUS_MI = 5;
 
   if (location) {
@@ -726,6 +812,7 @@ export async function runAcreageValuation(
 
     if (withDist.length > 0) {
       // Fetch production for each well
+      onProgress?.({ step: "production", detail: `Fetching production history for ${withDist.length} offset wells…` });
       const apis       = withDist.map(w => w.api);
       const prodMap    = await fetchOffsetProduction(apis, 15).catch(() => new Map<string, { year: number; month: number; oil_bbl: number }[]>());
       const leaseInfoMap = await lookupTrrcLeasesByApis(null, apis.slice(0, 15)).catch(() => new Map());
@@ -758,7 +845,20 @@ export async function runAcreageValuation(
     }
   }
 
+  // ── 4b. County fallback when geocoding failed or returned 0 nearby wells ───
+  if (offsetWells.length === 0 && county && (state?.toLowerCase().includes("tx") || state?.toLowerCase().includes("texas"))) {
+    onProgress?.({ step: "well_discovery", detail: `No geocoded wells found — falling back to ${county} county-level TRRC query…` });
+    const countyWells = await fetchCountyOffsetWells(county, state ?? "TX").catch(() => [] as OffsetWellProfile[]);
+    if (countyWells.length > 0) {
+      usedCountyFallback = true;
+      offsetWells = countyWells;
+    }
+  }
+
+  wellsWithProduction = offsetWells.filter(w => w.monthly_history.length > 0).length;
+
   // ── 5. Type curve ──────────────────────────────────────────────────────────
+  onProgress?.({ step: "dca", detail: `Running decline curves on ${offsetWells.length} offset wells…` });
   const typeCurve = buildTypeCurve(offsetWells);
 
   // ── 6. Operator profiles ───────────────────────────────────────────────────
@@ -768,6 +868,7 @@ export async function runAcreageValuation(
   const momentum = buildDrillingMomentum(offsetWells);
 
   // ── 8. Valuation ──────────────────────────────────────────────────────────
+  onProgress?.({ step: "valuation", detail: "Building type curve and risk-adjusted valuation…" });
   const valuation = buildValuation({
     offsetWells,
     typeCurve,
@@ -795,7 +896,11 @@ export async function runAcreageValuation(
   const flags: AcreageValuationReport["flags"] = [];
 
   if (!location) {
-    flags.push({ severity: "critical", category: "data", message: "Could not geocode the legal description — offset well search skipped. Provide township/range/section or Texas abstract number.", provenance: "INFERRED" });
+    if (usedCountyFallback) {
+      flags.push({ severity: "warning", category: "data", message: `Could not geocode to a precise location — using county-level well data for ${county ?? "this county"} instead. Well distances are not available; type curve is based on county production patterns.`, provenance: "INFERRED" });
+    } else {
+      flags.push({ severity: "critical", category: "data", message: "Could not geocode the legal description — offset well search skipped. Provide township/range/section or Texas abstract number.", provenance: "INFERRED" });
+    }
   }
   if (offsetWells.length === 0 && location) {
     flags.push({ severity: "warning", category: "activity", message: "No producing offset wells found within 5 miles. Production estimates rely on regional basin benchmarks only.", provenance: "ESTIMATED" });
@@ -825,7 +930,7 @@ export async function runAcreageValuation(
     { field: "PV10 Estimate",          value: valuation.pv10_mid != null ? (valuation.pv10_mid >= 1_000_000 ? `$${(valuation.pv10_mid/1_000_000).toFixed(2)}MM` : `$${Math.round(valuation.pv10_mid/1_000)}K`) : "—", label: "ESTIMATED", source: "Simplified DCF model — not a reserve engineering study" },
   ];
 
-  return {
+  const report: AcreageValuationReport = {
     report_id:    reportId,
     generated_at: new Date().toISOString(),
     input:        { ...input, county: county ?? undefined, state: state ?? undefined, acreage: acreage ?? undefined, nri: nri ?? undefined },
@@ -864,4 +969,7 @@ export async function runAcreageValuation(
       plss_lookup_attempted: plssLookupAttempted,
     },
   };
+
+  onProgress?.({ step: "done", detail: `Complete — ${report._meta.offset_well_count} offset wells, ${typeCurve?.confidence ?? "LOW"} confidence type curve` });
+  return report;
 }

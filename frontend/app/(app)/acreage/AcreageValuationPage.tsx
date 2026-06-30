@@ -598,9 +598,10 @@ export function AcreageValuationPage() {
   const [operatorHint,  setOperatorHint]  = useState("");
   const [formationHint, setFormationHint] = useState("");
 
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
-  const [report,  setReport]  = useState<AcreageValuationReport | null>(null);
+  const [loading,      setLoading]      = useState(false);
+  const [progressStep, setProgressStep] = useState<string>("");
+  const [error,        setError]        = useState<string | null>(null);
+  const [report,       setReport]       = useState<AcreageValuationReport | null>(null);
 
   const supabase = createClient();
 
@@ -608,6 +609,7 @@ export function AcreageValuationPage() {
     e.preventDefault();
     setError(null);
     setReport(null);
+    setProgressStep("");
 
     const trimmed = legalDescription.trim();
     if (!trimmed) { setError("Legal description is required."); return; }
@@ -628,7 +630,7 @@ export function AcreageValuationPage() {
         formation_hint: formationHint.trim() || undefined,
       };
 
-      const res = await fetch("/api/underwriting/acreage", {
+      const res = await fetch("/api/underwriting/acreage/stream", {
         method:      "POST",
         credentials: "include",
         headers: {
@@ -638,16 +640,53 @@ export function AcreageValuationPage() {
         body: JSON.stringify(body),
       });
 
-      const data = await res.json() as AcreageValuationReport & { error?: string };
       if (!res.ok) {
-        setError(data.error ?? `Error ${res.status}`);
+        const text = await res.text().catch(() => "");
+        try {
+          const parsed = JSON.parse(text.replace(/^data: /, ""));
+          setError(parsed.message ?? `Error ${res.status}`);
+        } catch {
+          setError(`Error ${res.status}`);
+        }
         return;
       }
-      setReport(data);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf("\n\n")) !== -1) {
+          const chunk = buffer.slice(0, newlineIdx);
+          buffer = buffer.slice(newlineIdx + 2);
+
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const event: any = JSON.parse(line.slice(6));
+              if (event.type === "progress") {
+                setProgressStep(event.detail ?? event.step);
+              } else if (event.type === "report") {
+                setReport(event.report);
+              } else if (event.type === "error") {
+                setError(event.message ?? "Analysis error");
+              }
+            } catch { /* skip malformed */ }
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error — please try again.");
     } finally {
       setLoading(false);
+      setProgressStep("");
     }
   }
 
@@ -795,10 +834,18 @@ export function AcreageValuationPage() {
       {/* ── Loading state ── */}
       {loading && (
         <Card style={{ maxWidth: 580, marginBottom: "1rem" }}>
-          <p style={{ fontSize: "0.88rem", color: T.textMuted, margin: 0, lineHeight: 1.6 }}>
-            Resolving legal description → geocoding → querying nearby wells → fetching production histories →
-            running decline curves → building type curve → generating valuation…
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+            <div style={{
+              width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+              border: `2px solid ${T.accent}`,
+              borderTopColor: "transparent",
+              animation: "spin 0.8s linear infinite",
+            }} />
+            <p style={{ fontSize: "0.88rem", color: T.textMuted, margin: 0, lineHeight: 1.5 }}>
+              {progressStep || "Initializing analysis…"}
+            </p>
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </Card>
       )}
 
