@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useContext, createContext, useEffect, useRef, Suspense } from "react";
+import React, { useState, useCallback, useContext, createContext, useEffect, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { ProductionDeclineChart, DcaProjectionChart, CashFlowChart } from "./UnderwritingCharts";
@@ -4591,7 +4591,21 @@ function OperationalTimelineTab({ report }: { report: DDReport }) {
 
 // ─── Executive Summary Tab ───────────────────────────────────────────────────
 
-function ExecutiveSummaryTab({ report }: { report: DDReport }) {
+function Reveal({ phase, threshold, children }: { phase: number; threshold: number; children: React.ReactNode }) {
+  const visible = phase >= threshold;
+  return (
+    <div style={{
+      opacity: visible ? 1 : 0,
+      transform: visible ? "translateY(0)" : "translateY(14px)",
+      transition: "opacity 0.7s ease, transform 0.7s ease",
+      pointerEvents: visible ? "auto" : "none",
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function ExecutiveSummaryTab({ report, revealPhase }: { report: DDReport; revealPhase: number }) {
   const ex = report.executive_summary;
   const recColors: Record<string, string> = { pursue: COLORS.green, review: COLORS.yellow, pass: COLORS.red };
   const recColor = recColors[ex.recommendation.value ?? "review"] ?? COLORS.yellow;
@@ -4606,7 +4620,8 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
 
   return (
     <div>
-      {/* Hero banner */}
+      {/* Hero banner — phase 1 */}
+      <Reveal phase={revealPhase} threshold={1}>
       <div style={{
         background: COLORS.surface,
         border: `2px solid ${recColor}`,
@@ -4654,8 +4669,10 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
           ))}
         </div>
       </div>
+      </Reveal>
 
       {/* Downtime banner if significant */}
+      <Reveal phase={revealPhase} threshold={1}>
       {ex.downtime_pct != null && ex.downtime_pct > 10 && (
         <div style={{
           background: COLORS.redDim,
@@ -4669,8 +4686,10 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
           ⚠️ <strong>Production Interruptions:</strong> {ex.downtime_pct.toFixed(1)}% of reported months recorded zero production. See Downtime tab for period-by-period analysis.
         </div>
       )}
+      </Reveal>
 
       {/* IC Memo Narrative */}
+      <Reveal phase={revealPhase} threshold={2}>
       {report.underwriting_narrative && report.underwriting_narrative.length > 0 && (
         <Section title="Investment Committee Memo" icon="📋">
           <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
@@ -4696,8 +4715,10 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
           </p>
         </Section>
       )}
+      </Reveal>
 
       {/* Risks & drivers */}
+      <Reveal phase={revealPhase} threshold={3}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
         <div style={{
           background: COLORS.surface,
@@ -4736,11 +4757,15 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
           }
         </div>
       </div>
+      </Reveal>
 
-      {/* Offer Gate Banner — always visible on exec summary */}
+      {/* Offer Gate Banner */}
+      <Reveal phase={revealPhase} threshold={4}>
       <OfferGateBanner gate={report.offer_gate} />
+      </Reveal>
 
       {/* Diligence Status — compact three-pill summary */}
+      <Reveal phase={revealPhase} threshold={5}>
       <Section title="Diligence Status" icon="🔍">
         <p style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "0.75rem" }}>
           12 diligence categories auto-classified from available data.{" "}
@@ -4787,6 +4812,7 @@ function ExecutiveSummaryTab({ report }: { report: DDReport }) {
           </span>
         </div>
       </Section>
+      </Reveal>
 
       {/* Sources used */}
       {ex.sources_used.length > 0 && (
@@ -7158,6 +7184,24 @@ export default function UnderwritingPage() {
     const interval = setInterval(() => setPipelineClockNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, [loading]);
+  // Staged section reveal — increments 0→5 after a new report arrives so sections
+  // fade in sequentially rather than all appearing at once.
+  const [revealPhase, setRevealPhase] = useState(0);
+  const revealTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  function startReveal() {
+    revealTimersRef.current.forEach(clearTimeout);
+    setRevealPhase(1);
+    revealTimersRef.current = [
+      setTimeout(() => setRevealPhase(2), 1800),
+      setTimeout(() => setRevealPhase(3), 3500),
+      setTimeout(() => setRevealPhase(4), 5200),
+      setTimeout(() => setRevealPhase(5), 6800),
+    ];
+  }
+  function resetReveal() {
+    revealTimersRef.current.forEach(clearTimeout);
+    setRevealPhase(0);
+  }
   // Saved report state
   const [savedReportId, setSavedReportId]   = useState<string | null>(null);
   const [saveStatus, setSaveStatus]         = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -7175,6 +7219,7 @@ export default function UnderwritingPage() {
           setShowForm(false);
           setSavedReportId(data.report.id);
           setSaveStatus("saved");
+          setRevealPhase(5); // no staged reveal for saved reports
         }
       })
       .catch(() => {});
@@ -7293,6 +7338,7 @@ export default function UnderwritingPage() {
       setReport(data.report);
       setActiveTab("executive_summary");
       setShowForm(false);
+      startReveal();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error");
     } finally {
@@ -7310,6 +7356,7 @@ export default function UnderwritingPage() {
     setLoading(true);
     setError(null);
     setReport(null);
+    resetReveal();
     // Reset all steps to pending
     setPipelineSteps(INITIAL_PIPELINE);
 
@@ -7368,6 +7415,7 @@ export default function UnderwritingPage() {
                 setReport(event.report);
                 setActiveTab("executive_summary");
                 setShowForm(false);
+                startReveal();
                 // Auto-save: persist the completed report immediately so it
                 // appears in deal history without requiring a manual save click.
                 setSaveStatus("saving");
@@ -8045,7 +8093,7 @@ export default function UnderwritingPage() {
                 </a>
               )}
               <button
-                onClick={() => { setReport(null); setFiles([]); setForm(INITIAL_FORM); setShowForm(true); setError(null); setSavedReportId(null); setSaveStatus("idle"); }}
+                onClick={() => { setReport(null); setFiles([]); setForm(INITIAL_FORM); setShowForm(true); setError(null); setSavedReportId(null); setSaveStatus("idle"); resetReveal(); }}
                 style={{
                   background: "transparent",
                   color: COLORS.textMuted,
@@ -8065,7 +8113,7 @@ export default function UnderwritingPage() {
             <div>
               {activeTab === "truth_check"           && <TruthCheckTab          report={report} />}
               {activeTab === "data_provenance"       && <DataProvenanceTab      report={report} />}
-              {activeTab === "executive_summary"    && <ExecutiveSummaryTab    report={report} />}
+              {activeTab === "executive_summary"    && <ExecutiveSummaryTab    report={report} revealPhase={revealPhase} />}
               {activeTab === "asset_overview"        && <AssetOverviewTab       report={report} />}
               {activeTab === "production_decline"    && <ProductionDeclineTab   report={report} />}
               {activeTab === "production_audit"      && <ProductionAuditTab     report={report} />}
