@@ -7139,16 +7139,18 @@ type PipelineStepState = {
 };
 
 const PIPELINE_STEP_LABELS: Record<string, string> = {
-  normalize:         "Resolving asset identity",
-  parse_documents:   "Parsing documents",          // step 2 — FIRST so API/lease IDs feed all TRRC queries
-  resolve_asset:     "Matching RRC lease records", // step 3 — uses identifiers from docs
-  pull_production:   "Pulling production history", // step 4
-  pull_inspections:  "Pulling inspections & compliance", // step 5
-  pull_completions:  "Searching completion records",     // step 6
-  build_decline:     "Building decline curves",    // step 7
-  run_economics:     "Running economics",          // step 8
-  check_diligence:   "Checking missing diligence", // step 9
-  generate_report:   "Generating report",          // step 10
+  parse_documents:           "Reading acquisition documents",
+  agent_init:                "Starting AI investigation",
+  verify_api:                "Verifying API number in TRRC",
+  fetch_production_by_lease: "Pulling lease production from TRRC",
+  fetch_wellbore_count:      "Counting wells on lease",
+  fetch_operator_compliance: "Checking operator compliance history",
+  fetch_p5_status:           "Checking operator bond status",
+  fetch_completions:         "Fetching well completion records",
+  fetch_production_by_api:   "Pulling well production by API",
+  search_operator_leases:    "Searching operator lease portfolio",
+  submit_report:             "Compiling investigation findings",
+  build_report:              "Assembling report",
 };
 
 const INITIAL_PIPELINE: PipelineStepState[] = Object.entries(PIPELINE_STEP_LABELS).map(([id, label]) => ({
@@ -7361,13 +7363,21 @@ export default function UnderwritingPage() {
     setPipelineSteps(INITIAL_PIPELINE);
 
     const updateStep = (id: string, patch: Partial<PipelineStepState>) => {
-      setPipelineSteps(prev => prev.map(s => s.id === id
-        ? { ...s, ...patch, startedAt: patch.status === "running" ? Date.now() : s.startedAt }
-        : s));
+      setPipelineSteps(prev => {
+        const exists = prev.some(s => s.id === id);
+        if (exists) {
+          return prev.map(s => s.id === id
+            ? { ...s, ...patch, startedAt: patch.status === "running" ? Date.now() : s.startedAt }
+            : s);
+        }
+        // Agent mode: append unknown tool steps dynamically
+        const label = PIPELINE_STEP_LABELS[id] ?? id.replace(/_/g, " ");
+        return [...prev, { id, label, status: patch.status ?? "running", startedAt: Date.now(), detail: patch.detail }];
+      });
     };
 
     try {
-      const res = await fetch("/api/underwriting/stream", {
+      const res = await fetch("/api/underwriting/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildPayload("full")),
