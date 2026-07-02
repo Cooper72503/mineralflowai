@@ -140,8 +140,9 @@ function IconBrandMark() {
 
 // ── Nav config ─────────────────────────────────────────────────────────────
 const primaryNav = [
-  { href: "/underwriting", label: "MineralFlow Underwriting", Icon: IconUnderwriting },
-  { href: "/acreage",      label: "Acreage Valuation",        Icon: IconAcreage      },
+  { href: "/underwriting",         label: "MineralFlow Underwriting", Icon: IconUnderwriting },
+  { href: "/underwriting/history", label: "Deal Pipeline",            Icon: IconPipeline     },
+  { href: "/acreage",              label: "Acreage Valuation",        Icon: IconAcreage      },
 ] as const;
 
 const accountNav = [
@@ -195,8 +196,9 @@ function NavGroup({
       {items.map(({ href, label, Icon }) => {
         const isActive =
           pathname === href
-          || (href === "/underwriting" && (pathname === "/underwriting" || (pathname.startsWith("/underwriting") && !pathname.startsWith("/underwriting/history"))))
-          || (href !== "/underwriting" && pathname.startsWith(href));
+          || (href === "/underwriting" && pathname === "/underwriting")
+          || (href === "/underwriting/history" && pathname.startsWith("/underwriting/history"))
+          || (href !== "/underwriting" && href !== "/underwriting/history" && pathname.startsWith(href));
         const isPrimary = href === "/underwriting";
         return (
           <Link
@@ -213,19 +215,6 @@ function NavGroup({
           </Link>
         );
       })}
-      {/* Deal History sub-item — shown whenever underwriting section is visible */}
-      {items.some(i => i.href === "/underwriting") && (
-        <Link
-          href="/underwriting/history"
-          className={[
-            "sidebar-sub-item",
-            pathname.startsWith("/underwriting/history") ? "active" : undefined,
-          ].filter(Boolean).join(" ")}
-          onClick={onClose}
-        >
-          📋 Deal History
-        </Link>
-      )}
     </>
   );
 }

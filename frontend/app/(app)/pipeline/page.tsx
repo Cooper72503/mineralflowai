@@ -1,5 +1,4 @@
-export const dynamic = "force-dynamic";
-import PipelinePage from "./PipelinePage";
+import { redirect } from "next/navigation";
 export default function Page() {
-  return <PipelinePage />;
+  redirect("/underwriting/history");
 }

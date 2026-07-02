@@ -432,7 +432,8 @@ type TabId =
   | "production_audit"
   | "data_provenance"
   | "truth_check"
-  | "why_this_could_be_wrong";
+  | "why_this_could_be_wrong"
+  | "offer_model";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "truth_check",         label: "Truth-Check",            icon: "⚖️" },
@@ -442,6 +443,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "production_decline",  label: "Production & Decline",   icon: "⛽" },
   { id: "production_audit",    label: "Production Audit",       icon: "🔬" },
   { id: "economics_valuation", label: "Economics & Valuation",  icon: "💰" },
+  { id: "offer_model",         label: "Offer Model",            icon: "🎯" },
   { id: "gis_map",             label: "GIS / Well Map",         icon: "🗺️" },
   { id: "operations_workovers",label: "Operations & Workovers", icon: "🔧" },
   { id: "compliance_risk",     label: "Compliance & Risk",      icon: "🔒" },
@@ -5866,6 +5868,300 @@ function IcMemoTab({ report }: { report: DDReport }) {
   );
 }
 
+// ─── Offer Model Tab ─────────────────────────────────────────────────────────
+
+function OfferModelTab({ report }: { report: DDReport }) {
+  // Seed from verified report data (agent's TRRC findings take priority)
+  const seedRate    = report.dca?.current_rate_bbl?.value ?? report.production?.total_monthly_oil_bbl?.value ?? null;
+  const seedAvg     = report.production?.total_monthly_oil_bbl?.value ?? seedRate;
+  const seedDecline = report.dca?.decline_rate_annual_pct?.value ?? 25;
+  const seedLoe     = report.economics?.loe_per_boe?.value ?? 18;
+  const seedNri     = (report.acquisition_economics?.nri_decimal?.value ?? 1) * 100;
+  const seedPlugging = report.plugging_liability?.total_estimated_plug_cost_usd?.value ?? 0;
+  const seedRisk    = report.risk?.overall_score?.value ?? 50;
+
+  const [rate,     setRate]     = useState<number>(Math.round(seedAvg ?? seedRate ?? 0));
+  const [decline,  setDecline]  = useState<number>(Math.round(seedDecline));
+  const [loe,      setLoe]      = useState<number>(Math.round(seedLoe));
+  const [nri,      setNri]      = useState<number>(Math.round(seedNri));
+  const [oilPrice, setOilPrice] = useState<number>(72);
+  const [riskFactor, setRiskFactor] = useState<number>(Math.round(100 - seedRisk));
+  const [plugging, setPlugging] = useState<number>(Math.round(seedPlugging));
+  const [horizon,  setHorizon]  = useState<number>(5);
+
+  // ── Core math ──────────────────────────────────────────────────────────────
+  // Decline-weighted annual production for each year
+  function annualBbl(year: number): number {
+    // Exponential decline: Q(t) = Q0 × e^(-Di × t)
+    const Di = decline / 100;
+    // Average monthly rate over year: integral of Q0×e^(-Di×t) / 12 months
+    // ≈ Q0 × e^(-Di × (year-0.5)) for midpoint approximation
+    return rate * 12 * Math.exp(-Di * (year - 0.5));
+  }
+
+  function yearNetRevenue(year: number, price: number): number {
+    const bbl  = annualBbl(year);
+    const gross = bbl * (nri / 100) * price;
+    const opex  = bbl * (nri / 100) * loe;
+    return gross - opex;
+  }
+
+  function pv10(price: number): number {
+    let pv = 0;
+    for (let y = 1; y <= horizon; y++) {
+      pv += yearNetRevenue(y, price) / Math.pow(1.1, y);
+    }
+    return pv;
+  }
+
+  const pv = pv10(oilPrice);
+  const riskMult = riskFactor / 100;
+  const plugDeduct = plugging;
+  const offerLow  = Math.max(0, pv * riskMult * 0.75 - plugDeduct);
+  const offerMid  = Math.max(0, pv * riskMult * 0.90 - plugDeduct);
+  const offerHigh = Math.max(0, pv * riskMult * 1.00 - plugDeduct);
+  const moProduction = rate * (nri / 100);
+  const boepd = moProduction / 30.4;
+
+  // Sensitivity: rows = oil price, cols = decline rate
+  const SENS_PRICES   = [50, 60, 70, 80, 90, 100];
+  const SENS_DECLINES = [10, 20, 30, 40, 50];
+
+  const fmt$ = (n: number) => n >= 1_000_000
+    ? `$${(n / 1_000_000).toFixed(2)}MM`
+    : n >= 1_000 ? `$${Math.round(n / 1_000)}K` : `$${Math.round(n)}`;
+
+  const isSeeded = !!seedAvg || !!seedRate;
+
+  return (
+    <div style={{ padding: "1.5rem 1.75rem" }}>
+      {/* Header */}
+      <div style={{ marginBottom: "1.25rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.3rem" }}>
+          <span style={{ fontSize: "1rem", fontWeight: 800, color: COLORS.text }}>
+            Acquisition Offer Model
+          </span>
+          {isSeeded && (
+            <span style={{ fontSize: "0.62rem", fontWeight: 800, color: COLORS.green,
+              background: COLORS.greenDim, borderRadius: 5, padding: "0.15rem 0.5rem",
+              border: "1px solid rgba(34,197,94,0.3)" }}>
+              TRRC VERIFIED
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: "0.77rem", color: COLORS.textMuted, lineHeight: 1.55 }}>
+          Transparent bid model built from verified TRRC production.
+          Adjust assumptions below — the offer range updates live.
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
+        {/* Left: Inputs */}
+        <div>
+          <div style={{ fontSize: "0.68rem", fontWeight: 800, color: COLORS.textMuted,
+            textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.75rem" }}>
+            Assumptions
+          </div>
+
+          {[
+            { label: "Production Rate (BBL/mo)", value: rate, set: setRate, min: 0, max: 5000, step: 10,
+              hint: isSeeded ? "From TRRC 12-mo avg" : "Seller estimate — unverified" },
+            { label: "Annual Decline Rate (%)", value: decline, set: setDecline, min: 0, max: 80, step: 1,
+              hint: report.dca?.decline_rate_annual_pct?.value ? "From DCA analysis" : "Basin typical" },
+            { label: "LOE ($/BOE)", value: loe, set: setLoe, min: 0, max: 60, step: 1,
+              hint: report.economics?.loe_per_boe?.value ? "From operator financials" : "Basin estimate" },
+            { label: "NRI (%)", value: nri, set: setNri, min: 0, max: 100, step: 0.5,
+              hint: report.acquisition_economics?.nri_decimal?.value ? "From lease doc" : "Enter your NRI" },
+            { label: "Oil Price ($/bbl)", value: oilPrice, set: setOilPrice, min: 40, max: 120, step: 2,
+              hint: "WTI assumption" },
+            { label: "Risk Factor (%)", value: riskFactor, set: setRiskFactor, min: 50, max: 100, step: 5,
+              hint: `${100 - riskFactor}% discount for deal risk` },
+            { label: "Plugging Liability ($)", value: plugging, set: setPlugging, min: 0, max: 2_000_000, step: 10000,
+              hint: seedPlugging > 0 ? "From well inventory" : "Estimated" },
+            { label: "Cash Flow Horizon (yrs)", value: horizon, set: setHorizon, min: 1, max: 15, step: 1,
+              hint: "Years to model" },
+          ].map(({ label, value, set, min, max, step, hint }) => (
+            <div key={label} style={{ marginBottom: "0.85rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.2rem" }}>
+                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.text }}>{label}</span>
+                <span style={{ fontSize: "0.78rem", fontWeight: 800, color: COLORS.accent }}>
+                  {label.includes("$") && !label.includes("($/")
+                    ? `$${value.toLocaleString()}`
+                    : value.toLocaleString(undefined, { maximumFractionDigits: 1 })}{label.includes("(%)")  ? "%" : ""}
+                </span>
+              </div>
+              <input
+                type="range" min={min} max={max} step={step} value={value}
+                onChange={e => set(Number(e.target.value))}
+                style={{ width: "100%", accentColor: COLORS.accent, cursor: "pointer" }}
+              />
+              <div style={{ fontSize: "0.62rem", color: COLORS.textFaint, marginTop: "0.1rem" }}>{hint}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Right: Output */}
+        <div>
+          {/* Offer range */}
+          <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`,
+            borderRadius: 12, padding: "1.25rem", marginBottom: "1rem" }}>
+            <div style={{ fontSize: "0.68rem", fontWeight: 800, color: COLORS.textMuted,
+              textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.75rem" }}>
+              Indicated Offer Range
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem", marginBottom: "0.75rem" }}>
+              {[
+                { label: "Conservative", value: offerLow,  color: COLORS.yellow },
+                { label: "Target",       value: offerMid,  color: COLORS.green  },
+                { label: "Stretch",      value: offerHigh, color: COLORS.accent  },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ background: COLORS.bg, borderRadius: 8, padding: "0.65rem 0.75rem",
+                  border: `1px solid ${color}33` }}>
+                  <div style={{ fontSize: "0.58rem", color: COLORS.textFaint, textTransform: "uppercase",
+                    letterSpacing: "0.06em", marginBottom: "0.25rem" }}>{label}</div>
+                  <div style={{ fontSize: "0.95rem", fontWeight: 800, color }}>{fmt$(value)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, lineHeight: 1.6 }}>
+              PV10 ({horizon}yr, ${oilPrice}/bbl): <strong style={{ color: COLORS.text }}>{fmt$(pv)}</strong>
+              {" · "}Risk factor: <strong style={{ color: COLORS.text }}>{riskFactor}%</strong>
+              {" · "}Plugging deduct: <strong style={{ color: COLORS.red }}>({fmt$(plugDeduct)})</strong>
+            </div>
+          </div>
+
+          {/* Key metrics */}
+          <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`,
+            borderRadius: 12, padding: "1rem 1.25rem", marginBottom: "1rem" }}>
+            <div style={{ fontSize: "0.68rem", fontWeight: 800, color: COLORS.textMuted,
+              textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.65rem" }}>
+              Implied Metrics
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+              {[
+                { label: "$/BOE/day (target)",  v: boepd > 0 ? fmt$(offerMid / (boepd * 365 * horizon)) : "—" },
+                { label: "Net BBL/mo",           v: `${Math.round(moProduction).toLocaleString()}` },
+                { label: "Yr-1 Net Revenue",     v: fmt$(yearNetRevenue(1, oilPrice)) },
+                { label: "Implied Multiple",      v: yearNetRevenue(1, oilPrice) > 0 ? `${(offerMid / yearNetRevenue(1, oilPrice)).toFixed(1)}×` : "—" },
+              ].map(({ label, v }) => (
+                <div key={label} style={{ background: COLORS.bg, borderRadius: 6, padding: "0.45rem 0.65rem" }}>
+                  <div style={{ fontSize: "0.58rem", color: COLORS.textFaint, textTransform: "uppercase",
+                    letterSpacing: "0.05em", marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: "0.82rem", fontWeight: 700, color: COLORS.text }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Year-by-year cash flow */}
+          <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`,
+            borderRadius: 12, padding: "1rem 1.25rem", marginBottom: "1rem" }}>
+            <div style={{ fontSize: "0.68rem", fontWeight: 800, color: COLORS.textMuted,
+              textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.65rem" }}>
+              Projected Cash Flows
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.72rem" }}>
+              <thead>
+                <tr>
+                  {["Year", "BBL", "Gross Rev", "Opex", "Net CF", "PV@10%"].map(h => (
+                    <th key={h} style={{ textAlign: "right", padding: "0.2rem 0.3rem",
+                      color: COLORS.textFaint, fontWeight: 600, borderBottom: `1px solid ${COLORS.border}` }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: horizon }, (_, i) => i + 1).map(yr => {
+                  const bbl  = annualBbl(yr);
+                  const netBbl = bbl * (nri / 100);
+                  const gross = netBbl * oilPrice;
+                  const opex  = netBbl * loe;
+                  const net   = gross - opex;
+                  const pv_yr = net / Math.pow(1.1, yr);
+                  return (
+                    <tr key={yr} style={{ borderBottom: `1px solid ${COLORS.border}33` }}>
+                      <td style={{ textAlign: "right", padding: "0.25rem 0.3rem", color: COLORS.textMuted }}>{yr}</td>
+                      <td style={{ textAlign: "right", padding: "0.25rem 0.3rem", color: COLORS.text }}>{Math.round(bbl).toLocaleString()}</td>
+                      <td style={{ textAlign: "right", padding: "0.25rem 0.3rem", color: COLORS.text }}>{fmt$(gross)}</td>
+                      <td style={{ textAlign: "right", padding: "0.25rem 0.3rem", color: COLORS.red }}>({fmt$(opex)})</td>
+                      <td style={{ textAlign: "right", padding: "0.25rem 0.3rem", color: net > 0 ? COLORS.green : COLORS.red }}>{fmt$(net)}</td>
+                      <td style={{ textAlign: "right", padding: "0.25rem 0.3rem", color: COLORS.accent }}>{fmt$(pv_yr)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Sensitivity table */}
+      <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`,
+        borderRadius: 12, padding: "1.1rem 1.25rem", marginTop: "0.5rem" }}>
+        <div style={{ fontSize: "0.68rem", fontWeight: 800, color: COLORS.textMuted,
+          textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "0.75rem" }}>
+          Offer Sensitivity — Target Price (Oil Price × Decline Rate)
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: "0.68rem", width: "100%" }}>
+            <thead>
+              <tr>
+                <th style={{ padding: "0.3rem 0.5rem", textAlign: "left", color: COLORS.textFaint,
+                  borderBottom: `1px solid ${COLORS.border}` }}>$/bbl ↓ · Decline →</th>
+                {SENS_DECLINES.map(d => (
+                  <th key={d} style={{ padding: "0.3rem 0.5rem", textAlign: "right",
+                    color: d === decline ? COLORS.accent : COLORS.textFaint,
+                    background: d === decline ? COLORS.accentDim : "transparent",
+                    borderBottom: `1px solid ${COLORS.border}`, fontWeight: d === decline ? 800 : 500 }}>
+                    {d}%
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {SENS_PRICES.map(price => (
+                <tr key={price} style={{ borderBottom: `1px solid ${COLORS.border}33` }}>
+                  <td style={{ padding: "0.3rem 0.5rem", color: price === oilPrice ? COLORS.accent : COLORS.textMuted,
+                    fontWeight: price === oilPrice ? 800 : 400,
+                    background: price === oilPrice ? COLORS.accentDim : "transparent" }}>
+                    ${price}
+                  </td>
+                  {SENS_DECLINES.map(d => {
+                    // Compute offer mid for this scenario
+                    const Di = d / 100;
+                    let pvScen = 0;
+                    for (let y = 1; y <= horizon; y++) {
+                      const bbl = rate * 12 * Math.exp(-Di * (y - 0.5));
+                      const netBbl = bbl * (nri / 100);
+                      pvScen += (netBbl * price - netBbl * loe) / Math.pow(1.1, y);
+                    }
+                    const offerScen = Math.max(0, pvScen * riskMult * 0.90 - plugDeduct);
+                    const isActive = d === decline && price === oilPrice;
+                    return (
+                      <td key={d} style={{
+                        padding: "0.3rem 0.5rem", textAlign: "right",
+                        color: isActive ? "#fff" : offerScen > offerMid ? COLORS.green : offerScen < offerLow ? COLORS.red : COLORS.text,
+                        background: isActive ? COLORS.accent : "transparent",
+                        fontWeight: isActive ? 800 : 400, borderRadius: isActive ? 4 : 0,
+                      }}>
+                        {fmt$(offerScen)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: "0.62rem", color: COLORS.textFaint, marginTop: "0.5rem" }}>
+          Active scenario highlighted in blue. Green = above target, red = below conservative floor.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Why This Could Be Wrong Tab ─────────────────────────────────────────────
 
 function WhyThisCouldBeWrongTab({ report }: { report: DDReport }) {
@@ -8324,6 +8620,7 @@ export default function UnderwritingPage() {
               {activeTab === "ic_memo"               && <IcMemoTab              report={report} />}
               {activeTab === "export_center"         && <ExportTab              report={report} />}
               {activeTab === "why_this_could_be_wrong" && <WhyThisCouldBeWrongTab report={report} />}
+              {activeTab === "offer_model"            && <OfferModelTab          report={report} />}
             </div>
 
             {/* Meta footer */}
