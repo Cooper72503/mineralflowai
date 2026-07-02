@@ -5379,6 +5379,7 @@ export function buildDDReport(args: BuildReportArgs): DDReport {
     reserve_classification: reserveClassification,
     peer_benchmark:        peerBenchmark ?? null,
     title_risk:            titleRisk,
+    why_this_could_be_wrong: null,
     _meta: {
       trrc_lookup_attempted: trrcWells.length > 0 || providedApis.length > 0 || !!operatorName,
       trrc_match_tier: matchTier,

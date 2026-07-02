@@ -770,6 +770,34 @@ export type ProductionAudit = {
 
 // ─── Full DD Report ───────────────────────────────────────────────────────────
 
+// ─── Why This Report Could Be Wrong ──────────────────────────────────────────
+//
+// Every report ends with a plain-English acknowledgment of its own limitations.
+// Counterintuitively, this increases buyer confidence — they can see exactly
+// what is and isn't supported rather than discovering hidden assumptions later.
+
+export type WhyThisCouldBeWrongItem = {
+  /** Short headline, e.g. "No LOE statements provided" */
+  title: string;
+  /** Explanation of the implication, e.g. "Operating costs estimated from basin benchmark — actual costs may differ" */
+  implication: string;
+  /** How serious this limitation is */
+  severity: "critical" | "warning" | "info";
+  /** What the buyer should do to resolve it, e.g. "Request 12 months of JIB statements from operator" */
+  buyer_action: string | null;
+};
+
+export type WhyThisCouldBeWrong = {
+  /** Items: assumptions, data gaps, limitations — in descending severity */
+  items: WhyThisCouldBeWrongItem[];
+  /** Counts by severity */
+  critical_count: number;
+  warning_count: number;
+  info_count: number;
+  /** One-sentence summary for display at top of section */
+  summary: string;
+};
+
 export type DDReportConfidence = "high" | "medium" | "low" | "very_low";
 
 export type DDReport = {
@@ -997,6 +1025,14 @@ export type DDReport = {
    * NOT a title opinion. A licensed title attorney is always required before closing.
    */
   title_risk: import("./title-risk").TitleRiskResult | null;
+
+  /**
+   * "Why This Report Could Be Wrong" — final section acknowledging limitations.
+   * Lists every assumption, estimate, and data gap so buyers know exactly
+   * what is verified vs. what still needs independent confirmation.
+   * Populated by the agentic investigation from its data_gaps + red_flags.
+   */
+  why_this_could_be_wrong: WhyThisCouldBeWrong | null;
 
   /** Debug / audit trail */
   _meta: {

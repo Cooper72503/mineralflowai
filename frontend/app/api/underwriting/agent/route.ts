@@ -21,7 +21,7 @@ import { buildDDReport }                         from "@/lib/underwriting/report
 import { extractUnderwritingDataFromDocuments }  from "@/lib/underwriting/document-extraction";
 import { fetchFinancialContext }                 from "@/lib/underwriting/financial-lookup";
 import { getBenchmarkFromCounty }                from "@/lib/underwriting/benchmarks";
-import type { UnderwritingInput }                from "@/lib/underwriting/types";
+import type { UnderwritingInput, WhyThisCouldBeWrong, WhyThisCouldBeWrongItem } from "@/lib/underwriting/types";
 import type { TrrcWellProduction }               from "@/lib/underwriting/report-builder";
 import type { AgentContext }                     from "@/lib/underwriting/agent/tool-handlers";
 
@@ -257,6 +257,134 @@ function buildExtractedFromAgent(
   };
 }
 
+function buildWhyThisCouldBeWrong(
+  ctx:    AgentContext,
+  report: import("@/lib/underwriting/types").DDReport,
+): WhyThisCouldBeWrong {
+  const items: WhyThisCouldBeWrongItem[] = [];
+
+  // Red flags from agent (critical by definition)
+  for (const flag of ctx.agentAssessment?.red_flags ?? []) {
+    items.push({
+      title:       flag,
+      implication: "This was flagged as a red flag during TRRC investigation — buyer must independently verify before proceeding.",
+      severity:    "critical",
+      buyer_action: "Obtain independent verification before making any offer.",
+    });
+  }
+
+  // Invalid APIs
+  if (ctx.invalidApis.length > 0) {
+    items.push({
+      title:       `Unverified API number(s): ${ctx.invalidApis.join(", ")}`,
+      implication: "One or more API numbers provided by the seller could not be found in the TRRC database. All TRRC queries for these identifiers returned no data — figures may be unverifiable.",
+      severity:    "critical",
+      buyer_action: "Request the seller to provide valid RRC lease numbers and confirm the correct API numbers in writing.",
+    });
+  }
+
+  // No production data
+  if (ctx.trrcProductionRows.length === 0) {
+    items.push({
+      title:       "No TRRC production data retrieved",
+      implication: "Production rates, decline analysis, NPV10, and offer range are NOT backed by TRRC public records. Economics shown are estimates only.",
+      severity:    "critical",
+      buyer_action: "Do not make an offer until production history can be verified via TRRC Specific Lease Query or operator-provided run statements.",
+    });
+  }
+
+  // Compliance not queried
+  if (!ctx.complianceQueried) {
+    items.push({
+      title:       "Compliance history not queried",
+      implication: "The agent was unable to run a compliance check. Violations, inspections, and enforcement actions are UNKNOWN — not clean.",
+      severity:    "critical",
+      buyer_action: "Run compliance check at TRRC EWA portal using operator number before any offer.",
+    });
+  }
+
+  // No well inventory
+  if (!ctx.leaseWellInventory) {
+    items.push({
+      title:       "Well count not independently verified",
+      implication: "The number of wells on this lease was not confirmed from TRRC. Seller's stated well count is unverified — actual count may differ materially.",
+      severity:    "warning",
+      buyer_action: "Request TRRC well inventory for this lease number from the railroad commission.",
+    });
+  }
+
+  // Data gaps from agent assessment
+  for (const gap of ctx.agentAssessment?.data_gaps ?? []) {
+    items.push({
+      title:       gap,
+      implication: "This item could not be verified during the investigation.",
+      severity:    "warning",
+      buyer_action: "Request this information from the seller before closing.",
+    });
+  }
+
+  // Economics rely on estimates
+  const npv = report.acquisition_economics?.npv10_usd;
+  if (npv?.source === "inferred" || npv?.source === "missing") {
+    items.push({
+      title:       "NPV10 and offer range are model estimates",
+      implication: "Financial metrics are calculated from estimated inputs (basin benchmark LOE, TRRC production). Actual value depends on verified LOE, water cut, and current commodity price.",
+      severity:    "warning",
+      buyer_action: "Obtain LOE statements, run tickets, and a licensed PE reserve report before committing to an offer price.",
+    });
+  }
+
+  // No P5 / bond status
+  if (!ctx.trrcP5Status && !ctx.trrcOperatorProfile) {
+    items.push({
+      title:       "Operator bond status not confirmed",
+      implication: "P-5 organizational record was not retrieved. Bond amount, org status, and TNR §91.114 flag are unknown.",
+      severity:    "warning",
+      buyer_action: "Look up operator P-5 record at TRRC EWA portal or request current bond certificate from seller.",
+    });
+  }
+
+  // General standard items (always present in any report)
+  items.push(
+    {
+      title:       "No division orders or title documents reviewed",
+      implication: "Ownership, NRI, and WI are based on user input — not confirmed against recorded instruments.",
+      severity:    "info",
+      buyer_action: "Request current division orders and obtain a 3-year title runsheet from a licensed land professional before closing.",
+    },
+    {
+      title:       "TRRC data may lag current operations by 3–5 months",
+      implication: "The most recent production months shown may not reflect current well conditions.",
+      severity:    "info",
+      buyer_action: "Request the most recent run statements or purchaser statements from the operator to confirm current production.",
+    },
+    {
+      title:       "This is not a reserve engineering study",
+      implication: "Decline curve analysis and EUR estimates are screening-level only. Not equivalent to an SEC-standard PV10 by a licensed petroleum engineer.",
+      severity:    "info",
+      buyer_action: "For financing or institutional investment, obtain a certified reserve report from a licensed PE.",
+    },
+  );
+
+  // Sort: critical → warning → info
+  items.sort((a, b) => {
+    const order = { critical: 0, warning: 1, info: 2 };
+    return order[a.severity] - order[b.severity];
+  });
+
+  const critical_count = items.filter(i => i.severity === "critical").length;
+  const warning_count  = items.filter(i => i.severity === "warning").length;
+  const info_count     = items.filter(i => i.severity === "info").length;
+
+  const summary = critical_count > 0
+    ? `${critical_count} critical limitation${critical_count > 1 ? "s" : ""} require buyer verification before any offer.`
+    : warning_count > 0
+      ? `${warning_count} item${warning_count > 1 ? "s" : ""} require buyer follow-up — proceed with conditions.`
+      : "No critical limitations identified. Standard buyer verification still required before closing.";
+
+  return { items, critical_count, warning_count, info_count, summary };
+}
+
 function overlayAgentAssessment(
   report: import("@/lib/underwriting/types").DDReport,
   ctx: AgentContext,
@@ -283,7 +411,7 @@ function overlayAgentAssessment(
     ...(gapPara ? [gapPara] : []),
   ];
 
-  return {
+  const enriched: import("@/lib/underwriting/types").DDReport = {
     ...report,
     underwriting_narrative: narrative,
     executive_summary: {
@@ -300,7 +428,6 @@ function overlayAgentAssessment(
       top_risks:    assessment.top_risks.length    > 0 ? assessment.top_risks    : report.executive_summary.top_risks,
       value_drivers: assessment.value_drivers.length > 0 ? assessment.value_drivers : report.executive_summary.value_drivers,
     },
-    // Embed seller claim crosschecks into truth_check section
     truth_check: {
       ...report.truth_check,
       agent_crosschecks: assessment.seller_claim_crosschecks,
@@ -308,4 +435,9 @@ function overlayAgentAssessment(
       compliance_queried: ctx.complianceQueried,
     } as typeof report.truth_check & { agent_crosschecks: typeof assessment.seller_claim_crosschecks; invalid_apis: string[]; compliance_queried: boolean },
   };
+
+  // Build "Why This Report Could Be Wrong" from agent context + assembled report
+  enriched.why_this_could_be_wrong = buildWhyThisCouldBeWrong(ctx, enriched);
+
+  return enriched;
 }

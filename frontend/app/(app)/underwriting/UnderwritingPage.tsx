@@ -72,21 +72,22 @@ function SourceBadge({ source, confidence, sourceDetail }: {
   let cfg: BadgeCfg;
 
   if (source === "trrc") {
-    cfg = confidence === "high"
-      ? { label: "VERIFIED",       bg: "rgba(34,197,94,0.15)",  color: COLORS.green  }
-      : { label: "PUBLIC RECORD",  bg: COLORS.accentDim,        color: COLORS.accent };
+    // TRRC public record = VERIFIED regardless of confidence tier
+    cfg = { label: "VERIFIED", bg: "rgba(34,197,94,0.15)", color: COLORS.green };
+  } else if (source === "run_statement" || source === "loe_statement") {
+    // Operator-provided signed statements = VERIFIED (operator signed off)
+    cfg = { label: "VERIFIED", bg: COLORS.greenDim, color: COLORS.green };
   } else if (source === "uploaded_doc") {
-    cfg = { label: "OCR EXTRACTED",     bg: COLORS.purpleDim, color: COLORS.purple };
-  } else if (source === "run_statement") {
-    cfg = { label: "OPERATOR PROVIDED", bg: COLORS.greenDim,  color: COLORS.green  };
-  } else if (source === "loe_statement") {
-    cfg = { label: "OPERATOR PROVIDED", bg: COLORS.yellowDim, color: COLORS.yellow };
+    // Extracted from seller document — not independently confirmed = INFERRED
+    cfg = { label: "INFERRED", bg: COLORS.purpleDim, color: COLORS.purple };
   } else if (source === "inferred") {
+    // Calculated from other data or basin benchmark = ESTIMATED
     cfg = confidence === "low" || confidence === "none"
-      ? { label: "LOW CONFIDENCE", bg: "rgba(245,158,11,0.08)", color: "#e09a2a" }
-      : { label: "INFERRED",       bg: "rgba(255,255,255,0.06)", color: COLORS.textMuted };
+      ? { label: "ESTIMATED", bg: "rgba(245,158,11,0.08)", color: "#e09a2a" }
+      : { label: "ESTIMATED", bg: "rgba(255,255,255,0.06)", color: COLORS.textMuted };
   } else {
-    cfg = { label: "MISSING DATA", bg: COLORS.redDim, color: COLORS.red };
+    // Not found in any source = UNKNOWN
+    cfg = { label: "UNKNOWN", bg: COLORS.redDim, color: COLORS.red };
   }
 
   return (
@@ -430,7 +431,8 @@ type TabId =
   | "export_center"
   | "production_audit"
   | "data_provenance"
-  | "truth_check";
+  | "truth_check"
+  | "why_this_could_be_wrong";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "truth_check",         label: "Truth-Check",            icon: "⚖️" },
@@ -450,7 +452,8 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "documents_sources",   label: "Documents & Sources",    icon: "📂" },
   { id: "missing_diligence",   label: "Missing Diligence",      icon: "⚠️" },
   { id: "ic_memo",             label: "IC Memo",                icon: "🤔" },
-  { id: "export_center",       label: "Export Center",          icon: "📦" },
+  { id: "export_center",            label: "Export Center",       icon: "📦" },
+  { id: "why_this_could_be_wrong",  label: "Limitations",         icon: "⚠️" },
 ];
 
 // ─── Report sections ──────────────────────────────────────────────────────────
@@ -5863,6 +5866,106 @@ function IcMemoTab({ report }: { report: DDReport }) {
   );
 }
 
+// ─── Why This Could Be Wrong Tab ─────────────────────────────────────────────
+
+function WhyThisCouldBeWrongTab({ report }: { report: DDReport }) {
+  const data = report.why_this_could_be_wrong;
+
+  if (!data || data.items.length === 0) {
+    return (
+      <div style={{ padding: "2rem", textAlign: "center", color: COLORS.textMuted, fontSize: "0.85rem" }}>
+        No limitation data available. Run Full Underwriting to generate this section.
+      </div>
+    );
+  }
+
+  const severityConfig = {
+    critical: { color: COLORS.red,    bg: COLORS.redDim,    icon: "⛔", label: "CRITICAL" },
+    warning:  { color: COLORS.yellow, bg: COLORS.yellowDim, icon: "⚠️", label: "WARNING"  },
+    info:     { color: COLORS.accent, bg: COLORS.accentDim, icon: "ℹ️", label: "INFO"     },
+  };
+
+  return (
+    <div style={{ padding: "1.5rem 1.75rem" }}>
+      {/* Header */}
+      <div style={{ marginBottom: "1.5rem" }}>
+        <div style={{ fontSize: "1rem", fontWeight: 800, color: COLORS.text, marginBottom: "0.35rem" }}>
+          Why This Report Could Be Wrong
+        </div>
+        <div style={{ fontSize: "0.78rem", color: COLORS.textMuted, lineHeight: 1.6, marginBottom: "0.75rem" }}>
+          {data.summary}
+        </div>
+        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" as const }}>
+          {data.critical_count > 0 && (
+            <span style={{ fontSize: "0.72rem", fontWeight: 800, color: COLORS.red,
+              background: COLORS.redDim, borderRadius: 6, padding: "0.2rem 0.55rem",
+              border: `1px solid rgba(239,68,68,0.3)` }}>
+              {data.critical_count} Critical
+            </span>
+          )}
+          {data.warning_count > 0 && (
+            <span style={{ fontSize: "0.72rem", fontWeight: 800, color: COLORS.yellow,
+              background: COLORS.yellowDim, borderRadius: 6, padding: "0.2rem 0.55rem",
+              border: `1px solid rgba(234,179,8,0.3)` }}>
+              {data.warning_count} Warning
+            </span>
+          )}
+          {data.info_count > 0 && (
+            <span style={{ fontSize: "0.72rem", fontWeight: 800, color: COLORS.accent,
+              background: COLORS.accentDim, borderRadius: 6, padding: "0.2rem 0.55rem",
+              border: `1px solid rgba(99,102,241,0.3)` }}>
+              {data.info_count} Info
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Items */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+        {data.items.map((item, i) => {
+          const cfg = severityConfig[item.severity];
+          return (
+            <div key={i} style={{
+              background: cfg.bg,
+              border: `1px solid ${cfg.color}33`,
+              borderLeft: `4px solid ${cfg.color}`,
+              borderRadius: 10,
+              padding: "1rem 1.25rem",
+            }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", marginBottom: "0.4rem" }}>
+                <span style={{ fontSize: "0.85rem", lineHeight: 1.4 }}>{cfg.icon}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.3rem" }}>
+                    <span style={{ fontSize: "0.62rem", fontWeight: 800, color: cfg.color,
+                      letterSpacing: "0.1em", textTransform: "uppercase" as const }}>
+                      {cfg.label}
+                    </span>
+                    <span style={{ fontSize: "0.82rem", fontWeight: 700, color: COLORS.text }}>
+                      {item.title}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "0.78rem", color: COLORS.textMuted, lineHeight: 1.6, marginBottom: item.buyer_action ? "0.5rem" : 0 }}>
+                    {item.implication}
+                  </div>
+                  {item.buyer_action && (
+                    <div style={{ fontSize: "0.75rem", color: COLORS.text, lineHeight: 1.55,
+                      background: "rgba(255,255,255,0.04)", borderRadius: 6,
+                      padding: "0.4rem 0.65rem", marginTop: "0.4rem",
+                      borderLeft: `2px solid ${cfg.color}66` }}>
+                      <span style={{ fontWeight: 700, color: cfg.color }}>Buyer action: </span>
+                      {item.buyer_action}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Export / Print Tab ──────────────────────────────────────────────────────
 
 function ExportTab({ report }: { report: DDReport }) {
@@ -7696,6 +7799,87 @@ export default function UnderwritingPage() {
                 </div>
               </div>
 
+              {/* ── Readiness Score ───────────────────────────────────────── */}
+              {scanMode === "full" && (() => {
+                const cats = [
+                  {
+                    label: "Identifiers",
+                    score: (() => {
+                      const pts = (form.apiNumbers.trim() ? 50 : 0) + (form.rrcLeases.trim() ? 50 : 0);
+                      return pts;
+                    })(),
+                    tip: !form.apiNumbers.trim() && !form.rrcLeases.trim()
+                      ? "Add API number or RRC lease ID"
+                      : !form.apiNumbers.trim() ? "API number missing — AI will need to search" : null,
+                  },
+                  {
+                    label: "Operator",
+                    score: form.operatorName.trim() ? 100 : 0,
+                    tip: !form.operatorName.trim() ? "Operator name required for compliance check" : null,
+                  },
+                  {
+                    label: "Documents",
+                    score: files.length > 0 ? 100 : form.docText.trim() ? 60 : 0,
+                    tip: files.length === 0 && !form.docText.trim() ? "Upload seller documents for cross-check" : null,
+                  },
+                  {
+                    label: "Ownership",
+                    score: (form.nriPct.trim() ? 50 : 0) + (form.wiPct.trim() ? 50 : 0),
+                    tip: !form.nriPct.trim() || !form.wiPct.trim() ? "NRI/WI needed for economics" : null,
+                  },
+                  {
+                    label: "Location",
+                    score: (form.county.trim() ? 50 : 0) + (form.state.trim() ? 50 : 0),
+                    tip: !form.county.trim() ? "County helps with basin benchmarks" : null,
+                  },
+                ];
+                const overall = Math.round(cats.reduce((s, c) => s + c.score, 0) / cats.length);
+                const scoreColor = overall >= 80 ? COLORS.green : overall >= 50 ? COLORS.yellow : COLORS.red;
+                const tips = cats.filter(c => c.tip).map(c => c.tip as string);
+                return (
+                  <div style={{
+                    background: COLORS.surfaceAlt,
+                    border: `1px solid ${COLORS.border}`,
+                    borderRadius: 10,
+                    padding: "0.9rem 1.1rem",
+                    marginBottom: "0.75rem",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+                      <div style={{ fontSize: "0.72rem", fontWeight: 800, color: COLORS.textMuted,
+                        textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>
+                        Report Readiness
+                      </div>
+                      <div style={{ fontSize: "1rem", fontWeight: 800, color: scoreColor }}>
+                        {overall}%
+                      </div>
+                    </div>
+                    {/* Category bars */}
+                    <div style={{ display: "flex", gap: "0.35rem", marginBottom: "0.55rem" }}>
+                      {cats.map(cat => (
+                        <div key={cat.label} style={{ flex: 1 }}>
+                          <div style={{ height: 4, borderRadius: 3, background: COLORS.border, overflow: "hidden", marginBottom: "0.25rem" }}>
+                            <div style={{
+                              height: "100%",
+                              width: `${cat.score}%`,
+                              background: cat.score === 100 ? COLORS.green : cat.score >= 50 ? COLORS.yellow : COLORS.red,
+                              transition: "width 0.4s ease",
+                            }} />
+                          </div>
+                          <div style={{ fontSize: "0.58rem", color: COLORS.textMuted, textAlign: "center" as const }}>
+                            {cat.label}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {tips.length > 0 && (
+                      <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, lineHeight: 1.5 }}>
+                        {tips.map((t, i) => <span key={i} style={{ display: "block" }}>• {t}</span>)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* ── Run button ────────────────────────────────────────────── */}
               <button
                 onClick={runUnderwriting}
@@ -8139,6 +8323,7 @@ export default function UnderwritingPage() {
               {activeTab === "missing_diligence"     && <MissingItemsTab        report={report} />}
               {activeTab === "ic_memo"               && <IcMemoTab              report={report} />}
               {activeTab === "export_center"         && <ExportTab              report={report} />}
+              {activeTab === "why_this_could_be_wrong" && <WhyThisCouldBeWrongTab report={report} />}
             </div>
 
             {/* Meta footer */}
