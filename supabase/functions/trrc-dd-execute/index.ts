@@ -1521,7 +1521,7 @@ async function runAgent(runId: string): Promise<void> {
       const response = await anthropic.messages.create({
         model: "claude-opus-4-5",
         max_tokens: 16000,
-        thinking: { type: "adaptive" },
+        
         system: SYSTEM_PROMPT,
         tools: AGENT_TOOLS,
         messages,
