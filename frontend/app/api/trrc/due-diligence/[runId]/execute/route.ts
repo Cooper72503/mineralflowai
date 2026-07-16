@@ -1,53 +1,48 @@
 /**
  * POST /api/trrc/due-diligence/[runId]/execute
  *
- * Workhorse route: runs the full TRRC retrieval pipeline for an existing run.
+ * Workhorse route: runs the full TRRC agentic investigation for an existing run.
  * Called separately from the initial POST so that initial POST returns fast.
  *
  * Flow:
  *   1. Auth + ownership check
- *   2. Load run, verify status is "retrieving" or "pending"
- *   3. Build ResolvedSearchContext from run + entities
- *   4. expandSearchContext → populates api_numbers from lease/operator/GIS data
- *   5. runRetrievalOrchestrator  → source_attempts, production, coverage
- *   6. runFindingEngine          → findings
- *   7. computeAcquisitionScorecard → scorecard
- *   8. Persist findings, missing items, production rows
- *   9. Update run: status="complete", scorecard_json, coverage_json
- *  10. Build manifest → upload to Supabase Storage
- *  11. Return { ok: true, data: { status: "complete", run_id } }
+ *   2. Load run + resolved entities from DB
+ *   3. Run TrrcAgentLoop (claude-fable-5) — agent investigates TRRC, emits progress events
+ *   4. Take ctx.agentReport from the completed agent context
+ *   5. Persist findings to trrc_due_diligence_findings (evidence_json column)
+ *   6. Persist production rows to trrc_production_monthly
+ *   7. Build manifest, PDF, ZIP using existing builders
+ *   8. Upload to Supabase Storage
+ *   9. Update run status to "complete"
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { runRetrievalOrchestrator } from "@/lib/trrc/retrieval-orchestrator";
-import { runFindingEngine } from "@/lib/trrc/finding-engine";
-import { computeAcquisitionScorecard } from "@/lib/trrc/scoring-engine";
+import { runTrrcAgentLoop } from "@/lib/trrc/agent/loop";
+import type { TrrcAgentContext } from "@/lib/trrc/agent/tool-handlers";
 import { buildManifest } from "@/lib/trrc/manifest-builder";
-import { fetchLeaseWellInventory } from "@/lib/underwriting/trrc-lease-inventory";
-import { fetchTrrcP5ByOperatorName } from "@/lib/underwriting/trrc-p5";
-import { fetchTrrcInactiveWellsByOperator } from "@/lib/underwriting/trrc-inactive-wells";
-import { lookupTrrcLeasesByApis } from "@/lib/wells/trrc-api";
+import { buildTrrcPdfReport } from "@/lib/trrc/report-builder";
+import { buildTrrcZipArchive } from "@/lib/trrc/archive-builder";
 import { normalizeApiNumber } from "@/lib/trrc/normalization";
 import type {
-  ResolvedSearchContext,
   TrrcDueDiligenceRun,
   ResolvedEntity,
+  TrrcFinding,
+  AcquisitionScorecard,
+  TrrcDDProductionRow,
+  ResolvedSearchContext,
   NormalizedApi,
-  SourceSearchResult,
+  SourceCoverageStatus,
 } from "@/lib/trrc/types";
+import type { OrchestratorResult } from "@/lib/trrc/retrieval-orchestrator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// ─── Status guard ─────────────────────────────────────────────────────────────
+// ─── Status guard ──────────────────────────────────────────────────────────────
 
-/**
- * These statuses mean the run is already complete or actively running.
- * Re-executing a run in any of these states is an error.
- */
 const TERMINAL_OR_RUNNING = [
   "complete",
   "failed",
@@ -58,11 +53,10 @@ const TERMINAL_OR_RUNNING = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Build a NormalizedApi from a 10-digit api10 string. */
 function buildNormalizedApi(api10: string): NormalizedApi {
-  const state_code = api10.slice(0, 2);
+  const state_code  = api10.slice(0, 2);
   const county_code = api10.slice(2, 5);
-  const well_code = api10.slice(5, 10);
+  const well_code   = api10.slice(5, 10);
   return {
     raw: api10,
     api10,
@@ -75,11 +69,11 @@ function buildNormalizedApi(api10: string): NormalizedApi {
   };
 }
 
-/** Build a NormalizedApi from any raw string via normalizeApiNumber, falling back to buildNormalizedApi. */
 function buildNormalizedApiFromRaw(raw: string): NormalizedApi | null {
+  // normalizeApiNumber from @/lib/trrc/normalization returns NormalizedApi | null
   const norm = normalizeApiNumber(raw);
   if (norm) return norm;
-  // Last-ditch: if it's exactly 10 digits, build directly
+  // Last-ditch: strip non-digits and check length
   const digits = raw.replace(/\D/g, "");
   if (digits.length === 10 && digits.startsWith("42")) {
     return buildNormalizedApi(digits);
@@ -87,327 +81,294 @@ function buildNormalizedApiFromRaw(raw: string): NormalizedApi | null {
   return null;
 }
 
-/** Build ResolvedSearchContext from DB run + entity rows (initial pass — no API expansion yet). */
-function buildSearchContext(
-  run: Record<string, unknown>,
-  entities: ResolvedEntity[],
-  defaultProductionMonths = 36,
-): ResolvedSearchContext {
-  // Collect API numbers from wellbore entities
-  const api_numbers: NormalizedApi[] = entities
-    .filter((e) => e.entity_type === "wellbore" && typeof e.canonical_identifier === "string")
-    .map((e) => buildNormalizedApi(e.canonical_identifier))
-    .filter((a) => a.api10.length === 10);
+function makeId(): string {
+  return `finding_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
 
-  // If run has a resolved_primary_api, ensure it is included
-  const primaryApi = typeof run["resolved_primary_api"] === "string" ? run["resolved_primary_api"] : null;
-  if (primaryApi && !api_numbers.find((a) => a.api10 === primaryApi)) {
-    api_numbers.unshift(buildNormalizedApi(primaryApi));
+/**
+ * Map the agent's recommendation string to a canonical AcquisitionRecommendation value.
+ * The agent uses lowercase; the scorecard type uses uppercase.
+ */
+function mapRecommendation(
+  rec: string,
+): AcquisitionScorecard["recommendation"] {
+  switch (rec.toLowerCase()) {
+    case "pursue":  return "PURSUE";
+    case "blocked": return "BLOCKED";
+    case "pass":    return "PASS";
+    default:        return "REVIEW";
+  }
+}
+
+/**
+ * Map agent severity string to TrrcFinding severity.
+ * Agent uses "warning" (tool schema), DB uses "medium".
+ */
+function mapSeverity(sev: string): TrrcFinding["severity"] {
+  switch (sev.toLowerCase()) {
+    case "critical": return "critical";
+    case "warning":  return "medium";
+    case "info":     return "info";
+    default:         return "info";
+  }
+}
+
+/**
+ * Map agent category string to TrrcRecordCategory.
+ */
+function mapCategory(cat: string): TrrcFinding["category"] {
+  switch (cat.toLowerCase()) {
+    case "identity":       return "identity";
+    case "production":     return "production";
+    case "compliance":     return "compliance";
+    case "inactive_well":  return "plugging_inactive";
+    case "plugging":       return "plugging_inactive";
+    case "mechanical":     return "completion";
+    case "operator":       return "operator_p5";
+    case "data_gap":       return "miscellaneous";
+    default:               return "miscellaneous";
+  }
+}
+
+/**
+ * Convert agent findings to TrrcFinding[] for DB persistence and PDF generation.
+ */
+function agentFindingsToTrrcFindings(
+  agentFindings: Array<{
+    category: string;
+    severity: string;
+    title: string;
+    detail: string;
+    source_ids: string[];
+  }>,
+): TrrcFinding[] {
+  return agentFindings.map((f) => ({
+    id: makeId(),
+    category: mapCategory(f.category),
+    severity: mapSeverity(f.severity),
+    finding_type: `agent_${f.category}`,
+    title: f.title,
+    description: f.detail,
+    evidence: { source_ids: f.source_ids, agent_category: f.category },
+    source_record_ids: f.source_ids,
+    analytical_method: "agent_synthesis",
+    confidence: 0.85,
+    recommended_action: "Review finding and cross-check with primary TRRC records.",
+    is_directly_reported: true,
+  }));
+}
+
+/**
+ * Build an AcquisitionScorecard from the agent's scorecard output.
+ */
+function buildScorecardFromAgent(
+  agentScorecard: {
+    overall_score: number;
+    dimensions: Array<{
+      id: string;
+      name: string;
+      score: number;
+      weight: number;
+      key_finding: string;
+    }>;
+  },
+  recommendation: AcquisitionScorecard["recommendation"],
+  findings: TrrcFinding[],
+  dataGaps: string[],
+): AcquisitionScorecard {
+  const DEFAULT_DIMS = [
+    { id: "record_completeness",    name: "Record Completeness",    weight: 0.10 },
+    { id: "identity_confidence",    name: "Identity Confidence",    weight: 0.12 },
+    { id: "production_quality",     name: "Production Quality",     weight: 0.15 },
+    { id: "production_consistency", name: "Production Consistency", weight: 0.13 },
+    { id: "mechanical_integrity",   name: "Mechanical Integrity",   weight: 0.08 },
+    { id: "plugging_exposure",      name: "Plugging Exposure",      weight: 0.10 },
+    { id: "regulatory_compliance",  name: "Regulatory Compliance",  weight: 0.12 },
+    { id: "operator_profile",       name: "Operator Profile",       weight: 0.08 },
+    { id: "development_activity",   name: "Development Activity",   weight: 0.07 },
+    { id: "data_confidence",        name: "Data Confidence",        weight: 0.05 },
+  ] as const;
+
+  type DimKey = keyof AcquisitionScorecard["dimensions"];
+
+  // Build a map from the agent's dimension array
+  const dimMap = new Map(agentScorecard.dimensions.map((d) => [d.id, d]));
+
+  const buildDim = (id: string, name: string, weight: number) => {
+    const agentDim = dimMap.get(id);
+    return {
+      label: name,
+      score: agentDim?.score ?? 50,
+      weight,
+      rationale: agentDim?.key_finding ?? "Not assessed.",
+      data_points: [],
+    };
+  };
+
+  const dimensions = {} as AcquisitionScorecard["dimensions"];
+  for (const d of DEFAULT_DIMS) {
+    (dimensions as Record<DimKey, AcquisitionScorecard["dimensions"][DimKey]>)[d.id as DimKey] = buildDim(d.id, d.name, d.weight);
   }
 
-  // Derive district from entities or run
-  const district =
-    (typeof run["resolved_district"] === "string" ? run["resolved_district"] : null) ??
-    (() => {
-      const wellboreAttrs = entities.find((e) => e.entity_type === "wellbore")?.attributes;
-      return typeof wellboreAttrs?.["district"] === "string" ? wellboreAttrs["district"] : null;
-    })();
+  // Compute weighted sum for risk/opportunity scores
+  const weightedSum = DEFAULT_DIMS.reduce((sum, d) => {
+    const score = (dimensions as Record<string, { score: number }>)[d.id]?.score ?? 50;
+    return sum + score * d.weight;
+  }, 0);
 
-  // Operator name from operator entities
-  const operatorEntity = entities.find((e) => e.entity_type === "operator");
-  const operator_name =
-    typeof operatorEntity?.attributes["normalized_name"] === "string"
-      ? operatorEntity.attributes["normalized_name"]
-      : typeof run["original_input"] === "string" &&
-        (run["selected_input_type"] === "operator_name" || run["selected_input_type"] === "p5_number")
-        ? (run["original_input"] as string)
-        : null;
+  const overallScore = Math.round(agentScorecard.overall_score ?? weightedSum);
 
-  // Lease number
-  const leaseEntity = entities.find((e) => e.entity_type === "lease");
-  const lease_number =
-    (typeof run["resolved_lease_number"] === "string" ? run["resolved_lease_number"] : null) ??
-    (typeof leaseEntity?.attributes["lease_number"] === "string" ? leaseEntity.attributes["lease_number"] : null);
+  // Separate findings
+  const criticals = findings.filter((f) => f.severity === "critical");
+  const highs     = findings.filter((f) => f.severity === "high" || f.severity === "medium");
 
-  // Gas ID
-  const gas_id =
-    (typeof run["resolved_gas_id"] === "string" ? run["resolved_gas_id"] : null) ??
-    (() => {
-      const gwEntity = entities.find((e) => e.entity_type === "wellbore" && typeof e.attributes["gas_well_id"] === "string");
-      return gwEntity ? (gwEntity.attributes["gas_well_id"] as string) : null;
-    })();
+  const gating_conditions = criticals.map((f) => f.title);
+  const missing_critical_evidence = dataGaps.slice(0, 5);
+
+  const reasons_for = findings
+    .filter((f) => f.severity === "info")
+    .slice(0, 3)
+    .map((f) => f.title);
+
+  const reasons_against = criticals
+    .slice(0, 3)
+    .map((f) => f.title)
+    .concat(highs.slice(0, 2).map((f) => f.title))
+    .slice(0, 5);
 
   return {
-    run_id: run["id"] as string,
-    input_type: run["selected_input_type"] as ResolvedSearchContext["input_type"],
-    raw_input: run["original_input"] as string,
-    normalized_input: run["normalized_input"] as string,
-    api_numbers,
-    district,
-    lease_number,
-    gas_id,
-    operator_name,
-    operator_number:
-      typeof run["resolved_operator_number"] === "string" ? run["resolved_operator_number"] : null,
-    county: null,
-    lease_name: null,
-    legal_description: null,
-    search_historical: false,
-    include_offset_wells: false,
-    production_months: defaultProductionMonths,
+    dimensions,
+    opportunity_score: Math.max(0, Math.min(100, overallScore)),
+    risk_score: Math.max(0, Math.min(100, 100 - overallScore + criticals.length * 5)),
+    overall_confidence: Math.max(0, Math.min(100, overallScore)),
+    recommendation,
+    gating_conditions,
+    missing_critical_evidence,
+    reasons_for,
+    reasons_against,
   };
 }
 
-// ─── Context expansion ────────────────────────────────────────────────────────
-
 /**
- * Expand the ResolvedSearchContext by discovering additional API numbers,
- * district codes, and lease numbers based on the input type.
- *
- * Mutates ctx in place. Returns newly discovered NormalizedApi[] so the caller
- * can upsert wellbore entities for each.
+ * Convert raw production rows collected in TrrcAgentContext to TrrcDDProductionRow[]
+ * suitable for DB persistence and PDF generation.
  */
-async function expandSearchContext(
-  ctx: ResolvedSearchContext,
-  runRaw: Record<string, unknown>,
-  entities: ResolvedEntity[],
-  supabase: Awaited<ReturnType<typeof createSupabaseFromRouteRequest>>,
+function buildProductionRows(
+  ctx: TrrcAgentContext,
   runId: string,
-  expansion_trace: string[],
-): Promise<NormalizedApi[]> {
-  const inputType = ctx.input_type;
-  let expandedApis: NormalizedApi[] = [];
-  let expansionSource = "entity_resolution";
+): TrrcDDProductionRow[] {
+  const rows: TrrcDDProductionRow[] = [];
+  const seen = new Set<string>();
 
-  // ── api_number ────────────────────────────────────────────────────────────
-  if (inputType === "api_number") {
-    // APIs already populated from entity resolver. Fill in district + lease_number
-    // if missing by looking up the APIs in the TRRC PDQ wellbore query.
-    if (ctx.api_numbers.length > 0 && (!ctx.district || !ctx.lease_number)) {
-      expansion_trace.push(`api_number: looking up lease/district for ${ctx.api_numbers.length} API(s) via PDQ`);
-      try {
-        const leaseMap = await lookupTrrcLeasesByApis(
-          null,
-          ctx.api_numbers.map((a) => a.api10),
-        );
-        const firstMatch = leaseMap.get(ctx.api_numbers[0].api10);
-        if (firstMatch) {
-          if (!ctx.district) {
-            ctx.district = firstMatch.distCode;
-            expansion_trace.push(`api_number: district resolved to "${firstMatch.distCode}" from PDQ`);
-          }
-          if (!ctx.lease_number) {
-            ctx.lease_number = firstMatch.leaseNo;
-            expansion_trace.push(`api_number: lease_number resolved to "${firstMatch.leaseNo}" from PDQ`);
-          }
-        }
-      } catch (err) {
-        expansion_trace.push(`api_number: PDQ lookup failed — ${err instanceof Error ? err.message : String(err)}`);
-      }
-    } else {
-      expansion_trace.push(`api_number: ${ctx.api_numbers.length} API(s) already present from entity resolver — no expansion needed`);
-    }
-    expandedApis = [];
+  for (const raw of ctx.production) {
+    // The raw rows come from fetchTrrcProductionByLease or fetchTrrcProductionHistory
+    // Both return TrrcMonthlyRow objects: { year, month, oil_bbl, gas_mcf, ... }
+    const r = raw as Record<string, unknown>;
+    const year  = r["year"]  as number | undefined;
+    const month = r["month"] as number | undefined;
+    if (!year || !month) continue;
+
+    const productionMonth = `${year}-${String(month).padStart(2, "0")}`;
+    const key = `${ctx.lease_number ?? ""}:${ctx.district ?? ""}:${productionMonth}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    rows.push({
+      entity_type: "lease",
+      api_number: ctx.api_numbers[0] ?? null,
+      district: ctx.district ?? "",
+      lease_number: ctx.lease_number ?? null,
+      gas_id: null,
+      operator_number: ctx.operator_number ?? null,
+      production_month: productionMonth,
+      oil_bbl: typeof r["oil_bbl"] === "number" ? r["oil_bbl"] : null,
+      casinghead_gas_mcf: null,
+      gas_mcf: typeof r["gas_mcf"] === "number" ? r["gas_mcf"] : null,
+      condensate_bbl: null,
+      water_bbl: typeof r["water_bbl"] === "number" ? r["water_bbl"] : null,
+    });
   }
 
-  // ── rrc_lease_number ─────────────────────────────────────────────────────
-  else if (inputType === "rrc_lease_number") {
-    if (!ctx.lease_number) {
-      expansion_trace.push(`rrc_lease_number: no lease_number in context — cannot expand`);
-    } else if (!ctx.district) {
-      // Can't call lease inventory without a district
-      expansion_trace.push(
-        `rrc_lease_number: district unknown for lease ${ctx.lease_number} — API expansion skipped. Results will be lease-level only.`,
-      );
-    } else {
-      expansion_trace.push(`rrc_lease_number: fetching well inventory for lease ${ctx.lease_number} / district ${ctx.district}`);
-      try {
-        const inv = await fetchLeaseWellInventory(ctx.district, ctx.lease_number);
-        if (!inv.query_failed && inv.wells.length > 0) {
-          const newApis = inv.wells
-            .map((w) => buildNormalizedApiFromRaw(w.api10))
-            .filter((a): a is NormalizedApi => a !== null);
-
-          // Deduplicate against existing
-          const existingSet = new Set(ctx.api_numbers.map((a) => a.api10));
-          const fresh = newApis.filter((a) => !existingSet.has(a.api10));
-
-          ctx.api_numbers = [...ctx.api_numbers, ...fresh];
-          expandedApis = fresh;
-          expansionSource = "lease_inventory";
-          expansion_trace.push(
-            `rrc_lease_number: expanded lease ${ctx.lease_number} to ${ctx.api_numbers.length} API(s) via lease inventory (${fresh.length} new)`,
-          );
-        } else {
-          expansion_trace.push(
-            `rrc_lease_number: lease inventory ${inv.query_failed ? "query failed" : "returned 0 wells"} for lease ${ctx.lease_number} / district ${ctx.district}`,
-          );
-        }
-      } catch (err) {
-        expansion_trace.push(`rrc_lease_number: lease inventory error — ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  }
-
-  // ── operator_name / p5_number ─────────────────────────────────────────────
-  else if (inputType === "operator_name" || inputType === "p5_number") {
-    const operatorName = ctx.operator_name ?? ctx.raw_input;
-    if (!operatorName) {
-      expansion_trace.push(`${inputType}: no operator_name in context — cannot expand`);
-    } else {
-      // Step 1: resolve operator number via P-5 if not already known
-      if (!ctx.operator_number) {
-        expansion_trace.push(`${inputType}: looking up P-5 record for operator "${operatorName}"`);
-        try {
-          const p5 = await fetchTrrcP5ByOperatorName(operatorName);
-          if (p5) {
-            ctx.operator_number = p5.operator_no;
-            expansion_trace.push(`${inputType}: P-5 resolved operator_no="${p5.operator_no}" (status: ${p5.org_status})`);
-
-            // Persist operator number to DB
-            await supabase
-              .from("trrc_due_diligence_runs")
-              .update({
-                resolved_operator_number: p5.operator_no,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", runId);
-          } else {
-            expansion_trace.push(`${inputType}: P-5 lookup returned no record for "${operatorName}"`);
-          }
-        } catch (err) {
-          expansion_trace.push(`${inputType}: P-5 lookup error — ${err instanceof Error ? err.message : String(err)}`);
-        }
-      } else {
-        expansion_trace.push(`${inputType}: operator_number already known: "${ctx.operator_number}"`);
-      }
-
-      // Step 2: fetch inactive wells by operator to discover API numbers
-      if (ctx.operator_number) {
-        expansion_trace.push(`${inputType}: fetching inactive well roster for operator ${ctx.operator_number} (O + G leases in parallel)`);
-        try {
-          const [oilWells, gasWells] = await Promise.all([
-            fetchTrrcInactiveWellsByOperator(ctx.operator_number, "O"),
-            fetchTrrcInactiveWellsByOperator(ctx.operator_number, "G"),
-          ]);
-
-          const allWells = [...oilWells, ...gasWells];
-          expansion_trace.push(`${inputType}: inactive well roster returned ${allWells.length} records (${oilWells.length} oil, ${gasWells.length} gas)`);
-
-          // Convert api8 → api10 by prepending "42"
-          const seenApi10 = new Set<string>();
-          const wellApis: NormalizedApi[] = [];
-          for (const w of allWells) {
-            const api10 = `42${w.api8}`;
-            if (seenApi10.has(api10)) continue;
-            seenApi10.add(api10);
-            const norm = buildNormalizedApiFromRaw(api10);
-            if (norm) wellApis.push(norm);
-          }
-
-          // Cap to first 50 to keep pipeline fast
-          const capped = wellApis.slice(0, 50);
-
-          // Merge with any existing APIs
-          const existingSet = new Set(ctx.api_numbers.map((a) => a.api10));
-          const fresh = capped.filter((a) => !existingSet.has(a.api10));
-          ctx.api_numbers = [...ctx.api_numbers, ...fresh];
-          expandedApis = fresh;
-          expansionSource = "inactive_well_roster";
-
-          expansion_trace.push(
-            `${inputType}: expanded operator "${operatorName}" to ${ctx.api_numbers.length} API(s) via inactive well roster (${fresh.length} new, capped at 50)`,
-          );
-        } catch (err) {
-          expansion_trace.push(`${inputType}: inactive well roster error — ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-    }
-  }
-
-  // ── legal_description ─────────────────────────────────────────────────────
-  else if (inputType === "legal_description") {
-    // GIS resolution should have stored resolved APIs in wellbore entities.
-    // Gather from entities with resolution_method = "gis_abstract_polygon" or from attributes.resolved_apis.
-    const gisEntities = entities.filter(
-      (e) =>
-        e.entity_type === "wellbore" &&
-        (e.resolution_method === "gis_abstract_polygon" ||
-          (e.attributes["resolved_apis"] && Array.isArray(e.attributes["resolved_apis"]))),
-    );
-
-    const gisApis: NormalizedApi[] = [];
-    const seenGis = new Set<string>();
-
-    for (const e of gisEntities) {
-      // From canonical_identifier
-      const ci = e.canonical_identifier;
-      if (ci && !seenGis.has(ci)) {
-        const norm = buildNormalizedApiFromRaw(ci);
-        if (norm) { seenGis.add(ci); gisApis.push(norm); }
-      }
-      // From attributes.resolved_apis
-      const resolvedApis = e.attributes["resolved_apis"];
-      if (Array.isArray(resolvedApis)) {
-        for (const ra of resolvedApis) {
-          if (typeof ra === "string" && !seenGis.has(ra)) {
-            const norm = buildNormalizedApiFromRaw(ra);
-            if (norm) { seenGis.add(ra); gisApis.push(norm); }
-          }
-        }
-      }
-    }
-
-    if (gisApis.length > 0) {
-      const existingSet = new Set(ctx.api_numbers.map((a) => a.api10));
-      const fresh = gisApis.filter((a) => !existingSet.has(a.api10));
-      ctx.api_numbers = [...ctx.api_numbers, ...fresh];
-      expandedApis = fresh;
-      expansionSource = "gis_abstract_polygon";
-      expansion_trace.push(`legal_description: found ${gisApis.length} API(s) from GIS entities (${fresh.length} new)`);
-
-      // Fill in lease/district from PDQ
-      if (ctx.api_numbers.length > 0 && (!ctx.district || !ctx.lease_number)) {
-        try {
-          const leaseMap = await lookupTrrcLeasesByApis(null, ctx.api_numbers.map((a) => a.api10));
-          const firstMatch = leaseMap.get(ctx.api_numbers[0].api10);
-          if (firstMatch) {
-            if (!ctx.district) {
-              ctx.district = firstMatch.distCode;
-              expansion_trace.push(`legal_description: district resolved to "${firstMatch.distCode}" from PDQ`);
-            }
-            if (!ctx.lease_number) {
-              ctx.lease_number = firstMatch.leaseNo;
-              expansion_trace.push(`legal_description: lease_number resolved to "${firstMatch.leaseNo}" from PDQ`);
-            }
-          }
-        } catch (err) {
-          expansion_trace.push(`legal_description: PDQ lookup failed — ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-    } else {
-      expansion_trace.push(
-        `legal_description: no GIS-resolved APIs found in entities — api_numbers remains empty. Finding engine will emit a critical finding.`,
-      );
-    }
-  }
-
-  // ── gas_well_id ───────────────────────────────────────────────────────────
-  else if (inputType === "gas_well_id") {
-    // gas_id is already set as the canonical identifier.
-    // Gas production source handles gas_id directly — no API expansion needed.
-    expansion_trace.push(`gas_well_id: gas_id="${ctx.gas_id ?? "unknown"}" — no API expansion needed, gas production source handles gas_id`);
-  }
-
-  // ── unknown / lease_name / other ──────────────────────────────────────────
-  else {
-    expansion_trace.push(`${inputType}: no expansion strategy defined for this input type`);
-  }
-
-  return expandedApis;
+  // Suppress unused-variable warning — runId used for future per-run keys if needed
+  void runId;
+  return rows;
 }
 
-// ─── POST ─────────────────────────────────────────────────────────────────────
+/**
+ * Build a minimal OrchestratorResult stub so the existing manifest builder
+ * can be called without modification.
+ */
+function buildOrchestratorStub(
+  ctx: TrrcAgentContext,
+  production: TrrcDDProductionRow[],
+  _findings: TrrcFinding[],
+  runId: string,
+): OrchestratorResult {
+  const coverage: SourceCoverageStatus[] = [
+    {
+      category: "production",
+      label: "Production Records",
+      status: ctx.production.length > 0 ? "complete" : "no_applicable_record",
+      records_found: production.length,
+      data_current_through: null,
+      sources_checked: ["fetch_production"],
+      notes: ctx.production.length > 0 ? "Retrieved by agent." : "No production data retrieved.",
+    },
+    {
+      category: "compliance",
+      label: "Compliance Violations",
+      status: ctx.compliance_violations.length > 0 ? "complete" : "partial",
+      records_found: ctx.compliance_violations.length,
+      data_current_through: null,
+      sources_checked: ["fetch_compliance_violations"],
+      notes: ctx.compliance_violations.length > 0
+        ? `${ctx.compliance_violations.length} violation(s) found.`
+        : "Query returned no violations — may be clean or query miss.",
+    },
+    {
+      category: "plugging_inactive",
+      label: "Plugging & Inactive Wells",
+      status: ctx.plugging_records.length > 0 || ctx.inactive_wells.length > 0 ? "complete" : "no_applicable_record",
+      records_found: ctx.plugging_records.length + ctx.inactive_wells.length,
+      data_current_through: null,
+      sources_checked: ["fetch_plugging_records", "fetch_inactive_well_status"],
+      notes: null,
+    },
+    {
+      category: "operator_p5",
+      label: "Operator P-5 Record",
+      status: ctx.p5_record ? "complete" : "no_applicable_record",
+      records_found: ctx.p5_record ? 1 : 0,
+      data_current_through: null,
+      sources_checked: ["search_by_operator"],
+      notes: null,
+    },
+    {
+      category: "completion",
+      label: "Completion Records",
+      status: ctx.completions.length > 0 ? "complete" : "no_applicable_record",
+      records_found: ctx.completions.length,
+      data_current_through: null,
+      sources_checked: ["fetch_completion_records"],
+      notes: null,
+    },
+  ];
+
+  const totalRecords = coverage.reduce((s, c) => s + c.records_found, 0);
+
+  return {
+    run_id: runId,
+    production,
+    findings_raw: [],
+    source_attempts: [],
+    coverage,
+    total_records_found: totalRecords,
+    manual_required_count: 0,
+    error: null,
+  };
+}
+
+// ─── POST ──────────────────────────────────────────────────────────────────────
 
 export async function POST(
   request: NextRequest,
@@ -461,9 +422,9 @@ export async function POST(
     );
   }
 
-  // Wrap entire pipeline in try/catch to never leave run stuck in "retrieving"
+  // Wrap entire pipeline to never leave run stuck in "retrieving"
   try {
-    // 3. Load entities
+    // 3. Load resolved entities from DB
     const { data: entityRows } = await supabase
       .from("trrc_resolved_entities")
       .select("*")
@@ -482,112 +443,100 @@ export async function POST(
       is_user_selected: e["is_user_selected"] as boolean,
     }));
 
-    // 4. Build initial search context
-    const ctx = buildSearchContext(runRaw, entities);
+    // 4. Run agent loop
+    let progressCount = 0;
 
-    // 5. Expand search context — discover API numbers from lease/operator/GIS
-    const expansion_trace: string[] = [];
-    const newlyDiscoveredApis = await expandSearchContext(
-      ctx,
-      runRaw,
-      entities,
-      supabase,
-      runId,
-      expansion_trace,
+    const agentCtx = await runTrrcAgentLoop(
+      {
+        raw_input: runRaw["original_input"] as string,
+        input_type: runRaw["selected_input_type"] as string,
+        resolved_entities: entities.map((e) => ({
+          entity_type: e.entity_type,
+          canonical_identifier: e.canonical_identifier,
+          display_name: e.display_name,
+          attributes: e.attributes,
+        })),
+      },
+      async (event) => {
+        if (event.type === "tool_call") {
+          progressCount++;
+          // Scale progress 10% → 85% over MAX_TOOL_CALLS=50 tool calls
+          const progressPct = Math.min(85, 10 + progressCount * 1.5);
+
+          await supabase
+            .from("trrc_due_diligence_runs")
+            .update({
+              progress_percent: Math.round(progressPct),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", runId);
+
+          console.log(`[trrc-agent] [${runId}] ${event.tool}: ${event.summary}`);
+        } else if (event.type === "error") {
+          console.error(`[trrc-agent] [${runId}] error: ${event.message}`);
+        }
+      },
     );
 
-    // 6. Persist expanded identifiers back to the run
+    // 5. Persist discovered identifiers back to the run
+    const primaryApi = agentCtx.api_numbers[0] ?? null;
     await supabase
       .from("trrc_due_diligence_runs")
       .update({
-        resolved_primary_api: ctx.api_numbers[0]?.api10 ?? (runRaw["resolved_primary_api"] as string | null) ?? null,
-        resolved_district: ctx.district,
-        resolved_lease_number: ctx.lease_number,
-        resolved_gas_id: ctx.gas_id,
-        resolved_operator_number: ctx.operator_number,
+        resolved_primary_api: primaryApi,
+        resolved_district: agentCtx.district,
+        resolved_lease_number: agentCtx.lease_number,
+        resolved_operator_number: agentCtx.operator_number,
+        status: "analyzing",
+        progress_percent: 88,
         updated_at: new Date().toISOString(),
       })
       .eq("id", runId);
 
-    // 7. Upsert newly discovered wellbore entities
-    if (newlyDiscoveredApis.length > 0) {
-      const existingIdentifiers = new Set(entities.map((e) => e.canonical_identifier));
-      const newEntityRows = newlyDiscoveredApis
-        .filter((a) => !existingIdentifiers.has(a.api10))
-        .map((a) => ({
-          run_id: runId,
-          entity_type: "wellbore",
-          canonical_identifier: a.api10,
-          display_name: `API ${a.formatted}`,
-          attributes_json: { expansion_source: ctx.input_type },
-          confidence: 0.8,
-          resolution_method: ctx.input_type,
-          is_user_selected: false,
-        }));
+    // Upsert newly discovered wellbore entities so they appear in the report
+    if (agentCtx.api_numbers.length > 0) {
+      const existingIds = new Set(entities.map((e) => e.canonical_identifier));
+      const newEntityRows = agentCtx.api_numbers
+        .filter((api) => !existingIds.has(api))
+        .map((api) => {
+          const norm = buildNormalizedApiFromRaw(api);
+          return {
+            run_id: runId,
+            entity_type: "wellbore",
+            canonical_identifier: api,
+            display_name: norm ? `API ${norm.formatted}` : `API ${api}`,
+            attributes_json: { discovered_by: "trrc_agent" },
+            confidence: 0.9,
+            resolution_method: "agent_discovery",
+            is_user_selected: false,
+          };
+        });
 
       if (newEntityRows.length > 0) {
-        const { error: entityInsertError } = await supabase
+        const { error: entityErr } = await supabase
           .from("trrc_resolved_entities")
           .insert(newEntityRows);
-
-        if (entityInsertError) {
-          console.error("[execute] entity insert error:", entityInsertError);
-        } else {
-          console.log(`[execute] inserted ${newEntityRows.length} new wellbore entities from expansion`);
+        if (entityErr) {
+          console.error("[trrc-agent] entity insert error:", entityErr);
         }
       }
     }
 
-    // 8. Run retrieval orchestrator — pass expansion_trace in findings_raw context
-    const orchestratorResult = await runRetrievalOrchestrator(runId, ctx, supabase);
+    // 6. Convert agent output to typed findings
+    const agentReport = agentCtx.agentReport;
+    const agentFindings = agentReport?.findings ?? [];
+    const findings: TrrcFinding[] = agentFindingsToTrrcFindings(agentFindings);
+    const recommendation = mapRecommendation(agentReport?.recommendation ?? "review");
 
-    // Inject expansion_trace into findings_raw so the finding engine can reference it
-    orchestratorResult.findings_raw = [
-      ...(orchestratorResult.findings_raw ?? []),
-      {
-        source_id: "__expansion__",
-        expansion_trace,
-        api_numbers_count: ctx.api_numbers.length,
-        input_type: ctx.input_type,
-      },
-    ];
-
-    // Build a source_data map for the finding engine from findings_raw
-    const source_data: Record<string, SourceSearchResult> = {};
-    for (const raw of orchestratorResult.findings_raw) {
-      const sid = typeof raw["source_id"] === "string" ? raw["source_id"] : "";
-      if (sid && sid !== "__expansion__") {
-        source_data[sid] = {
-          source_id: sid,
-          status: "success",
-          records: [],
-          manual_action_url: null,
-          error: null,
-          result_count: 0,
-          data: raw as Record<string, unknown>,
-        };
-      }
-    }
-
-    // Mark run as analyzing
-    await supabase
-      .from("trrc_due_diligence_runs")
-      .update({ status: "analyzing", progress_percent: 90, updated_at: new Date().toISOString() })
-      .eq("id", runId);
-
-    // 9. Run finding engine
-    const findings = await runFindingEngine(runId, ctx, orchestratorResult, source_data);
-
-    // 10. Compute scorecard
-    const scorecard = computeAcquisitionScorecard(
-      runId,
-      ctx,
+    // 7. Build scorecard from agent's scorecard output
+    const scorecard = buildScorecardFromAgent(
+      agentReport?.scorecard ?? { overall_score: 50, dimensions: [] },
+      recommendation,
       findings,
-      orchestratorResult.coverage,
-      orchestratorResult,
+      agentReport?.data_gaps ?? [],
     );
 
-    // 11. Persist findings — DB column is evidence_json (not evidence)
+    // 8. Persist findings (evidence_json is the DB column name)
     if (findings.length > 0) {
       const findingRows = findings.map((f) => ({
         run_id: runId,
@@ -597,26 +546,27 @@ export async function POST(
         finding_type: f.finding_type,
         title: f.title,
         description: f.description,
-        evidence_json: f.evidence,           // DB col: evidence_json
-        source_record_ids: f.source_record_ids, // DB col: source_record_ids (TEXT[])
+        evidence_json: f.evidence,            // DB col: evidence_json
+        source_record_ids: f.source_record_ids,
         analytical_method: f.analytical_method,
         confidence: f.confidence,
         recommended_action: f.recommended_action,
         is_directly_reported: f.is_directly_reported,
       }));
 
-      const { error: findingsInsertError } = await supabase
+      const { error: findingsErr } = await supabase
         .from("trrc_due_diligence_findings")
         .insert(findingRows);
-
-      if (findingsInsertError) {
-        console.error("[execute] findings insert error:", findingsInsertError);
+      if (findingsErr) {
+        console.error("[trrc-agent] findings insert error:", findingsErr);
       }
     }
 
-    // 12. Persist production rows — upsert to avoid duplicates on retry
-    if (orchestratorResult.production.length > 0) {
-      const prodRows = orchestratorResult.production.map((p) => ({
+    // 9. Build and persist production rows
+    const production = buildProductionRows(agentCtx, runId);
+
+    if (production.length > 0) {
+      const prodRows = production.map((p) => ({
         run_id: runId,
         entity_type: p.entity_type,
         api_number: p.api_number,
@@ -632,27 +582,44 @@ export async function POST(
         water_bbl: p.water_bbl,
       }));
 
-      // Unique constraint: (run_id, entity_type, coalesce(api_number,''), coalesce(lease_number,''), production_month)
-      const { error: prodInsertError } = await supabase
+      const { error: prodErr } = await supabase
         .from("trrc_production_monthly")
         .upsert(prodRows, {
           onConflict: "run_id,entity_type,api_number,lease_number,production_month",
           ignoreDuplicates: true,
         });
-
-      if (prodInsertError) {
-        console.error("[execute] production upsert error:", prodInsertError);
+      if (prodErr) {
+        console.error("[trrc-agent] production upsert error:", prodErr);
       }
     }
 
-    // Mark run as generating
+    // Mark as generating
     await supabase
       .from("trrc_due_diligence_runs")
-      .update({ status: "generating", progress_percent: 95, updated_at: new Date().toISOString() })
+      .update({ status: "generating", progress_percent: 93, updated_at: new Date().toISOString() })
       .eq("id", runId);
 
-    // 13. Build manifest
-    const runForManifest: TrrcDueDiligenceRun = {
+    // 10. Build run object for builders
+    const resolvedEntitiesForRun: ResolvedEntity[] = [
+      ...entities,
+      ...agentCtx.api_numbers
+        .filter((api) => !entities.find((e) => e.canonical_identifier === api))
+        .map((api) => {
+          const norm = buildNormalizedApiFromRaw(api);
+          return {
+            id: `agent_${api}`,
+            entity_type: "wellbore" as ResolvedEntity["entity_type"],
+            canonical_identifier: api,
+            display_name: norm ? `API ${norm.formatted}` : `API ${api}`,
+            attributes: { discovered_by: "trrc_agent" },
+            confidence: 0.9,
+            resolution_method: "agent_discovery",
+            is_user_selected: false,
+          };
+        }),
+    ];
+
+    const runForBuilders: TrrcDueDiligenceRun = {
       id: runId,
       user_id: user.id,
       original_input: runRaw["original_input"] as string,
@@ -664,72 +631,158 @@ export async function POST(
       completed_at: new Date().toISOString(),
       progress_percent: 100,
       result_summary: null,
-      error_summary: orchestratorResult.error,
-      resolved_primary_api: ctx.api_numbers[0]?.api10 ?? null,
-      resolved_district: ctx.district,
-      resolved_lease_number: ctx.lease_number,
-      resolved_gas_id: ctx.gas_id,
-      resolved_operator_number: ctx.operator_number,
+      error_summary: null,
+      resolved_primary_api: primaryApi,
+      resolved_district: agentCtx.district,
+      resolved_lease_number: agentCtx.lease_number,
+      resolved_gas_id: null,
+      resolved_operator_number: agentCtx.operator_number,
       report_storage_path: null,
       archive_storage_path: null,
       manifest_storage_path: null,
       created_at: runRaw["created_at"] as string,
       updated_at: new Date().toISOString(),
-      entities,
+      entities: resolvedEntitiesForRun,
     };
 
+    // Build a minimal ResolvedSearchContext for the manifest builder
+    const normalizedApis: NormalizedApi[] = agentCtx.api_numbers
+      .map(buildNormalizedApiFromRaw)
+      .filter((a): a is NormalizedApi => a !== null);
+
+    const searchCtx: ResolvedSearchContext = {
+      run_id: runId,
+      input_type: runRaw["selected_input_type"] as ResolvedSearchContext["input_type"],
+      raw_input: runRaw["original_input"] as string,
+      normalized_input: runRaw["normalized_input"] as string,
+      api_numbers: normalizedApis,
+      district: agentCtx.district,
+      lease_number: agentCtx.lease_number,
+      gas_id: null,
+      operator_name: agentCtx.operator_name,
+      operator_number: agentCtx.operator_number,
+      county: agentCtx.county,
+      lease_name: null,
+      legal_description: null,
+      search_historical: false,
+      include_offset_wells: false,
+      production_months: 36,
+    };
+
+    // Build orchestrator stub for manifest builder
+    const orchestratorStub = buildOrchestratorStub(agentCtx, production, findings, runId);
+
+    // 11. Build manifest
     const manifest = buildManifest(
-      runForManifest,
-      ctx,
-      orchestratorResult,
+      runForBuilders,
+      searchCtx,
+      orchestratorStub,
       findings,
       scorecard,
       process.env["npm_package_version"] ?? "1.0.0",
     );
 
-    // 14. Upload manifest to Supabase Storage (use service role to bypass RLS on storage)
-    let manifest_storage_path: string | null = null;
+    // 12. Build PDF and ZIP
     const adminClient = createServiceRoleClient();
+    let report_storage_path: string | null = null;
+    let archive_storage_path: string | null = null;
+    let manifest_storage_path: string | null = null;
+
+    const coverage = orchestratorStub.coverage;
 
     if (adminClient) {
-      const storagePath = `trrc-due-diligence/${user.id}/${runId}/manifest.json`;
-      const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2));
+      const baseStoragePath = `trrc-due-diligence/${user.id}/${runId}`;
 
-      const { error: uploadError } = await adminClient.storage
+      // Upload manifest
+      const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2));
+      const { error: manifestErr } = await adminClient.storage
         .from("trrc-due-diligence")
-        .upload(storagePath, manifestBytes, {
+        .upload(`${baseStoragePath}/manifest.json`, manifestBytes, {
           contentType: "application/json",
           upsert: true,
         });
-
-      if (uploadError) {
-        console.error("[execute] manifest upload error:", uploadError);
+      if (manifestErr) {
+        console.error("[trrc-agent] manifest upload error:", manifestErr);
       } else {
-        manifest_storage_path = storagePath;
+        manifest_storage_path = `${baseStoragePath}/manifest.json`;
+      }
+
+      // Build and upload PDF
+      try {
+        const pdfBuffer = await buildTrrcPdfReport(
+          runForBuilders,
+          manifest,
+          findings,
+          scorecard,
+          production,
+          coverage,
+        );
+
+        const { error: pdfErr } = await adminClient.storage
+          .from("trrc-due-diligence")
+          .upload(`${baseStoragePath}/report.pdf`, pdfBuffer, {
+            contentType: "application/pdf",
+            upsert: true,
+          });
+        if (pdfErr) {
+          console.error("[trrc-agent] PDF upload error:", pdfErr);
+        } else {
+          report_storage_path = `${baseStoragePath}/report.pdf`;
+
+          // Build and upload ZIP
+          try {
+            const zipBuffer = await buildTrrcZipArchive(
+              runForBuilders,
+              manifest,
+              pdfBuffer,
+              production,
+              findings,
+              coverage,
+            );
+
+            const { error: zipErr } = await adminClient.storage
+              .from("trrc-due-diligence")
+              .upload(`${baseStoragePath}/archive.zip`, zipBuffer, {
+                contentType: "application/zip",
+                upsert: true,
+              });
+            if (zipErr) {
+              console.error("[trrc-agent] ZIP upload error:", zipErr);
+            } else {
+              archive_storage_path = `${baseStoragePath}/archive.zip`;
+            }
+          } catch (zipBuildErr) {
+            console.error("[trrc-agent] ZIP build error:", zipBuildErr);
+          }
+        }
+      } catch (pdfBuildErr) {
+        console.error("[trrc-agent] PDF build error:", pdfBuildErr);
       }
     }
 
-    // 15. Update run to complete
+    // 13. Update run to complete
     const { error: updateError } = await supabase
       .from("trrc_due_diligence_runs")
       .update({
         status: "complete",
         progress_percent: 100,
         completed_at: new Date().toISOString(),
-        resolved_primary_api: ctx.api_numbers[0]?.api10 ?? null,
-        resolved_district: ctx.district,
-        resolved_lease_number: ctx.lease_number,
-        resolved_gas_id: ctx.gas_id,
-        resolved_operator_number: ctx.operator_number,
+        resolved_primary_api: primaryApi,
+        resolved_district: agentCtx.district,
+        resolved_lease_number: agentCtx.lease_number,
+        resolved_gas_id: null,
+        resolved_operator_number: agentCtx.operator_number,
         scorecard_json: scorecard as unknown as Record<string, unknown>,
-        coverage_json: orchestratorResult.coverage as unknown as Record<string, unknown>[],
+        coverage_json: coverage as unknown as Record<string, unknown>[],
         manifest_storage_path,
+        report_storage_path,
+        archive_storage_path,
         updated_at: new Date().toISOString(),
       })
       .eq("id", runId);
 
     if (updateError) {
-      console.error("[execute] run update error:", updateError);
+      console.error("[trrc-agent] run update error:", updateError);
       return NextResponse.json(
         { ok: false, error: "Pipeline completed but failed to update run status." },
         { status: 500 },
@@ -742,7 +795,7 @@ export async function POST(
     });
   } catch (err) {
     // Error recovery — never leave run stuck in "retrieving"
-    console.error("[execute] unhandled pipeline error:", err);
+    console.error("[trrc-agent] unhandled pipeline error:", err);
 
     try {
       await supabase
@@ -755,7 +808,7 @@ export async function POST(
         })
         .eq("id", runId);
     } catch (updateErr) {
-      console.error("[execute] failed to update run status to failed:", updateErr);
+      console.error("[trrc-agent] failed to update run status to failed:", updateErr);
     }
 
     return NextResponse.json({ ok: false, error: "Pipeline failed." }, { status: 500 });
