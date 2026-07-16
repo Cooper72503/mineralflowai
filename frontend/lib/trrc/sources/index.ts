@@ -23,6 +23,8 @@ export {
   P4GathererSource,
   WellStatusSource,
 } from "./manual-fallback-sources";
+export { ImagedRecordsCmplSource } from "./imaged-records-source";
+export { GisSource } from "./gis-source";
 
 import type { TrrcSourceAdapter } from "../types";
 import { ProductionByLeaseSource, ProductionByApiSource } from "./production-source";
@@ -43,6 +45,8 @@ import {
   P4GathererSource,
   WellStatusSource,
 } from "./manual-fallback-sources";
+import { ImagedRecordsCmplSource } from "./imaged-records-source";
+import { GisSource } from "./gis-source";
 
 /**
  * Returns all registered TRRC source adapters.
@@ -55,9 +59,10 @@ import {
  */
 export function getAllAdapters(): TrrcSourceAdapter[] {
   return [
-    // Identity
+    // Identity / GIS
     WellboreSource,
     LeaseInventorySource,
+    GisSource,
 
     // Production
     ProductionByLeaseSource,
@@ -66,6 +71,7 @@ export function getAllAdapters(): TrrcSourceAdapter[] {
 
     // Completion / drilling
     CompletionSource,
+    ImagedRecordsCmplSource,
 
     // Compliance / regulatory
     ComplianceSource,

@@ -391,6 +391,29 @@ export const SOURCE_REGISTRY: Record<string, TrrcSourceDefinition> = {
     is_enabled: resolveEnabled("imaged_records_query"),
   },
 
+  imaged_records_cmpl: {
+    id: "imaged_records_cmpl",
+    name: "TRRC CMPL Completion Packets (Post-2009)",
+    description:
+      "Automated: W-2/G-1 completion packets filed online November 2009 onward. " +
+      "Queries the TRRC CMPL portal (webapps.rrc.texas.gov/CMPL) for completion records. " +
+      "Also surfaces Neubus manual-link records for pre-2009 historical coverage.",
+    official_base_url: "https://webapps.rrc.texas.gov/CMPL",
+    supported_inputs: ["api_number"],
+    expected_record_types: ["completion"],
+    retrieval_strategy: "html_scrape",
+    rate_limit_ms: 2000,
+    max_retries: 2,
+    access_limitations:
+      "Covers CMPL filings from Nov 2009 onward. Pre-2009 records require Neubus browser access. " +
+      "Requires JSESSIONID session cookie and Struts anti-CSRF token obtained from the CMPL home page.",
+    date_range_notes:
+      "Completion packets filed online from November 2, 2009 to present. " +
+      "Earlier completions are only available via the Neubus imaged records system (manual fallback).",
+    parser_version: "1.0",
+    is_enabled: resolveEnabled("imaged_records_cmpl"),
+  },
+
   drilling_permit_query: {
     id: "drilling_permit_query",
     name: "EWA Drilling Permit Query (Manual Fallback)",
@@ -540,28 +563,29 @@ export const SOURCE_REGISTRY: Record<string, TrrcSourceDefinition> = {
 
   gis_wellbore: {
     id: "gis_wellbore",
-    name: "TRRC GIS Public Well Locations",
+    name: "TRRC GIS Well Locations",
     description:
-      "TRRC GIS public wellbore location layer. Returns surface coordinates (latitude/longitude) " +
-      "for wellbores, enabling spatial verification of well locations against lease plats and " +
-      "survey descriptions. Also useful for identifying offset wells within a radius and " +
-      "cross-checking county assignments against stated legal descriptions. " +
-      "The legacy publicgisweb.rrc.texas.gov ArcGIS endpoint was decommissioned during " +
-      "TRRC's GIS Modernization Upgrades — current endpoint is the TRRC GIS public data service.",
-    official_base_url: "https://gis.rrc.texas.gov",
-    supported_inputs: ["api_number", "rrc_lease_number", "legal_description"],
-    expected_record_types: ["gis", "identity"],
+      "ArcGIS public well location data — coordinates, status, operator. " +
+      "Uses the Statewide Surface Wells ArcGIS REST service (Aug 2019 snapshot). " +
+      "Supports API-number coordinate lookup, legal-description → OTLS abstract polygon → API " +
+      "resolution, and offset well search by bounding box. No authentication required.",
+    official_base_url:
+      "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/Statewide_Surface_Wells_Aug2019/FeatureServer/0",
+    supported_inputs: [
+      "api_number",
+      "legal_description",
+      "rrc_lease_number",
+      "operator_name",
+      "lease_name",
+    ],
+    expected_record_types: ["gis"],
     retrieval_strategy: "api",
-    rate_limit_ms: 1000,
-    max_retries: 3,
-    access_limitations:
-      "Public REST API; no authentication required. Rate limiting applies — do not exceed 60 RPM. " +
-      "Legacy ArcGIS endpoint (publicgisweb.rrc.texas.gov) is DECOMMISSIONED; do not use.",
+    rate_limit_ms: 500,
+    max_retries: 2,
+    access_limitations: "Public ArcGIS REST API — no authentication required",
     date_range_notes:
-      "GIS coordinates are updated periodically from the TRRC master database. " +
-      "Coordinate accuracy varies: horizontal well surface locations are generally accurate; " +
-      "vintage vertical wells may have county-centroid coordinates only.",
-    parser_version: "1.0.0",
+      "Well location data as of August 2019 — coordinates may not reflect recent spuds",
+    parser_version: "1.0",
     is_enabled: resolveEnabled("gis_wellbore"),
   },
 };
