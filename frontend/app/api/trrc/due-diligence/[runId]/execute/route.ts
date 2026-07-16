@@ -24,6 +24,8 @@ const TERMINAL_OR_RUNNING = [
   "cancelled",
   "analyzing",
   "generating",
+  "retrieving",
+  "awaiting_selection",
 ];
 
 // ─── POST ──────────────────────────────────────────────────────────────────────
@@ -71,11 +73,11 @@ export async function POST(
     );
   }
 
-  if (runStatus !== "retrieving" && runStatus !== "pending") {
+  if (runStatus !== "pending") {
     return NextResponse.json(
       {
         ok: false,
-        error: `Run is in status "${runStatus}" — only "retrieving" or "pending" runs can be executed.`,
+        error: `Run is in status "${runStatus}" — only "pending" runs can be executed.`,
       },
       { status: 409 },
     );
@@ -100,8 +102,21 @@ export async function POST(
   // Don't await — fire and forget so we return immediately
   supabaseAdmin.functions
     .invoke("trrc-dd-execute", { body: { run_id: runId } })
+    .then(({ error }: { error: { message: string } | null }) => {
+      if (error) {
+        console.error("[execute] edge function invoke error:", error);
+        supabaseAdmin
+          .from("trrc_due_diligence_runs")
+          .update({
+            status: "failed",
+            error_summary: `Edge Function invoke failed: ${error.message}`,
+          })
+          .eq("id", runId)
+          .then(() => {});
+      }
+    })
     .catch((err: unknown) =>
-      console.error("[execute] edge function invoke error:", err),
+      console.error("[execute] invoke catch:", err),
     );
 
   return NextResponse.json({ ok: true, status: "retrieving" });

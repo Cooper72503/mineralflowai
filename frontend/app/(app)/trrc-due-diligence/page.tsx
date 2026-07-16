@@ -321,9 +321,13 @@ export default function TrrcDueDiligencePage() {
   }, [form]);
 
   const handleCancel = useCallback(async () => {
-    if (!runId) return;
-    await fetch(`/api/trrc/due-diligence/${runId}/cancel`, { method: "POST" });
+    if (runId) {
+      await fetch(`/api/trrc/due-diligence/${runId}/cancel`, { method: "POST" }).catch(() => {});
+    }
+    setRunId(null);
+    setRun(null);
     setPhase("form");
+    setError(null);
   }, [runId]);
 
   const handleResolve = useCallback(async (entityId: string) => {
@@ -399,6 +403,23 @@ export default function TrrcDueDiligencePage() {
             Query every available Texas Railroad Commission public record for any well, lease, or operator.
           </p>
         </div>
+
+        {/* Start Over — always visible when not on form */}
+        {phase !== "form" && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.75rem" }}>
+            <button onClick={handleCancel} style={{
+              background: "transparent",
+              border: `1px solid ${COLORS.border}`,
+              borderRadius: 6,
+              color: COLORS.textMuted,
+              fontSize: "0.78rem",
+              padding: "0.35rem 0.85rem",
+              cursor: "pointer",
+            }}>
+              ← Start Over
+            </button>
+          </div>
+        )}
 
         {/* Error banner */}
         {phase === "error" && error && (
