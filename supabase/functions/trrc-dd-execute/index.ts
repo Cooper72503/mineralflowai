@@ -1519,7 +1519,7 @@ async function runAgent(runId: string): Promise<void> {
   try {
     while (toolCallCount < MAX_TOOL_CALLS) {
       const response = await anthropic.messages.create({
-        model: "claude-fable-5",
+        model: "claude-opus-4-5",
         max_tokens: 16000,
         thinking: { type: "adaptive" },
         system: SYSTEM_PROMPT,
