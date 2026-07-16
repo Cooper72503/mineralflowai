@@ -293,10 +293,10 @@ export default function TrrcDueDiligencePage() {
     setError(null);
     try {
       const payload = {
-        query: form.query.trim(),
+        input: form.query.trim(),
         county: form.county.trim() || undefined,
         district: form.district || undefined,
-        input_type: form.inputTypeOverride === "auto" ? undefined : form.inputTypeOverride,
+        input_type_override: form.inputTypeOverride === "auto" ? undefined : form.inputTypeOverride,
         search_historical: form.searchHistorical,
         include_offset_wells: form.includeOffsetWells,
         production_months: form.productionMonths,
