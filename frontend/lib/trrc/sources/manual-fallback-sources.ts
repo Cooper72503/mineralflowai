@@ -1,21 +1,19 @@
 /**
  * TRRC Manual Fallback Source Adapters
  *
- * These sources require browser sessions, have CAPTCHAs, or are otherwise not automatable.
- * Each adapter:
- *   - Returns status: "manual_required" always
- *   - Generates a pre-filled official TRRC URL for the analyst
- *   - Does NOT claim success
- *   - Records a detailed note explaining exactly what to search for manually
+ * Most adapters in this file have been upgraded to real automated implementations.
+ * Only adapters that are genuinely CAPTCHA-gated or require browser sessions remain manual.
  *
- * Adapters in this file:
+ * Automated adapters (html_scrape, requires_browser: false):
+ *   - plugging_records        → fetchTrrcPluggingByApi / fetchTrrcPluggingByLease
+ *   - orphan_well_query       → fetchTrrcOrphanWellByApi
+ *   - severance_query         → fetchTrrcSeveranceByApi / fetchTrrcSeveranceByOperator
+ *   - p4_gatherer_query       → fetchTrrcP4ByApi / fetchTrrcP4ByLease
+ *   - well_status_query       → fetchTrrcWellStatus / fetchTrrcWellStatusByLease
+ *
+ * Still manual (CAPTCHA / browser required):
  *   - imaged_records_query    (CAPTCHA-gated, OGIMS system)
  *   - drilling_permit_query   (browser rendering required for attachments)
- *   - plugging_records        (browser rendering required for plugging detail)
- *   - orphan_well_query       (separate TRRC system, no machine-readable API)
- *   - severance_query         (browser session required)
- *   - p4_gatherer_query       (dynamic JS rendering, unreliable headless access)
- *   - well_status_query       (browser-rendered JS for full status output)
  */
 
 import type {
@@ -28,6 +26,12 @@ import type {
   SourceRecordReference,
   RetrievedFile,
 } from "../types";
+
+import { fetchTrrcPluggingByApi, fetchTrrcPluggingByLease }   from "../../wells/trrc-plugging";
+import { fetchTrrcOrphanWellByApi }                           from "../../wells/trrc-orphan-wells";
+import { fetchTrrcSeveranceByApi, fetchTrrcSeveranceByOperator } from "../../wells/trrc-severance";
+import { fetchTrrcP4ByApi, fetchTrrcP4ByLease }               from "../../wells/trrc-p4";
+import { fetchTrrcWellStatus, fetchTrrcWellStatusByLease }    from "../../wells/trrc-well-status";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -216,68 +220,83 @@ const PLUGGING_URL = "https://webapps2.rrc.texas.gov/EWA/pluggingQueryAction.do"
 
 export const PluggingRecordsSource: TrrcSourceAdapter = {
   id: "plugging_records",
-  name: "EWA Plugging Record Query (Manual Fallback)",
+  name: "EWA Plugging Record Query",
   description:
     "TRRC EWA plugging record query. Plugged wells cannot return to production without TRRC re-entry permit. " +
-    "Plugging detail page requires browser session for full record access.",
+    "Returns plugging method, depth, and status for each plugged well.",
   base_url: "https://webapps2.rrc.texas.gov/EWA",
-  supported_inputs: ["api_number", "rrc_lease_number", "operator_name"],
-  retrieval_strategy: "manual",
+  supported_inputs: ["api_number", "rrc_lease_number"],
+  retrieval_strategy: "html_scrape",
   rate_limit_ms: 2000,
   max_retries: 2,
-  parser_version: "1.0.0",
+  parser_version: "2.0.0",
   is_enabled: process.env["TRRC_SOURCE_PLUGGING_RECORDS_ENABLED"] !== "false",
-  requires_browser: true,
+  requires_browser: false,
 
   async search(ctx: ResolvedSearchContext, _opts: RetrievalOptions): Promise<SourceSearchResult> {
-    const primaryApi = ctx.api_numbers[0];
-    // Pre-fill URL with API number if available
-    let actionUrl = PLUGGING_URL;
-    if (primaryApi) {
-      const params = new URLSearchParams({
-        "methodToCall": "search",
-        "searchArgs.apiNoPrefixArg": primaryApi.county_code,
-        "searchArgs.apiNoSuffixArg": primaryApi.well_code,
-      });
-      actionUrl = `${PLUGGING_URL}?${params.toString()}`;
-    } else if (ctx.lease_number && ctx.district) {
-      const params = new URLSearchParams({
-        "methodToCall": "search",
-        "searchArgs.leaseNumberArg": ctx.lease_number,
-        "searchArgs.districtCodeArg": ctx.district,
-      });
-      actionUrl = `${PLUGGING_URL}?${params.toString()}`;
+    try {
+      const primaryApi = ctx.api_numbers[0];
+      let records;
+
+      if (primaryApi) {
+        records = await fetchTrrcPluggingByApi(primaryApi.api10);
+      } else if (ctx.lease_number && ctx.district) {
+        records = await fetchTrrcPluggingByLease(ctx.district, ctx.lease_number);
+      } else {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      if (records.length === 0) {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      const refs: SourceRecordRef[] = records.map((r, i) => ({
+        source_id:      this.id,
+        document_id:    `plugging_${r.api8}_${i}`,
+        title:          `Plugging Record — API ${r.api8}${r.status ? ` (${r.status})` : ""}`,
+        category:       "plugging_inactive" as const,
+        form_type:      "plugging_record",
+        url:            `${PLUGGING_URL}?methodToCall=search&searchArgs.apiNoPrefixArg=${r.api8.slice(0, 3)}&searchArgs.apiNoSuffixArg=${r.api8.slice(3, 8)}`,
+        filing_date:    r.plug_end_date ?? r.plug_start_date,
+        is_downloadable: false,
+      }));
+
+      return {
+        source_id:         this.id,
+        status:            "success",
+        records:           refs,
+        result_count:      records.length,
+        data:              { plugging_records: records },
+        error:             null,
+        manual_action_url: null,
+      };
+    } catch (err) {
+      return {
+        source_id:         this.id,
+        status:            "failed_transient",
+        records:           [],
+        result_count:      0,
+        data:              null,
+        error:             err instanceof Error ? err.message : "Unknown error",
+        manual_action_url: null,
+      };
     }
-
-    const noteLines = [
-      "MANUAL ACTION REQUIRED — TRRC Plugging Record detail requires browser session.",
-      "",
-      "What to search for:",
-      primaryApi
-        ? `  API County Prefix: ${primaryApi.county_code}  |  API Well Suffix: ${primaryApi.well_code}`
-        : ctx.lease_number
-          ? `  Lease Number: ${ctx.lease_number}${ctx.district ? `  |  District: ${ctx.district}` : ""}`
-          : "  Use API number or lease number",
-      "",
-      "What to retrieve:",
-      "  • Plug date and plugging contractor",
-      "  • Cement intervals (top, bottom of cement for each plug)",
-      "  • TRRC regulatory sign-off / W-14 filing date",
-      "  • Any open plugging orders or compliance issues",
-      "",
-      "CRITICAL: A plugged well (W-14 filed) appearing in an asset package is a red flag.",
-      "Plugged wells cannot be returned to production without TRRC re-entry permit approval.",
-      "Well status code 'PA' in wellbore_query indicates plugging — this source provides detail.",
-    ];
-
-    return buildManualResult(
-      this.id,
-      actionUrl,
-      "Plugging Records — Manual Retrieval Required",
-      "W14_plugging_report",
-      "plugging_inactive",
-      noteLines.join("\n"),
-    );
   },
 
   fetchRecord: noopFetchRecord,
@@ -286,60 +305,83 @@ export const PluggingRecordsSource: TrrcSourceAdapter = {
 
 // ─── 4. Orphan Well Query ─────────────────────────────────────────────────────
 
-const ORPHAN_URL = "https://www.rrc.texas.gov/oil-gas/publications-and-data/data-sets-available-for-download/";
+const ORPHAN_URL = "https://webapps2.rrc.texas.gov/EWA/orphanWellQueryAction.do";
 
 export const OrphanWellSource: TrrcSourceAdapter = {
   id: "orphan_well_query",
-  name: "TRRC Orphan Well Program Query (Manual Fallback)",
+  name: "EWA Orphan Well Program Query",
   description:
-    "TRRC Orphan Well Program database — wells where responsible operator is defunct or insolvent. " +
-    "Orphan wells in the same area as subject assets represent environmental and reputational risk. " +
-    "No machine-readable API; manual review of downloadable dataset required.",
-  base_url: "https://www.rrc.texas.gov/oil-and-gas/environmental-cleanup-programs/oil-field-cleanup-program/orphan-wells/",
-  supported_inputs: ["operator_name", "api_number"],
-  retrieval_strategy: "manual",
+    "TRRC EWA Orphan Well Program query — wells where responsible operator is defunct or insolvent. " +
+    "An orphan well in the subject asset's API range is a critical liability finding.",
+  base_url: "https://webapps2.rrc.texas.gov/EWA",
+  supported_inputs: ["api_number"],
+  retrieval_strategy: "html_scrape",
   rate_limit_ms: 3000,
   max_retries: 1,
-  parser_version: "1.0.0",
+  parser_version: "2.0.0",
   is_enabled: process.env["TRRC_SOURCE_ORPHAN_WELL_QUERY_ENABLED"] !== "false",
-  requires_browser: true,
+  requires_browser: false,
 
   async search(ctx: ResolvedSearchContext, _opts: RetrievalOptions): Promise<SourceSearchResult> {
-    const primaryApi = ctx.api_numbers[0];
-    const noteLines = [
-      "MANUAL ACTION REQUIRED — TRRC Orphan Well dataset requires manual download and review.",
-      "",
-      "What to check:",
-      primaryApi
-        ? `  Search for API: ${primaryApi.api10} in the orphan well dataset`
-        : ctx.operator_name
-          ? `  Search for operator: ${ctx.operator_name}`
-          : "  Download and search the full orphan well dataset",
-      ctx.county
-        ? `  County context: ${ctx.county} County, TX`
-        : "",
-      "",
-      "Download orphan well list from:",
-      "  https://www.rrc.texas.gov/oil-gas/publications-and-data/data-sets-available-for-download/",
-      "  (Look for 'Orphan Well' or 'Oil Field Cleanup Program' dataset)",
-      "",
-      "What this tells you:",
-      "  • Whether nearby orphan wells create environmental liability exposure for the buyer",
-      "  • Whether the selling operator has abandoned wells in the same county",
-      "  • Orphan well plugging is funded by the TRRC OFC bond pool — not the buyer",
-      "    but reputational risk and community opposition can complicate operations.",
-      "",
-      "Note: list is approximately 30 days behind current TRRC database.",
-    ].filter(Boolean);
+    try {
+      const primaryApi = ctx.api_numbers[0];
+      if (!primaryApi) {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
 
-    return buildManualResult(
-      this.id,
-      ORPHAN_URL,
-      "Orphan Well Program — Manual Dataset Review Required",
-      "orphan_well_record",
-      "plugging_inactive",
-      noteLines.join("\n"),
-    );
+      const records = await fetchTrrcOrphanWellByApi(primaryApi.api10);
+
+      if (records.length === 0) {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      const refs: SourceRecordRef[] = records.map((r, i) => ({
+        source_id:      this.id,
+        document_id:    `orphan_${r.api8}_${i}`,
+        title:          `Orphan Well — API ${r.api8}${r.last_operator_name ? ` (last op: ${r.last_operator_name})` : ""}`,
+        category:       "plugging_inactive" as const,
+        form_type:      "orphan_well_record",
+        url:            `${ORPHAN_URL}?methodToCall=search&searchArgs.apiNoPrefixArg=${r.api8.slice(0, 3)}&searchArgs.apiNoSuffixArg=${r.api8.slice(3, 8)}`,
+        filing_date:    r.date_added,
+        is_downloadable: false,
+      }));
+
+      return {
+        source_id:         this.id,
+        status:            "success",
+        records:           refs,
+        result_count:      records.length,
+        data:              { orphan_well_records: records },
+        error:             null,
+        manual_action_url: null,
+      };
+    } catch (err) {
+      return {
+        source_id:         this.id,
+        status:            "failed_transient",
+        records:           [],
+        result_count:      0,
+        data:              null,
+        error:             err instanceof Error ? err.message : "Unknown error",
+        manual_action_url: null,
+      };
+    }
   },
 
   fetchRecord: noopFetchRecord,
@@ -348,59 +390,87 @@ export const OrphanWellSource: TrrcSourceAdapter = {
 
 // ─── 5. Severance Query ───────────────────────────────────────────────────────
 
-const SEVERANCE_URL = "https://www.rrc.texas.gov/oil-gas/publications-and-data/data-sets-available-for-download/";
+const SEVERANCE_URL = "https://webapps2.rrc.texas.gov/EWA/severanceQueryAction.do";
 
 export const SeveranceSource: TrrcSourceAdapter = {
   id: "severance_query",
-  name: "TRRC Severance / Seal Order Query (Manual Fallback)",
+  name: "EWA Severance / Seal Order Query",
   description:
-    "TRRC severance and seal order database. A severance order prohibits production pending compliance. " +
-    "A seal order physically locks the wellhead. Either order is a critical finding. " +
-    "Requires browser session; not reliably accessible via headless scraping.",
+    "TRRC EWA severance and seal order query. A severance order prohibits production pending compliance. " +
+    "A seal order physically locks the wellhead. Either order is a critical diligence finding.",
   base_url: "https://webapps2.rrc.texas.gov/EWA",
   supported_inputs: ["api_number", "rrc_lease_number", "operator_name"],
-  retrieval_strategy: "manual",
+  retrieval_strategy: "html_scrape",
   rate_limit_ms: 3000,
   max_retries: 1,
-  parser_version: "1.0.0",
+  parser_version: "2.0.0",
   is_enabled: process.env["TRRC_SOURCE_SEVERANCE_QUERY_ENABLED"] !== "false",
-  requires_browser: true,
+  requires_browser: false,
 
   async search(ctx: ResolvedSearchContext, _opts: RetrievalOptions): Promise<SourceSearchResult> {
-    const primaryApi = ctx.api_numbers[0];
-    const noteLines = [
-      "MANUAL ACTION REQUIRED — TRRC Severance/Seal Order query requires browser session.",
-      "",
-      "What to search for:",
-      primaryApi
-        ? `  API Number: ${primaryApi.formatted}`
-        : ctx.lease_number
-          ? `  Lease Number: ${ctx.lease_number}${ctx.district ? ` / District: ${ctx.district}` : ""}`
-          : ctx.operator_name
-            ? `  Operator: ${ctx.operator_name}`
-            : "  Use available identifiers",
-      "",
-      "Why this matters:",
-      "  SEVERANCE ORDER — prohibits production from a well until TRRC directive is complied with.",
-      "  SEAL ORDER — TRRC physically locks the wellhead; no production is physically possible.",
-      "  Either order must be resolved before acquisition closes.",
-      "  Active orders block production and prevent permit issuance.",
-      "",
-      "Data coverage: Online orders from 2015 onward.",
-      "Downloadable severance data available at the TRRC publications page.",
-      "",
-      "CRITICAL FINDING if discovered: buyer must obtain written confirmation of order resolution",
-      "from TRRC before proceeding with acquisition.",
-    ];
+    try {
+      const primaryApi = ctx.api_numbers[0];
+      let records;
 
-    return buildManualResult(
-      this.id,
-      SEVERANCE_URL,
-      "Severance / Seal Orders — Manual Retrieval Required",
-      "severance_order",
-      "compliance",
-      noteLines.join("\n"),
-    );
+      if (primaryApi) {
+        records = await fetchTrrcSeveranceByApi(primaryApi.api10);
+      } else if (ctx.operator_number) {
+        records = await fetchTrrcSeveranceByOperator(ctx.operator_number);
+      } else {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      if (records.length === 0) {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      const refs: SourceRecordRef[] = records.map((r, i) => ({
+        source_id:      this.id,
+        document_id:    `severance_${r.api8}_${i}`,
+        title:          `Severance Order — API ${r.api8} (${r.status})${r.severance_reason ? `: ${r.severance_reason}` : ""}`,
+        category:       "compliance" as const,
+        form_type:      "severance_seal_order",
+        url:            `${SEVERANCE_URL}?methodToCall=search&searchArgs.apiNoPrefixArg=${r.api8.slice(0, 3)}&searchArgs.apiNoSuffixArg=${r.api8.slice(3, 8)}`,
+        filing_date:    r.severance_date,
+        is_downloadable: false,
+      }));
+
+      return {
+        source_id:         this.id,
+        status:            "success",
+        records:           refs,
+        result_count:      records.length,
+        data:              { severance_records: records },
+        error:             null,
+        manual_action_url: null,
+      };
+    } catch (err) {
+      return {
+        source_id:         this.id,
+        status:            "failed_transient",
+        records:           [],
+        result_count:      0,
+        data:              null,
+        error:             err instanceof Error ? err.message : "Unknown error",
+        manual_action_url: null,
+      };
+    }
   },
 
   fetchRecord: noopFetchRecord,
@@ -413,60 +483,83 @@ const P4_URL = "https://webapps2.rrc.texas.gov/EWA/p4QueryAction.do";
 
 export const P4GathererSource: TrrcSourceAdapter = {
   id: "p4_gatherer_query",
-  name: "EWA P-4 Gatherer/Purchaser Query (Manual Fallback)",
+  name: "EWA P-4 Gatherer/Purchaser Query",
   description:
-    "TRRC EWA P-4 purchaser/transporter query. Verifies whether the gathering company is a " +
-    "registered TRRC purchaser. Dynamic JS rendering prevents reliable headless scraping.",
+    "TRRC EWA P-4 purchaser/transporter authority query. Verifies which gathering companies are " +
+    "authorized to purchase production from a well and whether their P-4 authority is current.",
   base_url: "https://webapps2.rrc.texas.gov/EWA",
-  supported_inputs: ["operator_name"],
-  retrieval_strategy: "manual",
+  supported_inputs: ["api_number", "rrc_lease_number"],
+  retrieval_strategy: "html_scrape",
   rate_limit_ms: 3000,
   max_retries: 1,
-  parser_version: "1.0.0",
+  parser_version: "2.0.0",
   is_enabled: process.env["TRRC_SOURCE_P4_GATHERER_QUERY_ENABLED"] !== "false",
-  requires_browser: true,
+  requires_browser: false,
 
   async search(ctx: ResolvedSearchContext, _opts: RetrievalOptions): Promise<SourceSearchResult> {
-    // Build pre-filled URL with operator name if available
-    let actionUrl = P4_URL;
-    if (ctx.operator_name) {
-      const params = new URLSearchParams({
-        "methodToCall": "search",
-        "searchArgs.purchaserNameArg": ctx.operator_name,
-      });
-      actionUrl = `${P4_URL}?${params.toString()}`;
+    try {
+      const primaryApi = ctx.api_numbers[0];
+      let records;
+
+      if (primaryApi) {
+        records = await fetchTrrcP4ByApi(primaryApi.api10);
+      } else if (ctx.lease_number && ctx.district) {
+        records = await fetchTrrcP4ByLease(ctx.district, ctx.lease_number);
+      } else {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      if (records.length === 0) {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      const refs: SourceRecordRef[] = records.map((r, i) => ({
+        source_id:      this.id,
+        document_id:    `p4_${r.api8}_${i}`,
+        title:          `P-4 Authority — API ${r.api8}${r.gatherer_purchaser_name ? ` / ${r.gatherer_purchaser_name}` : ""}${r.termination_date ? ` (terminated ${r.termination_date})` : " (current)"}`,
+        category:       "p4_gatherer" as const,
+        form_type:      "P4_transportation_authority",
+        url:            `${P4_URL}?methodToCall=search&searchArgs.apiNoPrefixArg=${r.api8.slice(0, 3)}&searchArgs.apiNoSuffixArg=${r.api8.slice(3, 8)}&searchArgs.leaseTypeArg=O`,
+        filing_date:    r.effective_date,
+        is_downloadable: false,
+      }));
+
+      return {
+        source_id:         this.id,
+        status:            "success",
+        records:           refs,
+        result_count:      records.length,
+        data:              { p4_records: records },
+        error:             null,
+        manual_action_url: null,
+      };
+    } catch (err) {
+      return {
+        source_id:         this.id,
+        status:            "failed_transient",
+        records:           [],
+        result_count:      0,
+        data:              null,
+        error:             err instanceof Error ? err.message : "Unknown error",
+        manual_action_url: null,
+      };
     }
-
-    const noteLines = [
-      "MANUAL ACTION REQUIRED — TRRC P-4 Gatherer/Purchaser query requires browser session.",
-      "Dynamic JavaScript rendering prevents reliable automated access.",
-      "",
-      "What to search for:",
-      ctx.operator_name
-        ? `  Gatherer/Purchaser Name: ${ctx.operator_name}`
-        : "  Name of the gathering company or purchaser listed on the run statement",
-      "",
-      "What to verify:",
-      "  • P-4 permit status (Current | Expired | Cancelled)",
-      "  • Authorization date and expiration date",
-      "  • Types of commodities authorized (oil, gas, condensate)",
-      "",
-      "Why this matters:",
-      "  A lapsed P-4 means the gatherer cannot legally purchase production in Texas.",
-      "  Verify the gathering company on any run statement or JIB is an active P-4 holder.",
-      "  If the gatherer is unlicensed, revenue may be at risk and TRRC can seize production.",
-      "",
-      "P-4 permits require annual renewal. A lapsed P-4 is an immediate operational risk.",
-    ];
-
-    return buildManualResult(
-      this.id,
-      actionUrl,
-      "P-4 Gatherer/Purchaser — Manual Retrieval Required",
-      "P4_gatherer_permit",
-      "p4_gatherer",
-      noteLines.join("\n"),
-    );
   },
 
   fetchRecord: noopFetchRecord,
@@ -479,70 +572,83 @@ const WELL_STATUS_URL = "https://webapps2.rrc.texas.gov/EWA/wellStatusQueryActio
 
 export const WellStatusSource: TrrcSourceAdapter = {
   id: "well_status_query",
-  name: "EWA Well Status Query (Manual Fallback)",
+  name: "EWA Well Status Query",
   description:
-    "TRRC EWA well status query for current operating status, work-over history, and shut-in reason. " +
-    "Provides finer-grained status codes (PA, SI, AC, TA, etc.) than the wellbore query. " +
-    "Full status detail page requires browser-rendered JavaScript.",
+    "TRRC EWA well status query for current operating status, well type, and formation. " +
+    "Provides finer-grained status (Active, Inactive, Shut-in, Plugged) with status date.",
   base_url: "https://webapps2.rrc.texas.gov/EWA",
   supported_inputs: ["api_number", "rrc_lease_number"],
-  retrieval_strategy: "manual",
+  retrieval_strategy: "html_scrape",
   rate_limit_ms: 2000,
   max_retries: 2,
-  parser_version: "1.0.0",
+  parser_version: "2.0.0",
   is_enabled: process.env["TRRC_SOURCE_WELL_STATUS_QUERY_ENABLED"] !== "false",
-  requires_browser: true,
+  requires_browser: false,
 
   async search(ctx: ResolvedSearchContext, _opts: RetrievalOptions): Promise<SourceSearchResult> {
-    const primaryApi = ctx.api_numbers[0];
-    // Build pre-filled URL
-    let actionUrl = WELL_STATUS_URL;
-    if (primaryApi) {
-      const params = new URLSearchParams({
-        "methodToCall": "search",
-        "searchArgs.apiNoPrefixArg": primaryApi.county_code,
-        "searchArgs.apiNoSuffixArg": primaryApi.well_code,
-      });
-      actionUrl = `${WELL_STATUS_URL}?${params.toString()}`;
-    } else if (ctx.lease_number && ctx.district) {
-      const params = new URLSearchParams({
-        "methodToCall": "search",
-        "searchArgs.leaseNumberArg": ctx.lease_number,
-        "searchArgs.districtCodeArg": ctx.district,
-      });
-      actionUrl = `${WELL_STATUS_URL}?${params.toString()}`;
+    try {
+      const primaryApi = ctx.api_numbers[0];
+      let records;
+
+      if (primaryApi) {
+        records = await fetchTrrcWellStatus(primaryApi.api10);
+      } else if (ctx.lease_number && ctx.district) {
+        records = await fetchTrrcWellStatusByLease(ctx.district, ctx.lease_number);
+      } else {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      if (records.length === 0) {
+        return {
+          source_id: this.id,
+          status: "no_results",
+          records: [],
+          result_count: 0,
+          data: null,
+          error: null,
+          manual_action_url: null,
+        };
+      }
+
+      const refs: SourceRecordRef[] = records.map((r, i) => ({
+        source_id:      this.id,
+        document_id:    `well_status_${r.api8}_${i}`,
+        title:          `Well Status — API ${r.api8}${r.current_status ? ` (${r.current_status})` : ""}${r.well_type ? ` / ${r.well_type}` : ""}`,
+        category:       "well_status" as const,
+        form_type:      "OG2_well_status",
+        url:            `${WELL_STATUS_URL}?methodToCall=search&searchArgs.apiNoPrefixArg=${r.api8.slice(0, 3)}&searchArgs.apiNoSuffixArg=${r.api8.slice(3, 8)}`,
+        filing_date:    r.status_date,
+        is_downloadable: false,
+      }));
+
+      return {
+        source_id:         this.id,
+        status:            "success",
+        records:           refs,
+        result_count:      records.length,
+        data:              { well_status_records: records },
+        error:             null,
+        manual_action_url: null,
+      };
+    } catch (err) {
+      return {
+        source_id:         this.id,
+        status:            "failed_transient",
+        records:           [],
+        result_count:      0,
+        data:              null,
+        error:             err instanceof Error ? err.message : "Unknown error",
+        manual_action_url: null,
+      };
     }
-
-    const noteLines = [
-      "MANUAL ACTION REQUIRED — TRRC Well Status detail requires browser-rendered JavaScript.",
-      "",
-      "Note: Basic well status (AC/PA/SI/TA) is often available from the wellbore_query source.",
-      "This source provides finer-grained status detail, work-over history, and shut-in reason.",
-      "",
-      "What to search for:",
-      primaryApi
-        ? `  API County Code: ${primaryApi.county_code}  |  API Well Suffix: ${primaryApi.well_code}`
-        : ctx.lease_number
-          ? `  Lease Number: ${ctx.lease_number}${ctx.district ? `  |  District: ${ctx.district}` : ""}`
-          : "  Use API number or lease number",
-      "",
-      "Status codes to look for:",
-      "  AC = Active / Producing",
-      "  SI = Shut-in (not producing, reasons vary)",
-      "  TA = Temporarily Abandoned",
-      "  PA = Plugged and Abandoned (critical — see plugging_records source)",
-      "",
-      "Status changes are typically reflected within 30 days of a valid W-3/W-3C filing.",
-    ];
-
-    return buildManualResult(
-      this.id,
-      actionUrl,
-      "Well Status — Manual Retrieval Required",
-      "well_status_record",
-      "well_status",
-      noteLines.join("\n"),
-    );
   },
 
   fetchRecord: noopFetchRecord,
