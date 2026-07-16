@@ -1557,7 +1557,7 @@ async function runAgent(runId: string): Promise<void> {
           result_count: 0,
           error_message: result.ok ? null : String((result.data as Record<string, unknown>)?.["error"] ?? ""),
           attempted_at: new Date().toISOString(),
-        }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).catch(() => {});
+        }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).then(null, () => {});
 
         // Update progress (scale 5% → 90% over MAX_TOOL_CALLS)
         const progressPct = Math.min(90, 5 + toolCallCount * 1.7);
@@ -1705,7 +1705,7 @@ async function runAgent(runId: string): Promise<void> {
       }));
 
     if (newEntityRows.length > 0) {
-      await supabase.from("trrc_resolved_entities").insert(newEntityRows).catch(err => {
+      await supabase.from("trrc_resolved_entities").insert(newEntityRows).then(null, err => {
         console.error("[trrc-dd-execute] entity insert error:", err);
       });
     }
