@@ -92,6 +92,17 @@ function IconUnderwriting() {
     </svg>
   );
 }
+function IconDueDiligence() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>
+      <path d="M10 2v3h3"/>
+      <path d="M5.5 7.5h5M5.5 10h3"/>
+      <circle cx="11" cy="11" r="2" stroke="currentColor"/>
+      <path d="M12.5 12.5L14 14"/>
+    </svg>
+  );
+}
 function IconAcreage() {
   return (
     <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -143,6 +154,7 @@ const primaryNav = [
   { href: "/underwriting",         label: "MineralFlow Underwriting", Icon: IconUnderwriting },
   { href: "/underwriting/history", label: "Deal Pipeline",            Icon: IconPipeline     },
   { href: "/acreage",              label: "Acreage Valuation",        Icon: IconAcreage      },
+  { href: "/trrc-due-diligence",  label: "TRRC Due Diligence",       Icon: IconDueDiligence },
 ] as const;
 
 const accountNav = [
