@@ -297,7 +297,9 @@ export default function TrrcDueDiligencePage() {
       const payload = {
         input: primaryInput,
         input_type_override: inputTypeOverride,
-        operator_name: operator && !api && !lease ? undefined : (operator || undefined),
+        // Supplemental context — always pass the other fields so the agent starts pre-seeded
+        lease_number: lease || undefined,
+        operator_name: operator || undefined,
         county: form.county.trim() || undefined,
         district: form.district || undefined,
         search_historical: form.searchHistorical,

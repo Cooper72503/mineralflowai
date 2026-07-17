@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
     county?: string;
     district?: string;
     operator_name?: string;
+    lease_number?: string;
     lease_name?: string;
     search_historical?: boolean;
     include_offset_wells?: boolean;
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
       error_summary: null,
       resolved_primary_api: normalizedApi?.api10 ?? null,
       resolved_district: body.district ?? null,
-      resolved_lease_number: null,
+      resolved_lease_number: body.lease_number?.trim() ?? null,
       resolved_gas_id: null,
       resolved_operator_number: null,
       report_storage_path: null,

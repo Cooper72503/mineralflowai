@@ -1968,6 +1968,10 @@ async function runAgent(runId: string): Promise<void> {
     agentReport: null,
   };
 
+  // Pre-seed context from run row fields (user-supplied supplemental identifiers)
+  if (!ctx.lease_number && runRaw["resolved_lease_number"]) ctx.lease_number = String(runRaw["resolved_lease_number"]);
+  if (!ctx.district && runRaw["resolved_district"])         ctx.district     = String(runRaw["resolved_district"]);
+
   // Pre-seed context from resolved entities
   for (const entity of resolvedEntities) {
     if (entity.entity_type === "wellbore") {
