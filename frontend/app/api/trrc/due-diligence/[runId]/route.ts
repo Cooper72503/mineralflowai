@@ -44,7 +44,7 @@ export async function GET(
   }
 
   // 3. Load joined data in parallel
-  const [entitiesResult, attemptsResult, findingsResult, missingResult, productionResult] =
+  const [entitiesResult, attemptsResult, findingsResult, productionResult] =
     await Promise.all([
       supabase
         .from("trrc_resolved_entities")
@@ -55,16 +55,12 @@ export async function GET(
         .from("trrc_source_attempts")
         .select("*")
         .eq("run_id", runId)
-        .order("started_at", { ascending: true }),
+        .order("attempted_at", { ascending: true }),
       supabase
         .from("trrc_due_diligence_findings")
         .select("*")
         .eq("run_id", runId)
         .order("severity", { ascending: true }),
-      supabase
-        .from("trrc_missing_items")
-        .select("*")
-        .eq("run_id", runId),
       supabase
         .from("trrc_production_monthly")
         .select("*")
@@ -80,7 +76,7 @@ export async function GET(
       entities: entitiesResult.data ?? [],
       source_attempts: attemptsResult.data ?? [],
       findings: findingsResult.data ?? [],
-      missing_items: missingResult.data ?? [],
+      missing_items: [],
       production: productionResult.data ?? [],
       scorecard: run.scorecard_json ?? null,
       coverage: run.coverage_json ?? [],

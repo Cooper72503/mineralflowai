@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       entity_type: e.entity_type,
       canonical_identifier: e.canonical_identifier,
       display_name: e.display_name,
-      attributes: e.attributes,
+      attributes_json: e.attributes,
       confidence: e.confidence,
       resolution_method: e.resolution_method,
       is_user_selected: e.is_user_selected,
