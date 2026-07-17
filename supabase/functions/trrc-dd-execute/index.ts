@@ -1174,7 +1174,7 @@ async function toolFetchP4Records(input: Record<string, unknown>, ctx: AgentCont
   };
 }
 
-async function toolFetchWellStatus(input: Record<string, unknown>): Promise<ToolResult> {
+async function toolFetchWellStatus(input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
   const apiNum  = input.api_number   ? String(input.api_number).trim()   : null;
   const leaseNo = input.lease_number ? String(input.lease_number).trim() : null;
   const dist    = input.district     ? String(input.district).trim()     : null;
@@ -1229,7 +1229,7 @@ async function toolFetchWellStatus(input: Record<string, unknown>): Promise<Tool
   }
 }
 
-async function toolFetchOrphanWell(input: Record<string, unknown>): Promise<ToolResult> {
+async function toolFetchOrphanWell(input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
   const apiNum = String(input.api_number ?? "").trim();
   if (!apiNum) return { ok: false, data: { error: "api_number required" }, summary: "fetch_orphan_well: no input" };
 
@@ -1258,7 +1258,7 @@ async function toolFetchOrphanWell(input: Record<string, unknown>): Promise<Tool
   }
 }
 
-async function toolFetchSeveranceRecords(input: Record<string, unknown>): Promise<ToolResult> {
+async function toolFetchSeveranceRecords(input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
   const leaseNo   = input.lease_number   ? String(input.lease_number).trim()   : null;
   const leaseType = input.lease_type     ? String(input.lease_type).trim()     : "O";
   const dist      = input.district       ? String(input.district).trim()       : null;
@@ -1293,7 +1293,7 @@ async function toolFetchSeveranceRecords(input: Record<string, unknown>): Promis
   }
 }
 
-async function toolFetchComplianceViolations(_input: Record<string, unknown>): Promise<ToolResult> {
+async function toolFetchComplianceViolations(_input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
   // violationQueryAction.do returns HTTP 500 (not publicly accessible statlessly).
   // Compliance violations must be looked up directly in the TRRC EWA with a browser session.
   return {
@@ -1395,7 +1395,7 @@ async function toolFetchInjectionRecords(input: Record<string, unknown>, ctx: Ag
   }
 }
 
-async function toolFetchImagedRecords(_input: Record<string, unknown>): Promise<ToolResult> {
+async function toolFetchImagedRecords(_input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
   // The TRRC CMPL system (publicCmplQueryAction.do) returns HTTP 404.
   // Imaged scanned records (W-2, G-1, P-12, etc.) are not accessible via stateless HTTP.
   // They require a direct browser session at https://www.rrc.texas.gov/resource-center/research/online-research-queries/
@@ -1447,17 +1447,17 @@ async function dispatchTool(
     case "search_by_operator":        return toolSearchByOperator(toolInput, ctx);
     case "search_by_legal_description": return toolSearchByLegalDescription(toolInput, ctx);
     case "fetch_production":          return toolFetchProduction(toolInput, ctx);
-    case "fetch_completion_records":  return toolFetchCompletionRecords(toolInput);
-    case "fetch_inactive_well_status": return toolFetchInactiveWellStatus(toolInput);
-    case "fetch_plugging_records":    return toolFetchPluggingRecords(toolInput);
-    case "fetch_p4_records":          return toolFetchP4Records(toolInput);
-    case "fetch_well_status":         return toolFetchWellStatus(toolInput);
-    case "fetch_orphan_well":         return toolFetchOrphanWell(toolInput);
-    case "fetch_severance_records":   return toolFetchSeveranceRecords(toolInput);
-    case "fetch_compliance_violations": return toolFetchComplianceViolations(toolInput);
+    case "fetch_completion_records":  return toolFetchCompletionRecords(toolInput, ctx);
+    case "fetch_inactive_well_status": return toolFetchInactiveWellStatus(toolInput, ctx);
+    case "fetch_plugging_records":    return toolFetchPluggingRecords(toolInput, ctx);
+    case "fetch_p4_records":          return toolFetchP4Records(toolInput, ctx);
+    case "fetch_well_status":         return toolFetchWellStatus(toolInput, ctx);
+    case "fetch_orphan_well":         return toolFetchOrphanWell(toolInput, ctx);
+    case "fetch_severance_records":   return toolFetchSeveranceRecords(toolInput, ctx);
+    case "fetch_compliance_violations": return toolFetchComplianceViolations(toolInput, ctx);
     case "fetch_proration":           return toolFetchProration(toolInput, ctx);
     case "fetch_injection_records":   return toolFetchInjectionRecords(toolInput, ctx);
-    case "fetch_imaged_records":      return toolFetchImagedRecords(toolInput);
+    case "fetch_imaged_records":      return toolFetchImagedRecords(toolInput, ctx);
     case "submit_report":             return toolSubmitReport(toolInput, ctx);
     default:
       return { ok: false, data: { error: `Unknown tool: ${toolName}` }, summary: `Unknown tool: ${toolName}` };
@@ -1717,7 +1717,7 @@ async function runAgent(runId: string): Promise<void> {
 
         const result = await dispatchTool(
           block.name,
-          block.input as Record<string, unknown>,
+          ((block.input ?? {}) as Record<string, unknown>),
           ctx,
         );
 
