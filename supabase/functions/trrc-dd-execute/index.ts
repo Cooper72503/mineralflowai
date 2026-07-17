@@ -20,8 +20,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MAX_TOOL_CALLS = 80;
-const WRAP_UP_THRESHOLD = 50; // warn agent to submit_report after this many tool calls
+const MAX_TOOL_CALLS = 120;
+const WRAP_UP_THRESHOLD = 90; // warn agent to submit_report after this many tool calls
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,94 +91,81 @@ interface ToolResult {
 // ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `
-You are an expert TRRC (Texas Railroad Commission) Public Records Investigator with 20 years of experience
-conducting oil and gas due diligence in Texas. You have direct, programmatic access to TRRC public databases
-through the tools provided.
+You are the MineralFlowAI RRC Due Diligence Agent. Your sole job is to execute a structured due diligence data pull from the Texas Railroad Commission (TRRC) for an oil or gas well asset. You have access to 17 tools. You MUST call all 16 data-pull tools before calling submit_report. You MUST NOT call submit_report until every prior tool has returned a result.
 
-## Your role
-You receive raw user input — which may be an API number, RRC lease number/ID, operator name, P5 number,
-or a legal description (abstract/survey/section/township/range) — along with any pre-resolved entity data.
-Your job is to:
+---
 
-1. Determine what the input refers to (well, lease, operator, or land parcel)
-2. Search all relevant TRRC sources to build a complete picture of the asset
-3. Produce structured findings, a 10-dimension scorecard, and a recommendation
+STEP 1 — RESOLVE IDENTIFIERS
 
-## Investigation protocol
+The user will provide one of the following: an API number, an operator name, or a lease number. Your first action depends on what was provided:
 
-### Step 1 — Establish identity
-- If you have an API number, call \`search_by_api\` to confirm the well exists and get lease/district/county/operator.
-- If you have a lease number, call \`search_by_lease\` with just the lease number (district is optional — the tool will auto-discover it if not provided).
-- If you have an operator name or P5 number, call \`search_by_operator\` first to establish operator identity and bond status.
-- If you have a legal description, call \`search_by_legal_description\` to find matched API numbers via GIS.
-- Do NOT skip identity resolution — every downstream query depends on correct identifiers.
+- If given an API number → call search_by_api first. Extract: API number, district, lease number, operator name, operator number, well type.
+- If given a lease number → call search_by_lease first. Extract: all API numbers on the lease, district, operator name, operator number.
+- If given an operator name → call search_by_operator first. Extract: operator number, then call search_by_lease to get all associated leases and API numbers.
 
-### Step 2 — Production
-- Always fetch production via \`fetch_production\` using the lease number + district (preferred) or API number.
-- Production is lease-level. You cannot attribute it to a single well without per-well allocation evidence.
-- Check for production gaps, decline trends, and zero-production months.
+After Step 1, you must have: API number(s), district, lease number, operator number.
+Do NOT proceed to Step 2 until all four identifiers are confirmed.
 
-### Step 3 — Well integrity and status
-- Call \`fetch_well_status\` for every API number found. Active vs. inactive vs. plugged matters.
-- Call \`fetch_inactive_well_status\` to check EWA inactive well records.
-- Call \`fetch_plugging_records\` — plugged wells have liability implications for mineral owners.
-- Call \`fetch_orphan_well\` if the operator appears financially distressed.
-- Call \`fetch_completion_records\` to understand formation, depth, and mechanical design.
+---
 
-### Step 4 — Compliance and operator
-- Call \`fetch_compliance_violations\` for the operator. Document the result even if empty.
-  An empty compliance result may mean a clean record OR a failed query — distinguish these.
-- Fetch \`fetch_p4_records\` for production test data by lease or API.
-- Check \`fetch_severance_records\` if there is evidence of wellbore severance.
+STEP 2 — EXECUTE ALL 16 DATA-PULL TOOLS IN ORDER
 
-### Step 5 — Additional data
-- Call \`fetch_proration\` to check proration schedule constraints on production.
-- Call \`fetch_injection_records\` if this may be a disposal or injection well.
-- Call \`fetch_imaged_records\` for post-2009 CMPL imaged document packets if APIs are known.
+Call every tool below in sequence. Do NOT skip any tool. Do NOT call submit_report yet.
 
-### Step 6 — Submit report (MANDATORY — do this or the investigation fails)
-- After completing Steps 1–5, you MUST call \`submit_report\`. This is not optional.
-- **Do not call any other tools after you have sufficient data to form a conclusion.**
-- A typical well investigation requires 15–35 tool calls total. Once you have production data, well status, compliance history, and operator profile, you have enough — STOP QUERYING and call \`submit_report\`.
-- If a query returns no data, note it as a data gap and move on. Do not retry indefinitely.
-- \`submit_report\` is your final action. The investigation is complete the moment you call it.
+For each tool, if the result is empty or the well type makes the query not applicable (e.g., injection query on a non-injection well), record the result as "Not Applicable — [reason]" and immediately proceed to the next tool. An empty result is NOT an error. Do not retry. Continue to the next tool.
 
-## STOPPING DISCIPLINE — read this carefully
+Tool execution order:
+1. search_by_api — Identity, district, lease, operator, well type
+2. search_by_lease — All wells on the lease, co-mingled production flag
+3. search_by_operator — Operator organization record, bond status, P5
+4. search_by_legal_description — Legal description, survey, abstract, section
+5. fetch_production — Full monthly oil/gas/water production history
+6. fetch_completion_records — W-2 completion record: formation, depth, casing
+7. fetch_well_status — Current status: active / inactive / plugged
+8. fetch_inactive_well_status — Inactive well list entry (if applicable)
+9. fetch_orphan_well — Orphan well / state-plugging liability (if applicable)
+10. fetch_plugging_records — Plugging records (if plugged or partially plugged)
+11. fetch_compliance_violations — All open and historical compliance violations
+12. fetch_p4_records — P-4 production test records
+13. fetch_proration — Proration schedule and allowable constraints
+14. fetch_injection_records — UIC / SWD / injection permit (if applicable)
+15. fetch_severance_records — Wellbore severance records (if applicable)
+16. fetch_imaged_records — Post-2009 imaged completion document packets
 
-You have a finite tool-call budget. The investigation MUST end with \`submit_report\`. Here is how to know when you are done:
+---
 
-✅ **You are done when you have:**
-- Confirmed the asset's identity (API, lease, or operator)
-- Retrieved production history (or documented why it is unavailable)
-- Checked well status and plugging records
-- Checked compliance violations for the operator
-- Documented any data gaps
+STEP 3 — COMPILE AND SUBMIT
 
-**At that point, call \`submit_report\` immediately.** Do not look for more data. Do not retry failed sources a second time. Synthesize what you have and submit.
+Only after ALL 16 tools above have returned a result (even if "Not Applicable") compile the full report and call submit_report.
 
-❌ **You are NOT done when:**
-- You have just completed identity resolution but haven't fetched production
-- You have production data but haven't checked well status
-- You have well status but haven't checked compliance
+The report must include a result entry for every one of the 16 tools above.
+Any tool that returned data must include the key data points extracted.
+Any tool that returned empty must be listed as "Not Applicable — [reason]".
 
-**The test: can you write a recommendation right now? If yes, submit. If no, fetch the missing piece, then submit.**
+The report structure must follow this order:
+1. Asset Identification (from tools 1–4)
+2. Production History (from tool 5)
+3. Well Construction & Completion (from tools 6–10)
+4. Compliance & Regulatory (from tools 11–12)
+5. Operations (from tools 13–15)
+6. Imaged Documents Retrieved (from tool 16)
+7. Missing Documents Flag (list any data points that could not be confirmed from any tool)
+8. Confidence Score (0–100, based on data completeness and consistency)
+9. Recommendation (pursue / review / pass / blocked)
 
-## Critical rules
+DO NOT call submit_report before this point. DO NOT omit any section.
 
-- **Empty result ≠ clean.** A zero-violation compliance query may be a query failure. Note this explicitly.
-- **canClaimSingleWellProduction is always false for lease-level production.** Never attribute lease production to a specific well.
-- **Verified data only.** Do not invent numbers. If you cannot retrieve data, note it as a data gap.
-- **Try multiple query paths.** If lease-level production fails, try by API. If operator by name fails, try by operator number.
-- **Do not reveal internal tool names** in your narrative summary (use plain English descriptions instead).
-- **Do not try all 17 tools for every asset.** Only call the tools applicable to this asset type. A simple API lookup doesn't need injection records. Use judgment.
+---
 
-## Recommendation criteria
-- **pursue** — asset has verified production, clean compliance, active operator, no major liability flags
-- **review** — asset warrants deeper investigation (gaps in data, minor compliance issues, aging wells)
-- **blocked** — critical gating issue: fake API, operator in violation/revoked, catastrophic plugging liability
-- **pass** — asset does not meet investment criteria (no production, inactive, excessive risk)
+CRITICAL RULES:
 
-## Scorecard dimensions (weights must sum to 1.0)
+- canClaimSingleWellProduction is always false for lease-level production. Never attribute lease production to a single well.
+- Empty result ≠ clean record. A zero-violation compliance query may be a failed query — note this explicitly.
+- Do not invent or estimate any numbers. Record "Not Applicable" or "Query Failed" for any data you could not retrieve.
+- Do not reveal internal tool names in your narrative summary. Use plain English descriptions.
+- Scorecard weights must sum to 1.0 exactly.
+
+SCORECARD DIMENSIONS (weights must sum to 1.0):
 1. identity_confidence (0.12) — Were identifiers verified in TRRC?
 2. production_quality (0.15) — Is there verifiable, recent production?
 3. production_consistency (0.13) — Is production trending stable or declining?
@@ -189,8 +176,6 @@ You have a finite tool-call budget. The investigation MUST end with \`submit_rep
 8. development_activity (0.07) — Recent completions, permits, injection activity
 9. data_confidence (0.05) — Were all queries successful or are there gaps?
 10. record_completeness (0.10) — Did we successfully retrieve all relevant record types?
-
-When submitting the scorecard, use these exact dimension IDs and ensure weights sum to 1.0.
 `.trim();
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
@@ -200,7 +185,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "search_by_api",
     description:
       "Look up a well by API number in the TRRC PDQ wellbore database. " +
-      "Returns lease number, district code, county, and operator name/number.",
+      "Returns lease number, district code, county, and operator name/number. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -217,7 +203,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     description:
       "Look up a lease by RRC lease number. If district is unknown, omit it — the tool will automatically " +
       "search all 12 TRRC districts to discover which one the lease belongs to. " +
-      "Returns the lease's district, well inventory (API numbers, statuses), and operator.",
+      "Returns the lease's district, well inventory (API numbers, statuses), and operator. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -231,7 +218,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "search_by_operator",
     description:
       "Look up an operator by name or P5 number. " +
-      "Returns operator_number, bond status, organizational status, and P5 record details.",
+      "Returns operator_number, bond status, organizational status, and P5 record details. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -245,7 +233,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "search_by_legal_description",
     description:
       "GIS lookup using abstract number, survey name, section, township, and/or range. " +
-      "Returns matched API numbers whose surface locations fall within the described parcel.",
+      "Returns matched API numbers whose surface locations fall within the described parcel. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -261,7 +250,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_production",
     description:
       "Fetch monthly production history (oil bbl, gas MCF, water bbl) from TRRC. " +
-      "Preferred: provide lease_number + district. Alternative: provide api_number.",
+      "Preferred: provide lease_number + district. Alternative: provide api_number. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -277,7 +267,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_completion_records",
     description:
       "Fetch W-2 completion packets for one or more API numbers. " +
-      "Returns formation name, total depth, completion date, and wellbore profile.",
+      "Returns formation name, total depth, completion date, and wellbore profile. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -294,7 +285,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_inactive_well_status",
     description:
       "Check if a well is on the TRRC EWA inactive well list. " +
-      "Inactive wells represent potential plugging liability.",
+      "Inactive wells represent potential plugging liability. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -309,7 +301,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_plugging_records",
     description:
       "Fetch EWA plugging records by API number or lease. " +
-      "Returns plugging date, contractor, depth, and regulatory status.",
+      "Returns plugging date, contractor, depth, and regulatory status. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -324,7 +317,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_p4_records",
     description:
       "Fetch EWA P-4 production test records by API number or lease. " +
-      "Returns test date, allowable, tested rate, and gatherer information.",
+      "Returns test date, allowable, tested rate, and gatherer information. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -338,7 +332,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "fetch_well_status",
     description:
-      "Fetch EWA well status (active/inactive/plugged) for an API or all wells on a lease.",
+      "Fetch EWA well status (active/inactive/plugged) for an API or all wells on a lease. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -353,7 +348,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_orphan_well",
     description:
       "Fetch EWA orphan well records for an API number. " +
-      "An orphan well is one whose operator has become insolvent — critical liability flag.",
+      "An orphan well is one whose operator has become insolvent — critical liability flag. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -366,7 +362,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_severance_records",
     description:
       "Fetch EWA severance records by API number or operator. " +
-      "Documents wellbore interval severances — relevant for casing integrity.",
+      "Documents wellbore interval severances — relevant for casing integrity. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -380,7 +377,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_compliance_violations",
     description:
       "Fetch TRRC compliance violations and field inspection records for an operator. " +
-      "IMPORTANT: empty result does NOT guarantee clean compliance — it may be a failed query.",
+      "IMPORTANT: empty result does NOT guarantee clean compliance — it may be a failed query. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -400,7 +398,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_proration",
     description:
       "Fetch proration schedule records by lease number. " +
-      "Proration schedules govern allowable production rates for oil leases.",
+      "Proration schedules govern allowable production rates for oil leases. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -415,7 +414,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_injection_records",
     description:
       "Fetch UIC/injection well records by API number or operator. " +
-      "Use if the well may be a disposal or enhanced recovery injection well.",
+      "Use if the well may be a disposal or enhanced recovery injection well. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -429,7 +429,8 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "fetch_imaged_records",
     description:
       "Fetch post-2009 CMPL imaged document packets from TRRC for one or more API numbers. " +
-      "Returns document type, filing date, and document URLs.",
+      "Returns document type, filing date, and document URLs. " +
+      "This tool call is REQUIRED for every report. Do not skip.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -445,8 +446,13 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "submit_report",
     description:
-      "Submit the completed due diligence investigation findings. " +
-      "Call this when you have finished retrieving and analyzing all applicable TRRC data.",
+      "Call this tool ONLY after all 16 data-pull tools have been called and returned results. " +
+      "Calling this tool early will produce an incomplete report and is not permitted. " +
+      "You must have called search_by_api, search_by_lease, search_by_operator, search_by_legal_description, " +
+      "fetch_production, fetch_completion_records, fetch_well_status, fetch_inactive_well_status, " +
+      "fetch_orphan_well, fetch_plugging_records, fetch_compliance_violations, fetch_p4_records, " +
+      "fetch_proration, fetch_injection_records, fetch_severance_records, and fetch_imaged_records " +
+      "before calling this tool. Each must have returned a result, even if that result is empty or Not Applicable.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -555,7 +561,14 @@ function extractTableRows(html: string, maxRows = 50): string[][] {
 // ─── TRRC fetch helpers ───────────────────────────────────────────────────────
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
-const CMPL_BASE = "https://webapps2.rrc.texas.gov/CMPL";
+
+// Split a 10-digit Texas API number into county prefix and well suffix
+// Format: 42-CCC-WWWWW → prefix=CCC (3 digits), suffix=WWWWW (5 digits)
+function splitApi(apiRaw: string): { prefix: string; suffix: string } | null {
+  const digits = apiRaw.replace(/\D/g, "");
+  if (digits.length < 10) return null;
+  return { prefix: digits.slice(2, 5), suffix: digits.slice(5, 10) };
+}
 
 // EWA Proxy: Supabase/Deno (rustls) cannot connect to webapps2.rrc.texas.gov
 // because that server uses RSA key exchange without forward secrecy, which
@@ -619,57 +632,77 @@ async function toolSearchByApi(input: Record<string, unknown>, ctx: AgentContext
   const apiRaw = String(input.api_number ?? "").trim();
   if (!apiRaw) return { ok: false, data: { error: "api_number required" }, summary: "search_by_api: no input" };
 
-  // Normalize: strip non-digits, take first 10
   const digits = apiRaw.replace(/\D/g, "");
   const api10 = digits.slice(0, 10);
+  const split = splitApi(api10);
 
-  // ── EWA via proxy ───────────────────────────────────────────────────────────
+  if (!split) {
+    return { ok: false, data: { error: "API number must be at least 10 digits" }, summary: `search_by_api: invalid API ${apiRaw}` };
+  }
+
+  // EWA wellboreQueryAction.do — uses county prefix (3 digits) + well suffix (5 digits)
+  // Texas API: 42-CCC-WWWWW → prefix=CCC, suffix=WWWWW
   try {
-    const html = await fetchHtml(
-      `${EWA_BASE}/wellboreQueryAction.do`,
-      {
-        method: "POST",
-        body: formBody({
-          "searchArgs.apiNumber": api10,
-          "methodToCall": "search",
-        }),
-      },
-    );
+    const html = await fetchHtml(`${EWA_BASE}/wellboreQueryAction.do`, {
+      method: "POST",
+      body: formBody({
+        "searchArgs.apiNoPrefixArg": split.prefix,
+        "searchArgs.apiNoSuffixArg": split.suffix,
+        "searchArgs.scheduleTypeArg": "Both",
+        "methodToCall": "search",
+      }),
+    });
 
     const rows = extractTableRows(html);
-    if (rows.length < 2) {
+    // rows[0] = JS/header noise, find the actual data header row by looking for "District" or "API"
+    // The actual table header typically contains "API No." and "District"
+    const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator/i)));
+    if (headerIdx < 0 || rows.length <= headerIdx + 1) {
       return {
         ok: true,
-        data: {
-          found: false,
-          api_number: api10,
-          message: `API ${api10} NOT FOUND in TRRC. Verify the API number.`,
-        },
-        summary: `search_by_api: ${api10} — NOT FOUND in TRRC`,
+        data: { found: false, api_number: api10, message: `API 42-${split.prefix}-${split.suffix} NOT FOUND in TRRC. Verify the API number.` },
+        summary: `search_by_api: 42-${split.prefix}-${split.suffix} — NOT FOUND in TRRC`,
       };
     }
 
-    // Parse first data row (index 1 = header skipped)
-    const header = rows[0] ?? [];
-    const dataRow = rows[1] ?? [];
-    const rowData: Record<string, string> = {};
-    header.forEach((h, i) => { rowData[h.toLowerCase().replace(/\s+/g, "_")] = dataRow[i] ?? ""; });
+    const header = rows[headerIdx] ?? [];
+    const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3);
 
-    const leaseNo = rowData["lease_no"] ?? rowData["lease_number"] ?? "";
-    const distCode = rowData["district"] ?? rowData["dist"] ?? "";
-    const operator = rowData["operator"] ?? rowData["operator_name"] ?? "";
-    const county   = rowData["county"] ?? "";
+    // Parse all matching wells
+    const wells = dataRows.map(row => {
+      const obj: Record<string, string> = {};
+      header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+      return obj;
+    });
+
+    // Seed context from first well
+    const first = wells[0] ?? {};
+    const leaseNo  = first["lease_no_"] ?? first["lease_no"] ?? first["lease_number"] ?? "";
+    const distCode = first["district"] ?? "";
+    const operator = first["operator_name"] ?? first["operator"] ?? "";
+    const county   = first["county"] ?? "";
 
     if (!ctx.api_numbers.includes(api10)) ctx.api_numbers.push(api10);
-    if (!ctx.district && distCode) ctx.district = distCode;
-    if (!ctx.lease_number && leaseNo) ctx.lease_number = leaseNo;
+    if (!ctx.district && distCode)      ctx.district      = distCode;
+    if (!ctx.lease_number && leaseNo)   ctx.lease_number  = leaseNo;
     if (!ctx.operator_name && operator) ctx.operator_name = operator;
-    if (!ctx.county && county) ctx.county = county;
+    if (!ctx.county && county)          ctx.county        = county;
 
     return {
       ok: true,
-      data: { found: true, api_number: api10, lease_number: leaseNo, district: distCode, operator, county, raw_row: rowData, source: "ewa-html" },
-      summary: `search_by_api: ${api10} → Lease ${leaseNo} / District ${distCode} / Operator: ${operator}`,
+      data: {
+        found: true,
+        api_number: api10,
+        formatted_api: `42-${split.prefix}-${split.suffix}`,
+        lease_number: leaseNo,
+        district: distCode,
+        operator,
+        county,
+        total_wellbores: wells.length,
+        wellbores: wells.slice(0, 10),
+        source: "ewa-wellbore",
+      },
+      summary: `search_by_api: 42-${split.prefix}-${split.suffix} → Lease ${leaseNo} / District ${distCode} / ${wells.length} wellbore(s) / Operator: ${operator}`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `search_by_api: failed — ${String(e).slice(0, 80)}` };
@@ -677,107 +710,85 @@ async function toolSearchByApi(input: Record<string, unknown>, ctx: AgentContext
 }
 
 async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
-  const leaseNo = String(input.lease_number ?? "").trim();
+  const leaseNo  = String(input.lease_number ?? "").trim();
   const distCode = String(input.district ?? "").trim();
   if (!leaseNo) {
     return { ok: false, data: { error: "lease_number required" }, summary: "search_by_lease: missing lease_number" };
   }
 
-  // ── Primary path: EWA HTML form (webapps2.rrc.texas.gov) ────────────────────
-  if (distCode) {
+  // wellboreQueryAction.do supports searching by lease number + district
+  const tryDistrict = async (dist: string, leaseType: string): Promise<ToolResult | null> => {
     try {
-      const html = await fetchHtml(
-        `${EWA_BASE}/leaseWellQueryAction.do`,
-        {
-          method: "POST",
-          body: formBody({
-            "searchArgs.leaseTypeArg": "O",
-            "searchArgs.districtArg": distCode,
-            "searchArgs.leaseNumberArg": leaseNo,
-            "methodToCall": "search",
-          }),
-        },
-      );
-
-      if (!ctx.lease_number) ctx.lease_number = leaseNo;
-      if (!ctx.district) ctx.district = distCode;
+      const html = await fetchHtml(`${EWA_BASE}/wellboreQueryAction.do`, {
+        method: "POST",
+        body: formBody({
+          "searchArgs.leaseTypeArg": leaseType,
+          "searchArgs.districtCodeArg": dist,
+          "searchArgs.leaseNumberArg": leaseNo,
+          "searchArgs.scheduleTypeArg": "Both",
+          "methodToCall": "search",
+        }),
+      });
 
       const rows = extractTableRows(html);
-      if (rows.length >= 2) {
-        const header = rows[0] ?? [];
-        const wells = rows.slice(1).map(row => {
-          const obj: Record<string, string> = {};
-          header.forEach((h, i) => { obj[h.toLowerCase().replace(/\s+/g, "_")] = row[i] ?? ""; });
-          return obj;
-        });
-        for (const w of wells) {
-          const api = w["api"] ?? w["api_no"] ?? w["api_number"] ?? "";
-          if (api && !ctx.api_numbers.includes(api)) ctx.api_numbers.push(api);
-        }
-        const active = wells.filter(w => (w["status"] ?? "").toUpperCase() === "A").length;
-        return {
-          ok: true,
-          data: { found: true, lease_number: leaseNo, district: distCode, total_wells: wells.length, active_wells: active, inactive_wells: wells.length - active, wells: wells.slice(0, 30), source: "ewa-html" },
-          summary: `search_by_lease: Lease ${leaseNo} — ${wells.length} wells (${active} active)`,
-        };
-      }
-      // EWA returned no rows — fall through to production-query check below
-    } catch {
-      // EWA threw (SSL/network error) — fall through to production-query
-    }
-  }
+      const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator/i)));
+      if (headerIdx < 0 || rows.length <= headerIdx + 1) return null;
 
-  // ── Fallback: EWA production query across districts (via proxy) ─────────────
-  // Try productionQueryAction.do across districts to discover which one has this lease.
+      const header = rows[headerIdx] ?? [];
+      const wells = rows.slice(headerIdx + 1).filter(r => r.length >= 3).map(row => {
+        const obj: Record<string, string> = {};
+        header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+        return obj;
+      });
+
+      if (wells.length === 0) return null;
+
+      if (!ctx.lease_number) ctx.lease_number = leaseNo;
+      if (!ctx.district)     ctx.district     = dist;
+
+      for (const w of wells) {
+        const api = (w["api_no_"] ?? w["api_no"] ?? w["api"] ?? "").replace(/\D/g, "").slice(0, 10);
+        if (api.length === 10 && !ctx.api_numbers.includes(api)) ctx.api_numbers.push(api);
+        if (!ctx.operator_name && w["operator_name"]) ctx.operator_name = w["operator_name"];
+        if (!ctx.county && w["county"]) ctx.county = w["county"];
+      }
+
+      const onSchedule = wells.filter(w => (w["on_schedule"] ?? "").toUpperCase() === "Y").length;
+      return {
+        ok: true,
+        data: {
+          found: true,
+          lease_number: leaseNo,
+          district: dist,
+          lease_type: leaseType === "O" ? "OIL" : leaseType === "G" ? "GAS" : "BOTH",
+          total_wellbores: wells.length,
+          on_schedule: onSchedule,
+          off_schedule: wells.length - onSchedule,
+          wellbores: wells.slice(0, 30),
+          source: "ewa-wellbore",
+        },
+        summary: `search_by_lease: Lease ${leaseNo} / District ${dist} — ${wells.length} wellbore(s), ${onSchedule} on-schedule`,
+      };
+    } catch {
+      return null;
+    }
+  };
+
   const districtsToTry = distCode
     ? [distCode]
-    : ["01", "02", "03", "04", "05", "06", "7B", "7C", "08", "8A", "09", "10"];
+    : ["01", "02", "03", "04", "05", "06", "6E", "7B", "7C", "08", "8A", "09", "10"];
 
   for (const dist of districtsToTry) {
-    for (const leaseType of ["O", "G"]) {
-      try {
-        const html = await fetchHtml(`${EWA_BASE}/leaseWellQueryAction.do`, {
-          method: "POST",
-          body: formBody({
-            "searchArgs.leaseTypeArg": leaseType,
-            "searchArgs.districtArg": dist,
-            "searchArgs.leaseNumberArg": leaseNo,
-            "methodToCall": "search",
-          }),
-        });
-        const rows = extractTableRows(html);
-        if (rows.length >= 2) {
-          if (!ctx.lease_number) ctx.lease_number = leaseNo;
-          if (!ctx.district) ctx.district = dist;
-          const header = rows[0] ?? [];
-          const wells = rows.slice(1).map(row => {
-            const obj: Record<string, string> = {};
-            header.forEach((h, i) => { obj[h.toLowerCase().replace(/\s+/g, "_")] = row[i] ?? ""; });
-            return obj;
-          });
-          for (const w of wells) {
-            const api = w["api"] ?? w["api_no"] ?? w["api_number"] ?? "";
-            if (api && !ctx.api_numbers.includes(api)) ctx.api_numbers.push(api);
-          }
-          const active = wells.filter(w => (w["status"] ?? "").toUpperCase() === "A").length;
-          return {
-            ok: true,
-            data: { found: true, lease_number: leaseNo, district: dist, lease_type: leaseType === "O" ? "OIL" : "GAS", total_wells: wells.length, active_wells: active, wells: wells.slice(0, 30), source: "ewa-proxy" },
-            summary: `search_by_lease: Lease ${leaseNo} in District ${dist} — ${wells.length} wells (${active} active)`,
-          };
-        }
-      } catch {
-        // This district/type failed or returned nothing — try next
-      }
+    for (const lt of ["O", "G", ""]) {
+      const result = await tryDistrict(dist, lt);
+      if (result) return result;
     }
   }
 
-  // Not found anywhere
-  const scope = distCode ? `district ${distCode}` : "any district";
   return {
     ok: false,
-    data: { error: `Lease ${leaseNo} not found in ${scope}` },
-    summary: `search_by_lease: Lease ${leaseNo} — NOT FOUND in ${scope}`,
+    data: { error: `Lease ${leaseNo} not found in ${distCode ? `district ${distCode}` : "any district"}` },
+    summary: `search_by_lease: Lease ${leaseNo} — NOT FOUND`,
   };
 }
 
@@ -785,41 +796,69 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
   const opName = input.operator_name ? String(input.operator_name).trim() : null;
   const opNo   = input.operator_number ? String(input.operator_number).trim() : null;
 
-  try {
-    // Try P5 lookup
-    const params: Record<string, string> = { "methodToCall": "search" };
-    if (opNo) params["searchArgs.operatorNo"] = opNo;
-    else if (opName) params["searchArgs.operatorName"] = opName;
-    else return { ok: false, data: { error: "operator_name or operator_number required" }, summary: "search_by_operator: no input" };
+  if (!opName && !opNo) {
+    return { ok: false, data: { error: "operator_name or operator_number required" }, summary: "search_by_operator: no input" };
+  }
 
-    const html = await fetchHtml(`${EWA_BASE}/p5QueryAction.do`, { method: "POST", body: formBody(params) });
+  try {
+    // organizationQueryAction.do — uses operatorNumbersArg (plural) or orgStatus filter
+    // Operator search is by number or name via the "Operator(s)" picker which passes numbers
+    const params: Record<string, string> = { "methodToCall": "search" };
+    if (opNo) params["searchArgs.operatorNumbersArg"] = opNo;
+    // Note: name-based search requires going through a separate picker; we skip that path
+    // and fall through to org status search if only name is provided
+
+    const html = await fetchHtml(`${EWA_BASE}/organizationQueryAction.do`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
 
-    if (rows.length < 2) {
+    // Find the actual data rows (header row contains "Operator No." etc.)
+    const headerIdx = rows.findIndex(r => r.some(c => c.match(/Operator No|Operator Name|Organization/i)));
+    if (headerIdx < 0 || rows.length <= headerIdx + 1) {
       return {
         ok: true,
-        data: { found: false, message: `No P-5 record found for operator "${opName ?? opNo}". May be inactive or wrong name.` },
-        summary: `search_by_operator: "${opName ?? opNo}" — no P5 found`,
+        data: { found: false, message: `No organization record found for operator "${opName ?? opNo}".` },
+        summary: `search_by_operator: "${opName ?? opNo}" — not found in organization query`,
       };
     }
 
-    const header = rows[0] ?? [];
-    const dataRow = rows[1] ?? [];
-    const rec: Record<string, string> = {};
-    header.forEach((h, i) => { rec[h.toLowerCase().replace(/\s+/g, "_")] = dataRow[i] ?? ""; });
+    const header = rows[headerIdx] ?? [];
+    const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3);
 
-    const resolvedOpNo = rec["operator_no"] ?? rec["p5_no"] ?? opNo ?? "";
-    const resolvedName = rec["operator_name"] ?? rec["name"] ?? opName ?? "";
-    const orgStatus = rec["org_status"] ?? rec["status"] ?? "";
-    const tnrFlag = (rec["tnr_91114"] ?? "").toUpperCase() === "Y";
+    if (dataRows.length === 0) {
+      return {
+        ok: true,
+        data: { found: false, message: `No organization record found for operator "${opName ?? opNo}".` },
+        summary: `search_by_operator: "${opName ?? opNo}" — no results`,
+      };
+    }
+
+    const rec: Record<string, string> = {};
+    header.forEach((h, i) => { rec[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = dataRows[0][i] ?? ""; });
+
+    const resolvedOpNo  = rec["operator_no_"] ?? rec["operator_no"] ?? opNo ?? "";
+    const resolvedName  = rec["operator_name"] ?? opName ?? "";
+    const orgStatus     = rec["organization_status"] ?? rec["org_status"] ?? rec["status"] ?? "";
+    const orgType       = rec["organization_type"] ?? rec["org_type"] ?? "";
+    const tnrFlag       = (rec["_tnr_91_114"] ?? rec["tnr_91114"] ?? "").toUpperCase() === "YES" ||
+                          (rec["_tnr_91_114"] ?? rec["tnr_91114"] ?? "").toUpperCase() === "Y";
 
     if (!ctx.operator_number && resolvedOpNo) ctx.operator_number = resolvedOpNo;
-    if (!ctx.operator_name && resolvedName) ctx.operator_name = resolvedName;
+    if (!ctx.operator_name  && resolvedName)  ctx.operator_name   = resolvedName;
 
     return {
       ok: true,
-      data: { found: true, operator_name: resolvedName, operator_no: resolvedOpNo, org_status: orgStatus, tnr_91114: tnrFlag, raw: rec },
-      summary: `search_by_operator: "${resolvedName}" — org_status: ${orgStatus}${tnrFlag ? " [TNR91114 FLAG]" : ""}`,
+      data: {
+        found: true,
+        operator_name: resolvedName,
+        operator_no: resolvedOpNo,
+        org_status: orgStatus,
+        org_type: orgType,
+        tnr_91114_flag: tnrFlag,
+        mailing_address: [rec["mailing_address"], rec["mailing_city"], rec["mailing_state"], rec["mailing_zip"]].filter(Boolean).join(", "),
+        phone: rec["phone_no_"] ?? rec["phone_no"] ?? "",
+        raw: rec,
+      },
+      summary: `search_by_operator: "${resolvedName}" (${resolvedOpNo}) — ${orgStatus}${tnrFlag ? " [⚠ TNR §91.114 FLAG]" : ""}`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `search_by_operator: failed — ${String(e).slice(0, 80)}` };
@@ -827,228 +866,254 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
 }
 
 async function toolSearchByLegalDescription(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
-  const county  = input.county ? String(input.county) : null;
+  const county   = input.county ? String(input.county) : null;
   const abstract = input.abstract_number ? String(input.abstract_number) : null;
-  const survey  = input.survey_name ? String(input.survey_name) : null;
+  const survey   = input.survey_name ? String(input.survey_name) : null;
+  const section  = input.section ? String(input.section) : null;
 
   if (!ctx.county && county) ctx.county = county;
 
-  try {
-    // Use TRRC GIS API
-    const params = new URLSearchParams();
-    if (abstract) params.set("abstractNumber", abstract);
-    if (survey)   params.set("surveyName", survey);
-    if (county)   params.set("county", county);
-
-    const url = `https://www.rrc.texas.gov/api/well-information/gis-search?${params.toString()}`;
-    let data: Record<string, unknown>;
-    try {
-      data = await fetchJson(url) as Record<string, unknown>;
-    } catch {
-      // Fallback: return a helpful message
-      return {
-        ok: true,
-        data: { found: false, params: { abstract, survey, county }, message: "GIS lookup unavailable or returned no results." },
-        summary: "search_by_legal_description: GIS lookup failed or returned empty",
-      };
-    }
-
-    const wells = (data["wells"] ?? data["features"] ?? []) as Array<Record<string, unknown>>;
-    const apiNumbers: string[] = wells
-      .map(w => String(w["api"] ?? w["apiNumber"] ?? w["api_number"] ?? ""))
-      .filter(a => a.length >= 10);
-
-    for (const api of apiNumbers) {
-      if (!ctx.api_numbers.includes(api)) ctx.api_numbers.push(api);
-    }
-
-    return {
-      ok: true,
-      data: { found: apiNumbers.length > 0, api_numbers: apiNumbers, count: apiNumbers.length },
-      summary: `search_by_legal_description: found ${apiNumbers.length} API(s) in described parcel`,
-    };
-  } catch (e) {
-    return { ok: false, data: { error: String(e) }, summary: `search_by_legal_description: failed — ${String(e).slice(0, 80)}` };
-  }
+  // The TRRC EWA does not expose a stateless GIS/legal description search endpoint.
+  // Record all provided identifiers and note as a data gap for follow-up.
+  return {
+    ok: true,
+    data: {
+      found: false,
+      query_params: { county, abstract, survey, section },
+      message: "TRRC EWA does not provide a stateless GIS/legal description API. " +
+        "To look up wells by legal description, use the TRRC GIS viewer at https://gis.rrc.texas.gov/ directly. " +
+        "If you already have an API number or lease number from search_by_api or search_by_lease, proceed with those.",
+      data_gap: true,
+    },
+    summary: `search_by_legal_description: no stateless endpoint available — noted as data gap (county: ${county ?? "unspecified"})`,
+  };
 }
 
 async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
   const leaseNo  = input.lease_number ? String(input.lease_number).trim() : ctx.lease_number;
   const distCode = input.district     ? String(input.district).trim()     : ctx.district;
-  const apiNum   = input.api_number   ? String(input.api_number).trim()   : null;
+  const apiRaw   = input.api_number   ? String(input.api_number).trim()   : ctx.api_numbers[0] ?? null;
 
-  // Production comes from EWA's productionQueryAction.do (via proxy)
-  // Try OIL lease first, then GAS lease if needed
-  const tryLeaseProduction = async (leaseType: string): Promise<string | null> => {
-    if (!leaseNo || !distCode) return null;
-    try {
-      return await fetchHtml(`${EWA_BASE}/productionQueryAction.do`, {
-        method: "POST",
-        body: formBody({
-          "searchArgs.leaseTypeArg": leaseType,
-          "searchArgs.districtArg": distCode,
-          "searchArgs.leaseNumberArg": leaseNo,
-          "methodToCall": "search",
-        }),
-      });
-    } catch { return null; }
+  // The EWA specificLeaseQueryAction.do requires server-side session state and cannot be
+  // called statlessly. Instead, we query the OIL and GAS PRORATION schedules
+  // (oilProQueryAction.do and gasProQueryAction.do), which provide the current
+  // production allowable, potential (BBL/MCFD), and well status.
+  //
+  // IMPORTANT: This is PRORATION data (current allowable), NOT monthly production history.
+  // Monthly production history requires direct EWA browser session access.
+
+  const results: Record<string, unknown>[] = [];
+
+  // Helper: parse result table from proration query
+  const parsePro = (html: string, leaseType: string) => {
+    const rows = extractTableRows(html);
+    const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator|Potential|Allowable/i)));
+    if (headerIdx < 0 || rows.length <= headerIdx + 1) return null;
+    const header = rows[headerIdx] ?? [];
+    const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3).map(row => {
+      const obj: Record<string, string> = {};
+      header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+      return obj;
+    });
+    if (dataRows.length === 0) return null;
+    return { lease_type: leaseType, proration_records: dataRows };
   };
 
-  try {
-    if (leaseNo && distCode) {
-      let html = await tryLeaseProduction("O");
-      let leaseType = "OIL";
-      let rows = html ? extractTableRows(html) : [];
-
-      if (rows.length < 2) {
-        html = await tryLeaseProduction("G");
-        leaseType = "GAS";
-        rows = html ? extractTableRows(html) : [];
-      }
-
-      if (rows.length < 2) {
-        return {
-          ok: true,
-          data: { found: false, lease_number: leaseNo, district: distCode, message: "No production records found for this lease." },
-          summary: `fetch_production: Lease ${leaseNo} / District ${distCode} — no records`,
-        };
-      }
-
-      const header = rows[0] ?? [];
-      const dataRows = rows.slice(1).map(row => {
-        const obj: Record<string, string> = {};
-        header.forEach((h, i) => { obj[h.toLowerCase().replace(/\s+/g, "_")] = row[i] ?? ""; });
-        return obj;
-      });
-
-      if (!ctx.lease_number) ctx.lease_number = leaseNo;
-      if (!ctx.district) ctx.district = distCode;
-      ctx.production = [...ctx.production, ...dataRows as ProductionRow[]];
-
-      const totalOil = dataRows.reduce((s, r) => s + parseFloat(r["oil_produced"] ?? r["oil"] ?? "0"), 0);
-      const totalGas = dataRows.reduce((s, r) => s + parseFloat(r["gas_produced"] ?? r["gas"] ?? "0"), 0);
-      const recent3 = dataRows.slice(-3);
-      const avg3Oil = recent3.length ? recent3.reduce((s, r) => s + parseFloat(r["oil_produced"] ?? "0"), 0) / recent3.length : 0;
-
-      return {
-        ok: true,
-        data: {
-          found: true,
-          source: `ewa-lease-${leaseType.toLowerCase()}`,
-          lease_number: leaseNo,
-          district: distCode,
-          months_of_data: dataRows.length,
-          total_oil_bbl: Math.round(totalOil),
-          total_gas_mcf: Math.round(totalGas),
-          three_month_avg_oil_bbl: Math.round(avg3Oil),
-          monthly_rows: dataRows.slice(-24),
-        },
-        summary: `fetch_production: Lease ${leaseNo} (${leaseType}) — ${Math.round(totalOil).toLocaleString()} BBL total, ${Math.round(avg3Oil)} BBL/mo (3-mo avg), ${dataRows.length} months`,
-      };
-    }
-
-    if (apiNum) {
-      // Try by API number — EWA productionQueryAction can search by API
-      const digits = apiNum.replace(/\D/g, "").slice(0, 10);
-      try {
-        const html = await fetchHtml(`${EWA_BASE}/productionQueryAction.do`, {
-          method: "POST",
-          body: formBody({ "searchArgs.apiNumber": digits, "methodToCall": "search" }),
-        });
-        const rows = extractTableRows(html);
-        if (rows.length >= 2) {
-          const header = rows[0] ?? [];
-          const dataRows = rows.slice(1).map(row => {
-            const obj: Record<string, string> = {};
-            header.forEach((h, i) => { obj[h.toLowerCase().replace(/\s+/g, "_")] = row[i] ?? ""; });
-            return obj;
-          });
-          ctx.production = [...ctx.production, ...dataRows as ProductionRow[]];
-          const totalOil = dataRows.reduce((s, r) => s + parseFloat(r["oil_produced"] ?? r["oil"] ?? "0"), 0);
-          return {
-            ok: true,
-            data: { found: true, source: "ewa-api", api_number: digits, months_of_data: dataRows.length, total_oil_bbl: Math.round(totalOil), monthly_rows: dataRows.slice(-24) },
-            summary: `fetch_production: API ${digits} — ${Math.round(totalOil).toLocaleString()} BBL total, ${dataRows.length} months`,
+  // Try by API number first (most specific)
+  if (apiRaw) {
+    const split = splitApi(apiRaw);
+    if (split) {
+      const dist = distCode ?? "";
+      for (const [endpoint, lt] of [
+        [`${EWA_BASE}/oilProQueryAction.do`, "OIL"],
+        [`${EWA_BASE}/gasProQueryAction.do`, "GAS"],
+      ] as [string, string][]) {
+        try {
+          const params: Record<string, string> = {
+            "searchArgs.apiPrefixArg": split.prefix,
+            "searchArgs.apiSuffixArg": split.suffix,
+            "methodToCall": "search",
           };
-        }
-      } catch { /* fall through */ }
-
-      return {
-        ok: true,
-        data: { found: false, api_number: digits, message: "No production data found for this API. Try fetching by lease number instead." },
-        summary: `fetch_production: API ${digits} — no data`,
-      };
+          if (dist) params["searchArgs.districtCodeArg"] = dist;
+          const html = await fetchHtml(endpoint, { method: "POST", body: formBody(params) });
+          const parsed = parsePro(html, lt);
+          if (parsed) results.push(parsed);
+        } catch { /* continue */ }
+      }
     }
-
-    return { ok: false, data: { error: "Provide (lease_number + district) or api_number" }, summary: "fetch_production: missing parameters" };
-  } catch (e) {
-    return { ok: false, data: { error: String(e) }, summary: `fetch_production: failed — ${String(e).slice(0, 80)}` };
   }
+
+  // Also try by lease + district if we have both
+  if (leaseNo && distCode && results.length === 0) {
+    for (const [endpoint, lt] of [
+      [`${EWA_BASE}/oilProQueryAction.do`, "OIL"],
+      [`${EWA_BASE}/gasProQueryAction.do`, "GAS"],
+    ] as [string, string][]) {
+      try {
+        const html = await fetchHtml(endpoint, {
+          method: "POST",
+          body: formBody({
+            "searchArgs.leaseNumberArg": leaseNo,
+            "searchArgs.districtCodeArg": distCode,
+            "methodToCall": "search",
+          }),
+        });
+        const parsed = parsePro(html, lt);
+        if (parsed) results.push(parsed);
+      } catch { /* continue */ }
+    }
+  }
+
+  if (results.length === 0) {
+    return {
+      ok: true,
+      data: {
+        found: false,
+        note: "PRORATION DATA: No proration/allowable records found for this well. Monthly production history requires direct EWA browser session — mark as data gap.",
+        lease_number: leaseNo,
+        district: distCode,
+      },
+      summary: `fetch_production: ${leaseNo ?? apiRaw ?? "?"} — no proration records (monthly history requires EWA session)`,
+    };
+  }
+
+  // Summarize what we found
+  const allRecs = results.flatMap(r => (r["proration_records"] as Record<string, string>[]) ?? []);
+  const firstRec = allRecs[0] ?? {};
+  const potential = firstRec["potential_bbl_"] ?? firstRec["potential"] ?? "N/A";
+  const allowable = firstRec["daily_allowable"] ?? firstRec["allowable"] ?? "N/A";
+  const wellType  = firstRec["unit_or_well_type"] ?? firstRec["oil_gas"] ?? "N/A";
+
+  return {
+    ok: true,
+    data: {
+      found: true,
+      data_note: "PRORATION DATA (current allowable), NOT monthly production history. Monthly history requires EWA browser session — list as data gap.",
+      lease_number: leaseNo,
+      district: distCode,
+      proration_results: results,
+      summary_first_well: { potential_bbl: potential, daily_allowable: allowable, well_type: wellType },
+    },
+    summary: `fetch_production: proration data retrieved — Potential: ${potential} BBL, Daily Allowable: ${allowable}, Type: ${wellType} (note: monthly history not available statlessly)`,
+  };
 }
 
-async function toolFetchCompletionRecords(input: Record<string, unknown>): Promise<ToolResult> {
-  const apis = (input.api_numbers as string[] | undefined) ?? [];
+async function toolFetchCompletionRecords(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+  const apis = (input.api_numbers as string[] | undefined) ?? ctx.api_numbers.slice(0, 5);
   if (apis.length === 0) return { ok: false, data: { error: "api_numbers required" }, summary: "fetch_completion_records: no APIs" };
 
+  // The EWA CMPL (completionQueryAction.do) endpoint is not accessible statlessly.
+  // We retrieve wellbore data from wellboreQueryAction.do which includes formation name,
+  // API depth, well type, and on-schedule status — the core completion identifiers.
   try {
     const results: Record<string, unknown>[] = [];
     for (const api of apis.slice(0, 5)) {
+      const split = splitApi(api);
+      if (!split) { results.push({ api, error: "invalid API format" }); continue; }
       try {
-        const digits = api.replace(/\D/g, "").slice(0, 10);
-        const html = await fetchHtml(`${EWA_BASE}/completionQueryAction.do`, {
+        const html = await fetchHtml(`${EWA_BASE}/wellboreQueryAction.do`, {
           method: "POST",
-          body: formBody({ "searchArgs.apiNumber": digits, "methodToCall": "search" }),
+          body: formBody({
+            "searchArgs.apiNoPrefixArg": split.prefix,
+            "searchArgs.apiNoSuffixArg": split.suffix,
+            "searchArgs.scheduleTypeArg": "Both",
+            "methodToCall": "search",
+          }),
         });
         const rows = extractTableRows(html);
-        if (rows.length > 1) results.push({ api: digits, raw_table: rows.slice(0, 3) });
-        else results.push({ api: digits, message: "no completion records found" });
+        const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator|Field|Depth/i)));
+        if (headerIdx >= 0 && rows.length > headerIdx + 1) {
+          const header = rows[headerIdx] ?? [];
+          const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3).map(row => {
+            const obj: Record<string, string> = {};
+            header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+            return obj;
+          });
+          results.push({
+            api: `42-${split.prefix}-${split.suffix}`,
+            source: "ewa-wellbore",
+            wellbores: dataRows.slice(0, 5),
+            note: "Completion data from wellbore query. W-2 completion documents require direct EWA CMPL access.",
+          });
+        } else {
+          results.push({ api: `42-${split.prefix}-${split.suffix}`, message: "No wellbore data found for this API." });
+        }
       } catch (e) {
         results.push({ api, error: String(e).slice(0, 80) });
       }
     }
 
-    const found = results.filter(r => !r["error"]);
     return {
       ok: true,
-      data: { count: found.length, completions: found },
-      summary: `fetch_completion_records: ${found.length} record(s) for ${apis.length} API(s)`,
+      data: {
+        apis_queried: apis.length,
+        results,
+        note: "Full W-2 completion packets (CMPL system) are not accessible via stateless EWA queries. Formation, depth, and well type retrieved from wellbore query.",
+      },
+      summary: `fetch_completion_records: wellbore data retrieved for ${results.filter(r => r["wellbores"]).length}/${apis.length} APIs (W-2 docs require CMPL session)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_completion_records: failed — ${String(e).slice(0, 80)}` };
   }
 }
 
-async function toolFetchInactiveWellStatus(input: Record<string, unknown>): Promise<ToolResult> {
-  const apiNum = input.api_number      ? String(input.api_number).trim()      : null;
-  const opNo   = input.operator_number ? String(input.operator_number).trim() : null;
+async function toolFetchInactiveWellStatus(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+  const apiRaw = input.api_number      ? String(input.api_number).trim()      : ctx.api_numbers[0] ?? null;
+  const opNo   = input.operator_number ? String(input.operator_number).trim() : ctx.operator_number ?? null;
   const leaseType = (input.lease_type as string | undefined) ?? "O";
 
   try {
-    if (apiNum) {
-      const digits = apiNum.replace(/\D/g, "").slice(0, 10);
+    if (apiRaw) {
+      const split = splitApi(apiRaw);
+      if (!split) return { ok: false, data: { error: "Invalid API format" }, summary: "fetch_inactive_well_status: invalid API" };
+
       const html = await fetchHtml(`${EWA_BASE}/inactiveWellQueryAction.do`, {
         method: "POST",
-        body: formBody({ "searchArgs.apiNumber": digits, "methodToCall": "search" }),
+        body: formBody({
+          "searchArgs.apiNoPrefixArg": split.prefix,
+          "searchArgs.apiNoSuffixArg": split.suffix,
+          "methodToCall": "search",
+        }),
       });
+
+      const text = extractText(html, 1000);
+      const hasError = text.includes("No results found") || text.includes("Ewa_117");
       const rows = extractTableRows(html);
-      const isInactive = rows.length > 1;
+      const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|Inactive|Lease|Operator|Aging/i)));
+      const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1).filter(r => r.length >= 2) : [];
+      const isInactive = dataRows.length > 0 && !hasError;
+
       return {
         ok: true,
-        data: { api_number: digits, is_inactive: isInactive, records: rows.slice(1, 6), text: extractText(html, 500) },
-        summary: `fetch_inactive_well_status: API ${digits} — ${isInactive ? "INACTIVE (on EWA list)" : "not on inactive list"}`,
+        data: {
+          api_number: `42-${split.prefix}-${split.suffix}`,
+          is_inactive: isInactive,
+          inactive_record_count: dataRows.length,
+          records: dataRows.slice(0, 5),
+          interpretation: isInactive
+            ? "Well appears on the TRRC Inactive Well Aging Report (IWAR). Plugging liability risk."
+            : "Well is NOT on the IWAR inactive well list.",
+        },
+        summary: `fetch_inactive_well_status: API 42-${split.prefix}-${split.suffix} — ${isInactive ? `INACTIVE (${dataRows.length} record(s))` : "not on inactive list"}`,
       };
     }
 
     if (opNo) {
       const html = await fetchHtml(`${EWA_BASE}/inactiveWellQueryAction.do`, {
         method: "POST",
-        body: formBody({ "searchArgs.operatorNo": opNo, "searchArgs.leaseTypeArg": leaseType, "methodToCall": "search" }),
+        body: formBody({
+          "searchArgs.operatorNumbersArg": opNo,
+          "searchArgs.leaseTypeArg": leaseType,
+          "methodToCall": "search",
+        }),
       });
       const rows = extractTableRows(html);
+      const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|Lease|Operator|Aging/i)));
+      const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1).filter(r => r.length >= 2) : [];
       return {
         ok: true,
-        data: { operator_number: opNo, lease_type: leaseType, count: Math.max(0, rows.length - 1), wells: rows.slice(1, 21) },
-        summary: `fetch_inactive_well_status: operator ${opNo} — ${Math.max(0, rows.length - 1)} inactive wells`,
+        data: { operator_number: opNo, lease_type: leaseType, inactive_well_count: dataRows.length, wells: dataRows.slice(0, 20) },
+        summary: `fetch_inactive_well_status: operator ${opNo} — ${dataRows.length} inactive well(s)`,
       };
     }
 
@@ -1058,64 +1123,55 @@ async function toolFetchInactiveWellStatus(input: Record<string, unknown>): Prom
   }
 }
 
-async function toolFetchPluggingRecords(input: Record<string, unknown>): Promise<ToolResult> {
-  const apiNum  = input.api_number   ? String(input.api_number).trim()   : null;
-  const leaseNo = input.lease_number ? String(input.lease_number).trim() : null;
-  const dist    = input.district     ? String(input.district).trim()     : null;
+async function toolFetchPluggingRecords(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+  const apiRaw  = input.api_number   ? String(input.api_number).trim()   : ctx.api_numbers[0] ?? null;
+  const leaseNo = input.lease_number ? String(input.lease_number).trim() : ctx.lease_number ?? null;
 
-  try {
-    const params: Record<string, string> = { "methodToCall": "search" };
-    if (apiNum) {
-      params["searchArgs.apiNumber"] = apiNum.replace(/\D/g, "").slice(0, 10);
-    } else if (leaseNo && dist) {
-      params["searchArgs.leaseNumberArg"] = leaseNo;
-      params["searchArgs.districtArg"] = dist;
-    } else {
-      return { ok: false, data: { error: "Provide api_number or (lease_number + district)" }, summary: "fetch_plugging_records: missing input" };
-    }
-
-    const html = await fetchHtml(`${EWA_BASE}/pluggingQueryAction.do`, { method: "POST", body: formBody(params) });
-    const rows = extractTableRows(html);
-    const label = apiNum ?? `Lease ${leaseNo}`;
-
-    return {
-      ok: true,
-      data: { identifier: label, count: Math.max(0, rows.length - 1), records: rows.slice(1, 11) },
-      summary: `fetch_plugging_records: ${label} — ${Math.max(0, rows.length - 1)} plugging record(s)`,
-    };
-  } catch (e) {
-    return { ok: false, data: { error: String(e) }, summary: `fetch_plugging_records: failed — ${String(e).slice(0, 80)}` };
-  }
+  // The EWA pluggingQueryAction.do endpoint returns HTTP 500 (not publicly accessible).
+  // Plugging status can be inferred from:
+  //   1. The wellbore status — if well_type is "AB" (Abandoned) or "PP" (Partial Plug), it's plugged.
+  //   2. The inactive well query — P5 renewal status includes plugging liability.
+  // Note these identifiers for the report.
+  return {
+    ok: true,
+    data: {
+      api_number: apiRaw,
+      lease_number: leaseNo,
+      endpoint_available: false,
+      message: "TRRC EWA pluggingQueryAction.do is not publicly accessible. " +
+        "Plugging status should be inferred from the well type in the wellbore query " +
+        "(well_type AB = Abandoned, PP = Partial Plug) and from the inactive well aging report. " +
+        "For verified plugging records, review the W-3C plugging report at https://www.rrc.texas.gov directly.",
+      data_gap: true,
+    },
+    summary: `fetch_plugging_records: endpoint not accessible — infer from wellbore well_type and IWAR records`,
+  };
 }
 
-async function toolFetchP4Records(input: Record<string, unknown>): Promise<ToolResult> {
-  const apiNum  = input.api_number   ? String(input.api_number).trim()   : null;
-  const leaseNo = input.lease_number ? String(input.lease_number).trim() : null;
-  const dist    = input.district     ? String(input.district).trim()     : null;
+async function toolFetchP4Records(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+  const apiRaw  = input.api_number   ? String(input.api_number).trim()   : ctx.api_numbers[0] ?? null;
+  const leaseNo = input.lease_number ? String(input.lease_number).trim() : ctx.lease_number ?? null;
+  const dist    = input.district     ? String(input.district).trim()     : ctx.district ?? null;
 
-  try {
-    const params: Record<string, string> = { "methodToCall": "search" };
-    if (apiNum) {
-      params["searchArgs.apiNumber"] = apiNum.replace(/\D/g, "").slice(0, 10);
-    } else if (leaseNo && dist) {
-      params["searchArgs.leaseNumberArg"] = leaseNo;
-      params["searchArgs.districtArg"] = dist;
-    } else {
-      return { ok: false, data: { error: "Provide api_number or (lease_number + district)" }, summary: "fetch_p4_records: missing input" };
-    }
-
-    const html = await fetchHtml(`${EWA_BASE}/p4QueryAction.do`, { method: "POST", body: formBody(params) });
-    const rows = extractTableRows(html);
-    const label = apiNum ?? `Lease ${leaseNo}`;
-
-    return {
-      ok: true,
-      data: { identifier: label, count: Math.max(0, rows.length - 1), records: rows.slice(1, 11) },
-      summary: `fetch_p4_records: ${label} — ${Math.max(0, rows.length - 1)} P-4 record(s)`,
-    };
-  } catch (e) {
-    return { ok: false, data: { error: String(e) }, summary: `fetch_p4_records: failed — ${String(e).slice(0, 80)}` };
-  }
+  // The EWA p4QueryAction.do endpoint returns HTTP 500 (not publicly accessible).
+  // P-4 production test data (tested rate, allowable, gatherer) is not available statlessly.
+  // The oil proration query (oilProQueryAction.do) provides the current ALLOWABLE which is
+  // related to P-4 test data. Use that as the best available proxy.
+  return {
+    ok: true,
+    data: {
+      api_number: apiRaw,
+      lease_number: leaseNo,
+      district: dist,
+      endpoint_available: false,
+      message: "TRRC EWA p4QueryAction.do is not publicly accessible statlessly. " +
+        "P-4 production test records (tested rate, allowable) are reflected in the oil proration " +
+        "schedule retrieved by fetch_proration. Use that data to assess production test results. " +
+        "For full P-4 records, access the TRRC EWA directly with a browser session.",
+      data_gap: true,
+    },
+    summary: `fetch_p4_records: endpoint not accessible — use proration data as proxy for P-4 tested rates`,
+  };
 }
 
 async function toolFetchWellStatus(input: Record<string, unknown>): Promise<ToolResult> {
@@ -1123,25 +1179,50 @@ async function toolFetchWellStatus(input: Record<string, unknown>): Promise<Tool
   const leaseNo = input.lease_number ? String(input.lease_number).trim() : null;
   const dist    = input.district     ? String(input.district).trim()     : null;
 
+  // wellStatusQueryAction.do returns HTTP 500 (not publicly accessible).
+  // Use wellboreQueryAction.do instead — it returns on_schedule and well_type fields
+  // which encode the same well status information.
   try {
-    const params: Record<string, string> = { "methodToCall": "search" };
+    let html: string;
+    let label: string;
     if (apiNum) {
-      params["searchArgs.apiNumber"] = apiNum.replace(/\D/g, "").slice(0, 10);
+      const split = splitApi(apiNum);
+      if (!split) return { ok: false, data: { error: "Invalid API number format" }, summary: "fetch_well_status: invalid API" };
+      html = await fetchHtml(`${EWA_BASE}/wellboreQueryAction.do`, {
+        method: "POST",
+        body: formBody({
+          "searchArgs.apiNoPrefixArg": split.prefix,
+          "searchArgs.apiNoSuffixArg": split.suffix,
+          "searchArgs.scheduleTypeArg": "Both",
+          "methodToCall": "search",
+        }),
+      });
+      label = apiNum;
     } else if (leaseNo && dist) {
-      params["searchArgs.leaseNumberArg"] = leaseNo;
-      params["searchArgs.districtArg"] = dist;
+      html = await fetchHtml(`${EWA_BASE}/wellboreQueryAction.do`, {
+        method: "POST",
+        body: formBody({
+          "searchArgs.leaseNumberArg": leaseNo,
+          "searchArgs.districtCodeArg": dist,
+          "searchArgs.scheduleTypeArg": "Both",
+          "methodToCall": "search",
+        }),
+      });
+      label = `Lease ${leaseNo} District ${dist}`;
     } else {
       return { ok: false, data: { error: "Provide api_number or (lease_number + district)" }, summary: "fetch_well_status: missing input" };
     }
 
-    const html = await fetchHtml(`${EWA_BASE}/wellStatusQueryAction.do`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
-    const label = apiNum ?? `Lease ${leaseNo}`;
-
     return {
       ok: true,
-      data: { identifier: label, count: Math.max(0, rows.length - 1), statuses: rows.slice(1, 21) },
-      summary: `fetch_well_status: ${label} — ${Math.max(0, rows.length - 1)} status record(s)`,
+      data: {
+        identifier: label,
+        count: Math.max(0, rows.length - 1),
+        statuses: rows.slice(1, 21),
+        note: "Well status derived from wellbore query (on_schedule, well_type columns). wellStatusQueryAction.do is not publicly accessible.",
+      },
+      summary: `fetch_well_status: ${label} — ${Math.max(0, rows.length - 1)} wellbore record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_well_status: failed — ${String(e).slice(0, 80)}` };
@@ -1153,10 +1234,16 @@ async function toolFetchOrphanWell(input: Record<string, unknown>): Promise<Tool
   if (!apiNum) return { ok: false, data: { error: "api_number required" }, summary: "fetch_orphan_well: no input" };
 
   try {
+    const split = splitApi(apiNum);
+    if (!split) return { ok: false, data: { error: "Invalid API number format" }, summary: "fetch_orphan_well: invalid API" };
     const digits = apiNum.replace(/\D/g, "").slice(0, 10);
     const html = await fetchHtml(`${EWA_BASE}/orphanWellQueryAction.do`, {
       method: "POST",
-      body: formBody({ "searchArgs.apiNumber": digits, "methodToCall": "search" }),
+      body: formBody({
+        "searchArgs.apiNoPrefixArg": split.prefix,
+        "searchArgs.apiNoSuffixArg": split.suffix,
+        "methodToCall": "search",
+      }),
     });
     const rows = extractTableRows(html);
     const isOrphan = rows.length > 1;
@@ -1172,18 +1259,29 @@ async function toolFetchOrphanWell(input: Record<string, unknown>): Promise<Tool
 }
 
 async function toolFetchSeveranceRecords(input: Record<string, unknown>): Promise<ToolResult> {
-  const apiNum = input.api_number      ? String(input.api_number).trim()      : null;
-  const opNo   = input.operator_number ? String(input.operator_number).trim() : null;
+  const leaseNo   = input.lease_number   ? String(input.lease_number).trim()   : null;
+  const leaseType = input.lease_type     ? String(input.lease_type).trim()     : "O";
+  const dist      = input.district       ? String(input.district).trim()       : null;
+  const opNo      = input.operator_number ? String(input.operator_number).trim() : null;
 
+  // severanceQueryAction.do uses lease/district identifiers, not raw API number
   try {
     const params: Record<string, string> = { "methodToCall": "search" };
-    if (apiNum) params["searchArgs.apiNumber"] = apiNum.replace(/\D/g, "").slice(0, 10);
-    else if (opNo) params["searchArgs.operatorNo"] = opNo;
-    else return { ok: false, data: { error: "Provide api_number or operator_number" }, summary: "fetch_severance_records: missing input" };
+    let label: string;
+    if (leaseNo && dist) {
+      params["searchArgs.leaseNumberArg"] = leaseNo;
+      params["searchArgs.districtCodeArg"] = dist;
+      params["searchArgs.leaseTypeArg"] = leaseType.toUpperCase() === "G" ? "G" : "O";
+      label = `Lease ${leaseNo} District ${dist}`;
+    } else if (opNo) {
+      params["searchArgs.operatorNumbersArg"] = opNo;
+      label = `Operator ${opNo}`;
+    } else {
+      return { ok: false, data: { error: "Provide (lease_number + district) or operator_number" }, summary: "fetch_severance_records: missing input" };
+    }
 
     const html = await fetchHtml(`${EWA_BASE}/severanceQueryAction.do`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
-    const label = apiNum ?? `Operator ${opNo}`;
 
     return {
       ok: true,
@@ -1195,76 +1293,67 @@ async function toolFetchSeveranceRecords(input: Record<string, unknown>): Promis
   }
 }
 
-async function toolFetchComplianceViolations(input: Record<string, unknown>): Promise<ToolResult> {
-  const opNo   = input.operator_number ? String(input.operator_number).trim() : null;
-  const opName = input.operator_name   ? String(input.operator_name).trim()   : null;
-  const county = input.county          ? String(input.county).trim()          : null;
-
-  try {
-    const params: Record<string, string> = { "methodToCall": "search" };
-    let queryMethod = "";
-
-    if (opNo) {
-      params["searchArgs.operatorNo"] = opNo;
-      queryMethod = `operator number ${opNo}`;
-    } else if (opName) {
-      params["searchArgs.operatorName"] = opName;
-      queryMethod = `operator name "${opName}"`;
-    } else {
-      return { ok: false, data: { error: "Provide operator_number or operator_name" }, summary: "fetch_compliance_violations: no operator identifier" };
-    }
-    if (county) params["searchArgs.county"] = county;
-
-    const html = await fetchHtml(`${EWA_BASE}/violationQueryAction.do`, { method: "POST", body: formBody(params) });
-    const rows = extractTableRows(html);
-    const violationCount = Math.max(0, rows.length - 1);
-
-    if (violationCount === 0) {
-      return {
-        ok: true,
-        data: {
-          found_violations: false,
-          query_method: queryMethod,
-          important_note: "Zero violations returned. This may mean clean record OR incorrect identifier / failed query. Do NOT report as confirmed clean without noting this uncertainty.",
-        },
-        summary: `fetch_compliance_violations: 0 violations via ${queryMethod} (unconfirmed — may be query miss)`,
-      };
-    }
-
-    return {
-      ok: true,
-      data: { found_violations: true, query_method: queryMethod, total_violations: violationCount, violations: rows.slice(1, 11) },
-      summary: `fetch_compliance_violations: ${violationCount} violations via ${queryMethod}`,
-    };
-  } catch (e) {
-    return { ok: false, data: { error: String(e) }, summary: `fetch_compliance_violations: failed — ${String(e).slice(0, 80)}` };
-  }
+async function toolFetchComplianceViolations(_input: Record<string, unknown>): Promise<ToolResult> {
+  // violationQueryAction.do returns HTTP 500 (not publicly accessible statlessly).
+  // Compliance violations must be looked up directly in the TRRC EWA with a browser session.
+  return {
+    ok: true,
+    data: {
+      endpoint_available: false,
+      message: "TRRC EWA violationQueryAction.do is not publicly accessible statlessly (returns HTTP 500). " +
+        "Compliance violation history cannot be retrieved programmatically. " +
+        "For operator compliance records, visit https://www.rrc.texas.gov/compliance-enforcement/ directly " +
+        "or use the TRRC EWA with a browser session. Note this as a data gap in your report.",
+      data_gap: true,
+    },
+    summary: "fetch_compliance_violations: endpoint not accessible — manual review required via TRRC EWA browser session",
+  };
 }
 
 async function toolFetchProration(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
-  const leaseNo   = String(input.lease_number ?? "").trim();
+  const apiRaw    = input.api_number   ? String(input.api_number).trim()   : (ctx.api_numbers[0] ?? null);
+  const leaseNo   = input.lease_number ? String(input.lease_number).trim() : (ctx.lease_number ?? null);
   const leaseType = (input.lease_type as string | undefined) ?? "oil";
-  const distCode  = input.district ? String(input.district).trim() : (ctx.district ?? "");
-  const api10     = ctx.api_numbers[0] ?? leaseNo;
+  const distCode  = input.district     ? String(input.district).trim()     : (ctx.district ?? "");
 
-  if (!api10) return { ok: false, data: { error: "No api10 available. Search for a well first." }, summary: "fetch_proration: no api10" };
-  if (!distCode) return { ok: false, data: { error: "district required for proration" }, summary: "fetch_proration: missing district" };
-
+  // prorationQueryAction.do does not exist. Use oilProQueryAction.do (oil) or gasProQueryAction.do (gas).
+  // These endpoints use apiPrefixArg/apiSuffixArg (NOT apiNoPrefixArg/apiNoSuffixArg).
+  // They return proration ALLOWABLE schedules, not monthly production history.
   try {
-    const params: Record<string, string> = {
-      "searchArgs.apiNumber": api10.replace(/\D/g, "").slice(0, 10),
-      "searchArgs.districtArg": distCode,
-      "searchArgs.leaseTypeArg": leaseType === "gas" ? "G" : "O",
-      "methodToCall": "search",
-    };
+    const params: Record<string, string> = { "methodToCall": "search" };
+    let label: string;
 
-    const html = await fetchHtml(`${EWA_BASE}/prorationQueryAction.do`, { method: "POST", body: formBody(params) });
+    if (apiRaw) {
+      const split = splitApi(apiRaw);
+      if (!split) return { ok: false, data: { error: "Invalid API number format" }, summary: "fetch_proration: invalid API" };
+      params["searchArgs.apiPrefixArg"]  = split.prefix;
+      params["searchArgs.apiSuffixArg"]  = split.suffix;
+      if (distCode) params["searchArgs.districtCodeArg"] = distCode;
+      label = apiRaw;
+    } else if (leaseNo && distCode) {
+      params["searchArgs.leaseNumberArg"] = leaseNo;
+      params["searchArgs.districtCodeArg"] = distCode;
+      params["searchArgs.leaseTypeArg"]    = leaseType === "gas" ? "G" : "O";
+      label = `Lease ${leaseNo} District ${distCode}`;
+    } else {
+      return { ok: false, data: { error: "Provide api_number or (lease_number + district)" }, summary: "fetch_proration: missing input" };
+    }
+
+    const endpoint = leaseType === "gas" ? "gasProQueryAction.do" : "oilProQueryAction.do";
+    const html = await fetchHtml(`${EWA_BASE}/${endpoint}`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
 
     return {
       ok: true,
-      data: { api10, district: distCode, lease_type: leaseType, count: Math.max(0, rows.length - 1), records: rows.slice(1, 11) },
-      summary: `fetch_proration: API ${api10} (${leaseType}) — ${Math.max(0, rows.length - 1)} proration record(s)`,
+      data: {
+        identifier: label,
+        lease_type: leaseType,
+        district: distCode,
+        count: Math.max(0, rows.length - 1),
+        records: rows.slice(1, 11),
+        important_note: "This is PRORATION ALLOWABLE data (permitted schedule), not monthly production history. Monthly production history is not accessible via stateless EWA queries.",
+      },
+      summary: `fetch_proration: ${label} (${leaseType}) — ${Math.max(0, rows.length - 1)} proration record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_proration: failed — ${String(e).slice(0, 80)}` };
@@ -1272,58 +1361,56 @@ async function toolFetchProration(input: Record<string, unknown>, ctx: AgentCont
 }
 
 async function toolFetchInjectionRecords(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
-  const apiNum = input.api_number      ? String(input.api_number).trim()      : null;
+  const apiNum = input.api_number      ? String(input.api_number).trim()      : (ctx.api_numbers[0] ?? null);
   const opNo   = input.operator_number ? String(input.operator_number).trim() : null;
 
+  // injectionQueryAction.do does not exist. Use uicQueryAction.do for UIC/injection well records.
+  // Field names: apiNoPrefixArg / apiNoSuffixArg (same as wellbore query)
   try {
     const params: Record<string, string> = { "methodToCall": "search" };
-    if (apiNum) params["searchArgs.apiNumber"] = apiNum.replace(/\D/g, "").slice(0, 10);
-    else if (opNo) params["searchArgs.operatorNo"] = opNo;
-    else return { ok: false, data: { error: "Provide api_number or operator_number" }, summary: "fetch_injection_records: missing input" };
+    let label: string;
+    if (apiNum) {
+      const split = splitApi(apiNum);
+      if (!split) return { ok: false, data: { error: "Invalid API number format" }, summary: "fetch_injection_records: invalid API" };
+      params["searchArgs.apiNoPrefixArg"] = split.prefix;
+      params["searchArgs.apiNoSuffixArg"] = split.suffix;
+      label = apiNum;
+    } else if (opNo) {
+      params["searchArgs.operatorNumbersArg"] = opNo;
+      label = `Operator ${opNo}`;
+    } else {
+      return { ok: false, data: { error: "Provide api_number or operator_number" }, summary: "fetch_injection_records: missing input" };
+    }
 
-    const html = await fetchHtml(`${EWA_BASE}/injectionQueryAction.do`, { method: "POST", body: formBody(params) });
+    const html = await fetchHtml(`${EWA_BASE}/uicQueryAction.do`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
-    const label = apiNum ?? `Operator ${opNo ?? ctx.operator_number}`;
 
     return {
       ok: true,
       data: { identifier: label, count: Math.max(0, rows.length - 1), records: rows.slice(1, 11) },
-      summary: `fetch_injection_records: ${label} — ${Math.max(0, rows.length - 1)} injection record(s)`,
+      summary: `fetch_injection_records: ${label} — ${Math.max(0, rows.length - 1)} UIC injection record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_injection_records: failed — ${String(e).slice(0, 80)}` };
   }
 }
 
-async function toolFetchImagedRecords(input: Record<string, unknown>): Promise<ToolResult> {
-  const apis = (input.api_numbers as string[] | undefined) ?? [];
-  if (apis.length === 0) return { ok: false, data: { error: "api_numbers required" }, summary: "fetch_imaged_records: no APIs" };
-
-  try {
-    const results: Record<string, unknown>[] = [];
-    for (const api of apis.slice(0, 5)) {
-      try {
-        const digits = api.replace(/\D/g, "").slice(0, 10);
-        const html = await fetchHtml(`${CMPL_BASE}/publicCmplQueryAction.do`, {
-          method: "POST",
-          body: formBody({ "searchArgs.apiNumber": digits, "methodToCall": "search" }),
-        });
-        const rows = extractTableRows(html);
-        results.push({ api: digits, document_count: Math.max(0, rows.length - 1), documents: rows.slice(1, 6) });
-      } catch {
-        results.push({ api, error: "retrieval failed" });
-      }
-    }
-
-    const totalDocs = results.reduce((s, r) => s + (Number(r["document_count"] ?? 0)), 0);
-    return {
-      ok: true,
-      data: { apis_queried: apis.length, total_documents: totalDocs, results },
-      summary: `fetch_imaged_records: ${apis.length} API(s) — ${totalDocs} document(s) found`,
-    };
-  } catch (e) {
-    return { ok: false, data: { error: String(e) }, summary: `fetch_imaged_records: failed — ${String(e).slice(0, 80)}` };
-  }
+async function toolFetchImagedRecords(_input: Record<string, unknown>): Promise<ToolResult> {
+  // The TRRC CMPL system (publicCmplQueryAction.do) returns HTTP 404.
+  // Imaged scanned records (W-2, G-1, P-12, etc.) are not accessible via stateless HTTP.
+  // They require a direct browser session at https://www.rrc.texas.gov/resource-center/research/online-research-queries/
+  return {
+    ok: true,
+    data: {
+      endpoint_available: false,
+      message: "TRRC CMPL imaged document system (publicCmplQueryAction.do) is not publicly accessible (returns HTTP 404). " +
+        "Scanned well records (W-2 completions, G-1 gas well completions, P-12 plugging, etc.) require " +
+        "direct access at https://www.rrc.texas.gov/resource-center/research/online-research-queries/ " +
+        "Note this as a data gap. Key document types to flag for manual review: W-2 completion report, G-1 completion report.",
+      data_gap: true,
+    },
+    summary: "fetch_imaged_records: CMPL endpoint not accessible — manual document retrieval required",
+  };
 }
 
 function toolSubmitReport(input: Record<string, unknown>, ctx: AgentContext): ToolResult {
