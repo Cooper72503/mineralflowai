@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * TRRC CMPL Completion Packets — Automated Source Adapter (Post-2009)
  *

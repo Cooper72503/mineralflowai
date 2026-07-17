@@ -4,13 +4,6 @@ import React, { useState, useEffect, useCallback } from "react";
 import type {
   TrrcDueDiligenceRun,
   TrrcIdentifierType,
-  SourceAttemptStatus,
-  FindingSeverity,
-  AcquisitionRecommendation,
-  TrrcFinding,
-  TrrcMissingItem,
-  SourceCoverageStatus,
-  ScoreDimension,
   ResolvedEntity,
 } from "../../../lib/trrc/types";
 // detectInputType unused — each field has an explicit type now
@@ -141,69 +134,6 @@ function DdTable({ headers, rows }: { headers: string[]; rows: (React.ReactNode 
       </table>
     </div>
   );
-}
-
-// ─── Source status helpers ─────────────────────────────────────────────────────
-
-function sourceStatusIcon(status: SourceAttemptStatus): string {
-  switch (status) {
-    case "success":          return "✅";
-    case "manual_required":  return "📋";
-    case "failed_transient":
-    case "failed_permanent": return "❌";
-    case "rate_limited":     return "⏳";
-    default:                 return "⏳";
-  }
-}
-
-function sourceStatusColor(status: SourceAttemptStatus): string {
-  switch (status) {
-    case "success":          return COLORS.green;
-    case "manual_required":  return COLORS.yellow;
-    case "failed_transient":
-    case "failed_permanent": return COLORS.red;
-    default:                 return COLORS.textFaint;
-  }
-}
-
-function coverageStatusColor(status: string): string {
-  switch (status) {
-    case "complete":               return COLORS.green;
-    case "partial":                return COLORS.yellow;
-    case "manual_required":        return COLORS.yellow;
-    case "retrieval_failed":       return COLORS.red;
-    case "no_applicable_record":   return COLORS.textMuted;
-    default:                       return COLORS.textFaint;
-  }
-}
-
-function severityColor(sev: FindingSeverity): string {
-  switch (sev) {
-    case "critical": return COLORS.red;
-    case "high":     return "#f97316";
-    case "medium":   return COLORS.yellow;
-    case "low":      return COLORS.accent;
-    default:         return COLORS.textMuted;
-  }
-}
-
-function severityBg(sev: FindingSeverity): string {
-  switch (sev) {
-    case "critical": return COLORS.redDim;
-    case "high":     return "rgba(249,115,22,0.12)";
-    case "medium":   return COLORS.yellowDim;
-    case "low":      return COLORS.accentDim;
-    default:         return "rgba(255,255,255,0.04)";
-  }
-}
-
-function recColor(rec: AcquisitionRecommendation): { bg: string; border: string; color: string } {
-  switch (rec) {
-    case "PURSUE":  return { bg: "rgba(34,197,94,0.1)",  border: COLORS.green,  color: COLORS.green };
-    case "REVIEW":  return { bg: "rgba(245,158,11,0.1)", border: COLORS.yellow, color: COLORS.yellow };
-    case "PASS":    return { bg: "rgba(239,68,68,0.1)",  border: COLORS.red,    color: COLORS.red };
-    case "BLOCKED": return { bg: "rgba(255,255,255,0.04)", border: COLORS.textFaint, color: COLORS.textMuted };
-  }
 }
 
 // ─── Form state type ───────────────────────────────────────────────────────────
@@ -485,6 +415,7 @@ export default function TrrcDueDiligencePage() {
             onDownload={handleDownload}
           />
         )}
+        {/* unused tab state kept to avoid breaking form-phase logic */}
       </div>
     </div>
   );
@@ -835,51 +766,33 @@ function ProgressUI({ run, onCancel }: { run: TrrcDueDiligenceRun; onCancel: () 
           gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
           gap: "0.6rem",
         }}>
-          {attempts.map(a => (
-            <div key={a.source_id} style={{
-              background: COLORS.surface,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 8,
-              padding: "0.7rem 0.9rem",
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 8,
-            }}>
-              <span style={{ fontSize: "1rem", lineHeight: 1 }}>{sourceStatusIcon(a.status)}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: "0.78rem",
-                  fontWeight: 600,
-                  color: COLORS.text,
-                  whiteSpace: "nowrap" as const,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}>
-                  {a.source_name}
+          {attempts.map(a => {
+            const sColor = a.status === "success" ? COLORS.green
+              : a.status === "manual_required" ? COLORS.yellow
+              : a.status === "failed_transient" || a.status === "failed_permanent" ? COLORS.red
+              : COLORS.textFaint;
+            const sIcon = a.status === "success" ? "✅"
+              : a.status === "manual_required" ? "📋"
+              : a.status === "failed_transient" || a.status === "failed_permanent" ? "❌"
+              : "⏳";
+            return (
+              <div key={a.source_id} style={{
+                background: COLORS.surface, border: `1px solid ${COLORS.border}`,
+                borderRadius: 8, padding: "0.7rem 0.9rem", display: "flex", alignItems: "flex-start", gap: 8,
+              }}>
+                <span style={{ fontSize: "1rem", lineHeight: 1 }}>{sIcon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "0.78rem", fontWeight: 600, color: COLORS.text, whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {SOURCE_LABELS[a.source_name] ?? a.source_name}
+                  </div>
+                  <div style={{ fontSize: "0.68rem", color: sColor, marginTop: 2 }}>
+                    {a.status.replace(/_/g, " ")}
+                    {a.result_count > 0 && ` · ${a.result_count} records`}
+                  </div>
                 </div>
-                <div style={{ fontSize: "0.68rem", color: sourceStatusColor(a.status), marginTop: 2 }}>
-                  {a.status.replace(/_/g, " ")}
-                  {a.result_count > 0 && ` · ${a.result_count} records`}
-                </div>
-                {a.status === "manual_required" && a.manual_action_url && (
-                  <a
-                    href={a.manual_action_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "inline-block",
-                      marginTop: 4,
-                      fontSize: "0.65rem",
-                      color: COLORS.yellow,
-                      textDecoration: "underline",
-                    }}
-                  >
-                    Open manual URL →
-                  </a>
-                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -976,17 +889,28 @@ function EntityCard({ entity, onSelect }: { entity: ResolvedEntity; onSelect: (i
 
 // ─── Results Dashboard ─────────────────────────────────────────────────────────
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "summary",    label: "Summary" },
-  { key: "scorecard",  label: "Scorecard" },
-  { key: "production", label: "Production" },
-  { key: "findings",   label: "Findings" },
-  { key: "coverage",   label: "Source Coverage" },
-  { key: "missing",    label: "Missing Records" },
-];
+// Human-readable labels for each TRRC source
+const SOURCE_LABELS: Record<string, string> = {
+  search_by_api:              "Wellbore Identity (API Lookup)",
+  search_by_lease:            "Lease Inventory",
+  search_by_operator:         "Operator / P5 Organization",
+  search_by_legal_description:"Legal Description (GIS)",
+  fetch_production:           "Production History",
+  fetch_completion_records:   "Completion Records (W-2)",
+  fetch_well_status:          "Well Status",
+  fetch_inactive_well_status: "Inactive Well Aging (IWAR)",
+  fetch_orphan_well:          "Orphan Well Check",
+  fetch_plugging_records:     "Plugging Records (W-3C)",
+  fetch_compliance_violations:"Compliance Violations",
+  fetch_p4_records:           "P-4 Gatherer / Purchaser",
+  fetch_proration:            "Proration / Daily Allowable",
+  fetch_injection_records:    "UIC / Injection Well Records",
+  fetch_severance_records:    "Severance & Seal Orders",
+  fetch_imaged_records:       "Imaged Document Packets",
+};
 
 function ResultsDashboard({
-  run, activeTab, setActiveTab, onReset, onDownload,
+  run, onReset, onDownload,
 }: {
   run: TrrcDueDiligenceRun;
   activeTab: TabKey;
@@ -994,84 +918,129 @@ function ResultsDashboard({
   onReset: () => void;
   onDownload: (type: "report" | "archive" | "manifest") => void;
 }) {
-  const sc = run.scorecard;
+  const attempts = run.source_attempts ?? [];
+  const found = attempts.filter(a => a.status === "success" && a.result_count > 0);
+  const manual = attempts.filter(a => a.status === "manual_required");
+  const notFound = attempts.filter(a => a.status === "success" && a.result_count === 0);
+  const failed = attempts.filter(a => a.status !== "success" && a.status !== "manual_required");
 
   return (
     <div>
-      {/* Recommendation banner */}
-      {sc && <RecommendationBanner scorecard={sc} />}
-
-      {/* Tab bar */}
-      <div style={{
-        display: "flex",
-        gap: 2,
-        marginBottom: "1rem",
-        borderBottom: `1px solid ${COLORS.border}`,
-        overflowX: "auto" as const,
-      }}>
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            style={{
-              background: "transparent",
-              border: "none",
-              borderBottom: activeTab === t.key ? `2px solid ${COLORS.accent}` : "2px solid transparent",
-              color: activeTab === t.key ? COLORS.accent : COLORS.textMuted,
-              fontSize: "0.82rem",
-              fontWeight: activeTab === t.key ? 600 : 400,
-              padding: "0.6rem 1rem",
-              cursor: "pointer",
-              whiteSpace: "nowrap" as const,
-              transition: "color 0.15s",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {activeTab === "summary"    && <SummaryTab run={run} />}
-      {activeTab === "scorecard"  && sc && <ScorecardTab scorecard={sc} />}
-      {activeTab === "production" && <ProductionTab run={run} />}
-      {activeTab === "findings"   && <FindingsTab run={run} />}
-      {activeTab === "coverage"   && <CoverageTab run={run} />}
-      {activeTab === "missing"    && <MissingTab run={run} />}
-
-      {/* Downloads */}
+      {/* Well identity panel */}
       <div style={{
         background: COLORS.surface,
         border: `1px solid ${COLORS.border}`,
         borderRadius: 10,
         padding: "1.25rem 1.5rem",
-        marginTop: "1rem",
+        marginBottom: "1rem",
       }}>
-        <div style={{
-          fontSize: "0.75rem",
-          fontWeight: 700,
-          color: COLORS.textMuted,
-          textTransform: "uppercase" as const,
-          letterSpacing: "0.1em",
-          marginBottom: "0.85rem",
-        }}>
+        <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.85rem" }}>
+          Well Identity
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "0.6rem" }}>
+          {[
+            { label: "API Number", value: run.resolved_primary_api },
+            { label: "Lease",      value: run.resolved_lease_number },
+            { label: "District",   value: run.resolved_district },
+            { label: "Operator #", value: run.resolved_operator_number },
+            { label: "Input",      value: run.original_input },
+          ].map(({ label, value }) => (
+            <div key={label} style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: "0.5rem 0.75rem" }}>
+              <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 3 }}>{label}</div>
+              <div style={{ fontSize: "0.85rem", color: value ? COLORS.text : COLORS.textFaint, fontWeight: value ? 500 : 400 }}>{value ?? "—"}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.6rem", marginBottom: "1rem" }}>
+        {[
+          { label: "Sources Found", value: found.length, color: COLORS.green },
+          { label: "Manual Required", value: manual.length, color: COLORS.yellow },
+          { label: "Not Found", value: notFound.length, color: COLORS.textMuted },
+          { label: "Failed", value: failed.length, color: failed.length > 0 ? COLORS.red : COLORS.textMuted },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
+            <div style={{ fontSize: "1.5rem", fontWeight: 700, color }}>{value}</div>
+            <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Retrieved records */}
+      {found.length > 0 && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.green, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+            Records Retrieved ({found.length})
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
+            {found.map(a => <SourceCard key={a.source_id} attempt={a} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Manual required */}
+      {manual.length > 0 && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.yellow, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+            Manual Retrieval Required ({manual.length})
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
+            {manual.map(a => <SourceCard key={a.source_id} attempt={a} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Not found / No records */}
+      {notFound.length > 0 && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+            No Records ({notFound.length})
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "0.4rem" }}>
+            {notFound.map(a => (
+              <div key={a.source_id} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: "0.6rem 0.85rem", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: "0.7rem", color: COLORS.textFaint }}>○</span>
+                <span style={{ fontSize: "0.78rem", color: COLORS.textMuted }}>{SOURCE_LABELS[a.source_name] ?? a.source_name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Failed */}
+      {failed.length > 0 && (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.red, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+            Failed ({failed.length})
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.4rem" }}>
+            {failed.map(a => (
+              <div key={a.source_id} style={{ background: COLORS.surface, border: `1px solid ${COLORS.red}30`, borderRadius: 7, padding: "0.6rem 0.85rem" }}>
+                <span style={{ fontSize: "0.78rem", color: COLORS.red }}>{SOURCE_LABELS[a.source_name] ?? a.source_name}</span>
+                {a.error_message && <span style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginLeft: 8 }}>— {a.error_message.slice(0, 100)}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Downloads */}
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.25rem 1.5rem", marginBottom: "1rem" }}>
+        <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.85rem" }}>
           Downloads
         </div>
         <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" as const }}>
           {([
-            { type: "report" as const,   label: "Download PDF Report" },
-            { type: "archive" as const,  label: "Download ZIP Archive" },
-            { type: "manifest" as const, label: "Download JSON Manifest" },
+            { type: "report" as const,   label: "PDF Report" },
+            { type: "archive" as const,  label: "ZIP Archive" },
+            { type: "manifest" as const, label: "JSON Manifest" },
           ]).map(({ type, label }) => (
             <button key={type} onClick={() => onDownload(type)} style={{
-              background: COLORS.surfaceAlt,
-              border: `1px solid ${COLORS.borderStrong}`,
-              borderRadius: 7,
-              color: COLORS.text,
-              fontSize: "0.8rem",
-              fontWeight: 500,
-              padding: "0.5rem 1rem",
-              cursor: "pointer",
+              background: COLORS.surfaceAlt, border: `1px solid ${COLORS.borderStrong}`,
+              borderRadius: 7, color: COLORS.text, fontSize: "0.8rem", fontWeight: 500,
+              padding: "0.5rem 1rem", cursor: "pointer",
             }}>
               {label}
             </button>
@@ -1079,17 +1048,8 @@ function ResultsDashboard({
         </div>
       </div>
 
-      {/* New search */}
-      <div style={{ marginTop: "1rem", textAlign: "center" as const }}>
-        <button onClick={onReset} style={{
-          background: "transparent",
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: 7,
-          color: COLORS.textMuted,
-          fontSize: "0.8rem",
-          padding: "0.5rem 1.25rem",
-          cursor: "pointer",
-        }}>
+      <div style={{ textAlign: "center" as const }}>
+        <button onClick={onReset} style={{ background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 7, color: COLORS.textMuted, fontSize: "0.8rem", padding: "0.5rem 1.25rem", cursor: "pointer" }}>
           New Search
         </button>
       </div>
@@ -1097,483 +1057,85 @@ function ResultsDashboard({
   );
 }
 
-// ─── Recommendation Banner ─────────────────────────────────────────────────────
+// ─── Source record card ────────────────────────────────────────────────────────
 
-function RecommendationBanner({ scorecard }: { scorecard: NonNullable<TrrcDueDiligenceRun["scorecard"]> }) {
-  const c = recColor(scorecard.recommendation);
-  return (
-    <div style={{
-      background: c.bg,
-      border: `1px solid ${c.border}40`,
-      borderRadius: 10,
-      padding: "1.25rem 1.5rem",
-      marginBottom: "1rem",
-      display: "flex",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
-      flexWrap: "wrap" as const,
-      gap: 12,
-    }}>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <span style={{
-            fontSize: "1.1rem",
-            fontWeight: 800,
-            color: c.color,
-            letterSpacing: "0.05em",
-          }}>
-            {scorecard.recommendation}
-          </span>
-          <Pill bg={c.bg} color={c.color}>
-            Opportunity {scorecard.opportunity_score}/100
-          </Pill>
-          <Pill bg={COLORS.redDim} color={COLORS.red}>
-            Risk {scorecard.risk_score}/100
-          </Pill>
-          <Pill bg={COLORS.accentDim} color={COLORS.accent}>
-            Confidence {scorecard.overall_confidence}%
-          </Pill>
-        </div>
-        {scorecard.gating_conditions.length > 0 && (
-          <div style={{ fontSize: "0.78rem", color: COLORS.textMuted }}>
-            <span style={{ fontWeight: 600, color: COLORS.yellow }}>Gating conditions: </span>
-            {scorecard.gating_conditions.join(" · ")}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+type SourceAttemptRow = NonNullable<TrrcDueDiligenceRun["source_attempts"]>[number];
 
-// ─── Summary Tab ───────────────────────────────────────────────────────────────
+function SourceCard({ attempt }: { attempt: SourceAttemptRow }) {
+  const [expanded, setExpanded] = useState(false);
+  const data = (attempt.result_data_json ?? {}) as Record<string, unknown>;
+  const label = SOURCE_LABELS[attempt.source_name] ?? attempt.source_name;
+  const trrcUrl = data["trrc_source_url"] as string | undefined;
+  const isManual = attempt.status === "manual_required";
 
-function SummaryTab({ run }: { run: TrrcDueDiligenceRun }) {
-  const critHighFindings = (run.findings ?? []).filter(f => f.severity === "critical" || f.severity === "high");
-  const manualCount = (run.source_attempts ?? []).filter(a => a.status === "manual_required").length;
-  const totalRecords = (run.source_attempts ?? []).reduce((s, a) => s + a.result_count, 0);
+  const statusColor = isManual ? COLORS.yellow : COLORS.green;
+  const statusLabel = isManual ? "MANUAL REQUIRED" : `${attempt.result_count} record${attempt.result_count !== 1 ? "s" : ""}`;
 
-  return (
-    <div>
-      <SectionCard title="Asset Identity" icon="🏷">
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          gap: "0.75rem",
-        }}>
-          {[
-            { label: "API Number",      value: run.resolved_primary_api },
-            { label: "Lease Number",    value: run.resolved_lease_number },
-            { label: "Gas Well ID",     value: run.resolved_gas_id },
-            { label: "TRRC District",   value: run.resolved_district },
-            { label: "Operator #",      value: run.resolved_operator_number },
-            { label: "Original Input",  value: run.original_input },
-          ].map(({ label, value }) => (
-            <div key={label} style={{
-              background: COLORS.surfaceAlt,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 7,
-              padding: "0.65rem 0.85rem",
-            }}>
-              <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 4 }}>
-                {label}
-              </div>
-              <div style={{ fontSize: "0.85rem", color: value ? COLORS.text : COLORS.textFaint, fontWeight: value ? 600 : 400 }}>
-                {value ?? "—"}
-              </div>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
+  // Extract a few key facts to show in the card
+  const keyFacts: [string, string][] = [];
+  if (data["api_number"])      keyFacts.push(["API", String(data["api_number"])]);
+  if (data["formatted_api"])   keyFacts.push(["API", String(data["formatted_api"])]);
+  if (data["lease_number"])    keyFacts.push(["Lease", String(data["lease_number"])]);
+  if (data["district"])        keyFacts.push(["District", String(data["district"])]);
+  if (data["operator"])        keyFacts.push(["Operator", String(data["operator"])]);
+  if (data["operator_name"])   keyFacts.push(["Operator", String(data["operator_name"])]);
+  if (data["county"])          keyFacts.push(["County", String(data["county"])]);
+  if (data["org_status"])      keyFacts.push(["Org Status", String(data["org_status"])]);
+  if (data["uic_no"])          keyFacts.push(["UIC No.", String(data["uic_no"])]);
+  if (data["total_wellbores"]) keyFacts.push(["Wellbores", String(data["total_wellbores"])]);
+  if (data["months_returned"]) keyFacts.push(["Months", String(data["months_returned"])]);
+  if (data["note"] && !data["data_gap"]) keyFacts.push(["Note", String(data["note"]).slice(0, 80)]);
 
-      <SectionCard title="Quick Stats" icon="📊">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem" }}>
-          {[
-            { label: "Total Records", value: totalRecords },
-            { label: "Manual Required", value: manualCount },
-            { label: "Total Findings", value: (run.findings ?? []).length },
-          ].map(({ label, value }) => (
-            <div key={label} style={{
-              background: COLORS.surfaceAlt,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 7,
-              padding: "0.85rem 1rem",
-              textAlign: "center" as const,
-            }}>
-              <div style={{ fontSize: "1.5rem", fontWeight: 700, color: COLORS.text }}>{value}</div>
-              <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, marginTop: 3, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
-      {critHighFindings.length > 0 && (
-        <SectionCard title="Critical & High Severity Findings" icon="⚠">
-          <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.6rem" }}>
-            {critHighFindings.map(f => (
-              <FindingCard key={f.id} finding={f} compact />
-            ))}
-          </div>
-        </SectionCard>
-      )}
-    </div>
-  );
-}
-
-// ─── Scorecard Tab ─────────────────────────────────────────────────────────────
-
-function ScorecardTab({ scorecard }: { scorecard: NonNullable<TrrcDueDiligenceRun["scorecard"]> }) {
-  const dims = scorecard.dimensions;
-  const dimList: [string, ScoreDimension][] = Object.entries(dims) as [string, ScoreDimension][];
-
-  return (
-    <div>
-      {/* Overall scores */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(3, 1fr)",
-        gap: "0.75rem",
-        marginBottom: "1rem",
-      }}>
-        {[
-          { label: "Opportunity Score", value: scorecard.opportunity_score, color: COLORS.green },
-          { label: "Risk Score",        value: scorecard.risk_score,        color: COLORS.red },
-          { label: "Confidence",        value: scorecard.overall_confidence, color: COLORS.accent },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{
-            background: COLORS.surface,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 10,
-            padding: "1.1rem 1.25rem",
-            textAlign: "center" as const,
-          }}>
-            <div style={{ fontSize: "2.25rem", fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
-            <div style={{ fontSize: "0.68rem", color: COLORS.textMuted, marginTop: 5, textTransform: "uppercase" as const, letterSpacing: "0.07em" }}>{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Dimensions grid */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-        gap: "0.75rem",
-        marginBottom: "1rem",
-      }}>
-        {dimList.map(([key, dim]) => (
-          <DimensionCard key={key} dim={dim} />
-        ))}
-      </div>
-
-      {/* Reasons for / against */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-        <SectionCard title="Reasons For" icon="✅">
-          {scorecard.reasons_for.length === 0
-            ? <p style={{ color: COLORS.textFaint, fontSize: "0.8rem", margin: 0 }}>None identified.</p>
-            : <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
-                {scorecard.reasons_for.map((r, i) => (
-                  <li key={i} style={{ fontSize: "0.82rem", color: COLORS.text, marginBottom: 5, lineHeight: 1.5 }}>{r}</li>
-                ))}
-              </ul>
-          }
-        </SectionCard>
-        <SectionCard title="Reasons Against" icon="❌">
-          {scorecard.reasons_against.length === 0
-            ? <p style={{ color: COLORS.textFaint, fontSize: "0.8rem", margin: 0 }}>None identified.</p>
-            : <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
-                {scorecard.reasons_against.map((r, i) => (
-                  <li key={i} style={{ fontSize: "0.82rem", color: COLORS.text, marginBottom: 5, lineHeight: 1.5 }}>{r}</li>
-                ))}
-              </ul>
-          }
-        </SectionCard>
-      </div>
-    </div>
-  );
-}
-
-function DimensionCard({ dim }: { dim: ScoreDimension }) {
-  const scoreColor = dim.score >= 70 ? COLORS.green : dim.score >= 40 ? COLORS.yellow : COLORS.red;
   return (
     <div style={{
       background: COLORS.surface,
       border: `1px solid ${COLORS.border}`,
-      borderRadius: 9,
-      padding: "1rem 1.1rem",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <div style={{ fontSize: "0.78rem", fontWeight: 600, color: COLORS.textMuted }}>{dim.label}</div>
-        <div style={{ fontSize: "1rem", fontWeight: 700, color: scoreColor }}>{dim.score}</div>
-      </div>
-      {/* Score bar */}
-      <div style={{ height: 4, background: COLORS.surfaceAlt, borderRadius: 99, marginBottom: 8 }}>
-        <div style={{
-          height: "100%",
-          width: `${dim.score}%`,
-          background: scoreColor,
-          borderRadius: 99,
-          transition: "width 0.5s ease",
-        }} />
-      </div>
-      <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, lineHeight: 1.5 }}>{dim.rationale}</div>
-      <div style={{ fontSize: "0.65rem", color: COLORS.textFaint, marginTop: 4 }}>
-        Weight: {(dim.weight * 100).toFixed(0)}%
-      </div>
-    </div>
-  );
-}
-
-// ─── Production Tab ────────────────────────────────────────────────────────────
-
-function ProductionTab({ run }: { run: TrrcDueDiligenceRun }) {
-  const rows = run.production ?? [];
-  const isLease = rows.some(r => r.entity_type === "lease");
-
-  if (rows.length === 0) {
-    return (
-      <SectionCard title="Production History" icon="📈">
-        <p style={{ color: COLORS.textFaint, fontSize: "0.85rem", margin: 0 }}>No production data available.</p>
-      </SectionCard>
-    );
-  }
-
-  return (
-    <SectionCard title="Production History" icon="📈">
-      {isLease && (
-        <div style={{
-          background: COLORS.yellowDim,
-          border: `1px solid ${COLORS.yellow}30`,
-          borderRadius: 6,
-          padding: "0.5rem 0.85rem",
-          fontSize: "0.75rem",
-          color: COLORS.yellow,
-          marginBottom: "0.85rem",
-        }}>
-          Reported at lease level — multiple wells may share this production.
-        </div>
-      )}
-      <DdTable
-        headers={["Month", "Oil (bbl)", "Casing Gas (MCF)", "Gas (MCF)", "Condensate (bbl)", "Water (bbl)"]}
-        rows={rows.map(r => [
-          r.production_month,
-          r.oil_bbl != null ? r.oil_bbl.toLocaleString() : null,
-          r.casinghead_gas_mcf != null ? r.casinghead_gas_mcf.toLocaleString() : null,
-          r.gas_mcf != null ? r.gas_mcf.toLocaleString() : null,
-          r.condensate_bbl != null ? r.condensate_bbl.toLocaleString() : null,
-          r.water_bbl != null ? r.water_bbl.toLocaleString() : null,
-        ])}
-      />
-    </SectionCard>
-  );
-}
-
-// ─── Findings Tab ──────────────────────────────────────────────────────────────
-
-const SEVERITY_ORDER: FindingSeverity[] = ["critical", "high", "medium", "low", "info"];
-
-function FindingsTab({ run }: { run: TrrcDueDiligenceRun }) {
-  const findings = run.findings ?? [];
-
-  if (findings.length === 0) {
-    return (
-      <SectionCard title="Findings" icon="🔍">
-        <p style={{ color: COLORS.textFaint, fontSize: "0.85rem", margin: 0 }}>No findings generated.</p>
-      </SectionCard>
-    );
-  }
-
-  return (
-    <div>
-      {SEVERITY_ORDER.map(sev => {
-        const group = findings.filter(f => f.severity === sev);
-        if (group.length === 0) return null;
-        return (
-          <div key={sev} style={{ marginBottom: "1.25rem" }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: "0.6rem",
-              paddingBottom: "0.4rem",
-              borderBottom: `1px solid ${COLORS.border}`,
-            }}>
-              <div style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: severityColor(sev),
-                flexShrink: 0,
-              }} />
-              <span style={{
-                fontSize: "0.78rem",
-                fontWeight: 700,
-                color: severityColor(sev),
-                textTransform: "uppercase" as const,
-                letterSpacing: "0.08em",
-              }}>
-                {sev} ({group.length})
-              </span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.65rem" }}>
-              {group.map(f => <FindingCard key={f.id} finding={f} />)}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function FindingCard({ finding, compact = false }: { finding: TrrcFinding; compact?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div style={{
-      background: COLORS.surface,
-      border: `1px solid ${severityColor(finding.severity)}30`,
-      borderLeft: `3px solid ${severityColor(finding.severity)}`,
+      borderLeft: `3px solid ${statusColor}`,
       borderRadius: 8,
-      padding: compact ? "0.75rem 1rem" : "0.9rem 1.1rem",
+      padding: "0.85rem 1rem",
     }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-        <div style={{ fontSize: "0.85rem", fontWeight: 600, color: COLORS.text }}>{finding.title}</div>
-        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-          <Pill bg={severityBg(finding.severity)} color={severityColor(finding.severity)}>
-            {finding.severity}
-          </Pill>
-          <Pill
-            bg={finding.is_directly_reported ? COLORS.greenDim : COLORS.purpleDim}
-            color={finding.is_directly_reported ? COLORS.green : COLORS.purple}
-          >
-            {finding.is_directly_reported ? "Direct" : "Inferred"}
-          </Pill>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: keyFacts.length > 0 || expanded ? "0.5rem" : 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <span style={{ fontSize: "0.85rem", fontWeight: 600, color: COLORS.text, flexShrink: 0 }}>{label}</span>
+          <span style={{ fontSize: "0.65rem", fontWeight: 700, color: statusColor, background: `${statusColor}18`, padding: "0.15rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em", whiteSpace: "nowrap" as const }}>
+            {statusLabel}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+          {trrcUrl && (
+            <a href={trrcUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.75rem", color: COLORS.accent, textDecoration: "none", whiteSpace: "nowrap" as const }}>
+              View on TRRC ↗
+            </a>
+          )}
+          {Object.keys(data).length > 0 && (
+            <button onClick={() => setExpanded(e => !e)} style={{ background: "transparent", border: "none", color: COLORS.textMuted, fontSize: "0.72rem", cursor: "pointer", padding: 0 }}>
+              {expanded ? "Less" : "More"}
+            </button>
+          )}
         </div>
       </div>
 
-      <p style={{ margin: "0 0 0.5rem 0", fontSize: "0.78rem", color: COLORS.textMuted, lineHeight: 1.55 }}>
-        {finding.description}
-      </p>
+      {/* Key facts row */}
+      {keyFacts.length > 0 && !expanded && (
+        <div style={{ display: "flex", gap: "1.2rem", flexWrap: "wrap" as const }}>
+          {keyFacts.slice(0, 5).map(([k, v]) => (
+            <span key={k} style={{ fontSize: "0.72rem", color: COLORS.textMuted }}>
+              <span style={{ color: COLORS.textFaint }}>{k}: </span>
+              <span style={{ color: COLORS.text, fontWeight: 500 }}>{v}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
-      {!compact && (
-        <>
-          <button
-            onClick={() => setExpanded(e => !e)}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: COLORS.accent,
-              fontSize: "0.72rem",
-              padding: 0,
-              cursor: "pointer",
-            }}
-          >
-            {expanded ? "Hide details" : "Show details"}
-          </button>
-          {expanded && (
-            <div style={{ marginTop: "0.6rem" }}>
-              {Object.keys(finding.evidence).length > 0 && (
-                <div style={{
-                  background: COLORS.surfaceAlt,
-                  border: `1px solid ${COLORS.border}`,
-                  borderRadius: 6,
-                  padding: "0.5rem 0.75rem",
-                  fontSize: "0.72rem",
-                  color: COLORS.textMuted,
-                  fontFamily: "monospace",
-                  marginBottom: "0.5rem",
-                  overflowX: "auto" as const,
-                }}>
-                  {JSON.stringify(finding.evidence, null, 2)}
-                </div>
-              )}
-              <div style={{ fontSize: "0.75rem", color: COLORS.textMuted }}>
-                <span style={{ fontWeight: 600, color: COLORS.text }}>Recommended: </span>
-                {finding.recommended_action}
-              </div>
-            </div>
-          )}
-        </>
+      {/* Expanded JSON data */}
+      {expanded && (
+        <div style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "0.6rem 0.85rem", marginTop: "0.5rem", overflowX: "auto" as const }}>
+          <pre style={{ margin: 0, fontSize: "0.7rem", color: COLORS.textMuted, fontFamily: "monospace", whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const }}>
+            {JSON.stringify(data, null, 2)}
+          </pre>
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Source Coverage Tab ───────────────────────────────────────────────────────
-
-function CoverageTab({ run }: { run: TrrcDueDiligenceRun }) {
-  const coverage: SourceCoverageStatus[] = run.coverage ?? [];
-
-  return (
-    <SectionCard title="Source Coverage" icon="📡">
-      <DdTable
-        headers={["Source", "Status", "Records", "Data Through", "Notes"]}
-        rows={coverage.map(c => [
-          <span key="label" style={{ fontWeight: 500, color: COLORS.text }}>{c.label}</span>,
-          <span key="status" style={{ color: coverageStatusColor(c.status), fontWeight: 600, fontSize: "0.72rem", textTransform: "uppercase" as const, letterSpacing: "0.04em" }}>
-            {c.status.replace(/_/g, " ")}
-          </span>,
-          c.records_found > 0 ? String(c.records_found) : null,
-          c.data_current_through ?? null,
-          c.notes ?? null,
-        ])}
-      />
-      {coverage.length === 0 && (
-        <p style={{ color: COLORS.textFaint, fontSize: "0.8rem", margin: 0 }}>No coverage data available.</p>
-      )}
-    </SectionCard>
-  );
-}
-
-// ─── Missing Records Tab ───────────────────────────────────────────────────────
-
-const MISSING_STATUS_LABELS: Record<TrrcMissingItem["status"], string> = {
-  confirmed_no_record: "Confirmed No Record",
-  no_result_from_query: "No Results Found",
-  retrieval_failed: "Retrieval Failed",
-  source_unavailable: "Source Unavailable",
-  manual_required: "Manual Required",
-  outside_date_range: "Outside Date Range",
-};
-
-function MissingTab({ run }: { run: TrrcDueDiligenceRun }) {
-  const items: TrrcMissingItem[] = run.missing_items ?? [];
-
-  return (
-    <SectionCard title="Missing Records" icon="📭">
-      <DdTable
-        headers={["Type", "Category", "Status", "Action"]}
-        rows={items.map(item => [
-          <span key="type" style={{ fontWeight: 500 }}>{item.expected_record_type}</span>,
-          <span key="cat" style={{ fontSize: "0.72rem", color: COLORS.textMuted, textTransform: "capitalize" as const }}>
-            {item.category.replace(/_/g, " ")}
-          </span>,
-          <span key="status" style={{
-            color: item.status === "confirmed_no_record" ? COLORS.textFaint
-                 : item.status === "manual_required"     ? COLORS.yellow
-                 : item.status === "retrieval_failed"    ? COLORS.red
-                 : COLORS.textMuted,
-            fontSize: "0.72rem",
-            fontWeight: 600,
-          }}>
-            {MISSING_STATUS_LABELS[item.status]}
-          </span>,
-          item.manual_retrieval_url ? (
-            <a
-              key="url"
-              href={item.manual_retrieval_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: COLORS.accent, fontSize: "0.75rem", textDecoration: "underline" }}
-            >
-              Retrieve manually →
-            </a>
-          ) : (
-            <span key="nourl" style={{ fontSize: "0.75rem", color: COLORS.textFaint }}>{item.recommended_action}</span>
-          ),
-        ])}
-      />
-      {items.length === 0 && (
-        <p style={{ color: COLORS.textFaint, fontSize: "0.8rem", margin: 0 }}>No missing items recorded.</p>
-      )}
-    </SectionCard>
-  );
-}

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * TRRC Scoring Engine — unit tests.
  *

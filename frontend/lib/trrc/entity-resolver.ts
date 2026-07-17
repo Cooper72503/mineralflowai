@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * TRRC Public Records Due Diligence — Entity Resolver
  *

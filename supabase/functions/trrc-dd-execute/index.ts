@@ -1,66 +1,15 @@
 /**
  * Supabase Edge Function: trrc-dd-execute
  *
- * Runs the full TRRC Fable-5 agent investigation as a background job,
- * eliminating the Vercel 300s timeout constraint.
+ * Pure retrieval orchestrator — queries every TRRC EWA source in sequence
+ * and writes structured results to trrc_source_attempts. No LLM required.
  *
  * POST body: { run_id: string }
- *
- * The function immediately returns HTTP 200 and runs the agent via
- * EdgeRuntime.waitUntil(), so the HTTP response is sent before the work begins.
  */
 
-import Anthropic from "npm:@anthropic-ai/sdk@latest";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-// ─── Deno serve shim ─────────────────────────────────────────────────────────
-
-// Supabase Edge Functions use Deno.serve under the hood.
-// The npm:serve package is not needed — just export a handler via Deno.serve.
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const MAX_TOOL_CALLS = 120;
-const WRAP_UP_THRESHOLD = 90; // warn agent to submit_report after this many tool calls
-
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface AgentFinding {
-  category: string;
-  severity: string;
-  title: string;
-  detail: string;
-  source_ids: string[];
-}
-
-interface AgentScorecardDimension {
-  id: string;
-  name: string;
-  score: number;
-  weight: number;
-  key_finding: string;
-}
-
-interface AgentScorecard {
-  overall_score: number;
-  dimensions: AgentScorecardDimension[];
-}
-
-interface AgentReport {
-  recommendation: string;
-  recommendation_rationale: string;
-  executive_summary: string[];
-  findings: AgentFinding[];
-  scorecard: AgentScorecard;
-  production_summary: {
-    total_months: number;
-    avg_monthly_oil_bbl: number;
-    avg_monthly_gas_mcf: number;
-    last_production_date: string | null;
-    trend: "declining" | "flat" | "increasing" | "insufficient_data";
-  } | null;
-  data_gaps: string[];
-}
 
 interface AgentContext {
   api_numbers: string[];
@@ -70,7 +19,7 @@ interface AgentContext {
   operator_number: string | null;
   county: string | null;
   production: ProductionRow[];
-  agentReport: AgentReport | null;
+  agentReport: null;  // kept for compatibility with tool handlers that set it
 }
 
 interface ProductionRow {
@@ -88,448 +37,7 @@ interface ToolResult {
   summary: string;
 }
 
-// ─── System prompt ────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `
-You are the MineralFlowAI RRC Due Diligence Agent. Your sole job is to execute a structured due diligence data pull from the Texas Railroad Commission (TRRC) for an oil or gas well asset. You have access to 17 tools. You MUST call all 16 data-pull tools before calling submit_report. You MUST NOT call submit_report until every prior tool has returned a result.
-
----
-
-STEP 1 — RESOLVE IDENTIFIERS
-
-The user will provide one of the following: an API number, an operator name, or a lease number. Your first action depends on what was provided:
-
-- If given an API number → call search_by_api first. Extract: API number, district, lease number, operator name, operator number, well type.
-- If given a lease number → call search_by_lease first. Extract: all API numbers on the lease, district, operator name, operator number.
-- If given an operator name → call search_by_operator first. Extract: operator number, then call search_by_lease to get all associated leases and API numbers.
-
-After Step 1, you must have: API number(s), district, lease number, operator number.
-Do NOT proceed to Step 2 until all four identifiers are confirmed.
-
----
-
-STEP 2 — EXECUTE ALL 16 DATA-PULL TOOLS IN ORDER
-
-Call every tool below in sequence. Do NOT skip any tool. Do NOT call submit_report yet.
-
-For each tool, if the result is empty or the well type makes the query not applicable (e.g., injection query on a non-injection well), record the result as "Not Applicable — [reason]" and immediately proceed to the next tool. An empty result is NOT an error. Do not retry. Continue to the next tool.
-
-Tool execution order:
-1. search_by_api — Identity, district, lease, operator, well type
-2. search_by_lease — All wells on the lease, co-mingled production flag
-3. search_by_operator — Operator organization record, bond status, P5
-4. search_by_legal_description — Legal description, survey, abstract, section
-5. fetch_production — Full monthly oil/gas/water production history
-6. fetch_completion_records — W-2 completion record: formation, depth, casing
-7. fetch_well_status — Current status: active / inactive / plugged
-8. fetch_inactive_well_status — Inactive well list entry (if applicable)
-9. fetch_orphan_well — Orphan well / state-plugging liability (if applicable)
-10. fetch_plugging_records — Plugging records (if plugged or partially plugged)
-11. fetch_compliance_violations — All open and historical compliance violations
-12. fetch_p4_records — P-4 production test records
-13. fetch_proration — Proration schedule and allowable constraints
-14. fetch_injection_records — UIC / SWD / injection permit (if applicable)
-15. fetch_severance_records — Wellbore severance records (if applicable)
-16. fetch_imaged_records — Post-2009 imaged completion document packets
-
----
-
-STEP 3 — COMPILE AND SUBMIT
-
-Only after ALL 16 tools above have returned a result (even if "Not Applicable") compile the full report and call submit_report.
-
-The report must include a result entry for every one of the 16 tools above.
-Any tool that returned data must include the key data points extracted.
-Any tool that returned empty must be listed as "Not Applicable — [reason]".
-
-The report structure must follow this order:
-1. Asset Identification (from tools 1–4)
-2. Production History (from tool 5)
-3. Well Construction & Completion (from tools 6–10)
-4. Compliance & Regulatory (from tools 11–12)
-5. Operations (from tools 13–15)
-6. Imaged Documents Retrieved (from tool 16)
-7. Missing Documents Flag (list any data points that could not be confirmed from any tool)
-8. Confidence Score (0–100, based on data completeness and consistency)
-9. Recommendation (pursue / review / pass / blocked)
-
-DO NOT call submit_report before this point. DO NOT omit any section.
-
----
-
-CRITICAL RULES:
-
-- canClaimSingleWellProduction is always false for lease-level production. Never attribute lease production to a single well.
-- Empty result ≠ clean record. A zero-violation compliance query may be a failed query — note this explicitly.
-- Do not invent or estimate any numbers. Record "Not Applicable" or "Query Failed" for any data you could not retrieve.
-- Do not reveal internal tool names in your narrative summary. Use plain English descriptions.
-- Scorecard weights must sum to 1.0 exactly.
-
-SCORECARD DIMENSIONS (weights must sum to 1.0):
-1. identity_confidence (0.12) — Were identifiers verified in TRRC?
-2. production_quality (0.15) — Is there verifiable, recent production?
-3. production_consistency (0.13) — Is production trending stable or declining?
-4. mechanical_integrity (0.08) — Completion records, wellbore design, depths
-5. plugging_exposure (0.10) — Inactive, orphan, or unaddressed plugging liability
-6. regulatory_compliance (0.12) — Violations, inspections, enforcement actions
-7. operator_profile (0.08) — P5 status, bond, organizational health
-8. development_activity (0.07) — Recent completions, permits, injection activity
-9. data_confidence (0.05) — Were all queries successful or are there gaps?
-10. record_completeness (0.10) — Did we successfully retrieve all relevant record types?
-`.trim();
-
-// ─── Tool definitions ─────────────────────────────────────────────────────────
-
-const AGENT_TOOLS: Anthropic.Tool[] = [
-  {
-    name: "search_by_api",
-    description:
-      "Look up a well by API number in the TRRC PDQ wellbore database. " +
-      "Returns lease number, district code, county, and operator name/number. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: {
-          type: "string",
-          description: "API number in any format (e.g. '42-165-02733', '4216502733', or '42165027330000')",
-        },
-      },
-      required: ["api_number"],
-    },
-  },
-  {
-    name: "search_by_lease",
-    description:
-      "Look up a lease by RRC lease number. If district is unknown, omit it — the tool will automatically " +
-      "search all 12 TRRC districts to discover which one the lease belongs to. " +
-      "Returns the lease's district, well inventory (API numbers, statuses), and operator. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        lease_number: { type: "string", description: "RRC lease number (e.g. '10289', '60509')" },
-        district: { type: "string", description: "TRRC district code if known (e.g. '01', '08', '8A'). Omit to auto-discover." },
-      },
-      required: ["lease_number"],
-    },
-  },
-  {
-    name: "search_by_operator",
-    description:
-      "Look up an operator by name or P5 number. " +
-      "Returns operator_number, bond status, organizational status, and P5 record details. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        operator_name: { type: "string", description: "Operator name (partial match supported)" },
-        operator_number: { type: "string", description: "TRRC operator number / P5 number if known" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "search_by_legal_description",
-    description:
-      "GIS lookup using abstract number, survey name, section, township, and/or range. " +
-      "Returns matched API numbers whose surface locations fall within the described parcel. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        abstract_number: { type: "string", description: "Texas abstract number (e.g. 'A-145')" },
-        survey_name: { type: "string", description: "Survey name (e.g. 'JOHN SMITH SURVEY')" },
-        county: { type: "string", description: "County name (e.g. 'Midland', 'Reeves')" },
-        section: { type: "string", description: "Section number if applicable" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_production",
-    description:
-      "Fetch monthly production history (oil bbl, gas MCF, water bbl) from TRRC. " +
-      "Preferred: provide lease_number + district. Alternative: provide api_number. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        lease_number: { type: "string", description: "RRC lease number" },
-        district: { type: "string", description: "TRRC district code" },
-        api_number: { type: "string", description: "API number (fallback)" },
-        months: { type: "number", description: "Months of history (default 36, max 120)" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_completion_records",
-    description:
-      "Fetch W-2 completion packets for one or more API numbers. " +
-      "Returns formation name, total depth, completion date, and wellbore profile. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_numbers: {
-          type: "array",
-          items: { type: "string" },
-          description: "List of API numbers",
-        },
-      },
-      required: ["api_numbers"],
-    },
-  },
-  {
-    name: "fetch_inactive_well_status",
-    description:
-      "Check if a well is on the TRRC EWA inactive well list. " +
-      "Inactive wells represent potential plugging liability. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: { type: "string", description: "API number to check" },
-        operator_number: { type: "string", description: "Operator number — returns all inactive wells for operator" },
-        lease_type: { type: "string", enum: ["O", "G"], description: "'O' for oil, 'G' for gas" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_plugging_records",
-    description:
-      "Fetch EWA plugging records by API number or lease. " +
-      "Returns plugging date, contractor, depth, and regulatory status. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: { type: "string", description: "API number" },
-        lease_number: { type: "string", description: "Lease number" },
-        district: { type: "string", description: "District code (required with lease_number)" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_p4_records",
-    description:
-      "Fetch EWA P-4 production test records by API number or lease. " +
-      "Returns test date, allowable, tested rate, and gatherer information. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: { type: "string", description: "API number" },
-        lease_number: { type: "string", description: "Lease number" },
-        district: { type: "string", description: "District code (required with lease_number)" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_well_status",
-    description:
-      "Fetch EWA well status (active/inactive/plugged) for an API or all wells on a lease. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: { type: "string", description: "API number" },
-        lease_number: { type: "string", description: "Lease number" },
-        district: { type: "string", description: "District code (required with lease_number)" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_orphan_well",
-    description:
-      "Fetch EWA orphan well records for an API number. " +
-      "An orphan well is one whose operator has become insolvent — critical liability flag. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: { type: "string", description: "API number to check for orphan status" },
-      },
-      required: ["api_number"],
-    },
-  },
-  {
-    name: "fetch_severance_records",
-    description:
-      "Fetch EWA severance records by API number or operator. " +
-      "Documents wellbore interval severances — relevant for casing integrity. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: { type: "string", description: "API number" },
-        operator_number: { type: "string", description: "Operator number" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_compliance_violations",
-    description:
-      "Fetch TRRC compliance violations and field inspection records for an operator. " +
-      "IMPORTANT: empty result does NOT guarantee clean compliance — it may be a failed query. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        operator_number: { type: "string", description: "TRRC operator number (preferred)" },
-        operator_name: { type: "string", description: "Operator name (fallback)" },
-        county: { type: "string", description: "County to narrow scope (optional)" },
-        api_numbers: {
-          type: "array",
-          items: { type: "string" },
-          description: "API numbers for well-level inspection records (up to 3)",
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_proration",
-    description:
-      "Fetch proration schedule records by lease number. " +
-      "Proration schedules govern allowable production rates for oil leases. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        lease_number: { type: "string", description: "RRC lease number" },
-        lease_type: { type: "string", enum: ["oil", "gas"], description: "Lease type" },
-        district: { type: "string", description: "District code (optional)" },
-      },
-      required: ["lease_number"],
-    },
-  },
-  {
-    name: "fetch_injection_records",
-    description:
-      "Fetch UIC/injection well records by API number or operator. " +
-      "Use if the well may be a disposal or enhanced recovery injection well. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_number: { type: "string", description: "API number" },
-        operator_number: { type: "string", description: "Operator number" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "fetch_imaged_records",
-    description:
-      "Fetch post-2009 CMPL imaged document packets from TRRC for one or more API numbers. " +
-      "Returns document type, filing date, and document URLs. " +
-      "This tool call is REQUIRED for every report. Do not skip.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        api_numbers: {
-          type: "array",
-          items: { type: "string" },
-          description: "List of API numbers",
-        },
-      },
-      required: ["api_numbers"],
-    },
-  },
-  {
-    name: "submit_report",
-    description:
-      "Call this tool ONLY after all 16 data-pull tools have been called and returned results. " +
-      "Calling this tool early will produce an incomplete report and is not permitted. " +
-      "You must have called search_by_api, search_by_lease, search_by_operator, search_by_legal_description, " +
-      "fetch_production, fetch_completion_records, fetch_well_status, fetch_inactive_well_status, " +
-      "fetch_orphan_well, fetch_plugging_records, fetch_compliance_violations, fetch_p4_records, " +
-      "fetch_proration, fetch_injection_records, fetch_severance_records, and fetch_imaged_records " +
-      "before calling this tool. Each must have returned a result, even if that result is empty or Not Applicable.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        recommendation: {
-          type: "string",
-          enum: ["pursue", "review", "blocked", "pass"],
-          description: "Investment recommendation",
-        },
-        recommendation_rationale: {
-          type: "string",
-          description: "1-2 sentence rationale based on verified TRRC findings",
-        },
-        executive_summary: {
-          type: "array",
-          items: { type: "string" },
-          description: "3-5 narrative paragraphs covering the investigation",
-        },
-        findings: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              category: {
-                type: "string",
-                enum: ["identity", "production", "compliance", "inactive_well", "plugging", "mechanical", "operator", "data_gap"],
-              },
-              severity: { type: "string", enum: ["critical", "warning", "info"] },
-              title: { type: "string" },
-              detail: { type: "string" },
-              source_ids: { type: "array", items: { type: "string" } },
-            },
-            required: ["category", "severity", "title", "detail", "source_ids"],
-          },
-          description: "All findings, ordered by severity (critical first)",
-        },
-        scorecard: {
-          type: "object",
-          properties: {
-            overall_score: { type: "number", description: "Weighted overall score 0-100" },
-            dimensions: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  name: { type: "string" },
-                  score: { type: "number" },
-                  weight: { type: "number" },
-                  key_finding: { type: "string" },
-                },
-                required: ["id", "name", "score", "weight", "key_finding"],
-              },
-            },
-          },
-          required: ["overall_score", "dimensions"],
-        },
-        production_summary: {
-          type: "object",
-          properties: {
-            total_months: { type: "number" },
-            avg_monthly_oil_bbl: { type: "number" },
-            avg_monthly_gas_mcf: { type: "number" },
-            last_production_date: { type: "string" },
-            trend: { type: "string", enum: ["declining", "flat", "increasing", "insufficient_data"] },
-          },
-          required: ["total_months", "avg_monthly_oil_bbl", "avg_monthly_gas_mcf", "last_production_date", "trend"],
-        },
-        data_gaps: {
-          type: "array",
-          items: { type: "string" },
-          description: "Items that could not be verified and why",
-        },
-      },
-      required: ["recommendation", "recommendation_rationale", "executive_summary", "findings", "scorecard", "data_gaps"],
-    },
-  },
-];
 
 // ─── HTML text extractor ──────────────────────────────────────────────────────
 
@@ -1623,25 +1131,9 @@ async function toolFetchImagedRecords(_input: Record<string, unknown>, _ctx: Age
   };
 }
 
-function toolSubmitReport(input: Record<string, unknown>, ctx: AgentContext): ToolResult {
-  ctx.agentReport = {
-    recommendation:           String(input.recommendation ?? "review"),
-    recommendation_rationale: String(input.recommendation_rationale ?? ""),
-    executive_summary:        (input.executive_summary as string[]) ?? [],
-    findings:                 (input.findings as AgentFinding[]) ?? [],
-    scorecard:                (input.scorecard as AgentScorecard) ?? { overall_score: 0, dimensions: [] },
-    production_summary:       (input.production_summary as AgentReport["production_summary"]) ?? null,
-    data_gaps:                (input.data_gaps as string[]) ?? [],
-  };
-
-  const rec = ctx.agentReport.recommendation.toUpperCase();
-  const rationale = ctx.agentReport.recommendation_rationale.slice(0, 80);
-
-  return {
-    ok: true,
-    data: { submitted: true },
-    summary: `submit_report: ${rec} — ${rationale}`,
-  };
+function toolSubmitReport(_input: Record<string, unknown>, _ctx: AgentContext): ToolResult {
+  // Not used in the direct orchestrator — kept for dispatchTool compatibility
+  return { ok: true, data: { submitted: true }, summary: "submit_report: not used in direct orchestration mode" };
 }
 
 // ─── Tool dispatcher ─────────────────────────────────────────────────────────
@@ -1674,98 +1166,6 @@ async function dispatchTool(
   }
 }
 
-// ─── Initial message builder ──────────────────────────────────────────────────
-
-function buildInitialMessage(
-  rawInput: string,
-  inputType: string,
-  resolvedEntities: Array<{
-    entity_type: string;
-    canonical_identifier: string;
-    display_name: string;
-    attributes: Record<string, unknown>;
-  }>,
-): string {
-  const parts: string[] = [
-    "Please conduct a complete TRRC public records due diligence investigation on the following input.",
-    "",
-    "## Raw Input",
-    `"${rawInput}"`,
-    `Input Type: ${inputType.replace(/_/g, " ").toUpperCase()}`,
-    "",
-  ];
-
-  if (resolvedEntities.length > 0) {
-    parts.push("## Pre-Resolved Entities");
-    parts.push("The entity resolver has already identified the following candidates:");
-    parts.push("");
-    for (const entity of resolvedEntities) {
-      parts.push(`- **${entity.display_name}** (${entity.entity_type})`);
-      parts.push(`  Canonical ID: ${entity.canonical_identifier}`);
-      const attrs = Object.entries(entity.attributes)
-        .slice(0, 5)
-        .map(([k, v]) => `${k}: ${String(v)}`)
-        .join(", ");
-      if (attrs) parts.push(`  Attributes: ${attrs}`);
-    }
-    parts.push("");
-  }
-
-  parts.push(
-    "## Investigation instructions",
-    "1. Confirm identity: use the appropriate search tool to get the canonical API/lease/operator identifiers.",
-    "2. Fetch production history directly from TRRC (do not rely on any pre-stated figures).",
-    "3. Check well status and plugging records for all API numbers found.",
-    "4. Fetch compliance violations for the operator.",
-    "5. Note any sources that fail or return no data as explicit data gaps.",
-    "6. **STOP and call submit_report.** Once you have completed steps 1–4, you are done gathering data.",
-    "   Do not continue fetching more sources. Synthesize what you have and submit immediately.",
-    "",
-    "Target: 15–35 tool calls total. Call submit_report when you can write a recommendation.",
-    "",
-    "Begin your investigation now.",
-  );
-
-  return parts.join("\n");
-}
-
-// ─── Mapping helpers ─────────────────────────────────────────────────────────
-
-function mapRecommendation(rec: string): "PURSUE" | "REVIEW" | "PASS" | "BLOCKED" {
-  switch (rec.toLowerCase()) {
-    case "pursue":  return "PURSUE";
-    case "blocked": return "BLOCKED";
-    case "pass":    return "PASS";
-    default:        return "REVIEW";
-  }
-}
-
-function mapSeverity(sev: string): "critical" | "high" | "medium" | "low" | "info" {
-  switch (sev.toLowerCase()) {
-    case "critical": return "critical";
-    case "warning":  return "medium";
-    case "info":     return "info";
-    default:         return "info";
-  }
-}
-
-function mapCategory(cat: string): string {
-  switch (cat.toLowerCase()) {
-    case "identity":       return "identity";
-    case "production":     return "production";
-    case "compliance":     return "compliance";
-    case "inactive_well":  return "plugging_inactive";
-    case "plugging":       return "plugging_inactive";
-    case "mechanical":     return "completion";
-    case "operator":       return "operator_p5";
-    case "data_gap":       return "miscellaneous";
-    default:               return "miscellaneous";
-  }
-}
-
-function makeId(): string {
-  return `finding_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-}
 
 // ─── Coverage builder ─────────────────────────────────────────────────────────
 
@@ -1863,72 +1263,17 @@ function buildCoverageFromAttempts(
   return coverage;
 }
 
-// ─── Score builder ────────────────────────────────────────────────────────────
+// ─── Retrieval orchestrator ───────────────────────────────────────────────────
 
-function buildScorecard(
-  agentScorecard: AgentScorecard,
-  recommendation: ReturnType<typeof mapRecommendation>,
-  findings: Array<{ severity: string; title: string }>,
-  dataGaps: string[],
-): Record<string, unknown> {
-  const DEFAULT_DIMS = [
-    { id: "record_completeness",    name: "Record Completeness",    weight: 0.10 },
-    { id: "identity_confidence",    name: "Identity Confidence",    weight: 0.12 },
-    { id: "production_quality",     name: "Production Quality",     weight: 0.15 },
-    { id: "production_consistency", name: "Production Consistency", weight: 0.13 },
-    { id: "mechanical_integrity",   name: "Mechanical Integrity",   weight: 0.08 },
-    { id: "plugging_exposure",      name: "Plugging Exposure",      weight: 0.10 },
-    { id: "regulatory_compliance",  name: "Regulatory Compliance",  weight: 0.12 },
-    { id: "operator_profile",       name: "Operator Profile",       weight: 0.08 },
-    { id: "development_activity",   name: "Development Activity",   weight: 0.07 },
-    { id: "data_confidence",        name: "Data Confidence",        weight: 0.05 },
-  ];
-
-  const dimMap = new Map(agentScorecard.dimensions.map(d => [d.id, d]));
-  const dimensions: Record<string, unknown> = {};
-  for (const d of DEFAULT_DIMS) {
-    const agentDim = dimMap.get(d.id);
-    dimensions[d.id] = {
-      label: d.name,
-      score: agentDim?.score ?? 50,
-      weight: d.weight,
-      rationale: agentDim?.key_finding ?? "Not assessed.",
-      data_points: [],
-    };
-  }
-
-  const overallScore = Math.round(agentScorecard.overall_score ?? 50);
-  const criticals = findings.filter(f => f.severity === "critical");
-
-  return {
-    dimensions,
-    opportunity_score: Math.max(0, Math.min(100, overallScore)),
-    risk_score: Math.max(0, Math.min(100, 100 - overallScore + criticals.length * 5)),
-    overall_confidence: Math.max(0, Math.min(100, overallScore)),
-    recommendation,
-    gating_conditions: criticals.map(f => f.title),
-    missing_critical_evidence: dataGaps.slice(0, 5),
-    reasons_for: findings.filter(f => f.severity === "info").slice(0, 3).map(f => f.title),
-    reasons_against: criticals.slice(0, 3).map(f => f.title),
-  };
-}
-
-// ─── Main agent runner ────────────────────────────────────────────────────────
-
-async function runAgent(runId: string): Promise<void> {
+async function runRetrieval(runId: string): Promise<void> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
 
-  // Use service role so we can read+write without RLS
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
 
-  const anthropic = new Anthropic({ apiKey: anthropicKey });
-
-  // ── 1. Load run row ───────────────────────────────────────────────────────
-
+  // 1. Load run row
   const { data: runRaw, error: runErr } = await supabase
     .from("trrc_due_diligence_runs")
     .select("*")
@@ -1940,23 +1285,7 @@ async function runAgent(runId: string): Promise<void> {
     return;
   }
 
-  // ── 2. Load resolved entities ─────────────────────────────────────────────
-
-  const { data: entityRows } = await supabase
-    .from("trrc_resolved_entities")
-    .select("*")
-    .eq("run_id", runId)
-    .order("confidence", { ascending: false });
-
-  const resolvedEntities = (entityRows ?? []).map((e: Record<string, unknown>) => ({
-    entity_type: String(e["entity_type"] ?? ""),
-    canonical_identifier: String(e["canonical_identifier"] ?? ""),
-    display_name: String(e["display_name"] ?? ""),
-    attributes: (e["attributes_json"] ?? {}) as Record<string, unknown>,
-  }));
-
-  // ── 3. Build initial agent context ────────────────────────────────────────
-
+  // 2. Build initial context from run row and resolved entities
   const ctx: AgentContext = {
     api_numbers: [],
     district: null,
@@ -1968,186 +1297,103 @@ async function runAgent(runId: string): Promise<void> {
     agentReport: null,
   };
 
-  // Pre-seed context from run row fields (user-supplied supplemental identifiers)
-  if (!ctx.lease_number && runRaw["resolved_lease_number"]) ctx.lease_number = String(runRaw["resolved_lease_number"]);
-  if (!ctx.district && runRaw["resolved_district"])         ctx.district     = String(runRaw["resolved_district"]);
+  const resolvedApi = String(runRaw["resolved_primary_api"] ?? "").replace(/\D/g, "").slice(0, 10);
+  if (resolvedApi.length >= 10) ctx.api_numbers.push(resolvedApi);
+  if (runRaw["resolved_lease_number"]) ctx.lease_number = String(runRaw["resolved_lease_number"]);
+  if (runRaw["resolved_district"]) ctx.district = String(runRaw["resolved_district"]);
 
-  // Pre-seed context from resolved entities
-  for (const entity of resolvedEntities) {
-    if (entity.entity_type === "wellbore") {
-      const api = entity.canonical_identifier;
+  const { data: entityRows } = await supabase
+    .from("trrc_resolved_entities")
+    .select("*")
+    .eq("run_id", runId);
+
+  for (const e of (entityRows ?? [])) {
+    if (e["entity_type"] === "wellbore") {
+      const api = String(e["canonical_identifier"] ?? "");
       if (api && !ctx.api_numbers.includes(api)) ctx.api_numbers.push(api);
-      if (!ctx.district && entity.attributes["district"]) ctx.district = String(entity.attributes["district"]);
-    } else if (entity.entity_type === "lease") {
-      if (!ctx.lease_number && entity.attributes["lease_number"]) ctx.lease_number = String(entity.attributes["lease_number"]);
-      if (!ctx.district && entity.attributes["district"]) ctx.district = String(entity.attributes["district"]);
-    } else if (entity.entity_type === "operator") {
-      if (!ctx.operator_name && entity.attributes["normalized_name"]) ctx.operator_name = String(entity.attributes["normalized_name"]);
-      if (!ctx.operator_number && entity.attributes["operator_number"]) ctx.operator_number = String(entity.attributes["operator_number"]);
+      if (!ctx.district && e["attributes_json"]?.["district"]) ctx.district = String(e["attributes_json"]["district"]);
+    } else if (e["entity_type"] === "lease") {
+      if (!ctx.lease_number && e["attributes_json"]?.["lease_number"]) ctx.lease_number = String(e["attributes_json"]["lease_number"]);
+      if (!ctx.district && e["attributes_json"]?.["district"]) ctx.district = String(e["attributes_json"]["district"]);
+    } else if (e["entity_type"] === "operator") {
+      if (!ctx.operator_name && e["attributes_json"]?.["normalized_name"]) ctx.operator_name = String(e["attributes_json"]["normalized_name"]);
+      if (!ctx.operator_number && e["attributes_json"]?.["operator_number"]) ctx.operator_number = String(e["attributes_json"]["operator_number"]);
     }
   }
 
-  // ── 4. Run agent loop ─────────────────────────────────────────────────────
+  // 3. Retrieval plan — executed sequentially, each step seeds ctx for the next
+  type ToolStep = { name: string; input: () => Record<string, unknown> };
 
-  const userMessage = buildInitialMessage(
-    String(runRaw["original_input"] ?? ""),
-    String(runRaw["selected_input_type"] ?? "unknown"),
-    resolvedEntities,
-  );
-
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: userMessage },
+  const steps: ToolStep[] = [
+    { name: "search_by_api",              input: () => ({ api_number: ctx.api_numbers[0] ?? resolvedApi }) },
+    { name: "search_by_lease",            input: () => ({ lease_number: ctx.lease_number ?? "", district: ctx.district ?? "" }) },
+    { name: "search_by_operator",         input: () => ({ operator_name: ctx.operator_name ?? null, operator_number: ctx.operator_number ?? null }) },
+    { name: "search_by_legal_description",input: () => ({ county: ctx.county }) },
+    { name: "fetch_production",           input: () => ({}) },
+    { name: "fetch_completion_records",   input: () => ({}) },
+    { name: "fetch_well_status",          input: () => ({}) },
+    { name: "fetch_inactive_well_status", input: () => ({}) },
+    { name: "fetch_orphan_well",          input: () => ({}) },
+    { name: "fetch_plugging_records",     input: () => ({}) },
+    { name: "fetch_compliance_violations",input: () => ({}) },
+    { name: "fetch_p4_records",           input: () => ({}) },
+    { name: "fetch_proration",            input: () => ({}) },
+    { name: "fetch_injection_records",    input: () => ({}) },
+    { name: "fetch_severance_records",    input: () => ({}) },
+    { name: "fetch_imaged_records",       input: () => ({}) },
   ];
 
-  let toolCallCount = 0;
+  const allAttempts: Array<{ source_name: string; status: string; result_count: number; result_data_json: unknown }> = [];
 
   try {
-    while (toolCallCount < MAX_TOOL_CALLS) {
-      const response = await anthropic.messages.create({
-        model: "claude-opus-4-5",
-        max_tokens: 16000,
-        
-        system: SYSTEM_PROMPT,
-        tools: AGENT_TOOLS,
-        messages,
-      });
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
 
-      messages.push({ role: "assistant", content: response.content });
+      // Skip steps that can't produce useful results
+      if (step.name === "search_by_api" && !ctx.api_numbers[0] && !resolvedApi) continue;
+      if (step.name === "search_by_lease" && !ctx.lease_number) continue;
+      if (step.name === "search_by_operator" && !ctx.operator_name && !ctx.operator_number) continue;
 
-      const toolUseBlocks = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
-      );
+      const result = await dispatchTool(step.name, step.input(), ctx);
+      console.log(`[trrc-dd-execute] [${runId}] ${step.name}: ${result.summary}`);
 
-      if (toolUseBlocks.length === 0) break;
+      const resultData = result.data as Record<string, unknown>;
+      const resultCount = Array.isArray(resultData?.["wellbores"])
+        ? (resultData["wellbores"] as unknown[]).length
+        : Array.isArray(resultData?.["records"])
+        ? (resultData["records"] as unknown[]).length
+        : resultData?.["found"] === true ? 1 : 0;
 
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      await supabase.from("trrc_source_attempts").upsert({
+        run_id: runId,
+        source_id: `${step.name}_1`,
+        source_name: step.name,
+        status: result.ok ? "success" : "failed_transient",
+        result_count: resultCount,
+        error_message: result.ok ? null : String(resultData?.["error"] ?? ""),
+        attempted_at: new Date().toISOString(),
+        result_data_json: result.data,
+      }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).then(null, () => {});
 
-      for (const block of toolUseBlocks) {
-        toolCallCount++;
+      allAttempts.push({ source_name: step.name, status: result.ok ? "success" : "failed_transient", result_count: resultCount, result_data_json: result.data });
 
-        const result = await dispatchTool(
-          block.name,
-          ((block.input ?? {}) as Record<string, unknown>),
-          ctx,
-        );
-
-        console.log(`[trrc-dd-execute] [${runId}] tool=${block.name}: ${result.summary}`);
-
-        // Upsert source attempt (including raw result data for PDF exhibits)
-        const resultData = result.data as Record<string, unknown>;
-        const resultCount = Array.isArray(resultData?.["wellbores"])
-          ? (resultData["wellbores"] as unknown[]).length
-          : Array.isArray(resultData?.["records"])
-          ? (resultData["records"] as unknown[]).length
-          : resultData?.["found"] === true ? 1
-          : 0;
-        await supabase.from("trrc_source_attempts").upsert({
-          run_id: runId,
-          source_id: `${block.name}_${toolCallCount}`,
-          source_name: block.name,
-          status: result.ok ? "success" : "failed_transient",
-          result_count: resultCount,
-          error_message: result.ok ? null : String(resultData?.["error"] ?? ""),
-          attempted_at: new Date().toISOString(),
-          result_data_json: result.data,
-        }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).then(null, () => {});
-
-        // Update progress (scale 5% → 90% over MAX_TOOL_CALLS)
-        const progressPct = Math.min(90, 5 + toolCallCount * 1.7);
-        await supabase
-          .from("trrc_due_diligence_runs")
-          .update({ progress_percent: Math.round(progressPct), updated_at: new Date().toISOString() })
-          .eq("id", runId);
-
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: JSON.stringify(result.data),
-        });
-
-        // submit_report terminates the loop
-        if (block.name === "submit_report" && result.ok) {
-          messages.push({ role: "user", content: toolResults });
-          break;
-        }
-      }
-
-      // Check if submit_report was called (ctx.agentReport set)
-      if (ctx.agentReport) {
-        // Make sure we sent the tool result before breaking
-        if (toolResults.length > 0 && messages[messages.length - 1].role !== "user") {
-          messages.push({ role: "user", content: toolResults });
-        }
-        break;
-      }
-
-      messages.push({ role: "user", content: toolResults });
-
-      // After delivering tool results, inject a wrap-up reminder as a standalone user message
-      if (toolCallCount >= WRAP_UP_THRESHOLD && !ctx.agentReport) {
-        messages.push({
-          role: "user",
-          content: `[SYSTEM NOTICE] You have made ${toolCallCount} tool calls. ` +
-            `You MUST call submit_report as your very next action. ` +
-            `Synthesize all data gathered so far into findings, a scorecard, and a recommendation. ` +
-            `Do NOT call any other data-fetching tools. Call submit_report NOW.`,
-        });
-      }
-
-      if (response.stop_reason === "end_turn") break;
+      const progress = Math.min(90, 5 + Math.round((i + 1) / steps.length * 85));
+      await supabase.from("trrc_due_diligence_runs")
+        .update({ progress_percent: progress, updated_at: new Date().toISOString() })
+        .eq("id", runId);
     }
-  } catch (agentErr) {
-    console.error(`[trrc-dd-execute] [${runId}] agent loop error:`, agentErr);
+  } catch (err) {
+    console.error(`[trrc-dd-execute] [${runId}] retrieval error:`, err);
     await supabase.from("trrc_due_diligence_runs").update({
       status: "failed",
-      error_summary: agentErr instanceof Error ? agentErr.message : String(agentErr),
+      error_summary: err instanceof Error ? err.message : String(err),
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq("id", runId);
     return;
   }
 
-  if (!ctx.agentReport) {
-    console.warn(`[trrc-dd-execute] [${runId}] agent completed ${toolCallCount} tool calls without submitting report`);
-    await supabase.from("trrc_due_diligence_runs").update({
-      status: "failed",
-      error_summary: `Agent completed ${toolCallCount} tool calls but did not submit a report.`,
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq("id", runId);
-    return;
-  }
-
-  // ── 5. Persist findings ───────────────────────────────────────────────────
-
-  const agentFindings = ctx.agentReport.findings ?? [];
-  const recommendation = mapRecommendation(ctx.agentReport.recommendation);
-
-  if (agentFindings.length > 0) {
-    const findingRows = agentFindings.map(f => ({
-      run_id: runId,
-      finding_id: makeId(),
-      category: mapCategory(f.category),
-      severity: mapSeverity(f.severity),
-      finding_type: `agent_${f.category}`,
-      title: f.title,
-      description: f.detail,
-      evidence_json: { source_ids: f.source_ids, agent_category: f.category },
-      source_record_ids: f.source_ids,
-      analytical_method: "agent_synthesis",
-      confidence: 0.85,
-      recommended_action: "Review finding and cross-check with primary TRRC records.",
-      is_directly_reported: true,
-    }));
-
-    const { error: findingsErr } = await supabase
-      .from("trrc_due_diligence_findings")
-      .insert(findingRows);
-    if (findingsErr) console.error("[trrc-dd-execute] findings insert error:", findingsErr);
-  }
-
-  // ── 6. Persist production rows ────────────────────────────────────────────
-
+  // 4. Persist production rows collected by toolFetchProduction
   if (ctx.production.length > 0) {
     const seen = new Set<string>();
     const prodRows = ctx.production
@@ -2160,118 +1406,52 @@ async function runAgent(runId: string): Promise<void> {
         seen.add(key);
         return true;
       })
-      .map(raw => {
-        const year = Number(raw["year"]);
-        const month = Number(raw["month"]);
-        return {
-          run_id: runId,
-          entity_type: "lease",
-          api_number: ctx.api_numbers[0] ?? null,
-          district: ctx.district ?? "",
-          lease_number: ctx.lease_number ?? null,
-          gas_id: null,
-          operator_number: ctx.operator_number ?? null,
-          production_month: `${year}-${String(month).padStart(2, "0")}`,
-          oil_bbl: typeof raw["oil_bbl"] === "number" ? raw["oil_bbl"] : null,
-          casinghead_gas_mcf: null,
-          gas_mcf: typeof raw["gas_mcf"] === "number" ? raw["gas_mcf"] : null,
-          condensate_bbl: null,
-          water_bbl: typeof raw["water_bbl"] === "number" ? raw["water_bbl"] : null,
-        };
-      });
-
-    if (prodRows.length > 0) {
-      const { error: prodErr } = await supabase
-        .from("trrc_production_monthly")
-        .upsert(prodRows, {
-          onConflict: "run_id,entity_type,api_number,lease_number,production_month",
-          ignoreDuplicates: true,
-        });
-      if (prodErr) console.error("[trrc-dd-execute] production upsert error:", prodErr);
-    }
-  }
-
-  // ── 7. Upsert agent-discovered entities ──────────────────────────────────
-
-  if (ctx.api_numbers.length > 0) {
-    const existingIds = new Set(resolvedEntities.map(e => e.canonical_identifier));
-    const newEntityRows = ctx.api_numbers
-      .filter(api => !existingIds.has(api))
-      .map(api => ({
+      .map(raw => ({
         run_id: runId,
-        entity_type: "wellbore",
-        canonical_identifier: api,
-        display_name: `API ${api}`,
-        attributes_json: { discovered_by: "trrc_agent" },
-        confidence: 0.9,
-        resolution_method: "agent_discovery",
-        is_user_selected: false,
+        entity_type: "lease",
+        api_number: ctx.api_numbers[0] ?? null,
+        district: ctx.district ?? "",
+        lease_number: ctx.lease_number ?? null,
+        gas_id: null,
+        operator_number: ctx.operator_number ?? null,
+        production_month: `${Number(raw["year"])}-${String(Number(raw["month"])).padStart(2, "0")}`,
+        oil_bbl: typeof raw["oil_bbl"] === "number" ? raw["oil_bbl"] : null,
+        casinghead_gas_mcf: null,
+        gas_mcf: typeof raw["gas_mcf"] === "number" ? raw["gas_mcf"] : null,
+        condensate_bbl: null,
+        water_bbl: typeof raw["water_bbl"] === "number" ? raw["water_bbl"] : null,
       }));
 
-    if (newEntityRows.length > 0) {
-      await supabase.from("trrc_resolved_entities").insert(newEntityRows).then(null, err => {
-        console.error("[trrc-dd-execute] entity insert error:", err);
-      });
+    if (prodRows.length > 0) {
+      await supabase.from("trrc_production_monthly").upsert(prodRows, {
+        onConflict: "run_id,entity_type,api_number,lease_number,production_month",
+        ignoreDuplicates: true,
+      }).then(null, () => {});
     }
   }
 
-  // ── 8. Load source attempts and build coverage_json ──────────────────────
+  // 5. Build coverage summary
+  const coverageJson = buildCoverageFromAttempts(allAttempts);
 
-  const { data: attemptRows } = await supabase
-    .from("trrc_source_attempts")
-    .select("source_name, status, result_count, result_data_json")
-    .eq("run_id", runId)
-    .order("attempted_at", { ascending: true });
-
-  const coverageJson = buildCoverageFromAttempts(
-    (attemptRows ?? []).map((a: Record<string, unknown>) => ({
-      source_name: String(a["source_name"] ?? ""),
-      status:      String(a["status"] ?? ""),
-      result_count: Number(a["result_count"] ?? 0),
-      result_data_json: a["result_data_json"] ?? {},
-    })),
-  );
-
-  // ── 9. Build scorecard and result_summary ─────────────────────────────────
-
-  const scorecardJson = buildScorecard(
-    ctx.agentReport.scorecard,
-    recommendation,
-    agentFindings.map(f => ({ severity: mapSeverity(f.severity), title: f.title })),
-    ctx.agentReport.data_gaps ?? [],
-  );
-
-  const resultSummary = JSON.stringify({
-    recommendation,
-    overall_score: ctx.agentReport.scorecard.overall_score,
-    opportunity_score: (scorecardJson as Record<string, number>)["opportunity_score"],
-    risk_score: (scorecardJson as Record<string, number>)["risk_score"],
-    executive_summary_preview: (ctx.agentReport.executive_summary ?? [])[0]?.slice(0, 200) ?? "",
-  });
-
-  // ── 10. Update run to complete ────────────────────────────────────────────
-
-  const { error: updateErr } = await supabase
-    .from("trrc_due_diligence_runs")
-    .update({
-      status: "complete",
-      progress_percent: 100,
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      resolved_primary_api: ctx.api_numbers[0] ?? null,
-      resolved_district: ctx.district,
-      resolved_lease_number: ctx.lease_number,
-      resolved_operator_number: ctx.operator_number,
-      scorecard_json: scorecardJson,
-      coverage_json: coverageJson,
-      result_summary: resultSummary,
-    })
-    .eq("id", runId);
+  // 6. Mark run complete
+  const successCount = allAttempts.filter(a => a.status === "success").length;
+  const { error: updateErr } = await supabase.from("trrc_due_diligence_runs").update({
+    status: "complete",
+    progress_percent: 100,
+    completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    resolved_primary_api: ctx.api_numbers[0] ?? null,
+    resolved_district: ctx.district,
+    resolved_lease_number: ctx.lease_number,
+    resolved_operator_number: ctx.operator_number,
+    coverage_json: coverageJson,
+    result_summary: `${successCount} of ${steps.length} sources retrieved successfully.`,
+  }).eq("id", runId);
 
   if (updateErr) {
-    console.error("[trrc-dd-execute] run update error:", updateErr);
+    console.error("[trrc-dd-execute] final update error:", updateErr);
   } else {
-    console.log(`[trrc-dd-execute] [${runId}] complete — recommendation: ${recommendation}`);
+    console.log(`[trrc-dd-execute] [${runId}] complete — ${successCount}/${steps.length} sources`);
   }
 }
 
@@ -2315,7 +1495,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // Fire and forget via EdgeRuntime.waitUntil (keeps function alive after response)
-  const work = runAgent(runId);
+  const work = runRetrieval(runId);
 
   // @ts-ignore - Deno/Supabase EdgeRuntime global
   if (typeof EdgeRuntime !== "undefined") {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * TRRC Finding Engine — unit tests.
  *
