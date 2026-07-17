@@ -13,7 +13,7 @@ import type {
   ScoreDimension,
   ResolvedEntity,
 } from "../../../lib/trrc/types";
-import { detectInputType } from "../../../lib/trrc/normalization";
+// detectInputType unused — each field has an explicit type now
 
 // ─── Design tokens (matches UnderwritingPage.tsx exactly) ─────────────────────
 
@@ -41,16 +41,6 @@ const COLORS = {
 // ─── District options ──────────────────────────────────────────────────────────
 
 const DISTRICTS = ["01","02","03","04","05","06","07B","07C","08","09","10","C1","C2","C3"];
-
-const INPUT_TYPES: { value: TrrcIdentifierType; label: string }[] = [
-  { value: "api_number",       label: "API Number" },
-  { value: "rrc_lease_number", label: "Lease Number" },
-  { value: "gas_well_id",      label: "Gas Well ID" },
-  { value: "operator_name",    label: "Operator Name" },
-  { value: "p5_number",        label: "P-5 Number" },
-  { value: "legal_description",label: "Legal Description" },
-  { value: "lease_name",       label: "Lease Name" },
-];
 
 const TYPE_LABEL: Record<TrrcIdentifierType, string> = {
   api_number:        "API Number",
@@ -219,10 +209,11 @@ function recColor(rec: AcquisitionRecommendation): { bg: string; border: string;
 // ─── Form state type ───────────────────────────────────────────────────────────
 
 type FormState = {
-  query: string;
+  apiNumber: string;
+  leaseNumber: string;
+  operatorName: string;
   county: string;
   district: string;
-  inputTypeOverride: TrrcIdentifierType | "auto";
   searchHistorical: boolean;
   includeOffsetWells: boolean;
   productionMonths: number;
@@ -240,26 +231,17 @@ export default function TrrcDueDiligencePage() {
   const [activeTab, setActiveTab]   = useState<TabKey>("summary");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError]           = useState<string | null>(null);
-  const [detectedType, setDetectedType] = useState<TrrcIdentifierType>("unknown");
 
   const [form, setForm] = useState<FormState>({
-    query: "",
+    apiNumber: "",
+    leaseNumber: "",
+    operatorName: "",
     county: "",
     district: "",
-    inputTypeOverride: "auto",
     searchHistorical: true,
     includeOffsetWells: false,
     productionMonths: 36,
   });
-
-  // Auto-detect input type
-  useEffect(() => {
-    if (form.query.trim()) {
-      setDetectedType(detectInputType(form.query.trim()));
-    } else {
-      setDetectedType("unknown");
-    }
-  }, [form.query]);
 
   // Polling
   useEffect(() => {
@@ -292,11 +274,32 @@ export default function TrrcDueDiligencePage() {
   const handleSubmit = useCallback(async () => {
     setError(null);
     try {
+      // Use the most specific identifier as the primary input.
+      // Any additional filled fields are passed as supplemental context.
+      const api = form.apiNumber.trim();
+      const lease = form.leaseNumber.trim();
+      const operator = form.operatorName.trim();
+
+      let primaryInput: string;
+      let inputTypeOverride: TrrcIdentifierType | undefined;
+
+      if (api) {
+        primaryInput = api;
+        inputTypeOverride = "api_number";
+      } else if (lease) {
+        primaryInput = lease;
+        inputTypeOverride = "rrc_lease_number";
+      } else {
+        primaryInput = operator;
+        inputTypeOverride = "operator_name";
+      }
+
       const payload = {
-        input: form.query.trim(),
+        input: primaryInput,
+        input_type_override: inputTypeOverride,
+        operator_name: operator && !api && !lease ? undefined : (operator || undefined),
         county: form.county.trim() || undefined,
         district: form.district || undefined,
-        input_type_override: form.inputTypeOverride === "auto" ? undefined : form.inputTypeOverride,
         search_historical: form.searchHistorical,
         include_offset_wells: form.includeOffsetWells,
         production_months: form.productionMonths,
@@ -456,7 +459,6 @@ export default function TrrcDueDiligencePage() {
             setForm={setForm}
             showAdvanced={showAdvanced}
             setShowAdvanced={setShowAdvanced}
-            detectedType={detectedType}
             onSubmit={handleSubmit}
           />
         )}
@@ -489,16 +491,15 @@ export default function TrrcDueDiligencePage() {
 // ─── Search Form ───────────────────────────────────────────────────────────────
 
 function SearchForm({
-  form, setForm, showAdvanced, setShowAdvanced, detectedType, onSubmit,
+  form, setForm, showAdvanced, setShowAdvanced, onSubmit,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   showAdvanced: boolean;
   setShowAdvanced: React.Dispatch<React.SetStateAction<boolean>>;
-  detectedType: TrrcIdentifierType;
   onSubmit: () => void;
 }) {
-  const canSubmit = form.query.trim().length > 0;
+  const canSubmit = !!(form.apiNumber.trim() || form.leaseNumber.trim() || form.operatorName.trim());
   const [loading, setLoading] = useState(false);
 
   const handleRun = async () => {
@@ -512,13 +513,27 @@ function SearchForm({
     border: `1px solid ${COLORS.border}`,
     borderRadius: 7,
     color: COLORS.text,
-    fontSize: "0.85rem",
-    padding: "0.55rem 0.85rem",
+    fontSize: "0.9rem",
+    padding: "0.6rem 0.9rem",
     outline: "none",
     width: "100%",
     boxSizing: "border-box" as const,
+    fontFamily: "inherit",
     ...overrides,
   });
+
+  const fieldLabel = (text: string, hint?: string) => (
+    <div style={{ marginBottom: "0.45rem" }}>
+      <span style={{
+        fontSize: "0.72rem",
+        fontWeight: 600,
+        color: COLORS.textMuted,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase" as const,
+      }}>{text}</span>
+      {hint && <span style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginLeft: 6 }}>{hint}</span>}
+    </div>
+  );
 
   return (
     <div style={{
@@ -527,70 +542,48 @@ function SearchForm({
       borderRadius: 12,
       padding: "1.75rem",
     }}>
-      {/* Main search input */}
-      <div style={{ marginBottom: "1.25rem" }}>
-        <label style={{
-          display: "block",
-          fontSize: "0.75rem",
-          fontWeight: 600,
-          color: COLORS.textMuted,
-          letterSpacing: "0.06em",
-          textTransform: "uppercase" as const,
-          marginBottom: "0.5rem",
-        }}>
-          Enter any identifier
-        </label>
-        <textarea
-          value={form.query}
-          onChange={e => setForm(f => ({ ...f, query: e.target.value }))}
-          placeholder={"42-151-01734  |  Lease #12345  |  Operator Name  |  P-5 #123456  |  Lease Name"}
-          rows={2}
-          style={{
-            ...inp(),
-            resize: "none",
-            lineHeight: 1.5,
-            fontSize: "1rem",
-          }}
-          onKeyDown={e => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canSubmit) handleRun();
-          }}
-        />
-        {/* Auto-detect badge */}
-        {form.query.trim() && (
-          <div style={{ marginTop: "0.5rem" }}>
-            {detectedType !== "unknown" ? (
-              <span style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                background: COLORS.accentDim,
-                border: `1px solid ${COLORS.accent}40`,
-                borderRadius: 5,
-                padding: "0.2rem 0.6rem",
-                fontSize: "0.72rem",
-                color: COLORS.accent,
-                fontWeight: 600,
-              }}>
-                <span style={{ opacity: 0.7 }}>Detected:</span> {TYPE_LABEL[detectedType]}
-              </span>
-            ) : (
-              <span style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                background: COLORS.yellowDim,
-                border: `1px solid ${COLORS.yellow}40`,
-                borderRadius: 5,
-                padding: "0.2rem 0.6rem",
-                fontSize: "0.72rem",
-                color: COLORS.yellow,
-                fontWeight: 600,
-              }}>
-                Unable to auto-detect — specify type in Advanced Options
-              </span>
-            )}
-          </div>
-        )}
+
+      {/* Three search fields */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1rem", marginBottom: "1.25rem" }}>
+
+        {/* API Number */}
+        <div>
+          {fieldLabel("API Number", "e.g. 42-151-01734")}
+          <input
+            type="text"
+            value={form.apiNumber}
+            onChange={e => setForm(f => ({ ...f, apiNumber: e.target.value }))}
+            placeholder="42-XXX-XXXXX"
+            style={inp()}
+            onKeyDown={e => { if (e.key === "Enter" && canSubmit) handleRun(); }}
+          />
+        </div>
+
+        {/* Lease Number */}
+        <div>
+          {fieldLabel("Lease / Gas Well ID", "e.g. 12345")}
+          <input
+            type="text"
+            value={form.leaseNumber}
+            onChange={e => setForm(f => ({ ...f, leaseNumber: e.target.value }))}
+            placeholder="Lease # or Gas Well ID"
+            style={inp()}
+            onKeyDown={e => { if (e.key === "Enter" && canSubmit) handleRun(); }}
+          />
+        </div>
+
+        {/* Operator Name */}
+        <div>
+          {fieldLabel("Operator Name", "e.g. Pioneer Natural")}
+          <input
+            type="text"
+            value={form.operatorName}
+            onChange={e => setForm(f => ({ ...f, operatorName: e.target.value }))}
+            placeholder="Operator or P-5 name"
+            style={inp()}
+            onKeyDown={e => { if (e.key === "Enter" && canSubmit) handleRun(); }}
+          />
+        </div>
       </div>
 
       {/* Advanced options toggle */}
@@ -606,7 +599,7 @@ function SearchForm({
           display: "flex",
           alignItems: "center",
           gap: 5,
-          marginBottom: showAdvanced ? "1rem" : 0,
+          marginBottom: showAdvanced ? "1rem" : "1.25rem",
         }}
       >
         <span style={{
@@ -629,7 +622,7 @@ function SearchForm({
         }}>
           <div style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
             gap: "0.9rem",
           }}>
             {/* County */}
@@ -658,21 +651,6 @@ function SearchForm({
               >
                 <option value="">Any</option>
                 {DISTRICTS.map(d => <option key={d} value={d}>District {d}</option>)}
-              </select>
-            </div>
-
-            {/* Input type override */}
-            <div>
-              <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: COLORS.textMuted, marginBottom: "0.35rem", letterSpacing: "0.05em", textTransform: "uppercase" as const }}>
-                Input Type Override
-              </label>
-              <select
-                value={form.inputTypeOverride}
-                onChange={e => setForm(f => ({ ...f, inputTypeOverride: e.target.value as TrrcIdentifierType | "auto" }))}
-                style={inp({ appearance: "none" } as React.CSSProperties)}
-              >
-                <option value="auto">Auto-Detect</option>
-                {INPUT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
 
@@ -723,7 +701,7 @@ function SearchForm({
         margin: "0 0 1.1rem 0",
         lineHeight: 1.6,
       }}>
-        This search queries publicly available TRRC records only. Results are for preliminary screening purposes and do not constitute title verification, reserve engineering, or legal due diligence.
+        Fill in any identifier you have — API number, lease number, and/or operator name. The most specific identifier drives the search; any additional fields provide supplemental context to the agent.
       </p>
 
       {/* Submit button */}
