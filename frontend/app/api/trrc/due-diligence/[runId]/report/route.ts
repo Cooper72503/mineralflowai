@@ -259,12 +259,6 @@ export async function GET(
     : deriveCoverageFromAttempts(sourceAttemptRows);
 
   const scorecard: AcquisitionScorecard | null = run.scorecard ?? null;
-  if (!scorecard) {
-    return NextResponse.json(
-      { ok: false, error: "Run scorecard is missing — report cannot be generated." },
-      { status: 409 },
-    );
-  }
 
   // 6. Build a lightweight manifest for the report builder
   const manifest: TrrcManifest = {
@@ -289,7 +283,7 @@ export async function GET(
     production_records_count: production.length,
     findings,
     missing_items: run.missing_items ?? [],
-    scorecard,
+    scorecard: scorecard ?? ({} as AcquisitionScorecard),
     coverage,
     report_assumptions: [
       "All production data is lease-level; single-well attribution requires per-well allocation evidence.",
@@ -327,7 +321,7 @@ export async function GET(
 
   let pdfBuffer: Buffer;
   try {
-    pdfBuffer = await buildTrrcPdfReport(run, manifest, findings, scorecard, production, coverage, sourceAttemptRows);
+    pdfBuffer = await buildTrrcPdfReport(run, manifest, findings, scorecard ?? {} as AcquisitionScorecard, production, coverage, sourceAttemptRows);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[report] PDF generation error:", msg);
