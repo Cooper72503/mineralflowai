@@ -316,9 +316,11 @@ async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentConte
     }
   };
 
+  const ALL_DISTRICTS = ["01", "02", "03", "04", "05", "06", "6E", "7B", "7C", "08", "8A", "09", "10"];
+  // Try the provided district first; if not found, scan all districts
   const districtsToTry = distCode
-    ? [distCode]
-    : ["01", "02", "03", "04", "05", "06", "6E", "7B", "7C", "08", "8A", "09", "10"];
+    ? [distCode, ...ALL_DISTRICTS.filter(d => d !== distCode)]
+    : ALL_DISTRICTS;
 
   for (const dist of districtsToTry) {
     for (const lt of ["O", "G", ""]) {
@@ -751,10 +753,10 @@ async function toolFetchP4Records(input: Record<string, unknown>, ctx: AgentCont
   };
 }
 
-async function toolFetchWellStatus(input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
-  const apiNum  = input.api_number   ? String(input.api_number).trim()   : null;
-  const leaseNo = input.lease_number ? String(input.lease_number).trim() : null;
-  const dist    = input.district     ? String(input.district).trim()     : null;
+async function toolFetchWellStatus(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+  const apiNum  = input.api_number   ? String(input.api_number).trim()   : ctx.api_numbers[0] ?? null;
+  const leaseNo = input.lease_number ? String(input.lease_number).trim() : ctx.lease_number ?? null;
+  const dist    = input.district     ? String(input.district).trim()     : ctx.district ?? null;
 
   // wellStatusQueryAction.do returns HTTP 500 (not publicly accessible).
   // Use wellboreQueryAction.do instead — it returns on_schedule and well_type fields
@@ -826,8 +828,8 @@ async function toolFetchWellStatus(input: Record<string, unknown>, _ctx: AgentCo
   }
 }
 
-async function toolFetchOrphanWell(input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
-  const apiNum = String(input.api_number ?? "").trim();
+async function toolFetchOrphanWell(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+  const apiNum = String(input.api_number ?? ctx.api_numbers[0] ?? "").trim();
   if (!apiNum) return { ok: false, data: { error: "api_number required" }, summary: "fetch_orphan_well: no input" };
 
   try {
@@ -1331,9 +1333,9 @@ async function runRetrieval(runId: string): Promise<void> {
     { name: "search_by_legal_description",input: () => ({ county: ctx.county }) },
     { name: "fetch_production",           input: () => ({}) },
     { name: "fetch_completion_records",   input: () => ({}) },
-    { name: "fetch_well_status",          input: () => ({}) },
-    { name: "fetch_inactive_well_status", input: () => ({}) },
-    { name: "fetch_orphan_well",          input: () => ({}) },
+    { name: "fetch_well_status",          input: () => ({ api_number: ctx.api_numbers[0] ?? null, lease_number: ctx.lease_number, district: ctx.district }) },
+    { name: "fetch_inactive_well_status", input: () => ({ api_number: ctx.api_numbers[0] ?? null }) },
+    { name: "fetch_orphan_well",          input: () => ({ api_number: ctx.api_numbers[0] ?? null }) },
     { name: "fetch_plugging_records",     input: () => ({}) },
     { name: "fetch_compliance_violations",input: () => ({}) },
     { name: "fetch_p4_records",           input: () => ({}) },
