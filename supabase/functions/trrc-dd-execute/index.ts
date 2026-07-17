@@ -558,6 +558,38 @@ function extractTableRows(html: string, maxRows = 50): string[][] {
   return rows;
 }
 
+// EWA pages include navigation menus, form labels, JS artifacts, and error messages
+// as <tr> elements. These must be excluded before interpreting table data.
+const NOISE_PATTERNS: RegExp[] = [
+  /function\s+\w+\s*\(/,
+  /doSearch/,
+  /Please\s+[Cc]orrect/,
+  /Oil\s+&\s+Gas\s+Data\s+Query/i,
+  /Search\s+Criteria/i,
+  /Inactivity:\s*None/i,
+  /Or\s+Search\s+by/i,
+  /Links\s+Images\s+GIS/i,
+  /Page:\s*\d+\s+of\s+\d+/i,
+];
+
+function isNoiseRow(row: string[]): boolean {
+  if (row.every(c => !c.trim() || c === "&nbsp;")) return true;
+  const joined = row.join(" ");
+  return NOISE_PATTERNS.some(p => p.test(joined));
+}
+
+// Returns true only if the row looks like a real data-table header:
+// must have ≥minCols cells, ≥2 short keyword-like cells (≤50 chars each).
+function isHeaderRow(
+  row: string[],
+  minCols = 3,
+  kw: RegExp = /API|District|Lease|Operator|Aging|Inactive|Field|Depth|Potential|Allowable|Orphan|Severance|Formation|County/i,
+): boolean {
+  if (row.length < minCols) return false;
+  const matches = row.filter(c => c.length > 0 && c.length <= 50 && kw.test(c));
+  return matches.length >= 2;
+}
+
 // ─── TRRC fetch helpers ───────────────────────────────────────────────────────
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
@@ -654,10 +686,9 @@ async function toolSearchByApi(input: Record<string, unknown>, ctx: AgentContext
     });
 
     const rows = extractTableRows(html);
-    // rows[0] = JS/header noise, find the actual data header row by looking for "District" or "API"
-    // The actual table header typically contains "API No." and "District"
-    const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator/i)));
-    if (headerIdx < 0 || rows.length <= headerIdx + 1) {
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
+    const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator/i));
+    if (headerIdx < 0 || cleanRows.length <= headerIdx + 1) {
       return {
         ok: true,
         data: { found: false, api_number: api10, message: `API 42-${split.prefix}-${split.suffix} NOT FOUND in TRRC. Verify the API number.` },
@@ -665,8 +696,8 @@ async function toolSearchByApi(input: Record<string, unknown>, ctx: AgentContext
       };
     }
 
-    const header = rows[headerIdx] ?? [];
-    const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3);
+    const header = cleanRows[headerIdx] ?? [];
+    const dataRows = cleanRows.slice(headerIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r));
 
     // Parse all matching wells
     const wells = dataRows.map(row => {
@@ -701,6 +732,7 @@ async function toolSearchByApi(input: Record<string, unknown>, ctx: AgentContext
         total_wellbores: wells.length,
         wellbores: wells.slice(0, 10),
         source: "ewa-wellbore",
+        trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.apiNoPrefixArg=${split.prefix}&searchArgs.apiNoSuffixArg=${split.suffix}&searchArgs.scheduleTypeArg=Both&methodToCall=search`,
       },
       summary: `search_by_api: 42-${split.prefix}-${split.suffix} → Lease ${leaseNo} / District ${distCode} / ${wells.length} wellbore(s) / Operator: ${operator}`,
     };
@@ -731,11 +763,12 @@ async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentConte
       });
 
       const rows = extractTableRows(html);
-      const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator/i)));
-      if (headerIdx < 0 || rows.length <= headerIdx + 1) return null;
+      const cleanRows = rows.filter(r => !isNoiseRow(r));
+      const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator/i));
+      if (headerIdx < 0 || cleanRows.length <= headerIdx + 1) return null;
 
-      const header = rows[headerIdx] ?? [];
-      const wells = rows.slice(headerIdx + 1).filter(r => r.length >= 3).map(row => {
+      const header = cleanRows[headerIdx] ?? [];
+      const wells = cleanRows.slice(headerIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r)).map(row => {
         const obj: Record<string, string> = {};
         header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
         return obj;
@@ -766,6 +799,7 @@ async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentConte
           off_schedule: wells.length - onSchedule,
           wellbores: wells.slice(0, 30),
           source: "ewa-wellbore",
+          trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.leaseNumberArg=${leaseNo}&searchArgs.districtCodeArg=${dist}&searchArgs.scheduleTypeArg=Both&methodToCall=search`,
         },
         summary: `search_by_lease: Lease ${leaseNo} / District ${dist} — ${wells.length} wellbore(s), ${onSchedule} on-schedule`,
       };
@@ -810,10 +844,11 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
 
     const html = await fetchHtml(`${EWA_BASE}/organizationQueryAction.do`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
 
     // Find the actual data rows (header row contains "Operator No." etc.)
-    const headerIdx = rows.findIndex(r => r.some(c => c.match(/Operator No|Operator Name|Organization/i)));
-    if (headerIdx < 0 || rows.length <= headerIdx + 1) {
+    const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /Operator No|Operator Name|Organization/i));
+    if (headerIdx < 0 || cleanRows.length <= headerIdx + 1) {
       return {
         ok: true,
         data: { found: false, message: `No organization record found for operator "${opName ?? opNo}".` },
@@ -821,8 +856,8 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
       };
     }
 
-    const header = rows[headerIdx] ?? [];
-    const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3);
+    const header = cleanRows[headerIdx] ?? [];
+    const dataRows = cleanRows.slice(headerIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r));
 
     if (dataRows.length === 0) {
       return {
@@ -835,14 +870,21 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
     const rec: Record<string, string> = {};
     header.forEach((h, i) => { rec[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = dataRows[0][i] ?? ""; });
 
-    const resolvedOpNo  = rec["operator_no_"] ?? rec["operator_no"] ?? opNo ?? "";
+    // IMPORTANT: only use what the TRRC EWA returned — never fall back to the
+    // raw input `opNo` for setting ctx.operator_number.  The county code in an
+    // API number (e.g. "165" from 42-165-02733) is NOT a TRRC operator number.
+    // Real TRRC operator numbers are 5-6 numeric digits; reject anything shorter.
+    const resolvedOpNo  = rec["operator_no_"] ?? rec["operator_no"] ?? "";
     const resolvedName  = rec["operator_name"] ?? opName ?? "";
     const orgStatus     = rec["organization_status"] ?? rec["org_status"] ?? rec["status"] ?? "";
     const orgType       = rec["organization_type"] ?? rec["org_type"] ?? "";
     const tnrFlag       = (rec["_tnr_91_114"] ?? rec["tnr_91114"] ?? "").toUpperCase() === "YES" ||
                           (rec["_tnr_91_114"] ?? rec["tnr_91114"] ?? "").toUpperCase() === "Y";
 
-    if (!ctx.operator_number && resolvedOpNo) ctx.operator_number = resolvedOpNo;
+    // Only set if the HTML-parsed value looks like a real operator number (≥5 digits)
+    if (!ctx.operator_number && resolvedOpNo && /^\d{5,}$/.test(resolvedOpNo.replace(/\D/g, ""))) {
+      ctx.operator_number = resolvedOpNo;
+    }
     if (!ctx.operator_name  && resolvedName)  ctx.operator_name   = resolvedName;
 
     return {
@@ -857,6 +899,11 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
         mailing_address: [rec["mailing_address"], rec["mailing_city"], rec["mailing_state"], rec["mailing_zip"]].filter(Boolean).join(", "),
         phone: rec["phone_no_"] ?? rec["phone_no"] ?? "",
         raw: rec,
+        trrc_source_url: resolvedOpNo
+          ? `https://webapps2.rrc.texas.gov/EWA/p5QueryAction.do?searchArgs.operatorNumbersArg=${resolvedOpNo}&methodToCall=search`
+          : opName
+          ? `https://webapps2.rrc.texas.gov/EWA/p5QueryAction.do?searchArgs.operatorNameArg=${encodeURIComponent(opName)}&methodToCall=search`
+          : "https://webapps2.rrc.texas.gov/EWA/p5QueryAction.do",
       },
       summary: `search_by_operator: "${resolvedName}" (${resolvedOpNo}) — ${orgStatus}${tnrFlag ? " [⚠ TNR §91.114 FLAG]" : ""}`,
     };
@@ -884,6 +931,7 @@ async function toolSearchByLegalDescription(input: Record<string, unknown>, ctx:
         "To look up wells by legal description, use the TRRC GIS viewer at https://gis.rrc.texas.gov/ directly. " +
         "If you already have an API number or lease number from search_by_api or search_by_lease, proceed with those.",
       data_gap: true,
+      trrc_source_url: "https://gis.rrc.texas.gov/",
     },
     summary: `search_by_legal_description: no stateless endpoint available — noted as data gap (county: ${county ?? "unspecified"})`,
   };
@@ -906,11 +954,14 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
 
   // Helper: parse result table from proration query
   const parsePro = (html: string, leaseType: string) => {
+    // EWA returns a "Please Correct the Errors" form page when params are invalid
+    if (/Please\s+[Cc]orrect/i.test(html) || /errors?\s+list/i.test(html)) return null;
     const rows = extractTableRows(html);
-    const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator|Potential|Allowable/i)));
-    if (headerIdx < 0 || rows.length <= headerIdx + 1) return null;
-    const header = rows[headerIdx] ?? [];
-    const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3).map(row => {
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
+    const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator|Potential|Allowable/i));
+    if (headerIdx < 0 || cleanRows.length <= headerIdx + 1) return null;
+    const header = cleanRows[headerIdx] ?? [];
+    const dataRows = cleanRows.slice(headerIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r)).map(row => {
       const obj: Record<string, string> = {};
       header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
       return obj;
@@ -972,6 +1023,7 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
         note: "PRORATION DATA: No proration/allowable records found for this well. Monthly production history requires direct EWA browser session — mark as data gap.",
         lease_number: leaseNo,
         district: distCode,
+        trrc_source_url: "https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/production-data/",
       },
       summary: `fetch_production: ${leaseNo ?? apiRaw ?? "?"} — no proration records (monthly history requires EWA session)`,
     };
@@ -993,6 +1045,7 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
       district: distCode,
       proration_results: results,
       summary_first_well: { potential_bbl: potential, daily_allowable: allowable, well_type: wellType },
+      trrc_source_url: "https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/production-data/",
     },
     summary: `fetch_production: proration data retrieved — Potential: ${potential} BBL, Daily Allowable: ${allowable}, Type: ${wellType} (note: monthly history not available statlessly)`,
   };
@@ -1021,10 +1074,11 @@ async function toolFetchCompletionRecords(input: Record<string, unknown>, ctx: A
           }),
         });
         const rows = extractTableRows(html);
-        const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|District|Lease|Operator|Field|Depth/i)));
-        if (headerIdx >= 0 && rows.length > headerIdx + 1) {
-          const header = rows[headerIdx] ?? [];
-          const dataRows = rows.slice(headerIdx + 1).filter(r => r.length >= 3).map(row => {
+        const cleanRows = rows.filter(r => !isNoiseRow(r));
+        const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator|Field|Depth/i));
+        if (headerIdx >= 0 && cleanRows.length > headerIdx + 1) {
+          const header = cleanRows[headerIdx] ?? [];
+          const dataRows = cleanRows.slice(headerIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r)).map(row => {
             const obj: Record<string, string> = {};
             header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
             return obj;
@@ -1043,12 +1097,16 @@ async function toolFetchCompletionRecords(input: Record<string, unknown>, ctx: A
       }
     }
 
+    const firstApiSplit = splitApi(apis[0] ?? "");
     return {
       ok: true,
       data: {
         apis_queried: apis.length,
         results,
         note: "Full W-2 completion packets (CMPL system) are not accessible via stateless EWA queries. Formation, depth, and well type retrieved from wellbore query.",
+        trrc_source_url: firstApiSplit
+          ? `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.apiNoPrefixArg=${firstApiSplit.prefix}&searchArgs.apiNoSuffixArg=${firstApiSplit.suffix}&searchArgs.scheduleTypeArg=Both&methodToCall=search`
+          : "https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do",
       },
       summary: `fetch_completion_records: wellbore data retrieved for ${results.filter(r => r["wellbores"]).length}/${apis.length} APIs (W-2 docs require CMPL session)`,
     };
@@ -1079,8 +1137,9 @@ async function toolFetchInactiveWellStatus(input: Record<string, unknown>, ctx: 
       const text = extractText(html, 1000);
       const hasError = text.includes("No results found") || text.includes("Ewa_117");
       const rows = extractTableRows(html);
-      const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|Inactive|Lease|Operator|Aging/i)));
-      const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1).filter(r => r.length >= 2) : [];
+      const cleanRows = rows.filter(r => !isNoiseRow(r));
+      const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|Inactive|Lease|Operator|Aging/i));
+      const dataRows = headerIdx >= 0 ? cleanRows.slice(headerIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r)) : [];
       const isInactive = dataRows.length > 0 && !hasError;
 
       return {
@@ -1093,6 +1152,7 @@ async function toolFetchInactiveWellStatus(input: Record<string, unknown>, ctx: 
           interpretation: isInactive
             ? "Well appears on the TRRC Inactive Well Aging Report (IWAR). Plugging liability risk."
             : "Well is NOT on the IWAR inactive well list.",
+          trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/inactiveWellQueryAction.do?searchArgs.apiNoPrefixArg=${split.prefix}&searchArgs.apiNoSuffixArg=${split.suffix}&methodToCall=search`,
         },
         summary: `fetch_inactive_well_status: API 42-${split.prefix}-${split.suffix} — ${isInactive ? `INACTIVE (${dataRows.length} record(s))` : "not on inactive list"}`,
       };
@@ -1108,11 +1168,18 @@ async function toolFetchInactiveWellStatus(input: Record<string, unknown>, ctx: 
         }),
       });
       const rows = extractTableRows(html);
-      const headerIdx = rows.findIndex(r => r.some(c => c.match(/API|Lease|Operator|Aging/i)));
-      const dataRows = headerIdx >= 0 ? rows.slice(headerIdx + 1).filter(r => r.length >= 2) : [];
+      const cleanRows = rows.filter(r => !isNoiseRow(r));
+      const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|Lease|Operator|Aging/i));
+      const dataRows = headerIdx >= 0 ? cleanRows.slice(headerIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r)) : [];
       return {
         ok: true,
-        data: { operator_number: opNo, lease_type: leaseType, inactive_well_count: dataRows.length, wells: dataRows.slice(0, 20) },
+        data: {
+          operator_number: opNo,
+          lease_type: leaseType,
+          inactive_well_count: dataRows.length,
+          wells: dataRows.slice(0, 20),
+          trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/inactiveWellQueryAction.do?searchArgs.operatorNumbersArg=${opNo}&methodToCall=search`,
+        },
         summary: `fetch_inactive_well_status: operator ${opNo} — ${dataRows.length} inactive well(s)`,
       };
     }
@@ -1143,6 +1210,7 @@ async function toolFetchPluggingRecords(input: Record<string, unknown>, ctx: Age
         "(well_type AB = Abandoned, PP = Partial Plug) and from the inactive well aging report. " +
         "For verified plugging records, review the W-3C plugging report at https://www.rrc.texas.gov directly.",
       data_gap: true,
+      trrc_source_url: "https://www.rrc.texas.gov/oil-and-gas/applications-and-permits/drilling-permits/plugging-records/",
     },
     summary: `fetch_plugging_records: endpoint not accessible — infer from wellbore well_type and IWAR records`,
   };
@@ -1169,6 +1237,7 @@ async function toolFetchP4Records(input: Record<string, unknown>, ctx: AgentCont
         "schedule retrieved by fetch_proration. Use that data to assess production test results. " +
         "For full P-4 records, access the TRRC EWA directly with a browser session.",
       data_gap: true,
+      trrc_source_url: "https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/",
     },
     summary: `fetch_p4_records: endpoint not accessible — use proration data as proxy for P-4 tested rates`,
   };
@@ -1214,15 +1283,35 @@ async function toolFetchWellStatus(input: Record<string, unknown>, _ctx: AgentCo
     }
 
     const rows = extractTableRows(html);
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
+    const hIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator/i));
+    const header = hIdx >= 0 ? cleanRows[hIdx] : null;
+    const dataRows = hIdx >= 0
+      ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r))
+      : [];
+    const wellbores = header
+      ? dataRows.map(row => {
+          const obj: Record<string, string> = {};
+          header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+          return obj;
+        }).slice(0, 21)
+      : [];
+    const wellStatusSplit = apiNum ? splitApi(apiNum) : null;
+    const wellStatusUrl = wellStatusSplit
+      ? `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.apiNoPrefixArg=${wellStatusSplit.prefix}&searchArgs.apiNoSuffixArg=${wellStatusSplit.suffix}&searchArgs.scheduleTypeArg=Both&methodToCall=search`
+      : leaseNo && dist
+      ? `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.leaseNumberArg=${leaseNo}&searchArgs.districtCodeArg=${dist}&searchArgs.scheduleTypeArg=Both&methodToCall=search`
+      : "https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do";
     return {
       ok: true,
       data: {
         identifier: label,
-        count: Math.max(0, rows.length - 1),
-        statuses: rows.slice(1, 21),
+        count: dataRows.length,
+        wellbores,
         note: "Well status derived from wellbore query (on_schedule, well_type columns). wellStatusQueryAction.do is not publicly accessible.",
+        trrc_source_url: wellStatusUrl,
       },
-      summary: `fetch_well_status: ${label} — ${Math.max(0, rows.length - 1)} wellbore record(s)`,
+      summary: `fetch_well_status: ${label} — ${dataRows.length} wellbore record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_well_status: failed — ${String(e).slice(0, 80)}` };
@@ -1246,23 +1335,34 @@ async function toolFetchOrphanWell(input: Record<string, unknown>, _ctx: AgentCo
       }),
     });
     const rows = extractTableRows(html);
-    const isOrphan = rows.length > 1;
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
+    const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|Orphan|Operator|District|Lease|County/i));
+    const dataRows = headerIdx >= 0
+      ? cleanRows.slice(headerIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r))
+      : [];
+    // Only flag orphan if data rows contain actual records (first cell resembles an API number or operator number)
+    const isOrphan = dataRows.some(r => /^\d{2,}/.test((r[0] ?? "").trim()));
 
     return {
       ok: true,
-      data: { api_number: digits, is_orphan: isOrphan, count: Math.max(0, rows.length - 1), records: rows.slice(1, 6) },
-      summary: `fetch_orphan_well: API ${digits} — ${isOrphan ? `ORPHAN (${rows.length - 1} record(s))` : "not on orphan list"}`,
+      data: {
+        api_number: digits,
+        is_orphan: isOrphan,
+        count: dataRows.length,
+        records: dataRows.slice(0, 6),
+      },
+      summary: `fetch_orphan_well: API ${digits} — ${isOrphan ? `ORPHAN (${dataRows.length} record(s))` : "not on orphan list"}`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_orphan_well: failed — ${String(e).slice(0, 80)}` };
   }
 }
 
-async function toolFetchSeveranceRecords(input: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
-  const leaseNo   = input.lease_number   ? String(input.lease_number).trim()   : null;
-  const leaseType = input.lease_type     ? String(input.lease_type).trim()     : "O";
-  const dist      = input.district       ? String(input.district).trim()       : null;
-  const opNo      = input.operator_number ? String(input.operator_number).trim() : null;
+async function toolFetchSeveranceRecords(input: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+  const leaseNo   = input.lease_number    ? String(input.lease_number).trim()    : (ctx.lease_number ?? null);
+  const leaseType = input.lease_type      ? String(input.lease_type).trim()      : "O";
+  const dist      = input.district        ? String(input.district).trim()        : (ctx.district ?? null);
+  const opNo      = input.operator_number ? String(input.operator_number).trim() : (ctx.operator_number ?? null);
 
   // severanceQueryAction.do uses lease/district identifiers, not raw API number
   try {
@@ -1282,11 +1382,29 @@ async function toolFetchSeveranceRecords(input: Record<string, unknown>, _ctx: A
 
     const html = await fetchHtml(`${EWA_BASE}/severanceQueryAction.do`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
+    const hIdx = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|District|Lease|Operator|Severance|County/i));
+    const header = hIdx >= 0 ? cleanRows[hIdx] : null;
+    const dataRows = hIdx >= 0
+      ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r))
+      : [];
+    const records = header
+      ? dataRows.map(row => {
+          const obj: Record<string, string> = {};
+          header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+          return obj;
+        }).slice(0, 11)
+      : dataRows.slice(0, 11);
 
+    const severanceUrl = leaseNo && dist
+      ? `https://webapps2.rrc.texas.gov/EWA/severanceQueryAction.do?searchArgs.leaseNumberArg=${leaseNo}&searchArgs.districtCodeArg=${dist}&searchArgs.leaseTypeArg=${(leaseType.toUpperCase() === "G" ? "G" : "O")}&methodToCall=search`
+      : opNo
+      ? `https://webapps2.rrc.texas.gov/EWA/severanceQueryAction.do?searchArgs.operatorNumbersArg=${opNo}&methodToCall=search`
+      : "https://webapps2.rrc.texas.gov/EWA/severanceQueryAction.do";
     return {
       ok: true,
-      data: { identifier: label, count: Math.max(0, rows.length - 1), records: rows.slice(1, 11) },
-      summary: `fetch_severance_records: ${label} — ${Math.max(0, rows.length - 1)} record(s)`,
+      data: { identifier: label, count: dataRows.length, records, trrc_source_url: severanceUrl },
+      summary: `fetch_severance_records: ${label} — ${dataRows.length} record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_severance_records: failed — ${String(e).slice(0, 80)}` };
@@ -1305,6 +1423,7 @@ async function toolFetchComplianceViolations(_input: Record<string, unknown>, _c
         "For operator compliance records, visit https://www.rrc.texas.gov/compliance-enforcement/ directly " +
         "or use the TRRC EWA with a browser session. Note this as a data gap in your report.",
       data_gap: true,
+      trrc_source_url: "https://www.rrc.texas.gov/compliance-enforcement/",
     },
     summary: "fetch_compliance_violations: endpoint not accessible — manual review required via TRRC EWA browser session",
   };
@@ -1341,7 +1460,44 @@ async function toolFetchProration(input: Record<string, unknown>, ctx: AgentCont
 
     const endpoint = leaseType === "gas" ? "gasProQueryAction.do" : "oilProQueryAction.do";
     const html = await fetchHtml(`${EWA_BASE}/${endpoint}`, { method: "POST", body: formBody(params) });
+
+    // Build a deep-link URL using the same params we sent
+    const proEndpointName = leaseType === "gas" ? "gasProQueryAction.do" : "oilProQueryAction.do";
+    const proQueryString = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
+    const prorationSourceUrl = `https://webapps2.rrc.texas.gov/EWA/${proEndpointName}?${proQueryString}`;
+
+    // Detect error page — EWA returns form validation page when params are invalid
+    if (/Please\s+[Cc]orrect/i.test(html) || /errors?\s+list/i.test(html)) {
+      return {
+        ok: true,
+        data: {
+          identifier: label,
+          lease_type: leaseType,
+          found: false,
+          count: 0,
+          records: [],
+          important_note: "No proration records found. EWA returned form validation page — search criteria did not match any records.",
+          trrc_source_url: prorationSourceUrl,
+        },
+        summary: `fetch_proration: ${label} (${leaseType}) — 0 proration record(s) (no match)`,
+      };
+    }
+
     const rows = extractTableRows(html);
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
+    const proKw = /API|District|Lease|Operator|Potential|Allowable|Daily|Schedule/i;
+    const hIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, proKw));
+    const header = hIdx >= 0 ? cleanRows[hIdx] : null;
+    const dataRows = hIdx >= 0
+      ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r))
+      : [];
+    const records = header
+      ? dataRows.map(row => {
+          const obj: Record<string, string> = {};
+          header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+          return obj;
+        }).slice(0, 11)
+      : [];
 
     return {
       ok: true,
@@ -1349,11 +1505,12 @@ async function toolFetchProration(input: Record<string, unknown>, ctx: AgentCont
         identifier: label,
         lease_type: leaseType,
         district: distCode,
-        count: Math.max(0, rows.length - 1),
-        records: rows.slice(1, 11),
+        count: records.length,
+        records,
         important_note: "This is PRORATION ALLOWABLE data (permitted schedule), not monthly production history. Monthly production history is not accessible via stateless EWA queries.",
+        trrc_source_url: prorationSourceUrl,
       },
-      summary: `fetch_proration: ${label} (${leaseType}) — ${Math.max(0, rows.length - 1)} proration record(s)`,
+      summary: `fetch_proration: ${label} (${leaseType}) — ${records.length} proration record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_proration: failed — ${String(e).slice(0, 80)}` };
@@ -1384,11 +1541,63 @@ async function toolFetchInjectionRecords(input: Record<string, unknown>, ctx: Ag
 
     const html = await fetchHtml(`${EWA_BASE}/uicQueryAction.do`, { method: "POST", body: formBody(params) });
     const rows = extractTableRows(html);
+    const cleanRows = rows.filter(r => !isNoiseRow(r));
+    // UIC table header contains "UIC No." and "API No."
+    const uicKw = /UIC|API|Lease|Operator|County|District|Permit|Well\s+No/i;
+    const hIdx = cleanRows.findIndex(r => isHeaderRow(r, 2, uicKw));
+    const header = hIdx >= 0 ? cleanRows[hIdx] : null;
+    const dataRows = hIdx >= 0
+      ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r) && !/^Links\s+Images/i.test(r.join(" ")))
+      : [];
 
+    // UIC records often span two <tr> rows: row1 = UIC permit + API, row2 = lease number + nav links
+    // Merge continuation rows (rows where col 0 looks like a lease number, not a UIC permit number)
+    const mergedRows: Array<Record<string, string>> = [];
+    if (header) {
+      for (const row of dataRows) {
+        const cell0 = (row[0] ?? "").trim();
+        // A UIC permit number is a long zero-padded number like "000042442"
+        // A lease number is a shorter number like "10289"
+        // If cell0 is a short number (≤6 digits) and we already have a merged record, attach as lease
+        const isLeaseContinuation = /^\d{1,6}$/.test(cell0) && mergedRows.length > 0 &&
+          !mergedRows[mergedRows.length - 1]["lease_no"];
+        if (isLeaseContinuation) {
+          mergedRows[mergedRows.length - 1]["lease_no"] = cell0;
+        } else {
+          const obj: Record<string, string> = {};
+          header.forEach((h, i) => {
+            const key = h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, "");
+            const val = (row[i] ?? "").replace(/\bLinks\b.*$/i, "").replace(/\bGIS\b.*$/i, "").trim();
+            if (key) obj[key] = val;
+          });
+          if (Object.values(obj).some(v => /\d/.test(v))) mergedRows.push(obj);
+        }
+      }
+    }
+    const records = mergedRows.slice(0, 11);
+
+    // Seed context with lease number from UIC data (injection wells often have lease # here)
+    if (records.length > 0) {
+      const firstRec = records[0];
+      const uicLease = firstRec["lease_no"] ?? firstRec["lease_no_"] ?? firstRec["lease"] ?? "";
+      if (!ctx.lease_number && uicLease && /^\d+$/.test(uicLease.trim())) {
+        ctx.lease_number = uicLease.trim();
+      }
+      const uicCounty = firstRec["county"] ?? "";
+      if (!ctx.county && uicCounty) ctx.county = uicCounty;
+    }
+
+    const uicQueryString = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
     return {
       ok: true,
-      data: { identifier: label, count: Math.max(0, rows.length - 1), records: rows.slice(1, 11) },
-      summary: `fetch_injection_records: ${label} — ${Math.max(0, rows.length - 1)} UIC injection record(s)`,
+      data: {
+        identifier: label,
+        count: records.length,
+        records,
+        note: records.length === 0 ? "No UIC/injection records found for this API." : undefined,
+        trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/uicQueryAction.do?${uicQueryString}`,
+      },
+      summary: `fetch_injection_records: ${label} — ${records.length} UIC injection record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_injection_records: failed — ${String(e).slice(0, 80)}` };
@@ -1408,6 +1617,7 @@ async function toolFetchImagedRecords(_input: Record<string, unknown>, _ctx: Age
         "direct access at https://www.rrc.texas.gov/resource-center/research/online-research-queries/ " +
         "Note this as a data gap. Key document types to flag for manual review: W-2 completion report, G-1 completion report.",
       data_gap: true,
+      trrc_source_url: "https://www.rrc.texas.gov/resource-center/research/online-research-queries/",
     },
     summary: "fetch_imaged_records: CMPL endpoint not accessible — manual document retrieval required",
   };
@@ -1555,6 +1765,102 @@ function mapCategory(cat: string): string {
 
 function makeId(): string {
   return `finding_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// ─── Coverage builder ─────────────────────────────────────────────────────────
+
+interface CoverageEntry {
+  category: string;
+  label: string;
+  status: "complete" | "partial" | "retrieval_failed" | "manual_required" | "no_applicable_record" | "not_checked";
+  records_found: number;
+  data_current_through: string | null;
+  sources_checked: string[];
+  notes: string | null;
+}
+
+const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string }> = {
+  search_by_api:             { category: "wellbore_identity",  label: "Well Identity (API Lookup)" },
+  search_by_lease:           { category: "lease_inventory",    label: "Lease Inventory" },
+  search_by_operator:        { category: "operator_p5",        label: "Operator / P5 Organization" },
+  search_by_legal_description:{ category: "legal_description", label: "Legal Description (GIS)" },
+  fetch_production:          { category: "production",         label: "Production History (Proration Proxy)" },
+  fetch_completion_records:  { category: "completion",         label: "Completion Records (W-2)" },
+  fetch_well_status:         { category: "well_status",        label: "Well Status (Active/Inactive/Plugged)" },
+  fetch_inactive_well_status:{ category: "inactive_well",      label: "Inactive Well Aging Report (IWAR)" },
+  fetch_orphan_well:         { category: "orphan_well",        label: "Orphan Well / P5 Insolvent Operator" },
+  fetch_plugging_records:    { category: "plugging",           label: "Plugging Records (W-3C)" },
+  fetch_compliance_violations:{ category: "compliance",        label: "Compliance Violations" },
+  fetch_p4_records:          { category: "p4_records",         label: "P-4 Production Test Records" },
+  fetch_proration:           { category: "proration",          label: "Proration Schedule / Daily Allowable" },
+  fetch_injection_records:   { category: "injection",          label: "UIC / Injection Well Records" },
+  fetch_severance_records:   { category: "severance",          label: "Wellbore Severance Records" },
+  fetch_imaged_records:      { category: "imaged_records",     label: "Imaged Document Packets (CMPL)" },
+};
+
+function buildCoverageFromAttempts(
+  attempts: Array<{ source_name: string; status: string; result_count: number; result_data_json?: unknown }>,
+): CoverageEntry[] {
+  const coverage: CoverageEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const attempt of attempts) {
+    const toolName = attempt.source_name;
+    if (toolName === "submit_report") continue;
+    const meta = TOOL_COVERAGE_MAP[toolName];
+    if (!meta) continue;
+    if (seen.has(meta.category)) continue; // first call per category wins
+    seen.add(meta.category);
+
+    const data = (attempt.result_data_json ?? {}) as Record<string, unknown>;
+    const isDataGap = data["data_gap"] === true || data["endpoint_available"] === false;
+    const found = data["found"];
+    const recordCount = attempt.result_count;
+
+    let status: CoverageEntry["status"];
+    let notes: string | null = null;
+
+    if (attempt.status === "failed_transient" || attempt.status === "failed_permanent") {
+      status = "retrieval_failed";
+      notes = (data["error"] ? String(data["error"]).slice(0, 120) : "Query failed.");
+    } else if (isDataGap) {
+      status = "manual_required";
+      notes = "Automated access unavailable — manual review required via TRRC EWA.";
+    } else if (found === false) {
+      status = "no_applicable_record";
+      notes = String(data["message"] ?? "No records found for this query.").slice(0, 120);
+    } else {
+      status = recordCount > 0 ? "complete" : "partial";
+      notes = recordCount > 0 ? `${recordCount} record(s) retrieved.` : "Query succeeded but returned 0 rows.";
+    }
+
+    coverage.push({
+      category: meta.category,
+      label: meta.label,
+      status,
+      records_found: recordCount,
+      data_current_through: new Date().toISOString().slice(0, 10),
+      sources_checked: [toolName],
+      notes,
+    });
+  }
+
+  // Add "not_checked" entries for any tool in the map that was never called
+  for (const [toolName, meta] of Object.entries(TOOL_COVERAGE_MAP)) {
+    if (!seen.has(meta.category)) {
+      coverage.push({
+        category: meta.category,
+        label: meta.label,
+        status: "not_checked",
+        records_found: 0,
+        data_current_through: null,
+        sources_checked: [],
+        notes: `Tool ${toolName} was not called during this run.`,
+      });
+    }
+  }
+
+  return coverage;
 }
 
 // ─── Score builder ────────────────────────────────────────────────────────────
@@ -1723,15 +2029,23 @@ async function runAgent(runId: string): Promise<void> {
 
         console.log(`[trrc-dd-execute] [${runId}] tool=${block.name}: ${result.summary}`);
 
-        // Upsert source attempt
+        // Upsert source attempt (including raw result data for PDF exhibits)
+        const resultData = result.data as Record<string, unknown>;
+        const resultCount = Array.isArray(resultData?.["wellbores"])
+          ? (resultData["wellbores"] as unknown[]).length
+          : Array.isArray(resultData?.["records"])
+          ? (resultData["records"] as unknown[]).length
+          : resultData?.["found"] === true ? 1
+          : 0;
         await supabase.from("trrc_source_attempts").upsert({
           run_id: runId,
           source_id: `${block.name}_${toolCallCount}`,
           source_name: block.name,
           status: result.ok ? "success" : "failed_transient",
-          result_count: 0,
-          error_message: result.ok ? null : String((result.data as Record<string, unknown>)?.["error"] ?? ""),
+          result_count: resultCount,
+          error_message: result.ok ? null : String(resultData?.["error"] ?? ""),
           attempted_at: new Date().toISOString(),
+          result_data_json: result.data,
         }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).then(null, () => {});
 
         // Update progress (scale 5% → 90% over MAX_TOOL_CALLS)
@@ -1897,7 +2211,24 @@ async function runAgent(runId: string): Promise<void> {
     }
   }
 
-  // ── 8. Build scorecard and result_summary ─────────────────────────────────
+  // ── 8. Load source attempts and build coverage_json ──────────────────────
+
+  const { data: attemptRows } = await supabase
+    .from("trrc_source_attempts")
+    .select("source_name, status, result_count, result_data_json")
+    .eq("run_id", runId)
+    .order("attempted_at", { ascending: true });
+
+  const coverageJson = buildCoverageFromAttempts(
+    (attemptRows ?? []).map((a: Record<string, unknown>) => ({
+      source_name: String(a["source_name"] ?? ""),
+      status:      String(a["status"] ?? ""),
+      result_count: Number(a["result_count"] ?? 0),
+      result_data_json: a["result_data_json"] ?? {},
+    })),
+  );
+
+  // ── 9. Build scorecard and result_summary ─────────────────────────────────
 
   const scorecardJson = buildScorecard(
     ctx.agentReport.scorecard,
@@ -1914,7 +2245,7 @@ async function runAgent(runId: string): Promise<void> {
     executive_summary_preview: (ctx.agentReport.executive_summary ?? [])[0]?.slice(0, 200) ?? "",
   });
 
-  // ── 9. Update run to complete ─────────────────────────────────────────────
+  // ── 10. Update run to complete ────────────────────────────────────────────
 
   const { error: updateErr } = await supabase
     .from("trrc_due_diligence_runs")
@@ -1928,6 +2259,7 @@ async function runAgent(runId: string): Promise<void> {
       resolved_lease_number: ctx.lease_number,
       resolved_operator_number: ctx.operator_number,
       scorecard_json: scorecardJson,
+      coverage_json: coverageJson,
       result_summary: resultSummary,
     })
     .eq("id", runId);

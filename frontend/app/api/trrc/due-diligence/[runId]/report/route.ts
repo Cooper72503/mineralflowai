@@ -18,6 +18,99 @@ import type {
 } from "@/lib/trrc/types";
 import type { TrrcManifest } from "@/lib/trrc/manifest-builder";
 
+// ─── Lightweight source attempt shape (only the fields we store/need) ─────────
+
+type LiteSourceAttempt = {
+  source_id: string;
+  source_name: string;
+  status: string;
+  result_count: number;
+  error_message: string | null;
+  attempted_at: string;
+  result_data_json: Record<string, unknown> | null;
+};
+
+// ─── Coverage derivation (fallback when coverage_json not in DB) ──────────────
+
+const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string }> = {
+  search_by_api:              { category: "wellbore_identity",  label: "Well Identity (API Lookup)" },
+  search_by_lease:            { category: "lease_inventory",    label: "Lease Inventory" },
+  search_by_operator:         { category: "operator_p5",        label: "Operator / P5 Organization" },
+  search_by_legal_description:{ category: "legal_description",  label: "Legal Description (GIS)" },
+  fetch_production:           { category: "production",         label: "Production History (Proration Proxy)" },
+  fetch_completion_records:   { category: "completion",         label: "Completion Records (W-2)" },
+  fetch_well_status:          { category: "well_status",        label: "Well Status (Active/Inactive/Plugged)" },
+  fetch_inactive_well_status: { category: "inactive_well",      label: "Inactive Well Aging Report (IWAR)" },
+  fetch_orphan_well:          { category: "orphan_well",        label: "Orphan Well / P5 Insolvent Operator" },
+  fetch_plugging_records:     { category: "plugging",           label: "Plugging Records (W-3C)" },
+  fetch_compliance_violations:{ category: "compliance",         label: "Compliance Violations" },
+  fetch_p4_records:           { category: "p4_records",         label: "P-4 Production Test Records" },
+  fetch_proration:            { category: "proration",          label: "Proration Schedule / Daily Allowable" },
+  fetch_injection_records:    { category: "injection",          label: "UIC / Injection Well Records" },
+  fetch_severance_records:    { category: "severance",          label: "Wellbore Severance Records" },
+  fetch_imaged_records:       { category: "imaged_records",     label: "Imaged Document Packets (CMPL)" },
+};
+
+function deriveCoverageFromAttempts(attempts: LiteSourceAttempt[]): SourceCoverageStatus[] {
+  const coverage: SourceCoverageStatus[] = [];
+  const seen = new Set<string>();
+
+  for (const a of attempts) {
+    if (a.source_name === "submit_report") continue;
+    const meta = TOOL_COVERAGE_MAP[a.source_name];
+    if (!meta || seen.has(meta.category)) continue;
+    seen.add(meta.category);
+
+    const data = a.result_data_json ?? {};
+    const isDataGap = data["data_gap"] === true || data["endpoint_available"] === false;
+    const found = data["found"];
+
+    let status: SourceCoverageStatus["status"];
+    let notes: string | null = null;
+
+    if (a.status === "failed_transient" || a.status === "failed_permanent") {
+      status = "retrieval_failed";
+      notes = a.error_message?.slice(0, 120) ?? "Query failed.";
+    } else if (isDataGap) {
+      status = "manual_required";
+      notes = "Automated access unavailable — manual review required via TRRC EWA.";
+    } else if (found === false) {
+      status = "no_applicable_record";
+      notes = typeof data["message"] === "string" ? data["message"].slice(0, 120) : "No records found.";
+    } else {
+      status = a.result_count > 0 ? "complete" : "partial";
+      notes = a.result_count > 0 ? `${a.result_count} record(s) retrieved.` : "Query succeeded but returned 0 rows.";
+    }
+
+    coverage.push({
+      category: meta.category,
+      label: meta.label,
+      status,
+      records_found: a.result_count,
+      data_current_through: new Date().toISOString().slice(0, 10),
+      sources_checked: [a.source_name],
+      notes,
+    });
+  }
+
+  // Fill in "not_checked" for any tool never called
+  for (const [, meta] of Object.entries(TOOL_COVERAGE_MAP)) {
+    if (!seen.has(meta.category)) {
+      coverage.push({
+        category: meta.category,
+        label: meta.label,
+        status: "not_checked",
+        records_found: 0,
+        data_current_through: null,
+        sources_checked: [],
+        notes: null,
+      });
+    }
+  }
+
+  return coverage;
+}
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -61,7 +154,7 @@ export async function GET(
   }
 
   // 3. Load related data
-  const [entitiesResult, findingsResult, productionResult] = await Promise.all([
+  const [entitiesResult, findingsResult, productionResult, attemptsResult] = await Promise.all([
     supabase.from("trrc_resolved_entities").select("*").eq("run_id", runId),
     supabase.from("trrc_due_diligence_findings").select("*").eq("run_id", runId),
     supabase
@@ -70,6 +163,11 @@ export async function GET(
       .eq("run_id", runId)
       .order("production_month", { ascending: false })
       .limit(120),
+    supabase
+      .from("trrc_source_attempts")
+      .select("source_id, source_name, status, result_count, result_data_json, attempted_at, error_message")
+      .eq("run_id", runId)
+      .order("attempted_at", { ascending: true }),
   ]);
 
   const entities: ResolvedEntity[] = (entitiesResult.data ?? []).map((e) => ({
@@ -143,8 +241,23 @@ export async function GET(
     coverage: (runRaw["coverage_json"] as SourceCoverageStatus[]) ?? [],
   };
 
-  // 4. Validate scorecard exists
-  const coverage: SourceCoverageStatus[] = run.coverage ?? [];
+  // 4. Map source_attempts rows into a lightweight shape for the report
+  const sourceAttemptRows = (attemptsResult.data ?? []).map((a) => ({
+    source_id: a["source_id"] as string,
+    source_name: a["source_name"] as string,
+    status: a["status"] as string,
+    result_count: (a["result_count"] as number) ?? 0,
+    error_message: (a["error_message"] as string | null) ?? null,
+    attempted_at: a["attempted_at"] as string,
+    result_data_json: (a["result_data_json"] ?? null) as Record<string, unknown> | null,
+  }));
+
+  // 5. Determine coverage: prefer coverage_json saved by edge function, fall back to deriving it
+  const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
+  const coverage: SourceCoverageStatus[] = storedCoverage.length > 0
+    ? storedCoverage
+    : deriveCoverageFromAttempts(sourceAttemptRows);
+
   const scorecard: AcquisitionScorecard | null = run.scorecard ?? null;
   if (!scorecard) {
     return NextResponse.json(
@@ -153,7 +266,7 @@ export async function GET(
     );
   }
 
-  // 5. Build a lightweight manifest for the report builder
+  // 6. Build a lightweight manifest for the report builder
   const manifest: TrrcManifest = {
     schema_version: "1.0",
     app_version: process.env["npm_package_version"] ?? "1.0.0",
@@ -167,7 +280,8 @@ export async function GET(
     retrieval_started_at: run.started_at,
     retrieval_completed_at: run.completed_at ?? new Date().toISOString(),
     source_registry_version: "1.0.0",
-    source_attempts: [],
+    // Pass real source attempts so methodology page can show correct count
+    source_attempts: sourceAttemptRows as unknown as import("@/lib/trrc/types").SourceAttempt[],
     discovered_records: [],
     downloaded_files: [],
     failed_downloads: [],
@@ -190,7 +304,7 @@ export async function GET(
     generated_at: new Date().toISOString(),
   };
 
-  // 6. Load and call the PDF report builder
+  // 7. Load and call the PDF report builder
   let buildTrrcPdfReport: (
     run: TrrcDueDiligenceRun,
     manifest: TrrcManifest,
@@ -198,6 +312,7 @@ export async function GET(
     scorecard: AcquisitionScorecard,
     production: TrrcDDProductionRow[],
     coverage: SourceCoverageStatus[],
+    sourceAttempts: LiteSourceAttempt[],
   ) => Promise<Buffer>;
 
   try {
@@ -212,7 +327,7 @@ export async function GET(
 
   let pdfBuffer: Buffer;
   try {
-    pdfBuffer = await buildTrrcPdfReport(run, manifest, findings, scorecard, production, coverage);
+    pdfBuffer = await buildTrrcPdfReport(run, manifest, findings, scorecard, production, coverage, sourceAttemptRows);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[report] PDF generation error:", msg);

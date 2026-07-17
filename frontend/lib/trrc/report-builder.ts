@@ -13,6 +13,7 @@ import {
   View,
   StyleSheet,
   renderToBuffer,
+  Link,
 } from "@react-pdf/renderer";
 import type { Style } from "@react-pdf/types";
 import type {
@@ -1422,6 +1423,381 @@ function TrrcReportDocument({
   );
 }
 
+// ─── Raw data exhibit types ───────────────────────────────────────────────────
+
+export type LiteSourceAttempt = {
+  source_id: string;
+  source_name: string;
+  status: string;
+  result_count: number;
+  error_message: string | null;
+  attempted_at: string;
+  result_data_json: Record<string, unknown> | null;
+};
+
+// ─── Exhibit label map ────────────────────────────────────────────────────────
+
+const EXHIBIT_LABELS: Record<string, string> = {
+  search_by_api:              "Well Identity — API Lookup",
+  search_by_lease:            "Lease Inventory",
+  search_by_operator:         "Operator / P5 Organization Record",
+  search_by_legal_description:"Legal Description (GIS)",
+  fetch_production:           "Production Data",
+  fetch_completion_records:   "Completion Records (W-2 Wellbore Data)",
+  fetch_well_status:          "Well Status Records",
+  fetch_inactive_well_status: "Inactive Well Aging Report (IWAR)",
+  fetch_orphan_well:          "Orphan Well Check",
+  fetch_plugging_records:     "Plugging Records (W-3C)",
+  fetch_compliance_violations:"Compliance Violations",
+  fetch_p4_records:           "P-4 Production Test Records",
+  fetch_proration:            "Proration Schedule / Daily Allowable",
+  fetch_injection_records:    "UIC / Injection Well Records",
+  fetch_severance_records:    "Wellbore Severance Records",
+  fetch_imaged_records:       "Imaged Document Packets (CMPL)",
+};
+
+// ─── Raw Data Exhibits page ───────────────────────────────────────────────────
+
+function renderExhibitData(data: Record<string, unknown>): React.ReactElement | null {
+  if (!data || Object.keys(data).length === 0) return null;
+
+  const isDataGap = data["data_gap"] === true || data["endpoint_available"] === false;
+
+  // Data gap / manual required
+  if (isDataGap) {
+    const msg = typeof data["message"] === "string" ? data["message"] : "Manual retrieval required.";
+    return React.createElement(
+      View,
+      { style: [S.noteBox, { backgroundColor: C.charcoalBg, borderLeftColor: C.charcoal }] as Style[] },
+      React.createElement(
+        Text,
+        { style: [S.noteText, { color: C.charcoal }] as Style[] },
+        `⚠ Manual Review Required: ${msg.slice(0, 300)}`,
+      ),
+    );
+  }
+
+  // Not found
+  if (data["found"] === false) {
+    const msg = typeof data["message"] === "string" ? data["message"] : "No records found for this query.";
+    return React.createElement(
+      View,
+      { style: S.noteBox },
+      React.createElement(Text, { style: S.noteText }, `No Records: ${msg.slice(0, 200)}`),
+    );
+  }
+
+  const elements: React.ReactElement[] = [];
+
+  // Key-value fields (scalar values)
+  const kvFields: [string, string][] = [];
+  for (const [k, v] of Object.entries(data)) {
+    if (k === "source" || k === "data_note" || k === "important_note" || k === "note" || k === "trrc_source_url") continue;
+    if (Array.isArray(v) || (typeof v === "object" && v !== null)) continue;
+    if (typeof v === "boolean" || typeof v === "string" || typeof v === "number") {
+      const label = k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      kvFields.push([label, String(v)]);
+    }
+  }
+  if (kvFields.length > 0) {
+    elements.push(
+      React.createElement(
+        View,
+        { key: "kv", style: { marginBottom: 6 } },
+        ...kvFields.slice(0, 12).map(([label, value], i) =>
+          React.createElement(KV, { key: `kv_${i}`, label, value }),
+        ),
+      ),
+    );
+  }
+
+  // Notes/data notes as info boxes
+  const notes = [data["data_note"], data["important_note"], data["note"], data["message"]]
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+  if (notes.length > 0) {
+    elements.push(
+      React.createElement(
+        View,
+        { key: "notes", style: S.noteBox },
+        React.createElement(Text, { style: S.noteText }, notes[0].slice(0, 250)),
+      ),
+    );
+  }
+
+  // Array of record objects → render as table
+  const arrayFields = Object.entries(data).filter(([, v]) => Array.isArray(v) && (v as unknown[]).length > 0);
+  for (const [fieldKey, rawArr] of arrayFields) {
+    const arr = rawArr as Record<string, unknown>[];
+    if (arr.length === 0) continue;
+    const first = arr[0];
+    if (typeof first !== "object" || first === null) continue;
+
+    // Get columns — cap at 6 to fit the page
+    const allCols = Object.keys(first).filter(k => typeof first[k] !== "object");
+    const cols = allCols.slice(0, 6);
+    if (cols.length === 0) continue;
+
+    const fieldLabel = fieldKey.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const colWidth = Math.floor(100 / cols.length);
+
+    elements.push(
+      React.createElement(
+        View,
+        { key: `table_${fieldKey}`, style: { marginBottom: 8 } },
+        React.createElement(
+          View,
+          { style: [S.groupHeader, { marginBottom: 4 }] as Style[] },
+          React.createElement(Text, { style: S.groupHeaderText }, fieldLabel),
+        ),
+        React.createElement(
+          View,
+          { style: { borderWidth: 1, borderColor: C.border, borderRadius: 3, overflow: "hidden" } },
+          // Header row
+          React.createElement(
+            View,
+            { style: S.tableHeader },
+            ...cols.map((col) =>
+              React.createElement(
+                Text,
+                { key: col, style: [S.tableHeaderCell, { flex: 1, width: `${colWidth}%` }] as Style[] },
+                col.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()).slice(0, 20),
+              ),
+            ),
+          ),
+          // Data rows — cap at 10
+          ...arr.slice(0, 10).map((row, ri) =>
+            React.createElement(
+              View,
+              { key: `row_${ri}`, style: ri % 2 === 0 ? S.tableRow : S.tableRowAlt },
+              ...cols.map((col) =>
+                React.createElement(
+                  Text,
+                  { key: col, style: [S.tableCellMono, { flex: 1, width: `${colWidth}%` }] as Style[] },
+                  String(row[col] ?? "—").slice(0, 30),
+                ),
+              ),
+            ),
+          ),
+        ),
+        arr.length > 10 ? React.createElement(
+          Text,
+          { style: { fontSize: 7, color: C.gray, marginTop: 2, fontFamily: "Helvetica-Oblique" } },
+          `Showing 10 of ${arr.length} records.`,
+        ) : null,
+      ),
+    );
+  }
+
+  // Handle nested proration_results
+  if (Array.isArray(data["proration_results"])) {
+    const proResults = data["proration_results"] as Array<{ lease_type?: string; proration_records?: Record<string, unknown>[] }>;
+    for (const pr of proResults) {
+      if (!Array.isArray(pr.proration_records) || pr.proration_records.length === 0) continue;
+      const recs = pr.proration_records;
+      const allCols = Object.keys(recs[0]).filter(k => typeof recs[0][k] !== "object").slice(0, 6);
+      if (allCols.length === 0) continue;
+      const colWidth = Math.floor(100 / allCols.length);
+      elements.push(
+        React.createElement(
+          View,
+          { key: `pro_${pr.lease_type}`, style: { marginBottom: 8 } },
+          React.createElement(
+            View,
+            { style: [S.groupHeader, { marginBottom: 4 }] as Style[] },
+            React.createElement(Text, { style: S.groupHeaderText }, `${pr.lease_type ?? "PRORATION"} Records`),
+          ),
+          React.createElement(
+            View,
+            { style: { borderWidth: 1, borderColor: C.border, borderRadius: 3, overflow: "hidden" } },
+            React.createElement(
+              View,
+              { style: S.tableHeader },
+              ...allCols.map((col) =>
+                React.createElement(
+                  Text,
+                  { key: col, style: [S.tableHeaderCell, { flex: 1, width: `${colWidth}%` }] as Style[] },
+                  col.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()).slice(0, 20),
+                ),
+              ),
+            ),
+            ...recs.slice(0, 10).map((row, ri) =>
+              React.createElement(
+                View,
+                { key: `prorow_${ri}`, style: ri % 2 === 0 ? S.tableRow : S.tableRowAlt },
+                ...allCols.map((col) =>
+                  React.createElement(
+                    Text,
+                    { key: col, style: [S.tableCellMono, { flex: 1, width: `${colWidth}%` }] as Style[] },
+                    String(row[col] ?? "—").slice(0, 30),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  if (elements.length === 0) {
+    return React.createElement(
+      Text,
+      { style: { fontSize: 8, color: C.gray, fontFamily: "Helvetica-Oblique" } },
+      "Query returned data but no structured records could be extracted.",
+    );
+  }
+  return React.createElement(View, { style: { gap: 4 } }, ...elements);
+}
+
+function RawDataExhibitsPage({
+  attempts,
+  generatedAt,
+  runId,
+}: {
+  attempts: LiteSourceAttempt[];
+  generatedAt: string;
+  runId: string;
+}) {
+  // Filter out submit_report; deduplicate by base tool name (first call per tool)
+  const seen = new Set<string>();
+  const exhibitAttempts = attempts.filter((a) => {
+    if (a.source_name === "submit_report") return false;
+    if (seen.has(a.source_name)) return false;
+    seen.add(a.source_name);
+    return true;
+  });
+
+  return React.createElement(
+    Page,
+    { size: "LETTER", style: S.page },
+    React.createElement(PageHeader, { runId }),
+    React.createElement(
+      View,
+      { style: S.body },
+      React.createElement(SectionHeader, { title: "Raw Data Exhibits — TRRC Source Records" }),
+
+      React.createElement(
+        View,
+        { style: S.noteBox },
+        React.createElement(
+          Text,
+          { style: S.noteText },
+          "The following section presents the raw records retrieved directly from TRRC sources during this investigation. " +
+          "Each exhibit corresponds to one query executed by the due diligence agent. " +
+          "Records are reproduced verbatim as returned by TRRC — no summarization or interpretation has been applied.",
+        ),
+      ),
+
+      exhibitAttempts.length === 0
+        ? React.createElement(
+            Text,
+            { style: { fontSize: 8.5, color: C.gray, fontFamily: "Helvetica-Oblique" } },
+            "No source attempts were recorded for this run.",
+          )
+        : React.createElement(
+            View,
+            { style: { gap: 10 } },
+            ...exhibitAttempts.map((attempt) => {
+              const label = EXHIBIT_LABELS[attempt.source_name] ?? attempt.source_name;
+              const data = attempt.result_data_json ?? {};
+              const statusColor = attempt.status === "success" ? C.green : C.critical;
+              const statusBg = attempt.status === "success" ? C.greenBg : C.criticalBg;
+
+              return React.createElement(
+                View,
+                {
+                  key: attempt.source_id,
+                  style: {
+                    borderWidth: 1,
+                    borderColor: C.border,
+                    borderRadius: 4,
+                    overflow: "hidden",
+                    marginBottom: 4,
+                  },
+                },
+                // Exhibit header
+                React.createElement(
+                  View,
+                  {
+                    style: {
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      backgroundColor: C.lightGray,
+                      paddingVertical: 5,
+                      paddingHorizontal: 8,
+                      borderBottomWidth: 1,
+                      borderBottomColor: C.border,
+                    },
+                  },
+                  React.createElement(
+                    Text,
+                    { style: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: C.navy } },
+                    label,
+                  ),
+                  // Status badge + TRRC link grouped on the right
+                  React.createElement(
+                    View,
+                    { style: { flexDirection: "row", alignItems: "center", gap: 6 } },
+                    React.createElement(
+                      Text,
+                      {
+                        style: {
+                          fontSize: 6.5,
+                          fontFamily: "Helvetica-Bold",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.4,
+                          color: statusColor,
+                          backgroundColor: statusBg,
+                          paddingHorizontal: 5,
+                          paddingVertical: 2,
+                          borderRadius: 3,
+                        },
+                      },
+                      attempt.status.replace(/_/g, " ").toUpperCase(),
+                    ),
+                    typeof data["trrc_source_url"] === "string" && data["trrc_source_url"]
+                      ? React.createElement(
+                          Link,
+                          {
+                            src: data["trrc_source_url"] as string,
+                            style: {
+                              fontSize: 6.5,
+                              color: C.accent,
+                              fontFamily: "Helvetica",
+                              textDecoration: "underline",
+                              marginLeft: 6,
+                            },
+                          },
+                          "View on TRRC \u2197",
+                        )
+                      : null,
+                  ),
+                ),
+                // Exhibit body
+                React.createElement(
+                  View,
+                  { style: { padding: "6 8" } },
+                  attempt.status === "failed_transient" || attempt.status === "failed_permanent"
+                    ? React.createElement(
+                        View,
+                        { style: [S.noteBox, { backgroundColor: C.criticalBg, borderLeftColor: C.critical }] as Style[] },
+                        React.createElement(
+                          Text,
+                          { style: [S.noteText, { color: C.critical }] as Style[] },
+                          `Query failed: ${attempt.error_message ?? "unknown error"}`,
+                        ),
+                      )
+                    : renderExhibitData(data),
+                ),
+              );
+            }),
+          ),
+    ),
+    React.createElement(PageFooter, { generatedAt }),
+  );
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function buildTrrcPdfReport(
@@ -1431,6 +1807,7 @@ export async function buildTrrcPdfReport(
   scorecard: AcquisitionScorecard,
   production: TrrcDDProductionRow[],
   coverage: SourceCoverageStatus[],
+  sourceAttempts: LiteSourceAttempt[] = [],
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
 
@@ -1449,6 +1826,10 @@ export async function buildTrrcPdfReport(
     React.createElement(ScorecardPage, { scorecard, generatedAt, runId: run.id }),
     React.createElement(ProductionPage, { production, generatedAt, runId: run.id }),
     React.createElement(FindingsPage, { findings, generatedAt, runId: run.id }),
+    // Raw data exhibits — actual TRRC records
+    sourceAttempts.length > 0
+      ? React.createElement(RawDataExhibitsPage, { attempts: sourceAttempts, generatedAt, runId: run.id })
+      : null,
     React.createElement(SourceCoveragePage, { coverage, generatedAt, runId: run.id }),
     React.createElement(MissingRecordsPage, { manifest, generatedAt, runId: run.id }),
     React.createElement(MethodologyPage, { manifest, generatedAt, runId: run.id }),
