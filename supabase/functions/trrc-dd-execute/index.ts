@@ -452,112 +452,130 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
   const distCode = input.district     ? String(input.district).trim()     : ctx.district;
   const apiRaw   = input.api_number   ? String(input.api_number).trim()   : ctx.api_numbers[0] ?? null;
 
-  // The EWA specificLeaseQueryAction.do requires server-side session state and cannot be
-  // called statlessly. Instead, we query the OIL and GAS PRORATION schedules
-  // (oilProQueryAction.do and gasProQueryAction.do), which provide the current
-  // production allowable, potential (BBL/MCFD), and well status.
-  //
-  // IMPORTANT: This is PRORATION data (current allowable), NOT monthly production history.
-  // Monthly production history requires direct EWA browser session access.
-
-  const results: Record<string, unknown>[] = [];
-
-  // Helper: parse result table from proration query
-  const parsePro = (html: string, leaseType: string) => {
-    // EWA returns a "Please Correct the Errors" form page when params are invalid
+  const parseTable = (html: string, kwRe: RegExp, minCols = 3) => {
     if (/Please\s+[Cc]orrect/i.test(html) || /errors?\s+list/i.test(html)) return null;
     const rows = extractTableRows(html);
     const cleanRows = rows.filter(r => !isNoiseRow(r));
-    const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator|Potential|Allowable/i));
-    if (headerIdx < 0 || cleanRows.length <= headerIdx + 1) return null;
-    const header = cleanRows[headerIdx] ?? [];
-    const dataRows = cleanRows.slice(headerIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r)).map(row => {
+    const hIdx = cleanRows.findIndex(r => isHeaderRow(r, minCols, kwRe));
+    if (hIdx < 0 || cleanRows.length <= hIdx + 1) return null;
+    const header = cleanRows[hIdx] ?? [];
+    const dataRows = cleanRows.slice(hIdx + 1).filter(r => r.length >= minCols && !isNoiseRow(r)).map(row => {
       const obj: Record<string, string> = {};
-      header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+      header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, "")] = row[i] ?? ""; });
       return obj;
     });
     if (dataRows.length === 0) return null;
-    return { lease_type: leaseType, proration_records: dataRows };
+    return { header, dataRows };
   };
 
-  // Try by API number first (most specific)
-  if (apiRaw) {
-    const split = splitApi(apiRaw);
-    if (split) {
-      const dist = distCode ?? "";
-      for (const [endpoint, lt] of [
-        [`${EWA_BASE}/oilProQueryAction.do`, "OIL"],
-        [`${EWA_BASE}/gasProQueryAction.do`, "GAS"],
-      ] as [string, string][]) {
-        try {
-          const params: Record<string, string> = {
-            "searchArgs.apiPrefixArg": split.prefix,
-            "searchArgs.apiSuffixArg": split.suffix,
-            "methodToCall": "search",
-          };
-          if (dist) params["searchArgs.districtCodeArg"] = dist;
-          const html = await fetchHtml(endpoint, { method: "POST", body: formBody(params) });
-          const parsed = parsePro(html, lt);
-          if (parsed) results.push(parsed);
-        } catch { /* continue */ }
-      }
-    }
-  }
+  const monthlyRecords: Record<string, string>[] = [];
+  const prorationRecords: Record<string, string>[] = [];
+  let trrcUrl = "https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/production-data/";
 
-  // Also try by lease + district if we have both
-  if (leaseNo && distCode && results.length === 0) {
-    for (const [endpoint, lt] of [
-      [`${EWA_BASE}/oilProQueryAction.do`, "OIL"],
-      [`${EWA_BASE}/gasProQueryAction.do`, "GAS"],
-    ] as [string, string][]) {
+  // ── 1. Monthly production history via productionQueryAction.do ────────────────
+  // This is the actual lease-level monthly oil/gas/water volumes database.
+  // Query requires lease number + district. Falls back to all districts if needed.
+  const districtsToTry = distCode ? [distCode] : ["01","02","03","04","05","06","6E","7B","7C","08","8A","09","10"];
+  for (const dist of districtsToTry) {
+    if (monthlyRecords.length > 0) break;
+    for (const lt of ["O", "G"]) {
+      if (monthlyRecords.length > 0) break;
+      if (!leaseNo) continue;
       try {
-        const html = await fetchHtml(endpoint, {
+        const html = await fetchHtml(`${EWA_BASE}/productionQueryAction.do`, {
           method: "POST",
           body: formBody({
             "searchArgs.leaseNumberArg": leaseNo,
-            "searchArgs.districtCodeArg": distCode,
+            "searchArgs.districtCodeArg": dist,
+            "searchArgs.leaseTypeArg": lt,
             "methodToCall": "search",
           }),
         });
-        const parsed = parsePro(html, lt);
-        if (parsed) results.push(parsed);
+        const parsed = parseTable(html, /Lease|District|Oil|Gas|Water|Month|Year|BBL|MCF|Condensate/i, 3);
+        if (parsed) {
+          monthlyRecords.push(...parsed.dataRows.slice(0, 60));
+          if (!distCode && dist) ctx.district = dist;
+          trrcUrl = `https://webapps2.rrc.texas.gov/EWA/productionQueryAction.do?searchArgs.leaseNumberArg=${leaseNo}&searchArgs.districtCodeArg=${dist}&searchArgs.leaseTypeArg=${lt}&methodToCall=search`;
+        }
       } catch { /* continue */ }
     }
   }
 
-  if (results.length === 0) {
+  // ── 2. Proration / daily allowable (supplementary) ────────────────────────────
+  const proEndpoints: [string, string][] = [
+    [`${EWA_BASE}/oilProQueryAction.do`, "OIL"],
+    [`${EWA_BASE}/gasProQueryAction.do`, "GAS"],
+  ];
+  const tryProration = async (params: Record<string, string>) => {
+    for (const [ep, lt] of proEndpoints) {
+      try {
+        const html = await fetchHtml(ep, { method: "POST", body: formBody({ ...params, "methodToCall": "search" }) });
+        const parsed = parseTable(html, /API|District|Lease|Potential|Allowable/i);
+        if (parsed) {
+          prorationRecords.push(...parsed.dataRows.map(r => ({ ...r, _lease_type: lt })));
+        }
+      } catch { /* continue */ }
+    }
+  };
+
+  if (apiRaw) {
+    const split = splitApi(apiRaw);
+    if (split) {
+      await tryProration({ "searchArgs.apiPrefixArg": split.prefix, "searchArgs.apiSuffixArg": split.suffix, ...(distCode ? { "searchArgs.districtCodeArg": distCode } : {}) });
+    }
+  }
+  if (leaseNo && distCode && prorationRecords.length === 0) {
+    await tryProration({ "searchArgs.leaseNumberArg": leaseNo, "searchArgs.districtCodeArg": distCode });
+  }
+
+  // ── 3. Build result ────────────────────────────────────────────────────────────
+  const found = monthlyRecords.length > 0 || prorationRecords.length > 0;
+  if (!found) {
     return {
       ok: true,
       data: {
         found: false,
-        note: "PRORATION DATA: No proration/allowable records found for this well. Monthly production history requires direct EWA browser session — mark as data gap.",
+        note: "No production records found. If the lease number or district is incorrect, production data may still exist. Verify identifiers at https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/production-data/",
         lease_number: leaseNo,
         district: distCode,
         trrc_source_url: "https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/production-data/",
       },
-      summary: `fetch_production: ${leaseNo ?? apiRaw ?? "?"} — no proration records (monthly history requires EWA session)`,
+      summary: `fetch_production: no records found for Lease ${leaseNo ?? "?"} District ${distCode ?? "?"}`,
     };
   }
 
-  // Summarize what we found
-  const allRecs = results.flatMap(r => (r["proration_records"] as Record<string, string>[]) ?? []);
-  const firstRec = allRecs[0] ?? {};
-  const potential = firstRec["potential_bbl_"] ?? firstRec["potential"] ?? "N/A";
-  const allowable = firstRec["daily_allowable"] ?? firstRec["allowable"] ?? "N/A";
-  const wellType  = firstRec["unit_or_well_type"] ?? firstRec["oil_gas"] ?? "N/A";
+  // Store monthly records into ctx.production for DB persistence
+  for (const row of monthlyRecords) {
+    const yr  = parseInt(row["year"] ?? row["production_year"] ?? "0", 10) || null;
+    const mo  = parseInt(row["month"] ?? row["production_month"] ?? "0", 10) || null;
+    const oil = parseFloat(row["oil_bbl"] ?? row["oil_produced_bbl"] ?? row["oil"] ?? "") || null;
+    const gas = parseFloat(row["gas_mcf"] ?? row["gas_well_gas_mcf"] ?? row["casinghead_gas_mcf"] ?? row["gas"] ?? "") || null;
+    const water = parseFloat(row["water_bbl"] ?? row["water"] ?? "") || null;
+    if (yr && mo) ctx.production.push({ year: yr, month: mo, oil_bbl: oil, gas_mcf: gas, water_bbl: water });
+  }
 
+  const firstPro = prorationRecords[0] ?? {};
   return {
     ok: true,
     data: {
       found: true,
-      data_note: "PRORATION DATA (current allowable), NOT monthly production history. Monthly history requires EWA browser session — list as data gap.",
       lease_number: leaseNo,
       district: distCode,
-      proration_results: results,
-      summary_first_well: { potential_bbl: potential, daily_allowable: allowable, well_type: wellType },
-      trrc_source_url: "https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/production-data/",
+      monthly_production: {
+        record_count: monthlyRecords.length,
+        records: monthlyRecords.slice(0, 60),
+        note: monthlyRecords.length > 0 ? "Monthly lease production volumes from TRRC productionQueryAction.do" : "Monthly production query returned no data — verify lease number and district",
+      },
+      proration: prorationRecords.length > 0 ? {
+        record_count: prorationRecords.length,
+        records: prorationRecords.slice(0, 10),
+        potential: firstPro["potential_bbl_"] ?? firstPro["potential"] ?? null,
+        daily_allowable: firstPro["daily_allowable"] ?? firstPro["allowable"] ?? null,
+        note: "Current proration/allowable from TRRC oilProQueryAction.do and gasProQueryAction.do",
+      } : null,
+      trrc_source_url: trrcUrl,
     },
-    summary: `fetch_production: proration data retrieved — Potential: ${potential} BBL, Daily Allowable: ${allowable}, Type: ${wellType} (note: monthly history not available statlessly)`,
+    summary: `fetch_production: ${monthlyRecords.length} monthly records, ${prorationRecords.length} proration records for Lease ${leaseNo ?? "?"} / District ${distCode ?? "?"}`,
   };
 }
 
