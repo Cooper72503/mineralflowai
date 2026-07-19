@@ -1202,6 +1202,21 @@ async function toolFetchSeveranceRecords(input: Record<string, unknown>, ctx: Ag
     };
   }
 
+  // Enrich ctx from found records — critical rescue path when wellbore PDQ (search_by_api) fails.
+  // Severance is the most aggressive fallback: it indexes by API regardless of PDQ status,
+  // and its records carry lease, district, and operator — exactly what production needs.
+  const firstRec = result.records[0];
+  if (firstRec) {
+    const sevLease = (firstRec["lease_no_"] ?? firstRec["lease_no"] ?? firstRec["lease_number"] ?? firstRec["lease"] ?? "").trim();
+    const sevDist  = (firstRec["dist_code"] ?? firstRec["district"] ?? firstRec["district_code"] ?? "").trim();
+    const sevOpNo  = (firstRec["operator_no_"] ?? firstRec["operator_no"] ?? firstRec["operator_number"] ?? "").trim();
+    const sevOpNm  = (firstRec["operator_name"] ?? firstRec["operator"] ?? "").trim();
+    if (!ctx.lease_number    && sevLease && /^\d+$/.test(sevLease))    ctx.lease_number    = sevLease;
+    if (!ctx.district        && sevDist)                               ctx.district        = sevDist;
+    if (!ctx.operator_number && sevOpNo && /^\d{5,}$/.test(sevOpNo)) ctx.operator_number = sevOpNo;
+    if (!ctx.operator_name   && sevOpNm)                               ctx.operator_name   = sevOpNm;
+  }
+
   return {
     ok:   true,
     data: { count: result.records.length, records: result.records, trrc_source_url: result.url },
@@ -1696,7 +1711,7 @@ async function runRetrieval(runId: string): Promise<void> {
 
   const allAttempts: Array<{ source_name: string; status: string; result_count: number; result_data_json: unknown }> = [];
   let stepIndex = 0;
-  const totalSteps = 18; // including re-runs
+  const totalSteps = 20; // Phase 3 may add up to 2 rescue runs (search_by_lease + search_by_operator)
 
   const run = async (name: string, inputFn: () => Record<string, unknown>): Promise<ToolResult> => {
     const result  = await dispatchTool(name, inputFn(), ctx);
@@ -1773,22 +1788,40 @@ async function runRetrieval(runId: string): Promise<void> {
       await run("fetch_injection_records", () => ({ api_number: ctx.api_numbers[0] ?? null, operator_number: ctx.operator_number }));
     }
 
+    // Severance records run EARLY — before production — because severance indexes by API
+    // even when wellbore PDQ has no entry (new wells, recently spud, incomplete indexing).
+    // When found, its records carry lease + district + operator, which are fed back into
+    // ctx immediately so the Phase 3 enrichment and production query can use them.
+    await run("fetch_severance_records", () => ({
+      lease_number:    ctx.lease_number,
+      district:        ctx.district,
+      api_number:      ctx.api_numbers[0] ?? null,
+      operator_number: ctx.operator_number,
+    }));
+
     // ══════════════════════════════════════════════════════════════
     // PHASE 3 — CONTEXT ENRICHMENT
-    // If completion records or injection records discovered a lease
-    // number we didn't have before, re-run the lease search so the
-    // rest of the run has confirmed district + lease.
+    // After the early data pass (completion + injection + severance),
+    // check whether we now have identifiers we lacked after Phase 1.
+    // If so, resolve the missing pieces before pulling production.
+    // A well not found in wellbore PDQ can still yield full data
+    // if severance hands us the lease number and operator.
     // ══════════════════════════════════════════════════════════════
 
     const leaseAfterEarlyPass = ctx.lease_number;
     const distAfterEarlyPass  = ctx.district;
+    const opNoAfterEarlyPass  = ctx.operator_number;
+    const opNmAfterEarlyPass  = ctx.operator_name;
 
     if (leaseAfterEarlyPass && !distAfterEarlyPass) {
-      // We have a lease but no district — do a fresh scan
+      // We have a lease but no district — scan all districts to confirm
       await run("search_by_lease", () => ({ lease_number: leaseAfterEarlyPass, district: "" }));
-    } else if (leaseAfterEarlyPass && distAfterEarlyPass) {
-      // Lease + district confirmed — if this is different from what API search returned,
-      // the lease search will also verify it (already ran in phase 1, this is a noop)
+    }
+
+    // If severance gave us an operator name but we still have no operator number,
+    // resolve it now — production REQUIRES operator_number for its 3-step EWA session.
+    if (!opNoAfterEarlyPass && opNmAfterEarlyPass) {
+      await run("search_by_operator", () => ({ operator_name: opNmAfterEarlyPass, operator_number: null }));
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -1839,14 +1872,6 @@ async function runRetrieval(runId: string): Promise<void> {
       api_number:   ctx.api_numbers[0] ?? null,
       lease_number: ctx.lease_number,
       district:     ctx.district,
-    }));
-
-    // Severance records — tries lease+district, API prefix, then operator
-    await run("fetch_severance_records", () => ({
-      lease_number:    ctx.lease_number,
-      district:        ctx.district,
-      api_number:      ctx.api_numbers[0] ?? null,
-      operator_number: ctx.operator_number,
     }));
 
     // Imaged document packets (documented endpoint gap)
