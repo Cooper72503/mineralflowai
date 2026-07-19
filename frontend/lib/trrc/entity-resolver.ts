@@ -18,8 +18,7 @@ import {
   normalizeOperatorName,
   extractDistrictFromApi,
 } from "./normalization";
-import { parseLegalDescription } from "../location/legal-description-parser";
-import { lookupWellsByLegalDescription } from "../wells/trrc-abstract-lookup";
+// Legal description GIS resolution (V2 — archived); legal_description input is a documented gap
 
 // ─── Public result type ───────────────────────────────────────────────────────
 
@@ -400,118 +399,9 @@ async function resolveLegalDescription(
   county: string | null,
   trace: string[],
 ): Promise<ResolvedEntity[]> {
-  trace.push("Parsing legal description for GIS-backed resolution (OTLS abstract polygon)");
-
-  // Step 1: parse
-  const parsed = parseLegalDescription(raw);
-
-  trace.push(
-    `Parsed: abstract=${parsed.abstract_number ?? "null"}, ` +
-    `survey="${parsed.survey_name ?? "null"}", ` +
-    `block=${parsed.block ?? "null"}, section=${parsed.section ?? "null"}`,
-  );
-
-  // Step 2: GIS lookup (Texas only)
-  const isTexas = county !== null || /\btx\b|texas/i.test(raw);
-
-  if (!isTexas) {
-    trace.push("Non-Texas legal description detected — skipping GIS lookup, using text-match fallback");
-    return resolveLegalDescriptionFallback(raw, county, trace);
-  }
-
-  let gisResult: Awaited<ReturnType<typeof lookupWellsByLegalDescription>> = null;
-
-  try {
-    gisResult = await lookupWellsByLegalDescription({
-      county,
-      state: "TX",
-      abstract_number: parsed.abstract_number,
-      survey_name: parsed.survey_name,
-      block: parsed.block,
-      section: parsed.section,
-    });
-  } catch {
-    trace.push("GIS lookup threw — falling back to text-match resolution");
-    return resolveLegalDescriptionFallback(raw, county, trace);
-  }
-
-  // Step 3: GIS returned API numbers
-  if (gisResult && gisResult.api_numbers.length > 0) {
-    const apis = gisResult.api_numbers.slice(0, 5); // cap at 5 per spec
-    const apiCount = apis.length;
-
-    const confidence =
-      apiCount === 1 ? 0.85 :
-      apiCount <= 3  ? 0.75 :
-                       0.65;
-
-    trace.push(
-      `GIS polygon match: ${apiCount} API(s) found on "${gisResult.description}"; ` +
-      `confidence=${confidence}`,
-    );
-
-    const entities: ResolvedEntity[] = apis.map((api10): ResolvedEntity => ({
-      id: makeId(),
-      entity_type: "wellbore",
-      canonical_identifier: api10,
-      display_name: `API: ${api10} (from legal description GIS match)`,
-      attributes: {
-        legal_description: raw,
-        county: county ?? null,
-        abstract_number: parsed.abstract_number,
-        survey_name: parsed.survey_name,
-        lat: gisResult!.centroid?.lat ?? null,
-        lng: gisResult!.centroid?.lng ?? null,
-        gis_description: gisResult!.description,
-        polygon_count: gisResult!.polygon_count,
-      },
-      confidence,
-      resolution_method: "gis_abstract_polygon",
-      is_user_selected: false,
-    }));
-
-    trace.push(
-      `Generated ${entities.length} GIS-resolved wellbore entit${entities.length === 1 ? "y" : "ies"}; ` +
-      "user confirmation required (spec requirement for legal_description input)",
-    );
-
-    return entities;
-  }
-
-  // Step 4: Parsed abstract/survey available but GIS returned nothing
-  if (parsed.abstract_number || parsed.survey_name || parsed.block || parsed.section) {
-    trace.push(
-      "GIS lookup returned no API numbers despite parsed identifiers; " +
-      "returning low-confidence lease entity with location context",
-    );
-
-    const entity: ResolvedEntity = {
-      id: makeId(),
-      entity_type: "lease",
-      canonical_identifier: `legal:${raw.slice(0, 80).replace(/\s+/g, "_")}`,
-      display_name: `Legal Description — Location Known, No Wells Found (${county ?? "county unknown"})`,
-      attributes: {
-        legal_description: raw,
-        county: county ?? null,
-        abstract_number: parsed.abstract_number,
-        survey_name: parsed.survey_name,
-        block: parsed.block,
-        section: parsed.section,
-        gis_searched: true,
-        gis_result: "no_apis_found",
-      },
-      confidence: 0.4,
-      resolution_method: "legal_description_parsed_only",
-      is_user_selected: false,
-    };
-
-    trace.push("Parsed-only entity (confidence=0.40) requires user confirmation");
-
-    return [entity];
-  }
-
-  // Step 5: GIS failed AND no parseable identifiers — pure text-match fallback
-  trace.push("No parseable survey identifiers extracted; using text-match fallback");
+  // GIS-backed resolution archived (V2). Legal description input is a documented gap —
+  // the edge function returns data_gap: true for search_by_legal_description.
+  trace.push("Legal description GIS resolution not available — using text-match fallback");
   return resolveLegalDescriptionFallback(raw, county, trace);
 }
 
