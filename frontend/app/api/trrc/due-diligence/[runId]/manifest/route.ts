@@ -21,8 +21,8 @@ import type {
   TrrcFinding,
   NormalizedApi,
   ResolvedSearchContext,
+  OrchestratorResult,
 } from "@/lib/trrc/types";
-import type { OrchestratorResult } from "@/lib/trrc/retrieval-orchestrator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

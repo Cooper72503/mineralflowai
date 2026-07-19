@@ -22,6 +22,7 @@ import type {
   SourceSearchResult,
 } from "./types";
 import { getAllAdapters } from "./sources/index";
+import { SOURCE_REGISTRY } from "./source-registry";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -180,9 +181,6 @@ function buildCoverage(
 
   // Build a lookup: adapter_id → adapter (to get expected_record_types)
   // We rely on the source registry for category mappings
-  const { SOURCE_REGISTRY } = require("./source-registry") as {
-    SOURCE_REGISTRY: Record<string, { expected_record_types: TrrcRecordCategory[] }>;
-  };
 
   const coverage: SourceCoverageStatus[] = [];
 
@@ -387,7 +385,7 @@ export async function runRetrievalOrchestrator(
       }
 
       // Automated sources: attempt with retries
-      const retrivalOpts: RetrievalOptions = {
+      const retrievalOpts: RetrievalOptions = {
         timeout_ms: options.timeout_per_source_ms,
         max_retries: adapter.max_retries,
         dry_run: options.dry_run,
@@ -402,7 +400,7 @@ export async function runRetrievalOrchestrator(
           const { result: r } = await runAdapterWithTimeout(
             adapter,
             ctx,
-            retrivalOpts,
+            retrievalOpts,
             options.timeout_per_source_ms,
           );
           result = r;

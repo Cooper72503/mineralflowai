@@ -507,6 +507,87 @@ function RecordsPage({
   );
 }
 
+// ─── Production Table Page ────────────────────────────────────────────────────
+
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function formatProductionMonth(iso: string): string {
+  const [year, month] = iso.split("-");
+  const mo = parseInt(month ?? "0", 10);
+  return `${MONTH_NAMES[mo - 1] ?? month} ${year}`;
+}
+
+function fmtNum(val: number | null): string {
+  if (val === null || val === undefined) return "NO RPT";
+  return val.toLocaleString("en-US");
+}
+
+function ProductionPage({
+  production,
+  run,
+  generatedAt,
+}: {
+  production: TrrcDDProductionRow[];
+  run: TrrcDueDiligenceRun;
+  generatedAt: string;
+}) {
+  const cols = [
+    { label: "Month",              width: "16%"  },
+    { label: "Oil (BBL)",          width: "17%"  },
+    { label: "Gas (MCF)",          width: "17%"  },
+    { label: "Casinghead (MCF)",   width: "17%"  },
+    { label: "Condensate (BBL)",   width: "17%"  },
+    { label: "Water (BBL)",        width: "16%"  },
+  ];
+
+  return React.createElement(
+    Page,
+    { size: "LETTER", style: S.page },
+
+    // Page header
+    React.createElement(
+      View,
+      { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica" } }, run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "Production History"),
+
+    // Source note
+    React.createElement(Text, {
+      style: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica-Oblique", marginBottom: 10 },
+    }, `${production.length} month(s) retrieved from TRRC specificLeaseQueryAction.do. All values are lease-level — single-well attribution requires per-well allocation. "NO RPT" = no production reported for that month.`),
+
+    // Table header
+    React.createElement(
+      View,
+      { style: S.tableHeader },
+      ...cols.map(c => React.createElement(
+        Text,
+        { style: [S.tableHeaderCell, { width: c.width }] },
+        c.label,
+      )),
+    ),
+
+    // Table rows
+    ...production.map((row, i) =>
+      React.createElement(
+        View,
+        { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCellMono, { width: "16%" }] }, formatProductionMonth(row.production_month)),
+        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.oil_bbl)),
+        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.gas_mcf)),
+        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.casinghead_gas_mcf)),
+        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.condensate_bbl)),
+        React.createElement(Text, { style: [S.tableCell,     { width: "16%", textAlign: "right" }] }, fmtNum(row.water_bbl)),
+      ),
+    ),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function buildTrrcPdfReport(
@@ -514,7 +595,7 @@ export async function buildTrrcPdfReport(
   _manifest: TrrcManifest,
   _findings: TrrcFinding[],
   _scorecard: AcquisitionScorecard,
-  _production: TrrcDDProductionRow[],
+  production: TrrcDDProductionRow[],
   _coverage: SourceCoverageStatus[],
   sourceAttempts: LiteSourceAttempt[] = [],
 ): Promise<Buffer> {
@@ -530,6 +611,9 @@ export async function buildTrrcPdfReport(
     },
     React.createElement(CoverPage, { run, generatedAt }),
     React.createElement(RecordsPage, { attempts: sourceAttempts, run, generatedAt }),
+    production.length > 0
+      ? React.createElement(ProductionPage, { production, run, generatedAt })
+      : null,
   );
 
   const buffer = await renderToBuffer(doc);

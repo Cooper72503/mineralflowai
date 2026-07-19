@@ -16,82 +16,6 @@ function IconDashboard() {
     </svg>
   );
 }
-function IconPipeline() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1" y="2" width="3.5" height="12" rx="1"/>
-      <rect x="6.25" y="2" width="3.5" height="8.5" rx="1"/>
-      <rect x="11.5" y="2" width="3.5" height="5.5" rx="1"/>
-    </svg>
-  );
-}
-function IconScreen() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="6.5" cy="6.5" r="4.5"/>
-      <path d="M10.5 10.5L14 14"/>
-    </svg>
-  );
-}
-function IconCalculator() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="1" width="12" height="14" rx="2"/>
-      <rect x="4" y="3.5" width="8" height="2.5" rx="0.75"/>
-      <circle cx="5" cy="9" r="0.75" fill="currentColor" stroke="none"/>
-      <circle cx="8" cy="9" r="0.75" fill="currentColor" stroke="none"/>
-      <circle cx="11" cy="9" r="0.75" fill="currentColor" stroke="none"/>
-      <circle cx="5" cy="12" r="0.75" fill="currentColor" stroke="none"/>
-      <circle cx="8" cy="12" r="0.75" fill="currentColor" stroke="none"/>
-      <circle cx="11" cy="12" r="0.75" fill="currentColor" stroke="none"/>
-    </svg>
-  );
-}
-function IconUpload() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M8 11V4M5.5 6.5L8 4l2.5 2.5"/>
-      <path d="M2.5 11.5a3.5 3.5 0 0 1 .75-5.75 4.5 4.5 0 0 1 9.5 0 3.5 3.5 0 0 1 .75 5.75"/>
-      <path d="M5.5 14h5"/>
-    </svg>
-  );
-}
-function IconDocuments() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 14h8a1 1 0 0 0 1-1V5.5L9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1z"/>
-      <path d="M9.5 2v3.5H13"/>
-      <path d="M5.5 8.5h5M5.5 11h3"/>
-    </svg>
-  );
-}
-function IconLeads() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="6" cy="5" r="2.75"/>
-      <path d="M1 14a5 5 0 0 1 10 0"/>
-      <path d="M11.5 6.5a2.5 2.5 0 0 1 0 4"/>
-      <path d="M13.5 14a4 4 0 0 0-2.5-3.5"/>
-    </svg>
-  );
-}
-function IconAlerts() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M8 1.5A4.5 4.5 0 0 1 12.5 6v3.5L14 12H2l1.5-2.5V6A4.5 4.5 0 0 1 8 1.5z"/>
-      <path d="M6.5 12.5a1.5 1.5 0 0 0 3 0"/>
-    </svg>
-  );
-}
-function IconUnderwriting() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="12" height="12" rx="2"/>
-      <path d="M5 6h6M5 8.5h4M5 11h5"/>
-      <circle cx="11.5" cy="10.5" r="1.5" fill="currentColor" stroke="none" opacity="0.6"/>
-    </svg>
-  );
-}
 function IconDueDiligence() {
   return (
     <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -100,17 +24,6 @@ function IconDueDiligence() {
       <path d="M5.5 7.5h5M5.5 10h3"/>
       <circle cx="11" cy="11" r="2" stroke="currentColor"/>
       <path d="M12.5 12.5L14 14"/>
-    </svg>
-  );
-}
-function IconAcreage() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 13L6 5l3 5 2.5-3.5L14 13"/>
-      <path d="M1.5 13h13"/>
-      <circle cx="6" cy="5" r="0.8" fill="currentColor" stroke="none"/>
-      <circle cx="9" cy="10" r="0.8" fill="currentColor" stroke="none"/>
-      <circle cx="11.5" cy="6.5" r="0.8" fill="currentColor" stroke="none"/>
     </svg>
   );
 }
@@ -151,10 +64,7 @@ function IconBrandMark() {
 
 // ── Nav config ─────────────────────────────────────────────────────────────
 const primaryNav = [
-  { href: "/underwriting",         label: "MineralFlow Underwriting", Icon: IconUnderwriting },
-  { href: "/underwriting/history", label: "Deal Pipeline",            Icon: IconPipeline     },
-  { href: "/acreage",              label: "Acreage Valuation",        Icon: IconAcreage      },
-  { href: "/trrc-due-diligence",  label: "TRRC Due Diligence",       Icon: IconDueDiligence },
+  { href: "/trrc-due-diligence", label: "TRRC Due Diligence", Icon: IconDueDiligence },
 ] as const;
 
 const accountNav = [
@@ -206,20 +116,12 @@ function NavGroup({
   return (
     <>
       {items.map(({ href, label, Icon }) => {
-        const isActive =
-          pathname === href
-          || (href === "/underwriting" && pathname === "/underwriting")
-          || (href === "/underwriting/history" && pathname.startsWith("/underwriting/history"))
-          || (href !== "/underwriting" && href !== "/underwriting/history" && pathname.startsWith(href));
-        const isPrimary = href === "/underwriting";
+        const isActive = pathname === href || pathname.startsWith(href + "/");
         return (
           <Link
             key={href}
             href={href}
-            className={[
-              isActive ? "active" : undefined,
-              isPrimary ? "sidebar-primary-item" : undefined,
-            ].filter(Boolean).join(" ") || undefined}
+            className={isActive ? "active" : undefined}
             onClick={onClose}
           >
             <Icon />

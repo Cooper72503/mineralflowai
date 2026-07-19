@@ -46,25 +46,14 @@ export const CompletionSource: TrrcSourceAdapter = {
     if (ctx.api_numbers.length === 0) {
       return {
         source_id: this.id,
-        status: "manual_required",
-        records: [
-          {
-            source_id: this.id,
-            document_id: "completion_manual_fallback",
-            title: "Completion Query — Manual Retrieval Required",
-            category: "completion",
-            form_type: "W2_G1_completion",
-            url: `${EWA_BASE}/drillingPermitsQueryAction.do`,
-            filing_date: null,
-            is_downloadable: false,
-          },
-        ],
+        status: "not_applicable",
+        records: [],
         result_count: 0,
         data: {
-          note: "No API numbers available. Search TRRC EWA drilling permits manually using operator name or lease number.",
+          note: "No API numbers resolved — completion query requires an API number.",
         },
         error: null,
-        manual_action_url: `${EWA_BASE}/drillingPermitsQueryAction.do`,
+        manual_action_url: null,
       };
     }
 

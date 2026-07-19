@@ -126,6 +126,7 @@ export async function POST(request: NextRequest) {
       resolved_district: body.district ?? null,
       resolved_lease_number: body.lease_number?.trim() ?? null,
       resolved_gas_id: null,
+      operator_name:            body.operator_name?.trim() ?? null,
       resolved_operator_number: null,
       report_storage_path: null,
       archive_storage_path: null,

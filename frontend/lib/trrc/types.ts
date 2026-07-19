@@ -132,7 +132,7 @@ export type SourceAttemptStatus =
   | 'rate_limited';
 
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
-export type AcquisitionRecommendation = 'proceed' | 'review' | 'pass' | 'insufficient_data';
+export type AcquisitionRecommendation = 'BLOCKED' | 'PURSUE' | 'REVIEW' | 'PASS';
 
 // Keep these as they may be referenced in underwriting
 export interface TrrcFinding {
@@ -150,24 +150,36 @@ export interface TrrcFinding {
   is_directly_reported: boolean;
 }
 
-export interface AcquisitionScorecard {
-  overall_score: number;
-  opportunity_score: number;
-  risk_score: number;
-  recommendation: AcquisitionRecommendation;
-  confidence: number;
-  dimensions: ScoreDimension[];
-  gating_conditions: string[];
-  top_reasons_for: string[];
-  top_reasons_against: string[];
-  missing_critical_evidence: string[];
-}
+export type ScorecardDimensionKey =
+  | 'record_completeness'
+  | 'identity_confidence'
+  | 'production_quality'
+  | 'production_consistency'
+  | 'mechanical_integrity'
+  | 'plugging_exposure'
+  | 'regulatory_compliance'
+  | 'operator_profile'
+  | 'development_activity'
+  | 'data_confidence';
 
 export interface ScoreDimension {
-  dimension: string;
+  label: string;
   score: number;
   weight: number;
   rationale: string;
+  data_points: string[];
+}
+
+export interface AcquisitionScorecard {
+  dimensions: Record<ScorecardDimensionKey, ScoreDimension>;
+  opportunity_score: number;
+  risk_score: number;
+  overall_confidence: number;
+  recommendation: AcquisitionRecommendation;
+  gating_conditions: string[];
+  missing_critical_evidence: string[];
+  reasons_for: string[];
+  reasons_against: string[];
 }
 
 export interface SourceCoverageStatus {
@@ -272,22 +284,48 @@ export interface SourceAttempt {
   result_data_json?: Record<string, unknown> | null;
 }
 
+// ─── Orchestrator result (returned by the edge function retrieval engine) ─────
+
+export type OrchestratorResult = {
+  run_id: string;
+  source_attempts: SourceAttempt[];
+  production: TrrcDDProductionRow[];
+  findings_raw: Record<string, unknown>[];
+  coverage: SourceCoverageStatus[];
+  total_records_found: number;
+  manual_required_count: number;
+  error: string | null;
+};
+
 // ─── Source adapter types (used by frontend/lib/trrc/sources/) ───────────────
 
 export interface ResolvedApiRef {
+  raw: string;          // original input string
   api10: string;        // 10-digit normalized
-  formatted: string;   // "42-165-02733"
-  county_code: string; // "165"
-  well_code: string;   // "02733"
+  api14: string;        // 14-digit UWI form
+  formatted: string;    // "42-165-02733"
+  state_code: string;   // "42"
+  county_code: string;  // "165"
+  well_code: string;    // "02733"
+  is_texas: boolean;
 }
 
 export interface ResolvedSearchContext {
+  run_id: string;
+  input_type: TrrcIdentifierType;
+  raw_input: string;
+  normalized_input: string;
   api_numbers: ResolvedApiRef[];
   district: string | null;
   lease_number: string | null;
+  lease_name: string | null;
+  gas_id: string | null;
   operator_name: string | null;
   operator_number: string | null;
   county: string | null;
+  legal_description: string | null;
+  include_offset_wells: boolean;
+  search_historical: boolean;
   production_months: number;
 }
 

@@ -2,7 +2,6 @@ import Link from "next/link";
 import { Inter } from "next/font/google";
 import { PublicHeader } from "../PublicHeader";
 import { PublicFooter } from "../PublicFooter";
-import { LivePriceTicker } from "./LivePriceTicker";
 import styles from "./landing.module.css";
 
 const inter = Inter({
@@ -26,8 +25,7 @@ export function LandingPage() {
         <div className={styles.wrap}>
           <div className={styles.heroGrid}>
             <div>
-              <LivePriceTicker />
-              <span className={styles.eyebrow}>Working interest underwriting platform</span>
+              <span className={styles.eyebrow}>Texas public records due diligence platform</span>
               <h1 id="hero-heading">
                 Underwriting-Grade Deal Analysis in Minutes
               </h1>

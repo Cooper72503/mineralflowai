@@ -1,3 +1,7 @@
+import { redirect } from "next/navigation";
+
 export const dynamic = "force-dynamic";
 
-export { default } from "./DashboardPage";
+export default function DashboardPage() {
+  redirect("/trrc-due-diligence");
+}

@@ -18,8 +18,8 @@ import type {
   SourceRecordRef,
   TrrcRecordCategory,
   TrrcMissingItem,
+  OrchestratorResult,
 } from "./types";
-import type { OrchestratorResult } from "./retrieval-orchestrator";
 
 // ─── Manifest type ────────────────────────────────────────────────────────────
 

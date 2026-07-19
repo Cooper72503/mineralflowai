@@ -95,11 +95,12 @@ export async function POST(
     );
   }
 
-  // 5. Advance run status to "retrieving"
+  // 5. Reset run status to "pending" so the caller can POST to /execute next.
+  //    (execute only accepts "pending"; setting "retrieving" here would deadlock.)
   const { error: runUpdateError } = await supabase
     .from("trrc_due_diligence_runs")
     .update({
-      status: "retrieving",
+      status: "pending",
       updated_at: new Date().toISOString(),
     })
     .eq("id", runId);
@@ -114,6 +115,6 @@ export async function POST(
 
   return NextResponse.json({
     ok: true,
-    data: { run_id: runId, status: "retrieving" },
+    data: { run_id: runId, status: "pending" },
   });
 }
