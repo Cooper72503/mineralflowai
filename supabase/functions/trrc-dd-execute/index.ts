@@ -793,9 +793,11 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
             };
             const operatorHtml = (await callProxy(prodUrl, "POST", formBody(operatorFields), cookie)).html;
 
-            // Step 3: find the specificLeaseQueryAction link for target lease number
+            // Step 3: find the specificLeaseQueryAction link for target lease number.
+            // Strip leading zeros from both sides — TRRC sometimes stores leaseNo=029126.
+            const leaseNoStripped = leaseNo.replace(/^0+/, "");
             const specificLinkRe = new RegExp(
-              `href=["'](specificLeaseQueryAction\\.do[^"']*(?:&amp;|&)leaseNo=${leaseNo}[^"']*)["']`,
+              `href=["'](specificLeaseQueryAction\\.do[^"']*(?:&amp;|&)leaseNo=0*${leaseNoStripped}[^"']*)["']`,
               "i",
             );
             const linkMatch = operatorHtml.match(specificLinkRe);
@@ -815,7 +817,41 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
           } catch { /* continue to next district/type */ }
         }
       }
-    } catch { /* session setup failed — fall through to "not found" */ }
+    } catch { /* session setup failed — fall through to direct fallback */ }
+  }
+
+  // ── Direct specificLeaseQueryAction fallback ───────────────────────────────
+  // When the current operator (102055) has no production filings (e.g. they acquired
+  // the lease after it went inactive), historical production is unreachable via the
+  // operator-based step-2 scan. Try the specificLeaseQueryAction endpoint directly
+  // with just a fresh step-1 session cookie — no operator context required.
+  // Only attempted for the known district to avoid 26 extra requests.
+  if (monthlyRecords.length === 0 && leaseNo && distHint) {
+    try {
+      const freshResp    = await callProxy(`${EWA_BASE}/productionQueryAction.do`, "GET");
+      const freshSession = extractSetCookieValue(freshResp.set_cookie, "JSESSIONID");
+      const freshCookie  = freshSession ? `JSESSIONID=${freshSession}` : undefined;
+      const endYear      = String(new Date().getFullYear());
+
+      for (const lt of ["O", "G"]) {
+        if (monthlyRecords.length > 0) break;
+        try {
+          const directUrl = `${EWA_BASE}/specificLeaseQueryAction.do` +
+            `?methodToCall=specificLeaseQuery` +
+            `&leaseNo=${leaseNo}&distCode=${distHint}&leaseTypeCode=${lt}` +
+            `&requestType=2&tab=1` +
+            `&startMonth=01&startYear=1993&endMonth=12&endYear=${endYear}`;
+          const leaseHtml = (await callProxy(directUrl, "GET", undefined, freshCookie)).html;
+          const parsed    = parseSpecificLeaseMonthly(leaseHtml);
+          if (parsed.length > 0) {
+            monthlyRecords.push(...parsed.slice(0, 60));
+            confirmedDistrict = distHint;
+            if (!ctx.district) ctx.district = distHint;
+            trrcUrl = directUrl;
+          }
+        } catch { /* continue */ }
+      }
+    } catch { /* direct fallback failed — fall through to "not found" */ }
   }
 
   // ── Proration by API (both oil and gas) ───────────────────────────────────
@@ -1195,7 +1231,11 @@ async function toolFetchSeveranceRecords(input: Record<string, unknown>, ctx: Ag
       if (dataRows.length === 0) return null;
       const records  = dataRows.map(row => {
         const obj: Record<string, string> = {};
-        header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+        header.forEach((h, i) => {
+          const key = h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, "");
+          const val = (row[i] ?? "").replace(/\bLinks\b.*$/i, "").replace(/\bGIS\b.*$/i, "").trim();
+          if (key) obj[key] = val;
+        });
         return obj;
       }).slice(0, 20);
       const qs = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
