@@ -25,11 +25,13 @@ interface AgentContext {
 }
 
 interface ProductionRow {
-  year?:      number;
-  month?:     number;
-  oil_bbl?:   number | null;
-  gas_mcf?:   number | null;
-  water_bbl?: number | null;
+  year?:           number;
+  month?:          number;
+  oil_bbl?:        number | null;
+  gas_mcf?:        number | null;
+  casinghead_mcf?: number | null;
+  condensate_bbl?: number | null;
+  water_bbl?:      number | null;
   [key: string]: unknown;
 }
 
@@ -119,18 +121,44 @@ function parseSpecificLeaseMonthly(html: string): Array<Record<string, string>> 
     .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&#\d+;/g, " ")
     .replace(/\s+/g, " ");
 
+  // TRRC specificLeaseQueryAction.do production table column order (for oil leases):
+  //   Month Year | Oil Prod | Oil Disp | Gas Prod | Gas Disp | Casinghead Prod | Casinghead Disp
+  //              | Condensate Prod | Condensate Disp | Water Prod | Water Disp
+  //
+  // We capture only the "Prod" columns (odd positions after Month+Year), skipping "Disp".
+  // The regex matches up to 10 consecutive VALUE tokens after Month+Year; trailing optional
+  // groups handle leases that have fewer columns (e.g. gas-only leases).
+  //
+  // Group index map (1-based):
+  //   m[1]=month  m[2]=year
+  //   m[3]=oil_prod   m[4]=oil_disp
+  //   m[5]=gas_prod   m[6]=gas_disp
+  //   m[7]=casing_prod  m[8]=casing_disp
+  //   m[9]=cond_prod  m[10]=cond_disp   (optional)
+  //   m[11]=water_prod m[12]=water_disp  (optional)
   const VALUE = "(?:NO RPT|[\\d,]+)";
   const rowRe = new RegExp(
-    `(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})\\s+(${VALUE})\\s+(${VALUE})\\s+(${VALUE})\\s+(${VALUE})`,
+    `(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})\\s+` +
+    `(${VALUE})\\s+(${VALUE})\\s+(${VALUE})\\s+(${VALUE})\\s+(${VALUE})\\s+(${VALUE})` +
+    `(?:\\s+(${VALUE})\\s+(${VALUE})(?:\\s+(${VALUE})\\s+(${VALUE}))?)?`,
     "gi",
   );
+
+  const parseVal = (v: string | undefined): string =>
+    !v || v === "NO RPT" ? "" : v.replace(/,/g, "");
+
   let m: RegExpExecArray | null;
   while ((m = rowRe.exec(clean)) !== null) {
-    const month = m[1];
-    const year  = m[2];
-    const oilProd = m[3] === "NO RPT" ? "" : m[3].replace(/,/g, "");
-    const gasProd = m[5] === "NO RPT" ? "" : m[5].replace(/,/g, "");
-    records.push({ date: `${month} ${year}`, year, month, oil_bbl: oilProd, casinghead_mcf: gasProd });
+    records.push({
+      date:           `${m[1]} ${m[2]}`,
+      year:           m[2],
+      month:          m[1],
+      oil_bbl:        parseVal(m[3]),
+      gas_mcf:        parseVal(m[5]),
+      casinghead_mcf: parseVal(m[7]),
+      condensate_bbl: parseVal(m[9]),
+      water_bbl:      parseVal(m[11]),
+    });
   }
   return records;
 }
@@ -184,7 +212,7 @@ function parseWellboreHtml(html: string): Array<Record<string, string>> {
     } catch { /* skip malformed params */ }
   }
 
-  // Fallback: title attribute absent or in wrong order — match by searchType=apiNo in query params
+  // Fallback 2: title attribute absent or in wrong order — match by searchType=apiNo in query params
   if (apiLinks.length === 0) {
     const fallbackRe = /href=["']leaseDetailAction\.do[^?"']*\?([^"']*searchType=apiNo[^"']*)["']/gi;
     while ((m = fallbackRe.exec(html)) !== null) {
@@ -194,6 +222,27 @@ function parseWellboreHtml(html: string): Array<Record<string, string>> {
         const leaseNo  = params.get("leaseNo")  ?? "";
         const apiNo    = params.get("apiNo")     ?? "";
         if (distCode && leaseNo) {
+          apiLinks.push({ apiNo, distCode, leaseNo });
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Fallback 3: catch ANY leaseDetailAction.do link that has distCode + leaseNo params.
+  // Needed for lease-based wellbore queries where TRRC uses searchType=lease links instead
+  // of searchType=apiNo — neither the title regex nor fallback 2 would match those.
+  if (apiLinks.length === 0) {
+    const genericRe = /href=["']leaseDetailAction\.do[^?"']*\?([^"']+)["']/gi;
+    const seen      = new Set<string>();
+    while ((m = genericRe.exec(html)) !== null) {
+      try {
+        const params   = new URLSearchParams(m[1].replace(/&amp;/g, "&"));
+        const distCode = params.get("distCode") ?? "";
+        const leaseNo  = params.get("leaseNo")  ?? "";
+        const apiNo    = params.get("apiNo")     ?? "";
+        const key      = `${distCode}:${leaseNo}:${apiNo}`;
+        if (distCode && leaseNo && !seen.has(key)) {
+          seen.add(key);
           apiLinks.push({ apiNo, distCode, leaseNo });
         }
       } catch { /* skip */ }
@@ -485,7 +534,10 @@ async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentConte
     return { ok: false, data: { error: "lease_number required" }, summary: "search_by_lease: missing lease_number" };
   }
 
-  const tryDistrict = async (dist: string, leaseType: string): Promise<Record<string, string>[] | null> => {
+  // Uses parseWellboreHtml (not extractTableRows) because wellboreQueryAction.do has nested
+  // tables inside rows — the lazy </tr> regex in extractTableRows closes on the inner table's
+  // row before the outer row ends, producing empty/wrong field values.
+  const tryDistrict = async (dist: string, leaseType: string): Promise<Array<Record<string,string>> | null> => {
     try {
       const html = await fetchHtml(`${EWA_BASE}/wellboreQueryAction.do`, {
         method: "POST",
@@ -497,18 +549,8 @@ async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentConte
           "methodToCall":               "search",
         }),
       });
-      const rows      = extractTableRows(html);
-      const cleanRows = rows.filter(r => !isNoiseRow(r));
-      const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator/i));
-      if (hIdx < 0 || cleanRows.length <= hIdx + 1) return null;
-      const header   = cleanRows[hIdx] ?? [];
-      const dataRows = cleanRows.slice(hIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r));
-      if (dataRows.length === 0) return null;
-      return dataRows.map(row => {
-        const obj: Record<string, string> = {};
-        header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
-        return obj;
-      });
+      const wells = parseWellboreHtml(html);
+      return wells.length > 0 ? wells : null;
     } catch {
       return null;
     }
@@ -524,19 +566,23 @@ async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentConte
       const wells = await tryDistrict(dist, lt);
       if (wells && wells.length > 0) {
         const first    = wells[0];
-        const distCode = first["district"] ?? dist;
-        const api      = first["api_no_"] ?? first["api_no"] ?? first["api_number"] ?? "";
-        const operator = first["operator_name"] ?? first["operator"] ?? "";
+        // parseWellboreHtml returns dist_code, lease_no, api_no, operator_name, operator_no, county
+        const distCode = first["dist_code"] || dist;
+        const api      = first["api_no"] ?? "";
+        const operator = first["operator_name"] ?? "";
+        const opNo     = first["operator_no"] ?? "";
         const county   = first["county"] ?? "";
 
-        if (distCode && !ctx.district)     ctx.district      = distCode;
-        if (!ctx.lease_number)              ctx.lease_number  = leaseNo;
-        if (api && !ctx.api_numbers.includes(api.replace(/\D/g, "").slice(0, 10))) {
+        // Always update district from confirmed TRRC result
+        if (distCode) ctx.district = distCode;
+        if (!ctx.lease_number) ctx.lease_number = leaseNo;
+        if (api) {
           const api10 = api.replace(/\D/g, "").slice(0, 10);
-          if (api10.length === 10) ctx.api_numbers.push(api10);
+          if (api10.length === 10 && !ctx.api_numbers.includes(api10)) ctx.api_numbers.push(api10);
         }
-        if (!ctx.operator_name && operator) ctx.operator_name = operator;
-        if (!ctx.county && county)          ctx.county        = county;
+        if (!ctx.operator_name   && operator)                        ctx.operator_name   = operator;
+        if (!ctx.operator_number && opNo && /^\d{5,}$/.test(opNo)) ctx.operator_number = opNo;
+        if (!ctx.county          && county)                          ctx.county          = county;
 
         return {
           ok: true,
@@ -546,6 +592,7 @@ async function toolSearchByLease(input: Record<string, unknown>, ctx: AgentConte
             district:     distCode,
             lease_type:   lt,
             operator,
+            operator_no:  opNo,
             county,
             wells:        wells.slice(0, 10),
             trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.leaseNumberArg=${leaseNo}&searchArgs.districtCodeArg=${dist}&searchArgs.leaseTypeArg=${lt}&searchArgs.scheduleTypeArg=Both&methodToCall=search`,
@@ -597,7 +644,8 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
   }
 
   // If number lookup failed and we have a name, try searching wellbore PDQ by operator name
-  // (EWA wellboreQueryAction supports operatorNameArg for fuzzy name matching)
+  // (EWA wellboreQueryAction supports operatorNameArg for fuzzy name matching).
+  // Uses parseWellboreHtml — NOT extractTableRows — because the wellbore page uses nested tables.
   if (!rec && opName) {
     try {
       const html = await fetchHtml(`${EWA_BASE}/wellboreQueryAction.do`, {
@@ -608,37 +656,29 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
           "methodToCall":                "search",
         }),
       });
-      const rows      = extractTableRows(html);
-      const cleanRows = rows.filter(r => !isNoiseRow(r));
-      const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator/i));
-      if (hIdx >= 0 && cleanRows.length > hIdx + 1) {
-        const header   = cleanRows[hIdx] ?? [];
-        const dataRows = cleanRows.slice(hIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r));
-        if (dataRows.length > 0) {
-          const first: Record<string, string> = {};
-          header.forEach((h, i) => { first[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = dataRows[0][i] ?? ""; });
-          // Extract operator info from wellbore row
-          const foundOpNo   = first["operator_no_"] ?? first["operator_no"] ?? "";
-          const foundOpName = first["operator_name"] ?? first["operator"] ?? opName;
-          const leaseNo     = first["lease_no_"] ?? first["lease_no"] ?? "";
-          const distCode    = first["district"] ?? "";
-          if (foundOpNo && /^\d{5,}$/.test(foundOpNo)) ctx.operator_number = foundOpNo;
-          if (!ctx.operator_name)  ctx.operator_name  = foundOpName;
-          if (!ctx.district && distCode) ctx.district = distCode;
-          if (!ctx.lease_number && leaseNo) ctx.lease_number = leaseNo;
-          return {
-            ok:   true,
-            data: {
-              found:           true,
-              operator_name:   foundOpName,
-              operator_no:     foundOpNo,
-              source:          "wellbore-name-search",
-              wellbores_found: dataRows.length,
-              note:            `Found ${dataRows.length} wellbore(s) for operator name "${opName}" — operator number resolved from first result.`,
-            },
-            summary: `search_by_operator: "${opName}" (${foundOpNo}) — found via wellbore name search (${dataRows.length} results)`,
-          };
-        }
+      const wells = parseWellboreHtml(html);
+      if (wells.length > 0) {
+        const first       = wells[0];
+        const foundOpNo   = first["operator_no"]   ?? "";
+        const foundOpName = first["operator_name"] ?? opName ?? "";
+        const leaseNo     = first["lease_no"]      ?? "";
+        const distCode    = first["dist_code"]     ?? "";
+        if (foundOpNo && /^\d{5,}$/.test(foundOpNo)) ctx.operator_number = foundOpNo;
+        if (!ctx.operator_name)                       ctx.operator_name   = foundOpName;
+        if (!ctx.district     && distCode)            ctx.district        = distCode;
+        if (!ctx.lease_number && leaseNo)             ctx.lease_number    = leaseNo;
+        return {
+          ok:   true,
+          data: {
+            found:           true,
+            operator_name:   foundOpName,
+            operator_no:     foundOpNo,
+            source:          "wellbore-name-search",
+            wellbores_found: wells.length,
+            note:            `Found ${wells.length} wellbore(s) for operator name "${opName}" — operator number resolved from first result.`,
+          },
+          summary: `search_by_operator: "${opName}" (${foundOpNo}) — found via wellbore name search (${wells.length} results)`,
+        };
       }
     } catch { /* fall through */ }
   }
@@ -749,7 +789,7 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
               "searchArgs.startMonthArg":              "01",
               "searchArgs.startYearArg":               "1993",
               "searchArgs.endMonthArg":                "12",
-              "searchArgs.endYearArg":                 "2025",
+              "searchArgs.endYearArg":                 String(new Date().getFullYear()),
             };
             const operatorHtml = (await callProxy(prodUrl, "POST", formBody(operatorFields), cookie)).html;
 
@@ -827,14 +867,26 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
     jan:1, feb:2, mar:3, apr:4, may:5, jun:6,
     jul:7, aug:8, sep:9, oct:10, nov:11, dec:12,
   };
+  const parseNum = (v: string | undefined): number | null => {
+    if (!v || v === "NO RPT") return null;
+    const n = parseFloat(v.replace(/,/g, ""));
+    return isNaN(n) ? null : n;
+  };
   for (const row of monthlyRecords) {
-    const yr  = parseInt(row["year"] ?? "0", 10) || null;
-    // month is either a number string ("4") or an abbreviation ("Apr")
+    const yr    = parseInt(row["year"] ?? "0", 10) || null;
     const rawMo = (row["month"] ?? "").trim().toLowerCase();
-    const mo  = MONTH_ABBR[rawMo.slice(0, 3)] ?? (parseInt(rawMo, 10) || null);
-    const oil = parseFloat(row["oil_bbl"] ?? "") || null;
-    const gas = parseFloat(row["casinghead_mcf"] ?? row["gas_mcf"] ?? "") || null;
-    if (yr && mo) ctx.production.push({ year: yr, month: mo, oil_bbl: oil, gas_mcf: gas, water_bbl: null });
+    const mo    = MONTH_ABBR[rawMo.slice(0, 3)] ?? (parseInt(rawMo, 10) || null);
+    if (yr && mo) {
+      ctx.production.push({
+        year:           yr,
+        month:          mo,
+        oil_bbl:        parseNum(row["oil_bbl"]),
+        gas_mcf:        parseNum(row["gas_mcf"]),
+        casinghead_mcf: parseNum(row["casinghead_mcf"]),
+        condensate_bbl: parseNum(row["condensate_bbl"]),
+        water_bbl:      parseNum(row["water_bbl"]),
+      });
+    }
   }
 
   const firstPro = prorationRecords[0] ?? {};
@@ -881,28 +933,24 @@ async function toolFetchCompletionRecords(input: Record<string, unknown>, ctx: A
             "methodToCall":               "search",
           }),
         });
-        const rows      = extractTableRows(html);
-        const cleanRows = rows.filter(r => !isNoiseRow(r));
-        const headerIdx = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator|Field|Depth/i));
-        if (headerIdx >= 0 && cleanRows.length > headerIdx + 1) {
-          const header   = cleanRows[headerIdx] ?? [];
-          const dataRows = cleanRows.slice(headerIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r)).map(row => {
-            const obj: Record<string, string> = {};
-            header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
-            return obj;
-          });
-          // Enrich context if lease found here and not yet resolved
-          const firstRow = dataRows[0];
-          if (firstRow) {
-            const foundLease = firstRow["lease_no_"] ?? firstRow["lease_no"] ?? firstRow["lease_number"] ?? "";
-            const foundDist  = firstRow["district"] ?? "";
-            if (!ctx.lease_number && foundLease) ctx.lease_number = foundLease;
-            if (!ctx.district    && foundDist)   ctx.district     = foundDist;
-          }
+        // Use parseWellboreHtml — NOT extractTableRows — because wellboreQueryAction.do uses
+        // nested tables inside rows, breaking the lazy </tr> regex in extractTableRows.
+        const wells = parseWellboreHtml(html);
+        if (wells.length > 0) {
+          const firstWell = wells[0];
+          // parseWellboreHtml returns dist_code, lease_no, api_no, operator_name, operator_no
+          const foundLease = firstWell["lease_no"]      ?? "";
+          const foundDist  = firstWell["dist_code"]     ?? "";
+          const foundOpNo  = firstWell["operator_no"]   ?? "";
+          const foundOp    = firstWell["operator_name"] ?? "";
+          if (!ctx.lease_number    && foundLease)                        ctx.lease_number    = foundLease;
+          if (!ctx.district        && foundDist)                         ctx.district        = foundDist;
+          if (!ctx.operator_number && foundOpNo && /^\d{5,}$/.test(foundOpNo)) ctx.operator_number = foundOpNo;
+          if (!ctx.operator_name   && foundOp)                           ctx.operator_name   = foundOp;
           results.push({
             api:      `42-${split.prefix}-${split.suffix}`,
             source:   "ewa-wellbore",
-            wellbores: dataRows.slice(0, 5),
+            wellbores: wells.slice(0, 5),
           });
         } else {
           results.push({ api: `42-${split.prefix}-${split.suffix}`, found: false });
@@ -1050,25 +1098,16 @@ async function toolFetchWellStatus(input: Record<string, unknown>, ctx: AgentCon
       return { ok: false, data: { error: "Provide api_number or (lease_number + district)" }, summary: "fetch_well_status: missing input" };
     }
 
-    const rows      = extractTableRows(html);
-    const cleanRows = rows.filter(r => !isNoiseRow(r));
-    const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 3, /API|District|Lease|Operator/i));
-    const header    = hIdx >= 0 ? cleanRows[hIdx] : null;
-    const dataRows  = hIdx >= 0 ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 3 && !isNoiseRow(r)) : [];
-    const wellbores = header
-      ? dataRows.map(row => {
-          const obj: Record<string, string> = {};
-          header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
-          return obj;
-        }).slice(0, 21)
-      : [];
+    // Use parseWellboreHtml — NOT extractTableRows — because wellboreQueryAction.do uses
+    // nested tables inside rows, breaking the lazy </tr> regex in extractTableRows.
+    const wellbores = parseWellboreHtml(html).slice(0, 21);
 
     const split = apiNum ? splitApi(apiNum) : null;
     return {
       ok:   true,
       data: {
         identifier:     label,
-        count:          dataRows.length,
+        count:          wellbores.length,
         wellbores,
         trrc_source_url: split
           ? `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.apiNoPrefixArg=${split.prefix}&searchArgs.apiNoSuffixArg=${split.suffix}&searchArgs.scheduleTypeArg=Both&methodToCall=search`
@@ -1910,11 +1949,11 @@ async function runRetrieval(runId: string): Promise<void> {
         gas_id:             null,
         operator_number:    ctx.operator_number ?? null,
         production_month:   `${Number(raw["year"])}-${String(Number(raw["month"])).padStart(2, "0")}`,
-        oil_bbl:            typeof raw["oil_bbl"]   === "number" ? raw["oil_bbl"]   : null,
-        casinghead_gas_mcf: null,
-        gas_mcf:            typeof raw["gas_mcf"]   === "number" ? raw["gas_mcf"]   : null,
-        condensate_bbl:     null,
-        water_bbl:          typeof raw["water_bbl"] === "number" ? raw["water_bbl"] : null,
+        oil_bbl:            typeof raw["oil_bbl"]        === "number" ? raw["oil_bbl"]        : null,
+        gas_mcf:            typeof raw["gas_mcf"]        === "number" ? raw["gas_mcf"]        : null,
+        casinghead_gas_mcf: typeof raw["casinghead_mcf"] === "number" ? raw["casinghead_mcf"] : null,
+        condensate_bbl:     typeof raw["condensate_bbl"] === "number" ? raw["condensate_bbl"] : null,
+        water_bbl:          typeof raw["water_bbl"]      === "number" ? raw["water_bbl"]      : null,
       }));
 
     if (prodRows.length > 0) {
