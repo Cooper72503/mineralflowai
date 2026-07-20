@@ -853,10 +853,10 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
         lease_number: leaseNo,
         district:    distHint,
         note:        !leaseNo
-          ? "No lease number available — production query requires a lease number. Run search_by_api first."
+          ? "No lease number available — not found in wellbore PDQ, severance, completion, or injection records. Well may not yet appear in any TRRC EWA database."
           : !opNo
-          ? `No operator number available — TRRC production query requires operator number to navigate session-based EWA form. Run search_by_api to resolve it.`
-          : `No production records found for Lease ${leaseNo} (Operator ${opNo}) in any TRRC district (${ALL_DISTRICTS.length} districts × 2 lease types scanned).`,
+          ? `Lease ${leaseNo} identified but no operator number resolved from any source (wellbore PDQ, severance, completion, injection). TRRC production requires operator number for 3-step EWA session. Manual retrieval required.`
+          : `No production records found for Lease ${leaseNo} (Operator ${opNo}) in any TRRC district (${ALL_DISTRICTS.length} districts × 2 lease types scanned). Well may have no reported production.`,
         trrc_source_url: trrcUrl,
       },
       summary: `fetch_production: no records found — Lease ${leaseNo ?? "?"} scanned all districts`,
@@ -1102,6 +1102,20 @@ async function toolFetchWellStatus(input: Record<string, unknown>, ctx: AgentCon
     // nested tables inside rows, breaking the lazy </tr> regex in extractTableRows.
     const wellbores = parseWellboreHtml(html).slice(0, 21);
 
+    // Enrich context — fetch_well_status runs before fetch_inactive_well_status and
+    // fetch_proration, so operator_number resolved here cascades to those tools.
+    if (wellbores.length > 0) {
+      const first = wellbores[0];
+      const distCode = first["dist_code"] ?? "";
+      const leaseRes = first["lease_no"]  ?? "";
+      const opNo     = first["operator_no"]   ?? "";
+      const opName   = first["operator_name"] ?? "";
+      if (distCode && !ctx.district)                                    ctx.district        = distCode;
+      if (leaseRes && !ctx.lease_number)                                ctx.lease_number    = leaseRes;
+      if (opNo && /^\d{5,}$/.test(opNo) && !ctx.operator_number)      ctx.operator_number = opNo;
+      if (opName && !ctx.operator_name)                                 ctx.operator_name   = opName;
+    }
+
     const split = apiNum ? splitApi(apiNum) : null;
     return {
       ok:   true,
@@ -1115,7 +1129,7 @@ async function toolFetchWellStatus(input: Record<string, unknown>, ctx: AgentCon
           ? `https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do?searchArgs.leaseNumberArg=${leaseNo}&searchArgs.districtCodeArg=${dist}&searchArgs.scheduleTypeArg=Both&methodToCall=search`
           : "https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do",
       },
-      summary: `fetch_well_status: ${label} — ${dataRows.length} wellbore record(s)`,
+      summary: `fetch_well_status: ${label} — ${wellbores.length} wellbore record(s)`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_well_status: failed — ${String(e).slice(0, 80)}` };
@@ -1422,6 +1436,7 @@ async function toolFetchProration(input: Record<string, unknown>, ctx: AgentCont
     const proKw = /API|District|Lease|Operator|Potential|Allowable|Daily|Schedule/i;
 
     for (const [ep, lt] of [[`${EWA_BASE}/oilProQueryAction.do`, "OIL"], [`${EWA_BASE}/gasProQueryAction.do`, "GAS"]] as [string,string][]) {
+      let foundByApi = false;
       // Try by API
       if (apiRaw) {
         const split = splitApi(apiRaw);
@@ -1431,12 +1446,15 @@ async function toolFetchProration(input: Record<string, unknown>, ctx: AgentCont
             if (distCode) params["searchArgs.districtCodeArg"] = distCode;
             const html    = await fetchHtml(ep, { method: "POST", body: formBody(params) });
             const records = parseTable(html, proKw);
-            if (records) allRecords.push(...records.map(r => ({ ...r, _lease_type: lt, _query: "by_api" })));
+            if (records) {
+              allRecords.push(...records.map(r => ({ ...r, _lease_type: lt, _query: "by_api" })));
+              foundByApi = true;
+            }
           } catch { /* continue */ }
         }
       }
-      // Try by lease+district
-      if (leaseNo && distCode && allRecords.filter(r => r["_query"] !== "by_api").length === 0) {
+      // Try by lease+district only if by-API found nothing for this endpoint
+      if (!foundByApi && leaseNo && distCode) {
         try {
           const params: Record<string, string> = {
             "methodToCall":               "search",
@@ -1522,10 +1540,16 @@ async function toolFetchInjectionRecords(input: Record<string, unknown>, ctx: Ag
     const records = mergedRows.slice(0, 11);
 
     if (records.length > 0) {
-      const firstRec = records[0];
-      const uicLease = firstRec["lease_no"] ?? firstRec["lease_no_"] ?? firstRec["lease"] ?? "";
-      if (!ctx.lease_number && uicLease && /^\d+$/.test(uicLease.trim())) ctx.lease_number = uicLease.trim();
-      if (!ctx.county && firstRec["county"]) ctx.county = firstRec["county"];
+      const firstRec  = records[0];
+      const uicLease  = (firstRec["lease_no"] ?? firstRec["lease_no_"] ?? firstRec["lease"] ?? "").trim();
+      const uicDist   = (firstRec["district"] ?? firstRec["dist_code"] ?? firstRec["district_code"] ?? "").trim();
+      const uicOpNo   = (firstRec["operator_no_"] ?? firstRec["operator_no"] ?? firstRec["operator_number"] ?? "").trim();
+      const uicOpNm   = (firstRec["operator_name"] ?? firstRec["operator"] ?? "").trim();
+      if (!ctx.lease_number    && uicLease && /^\d+$/.test(uicLease))    ctx.lease_number    = uicLease;
+      if (!ctx.district        && uicDist)                               ctx.district        = uicDist;
+      if (!ctx.operator_number && uicOpNo && /^\d{5,}$/.test(uicOpNo)) ctx.operator_number = uicOpNo;
+      if (!ctx.operator_name   && uicOpNm)                               ctx.operator_name   = uicOpNm;
+      if (!ctx.county && firstRec["county"])                             ctx.county          = firstRec["county"];
     }
 
     const qs = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
