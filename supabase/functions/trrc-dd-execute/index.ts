@@ -621,6 +621,7 @@ async function toolSearchByOperator(input: Record<string, unknown>, ctx: AgentCo
   const tryOrgQuery = async (params: Record<string, string>): Promise<Record<string, string> | null> => {
     try {
       const html      = await fetchHtml(`${EWA_BASE}/organizationQueryAction.do`, { method: "POST", body: formBody(params) });
+      if (/No results found/i.test(html)) return null;
       const rows      = extractTableRows(html);
       const cleanRows = rows.filter(r => !isNoiseRow(r));
       const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 3, /Operator No|Operator Name|Organization/i));
@@ -1070,11 +1071,16 @@ async function toolFetchInactiveWellStatus(input: Record<string, unknown>, ctx: 
             "methodToCall":              "search",
           }),
         });
+        const noResults  = /No results found/i.test(html);
         const rows      = extractTableRows(html);
         const cleanRows = rows.filter(r => !isNoiseRow(r));
-        const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|Inactive|Lease|Operator|Aging/i));
-        const dataRows  = hIdx >= 0 ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r)) : [];
-        const isInactive = dataRows.length > 0 && !extractText(html, 500).includes("No results found");
+        // Real IWAR result table has 4+ columns (API, Lease, District, County, Operator, Aging, ...).
+        // minCols=4 prevents 2-cell form label rows from being treated as the data header.
+        const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 4, /API|Inactive|Lease|Operator|Aging/i));
+        const dataRows  = (!noResults && hIdx >= 0)
+          ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r) && !/:\s*$/.test(r[0]))
+          : [];
+        const isInactive = dataRows.length > 0;
         results.push({
           query:              "by_api",
           api_number:         `42-${split.prefix}-${split.suffix}`,
@@ -1103,10 +1109,13 @@ async function toolFetchInactiveWellStatus(input: Record<string, unknown>, ctx: 
           "methodToCall":                  "search",
         }),
       });
+      const noResultsOp = /No results found/i.test(html);
       const rows      = extractTableRows(html);
       const cleanRows = rows.filter(r => !isNoiseRow(r));
-      const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|Lease|Operator|Aging/i));
-      const dataRows  = hIdx >= 0 ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r)) : [];
+      const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 4, /API|Lease|Operator|Aging/i));
+      const dataRows  = (!noResultsOp && hIdx >= 0)
+        ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r) && !/:\s*$/.test(r[0]))
+        : [];
       results.push({
         query:              "by_operator",
         operator_number:    opNo,
@@ -1225,10 +1234,19 @@ async function toolFetchOrphanWell(input: Record<string, unknown>, ctx: AgentCon
         "methodToCall":              "search",
       }),
     });
+    if (/No results found/i.test(html)) {
+      return {
+        ok:   true,
+        data: { api_number: digits, is_orphan: false, count: 0, records: [], interpretation: "Well NOT on TRRC orphan list." },
+        summary: `fetch_orphan_well: ${digits} — not on orphan list`,
+      };
+    }
     const rows      = extractTableRows(html);
     const cleanRows = rows.filter(r => !isNoiseRow(r));
-    const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|Orphan|Operator|District|Lease|County/i));
-    const dataRows  = hIdx >= 0 ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r)) : [];
+    // Real orphan well result table has 4+ columns (API, Lease, District, County, Operator, ...).
+    // minCols=4 prevents the 2-cell form label rows from being detected as a header.
+    const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 4, /API|Orphan|Operator|District|Lease|County/i));
+    const dataRows  = hIdx >= 0 ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r) && !/:\s*$/.test(r[0])) : [];
     const isOrphan  = dataRows.some(r => /^\d{2,}/.test((r[0] ?? "").trim()));
 
     return {
@@ -1259,12 +1277,21 @@ async function toolFetchSeveranceRecords(input: Record<string, unknown>, ctx: Ag
   const querySeverance = async (params: Record<string, string>): Promise<{ label: string; records: Record<string, string>[]; url: string } | null> => {
     try {
       const html      = await fetchHtml(`${EWA_BASE}/severanceQueryAction.do`, { method: "POST", body: formBody(params) });
+      // TRRC returns "(Ewa_117) No results found." — bail immediately before the form body
+      // (which still renders below the error) is mistaken for data rows.
+      if (/No results found/i.test(html)) return null;
       const rows      = extractTableRows(html);
       const cleanRows = rows.filter(r => !isNoiseRow(r));
-      const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 2, /API|District|Lease|Operator|Severance|County/i));
+      // Real severance result table has 5+ columns (API No., County, District, Lease No.,
+      // Operator No., Operator Name, ...). The TRRC form-label row that appears on a no-result
+      // page — ["Severance Query Criteria", "Severance/Reconnect Process"] — has only 2 cells,
+      // and both happen to contain "Severance", which fooled the old minCols=2 guard.
+      // Requiring 4+ columns + excluding "Severance" from the keyword set fixes this.
+      const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 4, /\bAPI\b|\bCounty\b|\bLease\b|\bOperator\b|\bDistrict\b/i));
       if (hIdx < 0) return null;
       const header   = cleanRows[hIdx] ?? [];
-      const dataRows = cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r));
+      // Also reject any row whose first cell ends with ":" — those are form labels, not data.
+      const dataRows = cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r) && !/:\s*$/.test(r[0]));
       if (dataRows.length === 0) return null;
       const records  = dataRows.map(row => {
         const obj: Record<string, string> = {};
@@ -1325,10 +1352,17 @@ async function toolFetchSeveranceRecords(input: Record<string, unknown>, ctx: Ag
   }
 
   if (!result) {
+    const hadIdentifiers = !!(leaseNo || apiRaw || opNo);
     return {
-      ok: false,
-      data: { error: "No severance records found. Provide (lease_number + district), api_number, or operator_number." },
-      summary: "fetch_severance_records: no results from any query angle",
+      ok: true,
+      data: {
+        found: false,
+        searched: hadIdentifiers,
+        note: hadIdentifiers
+          ? "No severance, seal certificate, or reconnect records found in TRRC for the provided identifiers."
+          : "No identifiers available — provide lease_number + district, api_number, or operator_number.",
+      },
+      summary: "fetch_severance_records: no records found in TRRC",
     };
   }
 
