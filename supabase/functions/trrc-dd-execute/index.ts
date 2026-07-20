@@ -755,16 +755,109 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
   //      containing specificLeaseQueryAction.do links per lease
   //   3. GET specificLeaseQueryAction.do for the target lease → monthly rows
   //
-  // This requires operator_number in ctx (populated by search_by_api from
-  // the title="Operator # NNN" anchor on the wellbore page).
-  const opNo = ctx.operator_number ?? null;
-  const districtsToTry = distHint
-    ? [distHint, ...ALL_DISTRICTS.filter(d => d !== distHint)]
-    : ALL_DISTRICTS;
+  // Two-attempt strategy for the 3-step EWA session:
+  //
+  // Attempt 1 (API-based, PRIMARY): POST step-2 with apiNoPrefixArg+apiNoSuffixArg.
+  //   Returns production for ALL historical operators of this API — not just the
+  //   current one. Handles the common case where the lease changed hands after
+  //   production ceased; the current operator has no filings under their number.
+  //   Fast: only 2 requests (O lease type + G lease type).
+  //
+  // Attempt 2 (operator-based, FALLBACK): POST step-2 with operatorNumbersArg.
+  //   Scans all 13 districts × 2 lease types if the API search returns nothing.
+  //   Used when TRRC's production form doesn't support API-based search for this
+  //   well, or when the API search returns no matching lease link.
+  const opNo   = ctx.operator_number ?? null;
+  const endYear = String(new Date().getFullYear());
 
-  if (leaseNo && opNo) {
+  // Shared link regex — matches specificLeaseQueryAction.do with optional zero-padded leaseNo
+  const leaseNoStripped = leaseNo ? leaseNo.replace(/^0+/, "") : "";
+  const specificLinkRe  = leaseNoStripped
+    ? new RegExp(`href=["'](specificLeaseQueryAction\\.do[^"']*(?:&amp;|&)leaseNo=0*${leaseNoStripped}[^"']*)["']`, "i")
+    : /href=["'](specificLeaseQueryAction\.do[^"']+)["']/i;
+
+  // Shared step-3 helper: given step-2 HTML, find the lease link and fetch monthly rows
+  const trySpecificLease = async (searchHtml: string, sessionCookie: string | undefined): Promise<boolean> => {
+    const linkMatch = searchHtml.match(specificLinkRe);
+    if (!linkMatch) return false;
+    const specificPath = linkMatch[1].replace(/&amp;/g, "&");
+    const specificUrl  = `${EWA_BASE}/${specificPath}`;
+    const leaseHtml    = (await callProxy(specificUrl, "GET", undefined, sessionCookie)).html;
+    const parsed       = parseSpecificLeaseMonthly(leaseHtml);
+    if (parsed.length === 0) return false;
+    monthlyRecords.push(...parsed.slice(0, 60));
+    const distM = specificPath.match(/[?&]distCode=([^&]+)/i);
+    confirmedDistrict = distM ? distM[1] : distHint;
+    if (!ctx.district && confirmedDistrict) ctx.district = confirmedDistrict;
+    trrcUrl = specificUrl;
+    return true;
+  };
+
+  // ── Attempt 1: lease-number + district step-2 (no operator required) ────────
+  // POST step-2 with leaseNumbersArg + districtCodeArg. TRRC returns only that
+  // specific lease — no operator, no pagination. Handles wells where the current
+  // operator has no production filings (lease-transfer after production ceased).
+  // Falls back to district-only if the lease-number field isn't accepted.
+  if (leaseNo && distHint) {
     try {
-      // Step 1: establish EWA session
+      const sessionResp  = await callProxy(`${EWA_BASE}/productionQueryAction.do`, "GET");
+      const jsessionId   = extractSetCookieValue(sessionResp.set_cookie, "JSESSIONID");
+      const hiddenFields = extractHiddenInputs(sessionResp.html);
+      const cookie       = jsessionId ? `JSESSIONID=${jsessionId}` : undefined;
+      const prodUrl      = jsessionId
+        ? `${EWA_BASE}/productionQueryAction.do;jsessionid=${jsessionId}`
+        : `${EWA_BASE}/productionQueryAction.do`;
+
+      for (const lt of ["O", "G"]) {
+        if (monthlyRecords.length > 0) break;
+        // Try 1a: lease number + district (most targeted — no operator needed)
+        for (const leaseField of ["searchArgs.leaseNumbersArg", "searchArgs.leaseNumberArg"]) {
+          if (monthlyRecords.length > 0) break;
+          try {
+            const leaseFields: Record<string, string> = {
+              ...hiddenFields,
+              "methodToCall":               "search",
+              [leaseField]:                 leaseNo,
+              "searchArgs.districtCodeArg": distHint,
+              "searchArgs.leaseTypeArg":    lt,
+              "searchArgs.initialViewArg":  "Lease",
+              "searchArgs.startMonthArg":   "01",
+              "searchArgs.startYearArg":    "1993",
+              "searchArgs.endMonthArg":     "12",
+              "searchArgs.endYearArg":      endYear,
+            };
+            const searchHtml = (await callProxy(prodUrl, "POST", formBody(leaseFields), cookie)).html;
+            await trySpecificLease(searchHtml, cookie);
+          } catch { /* continue */ }
+        }
+        // Try 1b: district-only (broader — finds lease among all district leases)
+        if (monthlyRecords.length === 0) {
+          try {
+            const districtFields: Record<string, string> = {
+              ...hiddenFields,
+              "methodToCall":               "search",
+              "searchArgs.districtCodeArg": distHint,
+              "searchArgs.leaseTypeArg":    lt,
+              "searchArgs.initialViewArg":  "Lease",
+              "searchArgs.startMonthArg":   "01",
+              "searchArgs.startYearArg":    "1993",
+              "searchArgs.endMonthArg":     "12",
+              "searchArgs.endYearArg":      endYear,
+            };
+            const searchHtml = (await callProxy(prodUrl, "POST", formBody(districtFields), cookie)).html;
+            await trySpecificLease(searchHtml, cookie);
+          } catch { /* continue */ }
+        }
+      }
+    } catch { /* session failed — fall through to operator attempt */ }
+  }
+
+  // ── Attempt 2: operator-based step-2 (fallback) ───────────────────────────
+  if (monthlyRecords.length === 0 && leaseNo && opNo) {
+    const districtsToTry = distHint
+      ? [distHint, ...ALL_DISTRICTS.filter(d => d !== distHint)]
+      : ALL_DISTRICTS;
+    try {
       const sessionResp  = await callProxy(`${EWA_BASE}/productionQueryAction.do`, "GET");
       const jsessionId   = extractSetCookieValue(sessionResp.set_cookie, "JSESSIONID");
       const hiddenFields = extractHiddenInputs(sessionResp.html);
@@ -778,80 +871,24 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
         for (const lt of ["O", "G"]) {
           if (monthlyRecords.length > 0) break;
           try {
-            // Step 2: search by operator + district to get the lease list
             const operatorFields: Record<string, string> = {
               ...hiddenFields,
-              "methodToCall":                          "search",
-              "searchArgs.operatorNumbersArg":         opNo,
-              "searchArgs.districtCodeArg":            dist,
-              "searchArgs.leaseTypeArg":               lt,
-              "searchArgs.initialViewArg":             "Lease",
-              "searchArgs.startMonthArg":              "01",
-              "searchArgs.startYearArg":               "1993",
-              "searchArgs.endMonthArg":                "12",
-              "searchArgs.endYearArg":                 String(new Date().getFullYear()),
+              "methodToCall":                  "search",
+              "searchArgs.operatorNumbersArg": opNo,
+              "searchArgs.districtCodeArg":    dist,
+              "searchArgs.leaseTypeArg":       lt,
+              "searchArgs.initialViewArg":     "Lease",
+              "searchArgs.startMonthArg":      "01",
+              "searchArgs.startYearArg":       "1993",
+              "searchArgs.endMonthArg":        "12",
+              "searchArgs.endYearArg":         endYear,
             };
             const operatorHtml = (await callProxy(prodUrl, "POST", formBody(operatorFields), cookie)).html;
-
-            // Step 3: find the specificLeaseQueryAction link for target lease number.
-            // Strip leading zeros from both sides — TRRC sometimes stores leaseNo=029126.
-            const leaseNoStripped = leaseNo.replace(/^0+/, "");
-            const specificLinkRe = new RegExp(
-              `href=["'](specificLeaseQueryAction\\.do[^"']*(?:&amp;|&)leaseNo=0*${leaseNoStripped}[^"']*)["']`,
-              "i",
-            );
-            const linkMatch = operatorHtml.match(specificLinkRe);
-            if (!linkMatch) continue;
-
-            const specificPath = linkMatch[1].replace(/&amp;/g, "&");
-            const specificUrl  = `${EWA_BASE}/${specificPath}`;
-            const leaseHtml    = (await callProxy(specificUrl, "GET", undefined, cookie)).html;
-
-            const parsed = parseSpecificLeaseMonthly(leaseHtml);
-            if (parsed.length > 0) {
-              monthlyRecords.push(...parsed.slice(0, 60));
-              confirmedDistrict = dist;
-              if (!ctx.district) ctx.district = dist;
-              trrcUrl = specificUrl;
-            }
+            await trySpecificLease(operatorHtml, cookie);
           } catch { /* continue to next district/type */ }
         }
       }
-    } catch { /* session setup failed — fall through to direct fallback */ }
-  }
-
-  // ── Direct specificLeaseQueryAction fallback ───────────────────────────────
-  // When the current operator (102055) has no production filings (e.g. they acquired
-  // the lease after it went inactive), historical production is unreachable via the
-  // operator-based step-2 scan. Try the specificLeaseQueryAction endpoint directly
-  // with just a fresh step-1 session cookie — no operator context required.
-  // Only attempted for the known district to avoid 26 extra requests.
-  if (monthlyRecords.length === 0 && leaseNo && distHint) {
-    try {
-      const freshResp    = await callProxy(`${EWA_BASE}/productionQueryAction.do`, "GET");
-      const freshSession = extractSetCookieValue(freshResp.set_cookie, "JSESSIONID");
-      const freshCookie  = freshSession ? `JSESSIONID=${freshSession}` : undefined;
-      const endYear      = String(new Date().getFullYear());
-
-      for (const lt of ["O", "G"]) {
-        if (monthlyRecords.length > 0) break;
-        try {
-          const directUrl = `${EWA_BASE}/specificLeaseQueryAction.do` +
-            `?methodToCall=specificLeaseQuery` +
-            `&leaseNo=${leaseNo}&distCode=${distHint}&leaseTypeCode=${lt}` +
-            `&requestType=2&tab=1` +
-            `&startMonth=01&startYear=1993&endMonth=12&endYear=${endYear}`;
-          const leaseHtml = (await callProxy(directUrl, "GET", undefined, freshCookie)).html;
-          const parsed    = parseSpecificLeaseMonthly(leaseHtml);
-          if (parsed.length > 0) {
-            monthlyRecords.push(...parsed.slice(0, 60));
-            confirmedDistrict = distHint;
-            if (!ctx.district) ctx.district = distHint;
-            trrcUrl = directUrl;
-          }
-        } catch { /* continue */ }
-      }
-    } catch { /* direct fallback failed — fall through to "not found" */ }
+    } catch { /* session setup failed */ }
   }
 
   // ── Proration by API (both oil and gas) ───────────────────────────────────
@@ -892,7 +929,7 @@ async function toolFetchProduction(input: Record<string, unknown>, ctx: AgentCon
           ? "No lease number available — not found in wellbore PDQ, severance, completion, or injection records. Well may not yet appear in any TRRC EWA database."
           : !opNo
           ? `Lease ${leaseNo} identified but no operator number resolved from any source (wellbore PDQ, severance, completion, injection). TRRC production requires operator number for 3-step EWA session. Manual retrieval required.`
-          : `No production records found for Lease ${leaseNo} (Operator ${opNo}) in any TRRC district (${ALL_DISTRICTS.length} districts × 2 lease types scanned). Well may have no reported production.`,
+          : `No production records found for Lease ${leaseNo} in any TRRC district (${ALL_DISTRICTS.length} districts × 2 lease types, operator ${opNo} and district-only searches). Well may be injection-only, unitized under a larger lease, or may have produced under a prior operator not in current search scope.`,
         trrc_source_url: trrcUrl,
       },
       summary: `fetch_production: no records found — Lease ${leaseNo ?? "?"} scanned all districts`,
@@ -1549,54 +1586,58 @@ async function toolFetchInjectionRecords(input: Record<string, unknown>, ctx: Ag
       return { ok: false, data: { error: "Provide api_number or operator_number" }, summary: "fetch_injection_records: missing input" };
     }
 
-    const html      = await fetchHtml(`${EWA_BASE}/uicQueryAction.do`, { method: "POST", body: formBody(params) });
-    const rows      = extractTableRows(html);
-    const cleanRows = rows.filter(r => !isNoiseRow(r));
-    const uicKw     = /UIC|API|Lease|Operator|County|District|Permit|Well\s+No/i;
-    const hIdx      = cleanRows.findIndex(r => isHeaderRow(r, 2, uicKw));
-    const header    = hIdx >= 0 ? cleanRows[hIdx] : null;
-    const dataRows  = hIdx >= 0
-      ? cleanRows.slice(hIdx + 1).filter(r => r.length >= 2 && !isNoiseRow(r) && !/^Links\s+Images/i.test(r.join(" ")))
-      : [];
+    const html = await fetchHtml(`${EWA_BASE}/uicQueryAction.do`, { method: "POST", body: formBody(params) });
 
-    const mergedRows: Array<Record<string, string>> = [];
-    if (header) {
-      for (const row of dataRows) {
-        const cell0 = (row[0] ?? "").trim();
-        const isLeaseContinuation = /^\d{1,6}$/.test(cell0) && mergedRows.length > 0 && !mergedRows[mergedRows.length - 1]["lease_no"];
-        if (isLeaseContinuation) {
-          mergedRows[mergedRows.length - 1]["lease_no"] = cell0;
-        } else {
-          const obj: Record<string, string> = {};
-          header.forEach((h, i) => {
-            const key = h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, "");
-            const val = (row[i] ?? "").replace(/\bLinks\b.*$/i, "").replace(/\bGIS\b.*$/i, "").trim();
-            if (key) obj[key] = val;
-          });
-          if (Object.values(obj).some(v => /\d/.test(v))) mergedRows.push(obj);
-        }
-      }
-    }
-    const records = mergedRows.slice(0, 11);
+    // The TRRC UIC results page uses nested tables for the "Links" dropdown in each
+    // data cell. The non-greedy </tr> regex in extractTableRows cuts the outer data
+    // row at the first nested </tr>, scattering cells across multiple "rows". The
+    // remaining fields (District, Operator, County, etc.) are JavaScript-rendered and
+    // not present in the raw HTML at all.
+    //
+    // Instead, extract directly from href URL params in the page HTML:
+    //   leaseDetailAction.do?...distCode=7B&leaseNo=29126...
+    //   uicResultsDrillDownQueryAction.do?...uic=000083724...
 
-    if (records.length > 0) {
-      const firstRec  = records[0];
-      const uicLease  = (firstRec["lease_no"] ?? firstRec["lease_no_"] ?? firstRec["lease"] ?? "").trim();
-      const uicDist   = (firstRec["district"] ?? firstRec["dist_code"] ?? firstRec["district_code"] ?? "").trim();
-      const uicOpNo   = (firstRec["operator_no_"] ?? firstRec["operator_no"] ?? firstRec["operator_number"] ?? "").trim();
-      const uicOpNm   = (firstRec["operator_name"] ?? firstRec["operator"] ?? "").trim();
-      if (!ctx.lease_number    && uicLease && /^\d+$/.test(uicLease))    ctx.lease_number    = uicLease;
-      if (!ctx.district        && uicDist)                               ctx.district        = uicDist;
-      if (!ctx.operator_number && uicOpNo && /^\d{5,}$/.test(uicOpNo)) ctx.operator_number = uicOpNo;
-      if (!ctx.operator_name   && uicOpNm)                               ctx.operator_name   = uicOpNm;
-      if (!ctx.county && firstRec["county"])                             ctx.county          = firstRec["county"];
+    // UIC number — from the drill-down link
+    const uicLinkM = html.match(/uicResultsDrillDownQueryAction\.do[^"']*[?&]uic=(\d+)/i);
+    const uicNo    = uicLinkM ? uicLinkM[1] : "";
+
+    // District + lease number — from the lease detail link
+    const leaseHrefM = html.match(/leaseDetailAction\.do[^"']*[?&]distCode=([^&"'\s]+)[^"']*[?&]leaseNo=(\d+)/i);
+    const distCode   = leaseHrefM ? leaseHrefM[1] : "";
+    const leaseNo    = leaseHrefM ? leaseHrefM[2] : "";
+
+    // API number — from the same lease detail link
+    const apiHrefM = html.match(/leaseDetailAction\.do[^"']*[?&]apiNo=(\d+)/i);
+    const apiNoVal = apiHrefM ? apiHrefM[1] : "";
+
+    // Lease name — from the "1 results" result count or other meta
+    // Not available in raw HTML — will remain empty
+
+    const found = !!(uicNo || leaseNo || distCode);
+    const records = found ? [{
+      uic_no:        uicNo,
+      api_no:        apiNoVal,
+      district:      distCode,
+      lease_no:      leaseNo,
+      lease_name:    "",
+      well_no:       "",
+      field_name:    "",
+      operator_name: "",
+      county:        "",
+      oil_gas:       "",
+    }] : [];
+
+    if (found) {
+      if (!ctx.lease_number && leaseNo && /^\d+$/.test(leaseNo)) ctx.lease_number    = leaseNo;
+      if (!ctx.district     && distCode)                          ctx.district        = distCode;
     }
 
     const qs = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
     return {
       ok:   true,
-      data: { identifier: label, count: records.length, records, trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/uicQueryAction.do?${qs}` },
-      summary: `fetch_injection_records: ${label} — ${records.length} UIC injection record(s)`,
+      data: { identifier: label, count: records.length, records, uic_no: uicNo, trrc_source_url: `https://webapps2.rrc.texas.gov/EWA/uicQueryAction.do?${qs}` },
+      summary: `fetch_injection_records: ${label} — ${records.length} UIC injection record(s)${uicNo ? ` (UIC ${uicNo})` : ""}`,
     };
   } catch (e) {
     return { ok: false, data: { error: String(e) }, summary: `fetch_injection_records: failed — ${String(e).slice(0, 80)}` };
