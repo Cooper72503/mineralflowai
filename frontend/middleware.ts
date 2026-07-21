@@ -16,7 +16,6 @@ const PROTECTED_PREFIXES = [
   "/offer",
   "/onboarding",
   "/trial-expired",
-  "/underwriting",
 ];
 
 const AUTH_PATHS_EXACT = new Set(["/login", "/signup", "/forgot-password"]);
