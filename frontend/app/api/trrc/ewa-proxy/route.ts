@@ -70,8 +70,10 @@ export async function POST(req: NextRequest) {
     const html = await upstream.text();
 
     // Collect all Set-Cookie headers so the edge function can maintain sessions
-    const rawSetCookie = upstream.headers.get("set-cookie");
-    const setCookies   = rawSetCookie ? [rawSetCookie] : [];
+    // Node 18+ supports getSetCookie() which returns each header as a separate entry
+    const setCookies: string[] = typeof (upstream.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
+      ? (upstream.headers as { getSetCookie: () => string[] }).getSetCookie()
+      : upstream.headers.get("set-cookie") ? [upstream.headers.get("set-cookie") as string] : [];
 
     return NextResponse.json(
       { html, status: upstream.status, set_cookie: setCookies },
