@@ -1533,6 +1533,8 @@ async function toolFetchComplianceViolations(input: Record<string, unknown>, ctx
     return { violations, totalCount };
   };
 
+  // Returns parsed result (even if 0 violations) on successful AJAX response.
+  // Returns null only on session/network failure — callers use null to detect errors.
   const runSearch = async (overrides: Record<string, string>): Promise<{ violations: Record<string, string>[]; totalCount: number } | null> => {
     try {
       // Step 1: GET page for JSESSIONID + ViewState
@@ -1592,8 +1594,10 @@ async function toolFetchComplianceViolations(input: Record<string, unknown>, ctx
         { "Faces-Request": "partial/ajax", "Content-Type": "application/x-www-form-urlencoded" },
       );
 
-      const parsed = parseViolations(postRes.html);
-      return parsed.totalCount > 0 || parsed.violations.length > 0 ? parsed : null;
+      // If the response doesn't contain the violations update panel, the AJAX
+      // session failed (e.g., stale ViewState or server error).
+      if (!postRes.html.includes("IceQueryForm:j_idt39:violResults")) return null;
+      return parseViolations(postRes.html);
     } catch {
       return null;
     }
