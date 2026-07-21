@@ -181,12 +181,13 @@ export default function TrrcDueDiligencePage() {
         const res = await fetch(`/api/trrc/due-diligence/${runId}`);
         const data = await res.json();
         if (data.ok) {
-          setRun(data.data);
-          if (data.data.status === "awaiting_selection") {
-            setPhase("selecting");
-            clearInterval(interval);
-          } else if (data.data.status === "complete") {
+          if (data.data.status === "complete") {
+            setRun({ ...data.data, progress_percent: 100 });
             setPhase("complete");
+            clearInterval(interval);
+          } else if (data.data.status === "awaiting_selection") {
+            setRun(data.data);
+            setPhase("selecting");
             clearInterval(interval);
           } else if (data.data.status === "failed" || data.data.status === "cancelled") {
             setError(data.data.error_summary ?? "The run failed or was cancelled.");
