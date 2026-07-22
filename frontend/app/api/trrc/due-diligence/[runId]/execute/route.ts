@@ -11,7 +11,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
-import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,41 +82,15 @@ export async function POST(
     );
   }
 
-  // 3. Mark run as retrieving with initial progress
+  // 3. Mark as pending — the DigitalOcean worker polls for pending runs and claims them
   await supabase
     .from("trrc_due_diligence_runs")
     .update({
-      status: "retrieving",
-      progress_percent: 5,
-      updated_at: new Date().toISOString(),
+      status:           "pending",
+      progress_percent: 2,
+      updated_at:       new Date().toISOString(),
     })
     .eq("id", runId);
 
-  // 4. Fire-and-forget: invoke Edge Function (no await)
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  // Don't await — fire and forget so we return immediately
-  supabaseAdmin.functions
-    .invoke("trrc-dd-execute", { body: { run_id: runId } })
-    .then(({ error }: { error: { message: string } | null }) => {
-      if (error) {
-        console.error("[execute] edge function invoke error:", error);
-        supabaseAdmin
-          .from("trrc_due_diligence_runs")
-          .update({
-            status: "failed",
-            error_summary: `Edge Function invoke failed: ${error.message}`,
-          })
-          .eq("id", runId)
-          .then(() => {});
-      }
-    })
-    .catch((err: unknown) =>
-      console.error("[execute] invoke catch:", err),
-    );
-
-  return NextResponse.json({ ok: true, status: "retrieving" });
+  return NextResponse.json({ ok: true, status: "pending" });
 }

@@ -1,11 +1,15 @@
 /**
- * TRRC Public Records Report Builder
+ * TRRC Due Diligence Report Builder — Manus Protocol
  *
- * Simple, focused output:
- *   1. Cover page — identifiers used, date
- *   2. Records page(s) — every TRRC source queried, status, key data, direct link
- *
- * Nothing else.
+ * 8-section structured report:
+ *   1. Executive Summary (well identity + critical/important flags)
+ *   2. Operator Standing (P-5 registration, bond, compliance)
+ *   3. Production History (monthly table + computed analytics)
+ *   4. Well Construction (W-2 completion data + imaged docs)
+ *   5. Compliance and Legal Status (violations, orphan, plugging)
+ *   6. Legal Description and Location (GLO + GIS)
+ *   7. Missing Documents and Gaps
+ *   8. Overall Assessment (data completeness, narrative)
  */
 
 import React from "react";
@@ -40,22 +44,23 @@ export type LiteSourceAttempt = {
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
 const C = {
-  navy:    "#0F2A47",
-  accent:  "#1E5FAD",
-  white:   "#FFFFFF",
-  offWhite:"#F8FAFC",
-  border:  "#E2E8F0",
-  gray:    "#6B7280",
-  dark:    "#1F2937",
-  green:   "#166534",
-  greenBg: "#DCFCE7",
-  red:     "#991B1B",
-  redBg:   "#FEE2E2",
-  yellow:  "#92400E",
-  yellowBg:"#FEF3C7",
-  blueBg:  "#DBEAFE",
-  blue:    "#1E40AF",
-  link:    "#1E5FAD",
+  navy:     "#0F2A47",
+  accent:   "#1E5FAD",
+  white:    "#FFFFFF",
+  offWhite: "#F8FAFC",
+  border:   "#E2E8F0",
+  gray:     "#6B7280",
+  lightGray:"#9CA3AF",
+  dark:     "#1F2937",
+  green:    "#166534",
+  greenBg:  "#DCFCE7",
+  red:      "#991B1B",
+  redBg:    "#FEE2E2",
+  yellow:   "#92400E",
+  yellowBg: "#FEF3C7",
+  blueBg:   "#DBEAFE",
+  blue:     "#1E40AF",
+  link:     "#1E5FAD",
 };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -88,42 +93,27 @@ const S = StyleSheet.create({
     borderTopColor: C.border,
     paddingTop: 6,
   },
-  footerText: {
-    fontSize: 7,
-    color: C.gray,
-    fontFamily: "Helvetica",
-  },
+  footerText: { fontSize: 7, color: C.gray, fontFamily: "Helvetica" },
   sectionTitle: {
     fontSize: 11,
     fontFamily: "Helvetica-Bold",
     color: C.navy,
-    marginBottom: 10,
-    paddingBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
-  // Source record card
-  card: {
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 4,
     marginBottom: 8,
-    overflow: "hidden",
+    paddingBottom: 5,
+    borderBottomWidth: 1.5,
+    borderBottomColor: C.navy,
+    marginTop: 14,
   },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: C.offWhite,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
+  subTitle: {
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    color: C.dark,
+    marginBottom: 5,
+    marginTop: 8,
   },
-  cardBody: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
+  kvRow: { flexDirection: "row", marginBottom: 4 },
+  kvLabel: { fontSize: 8, color: C.gray, fontFamily: "Helvetica-Bold", width: 130, flexShrink: 0 },
+  kvValue: { fontSize: 8, color: C.dark, fontFamily: "Helvetica", flex: 1 },
   badge: {
     fontSize: 6.5,
     fontFamily: "Helvetica-Bold",
@@ -133,41 +123,21 @@ const S = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 3,
   },
-  kvRow: {
-    flexDirection: "row",
-    marginBottom: 3,
+  flagBox: {
+    borderRadius: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    marginBottom: 5,
   },
-  kvLabel: {
-    fontSize: 7.5,
-    color: C.gray,
-    fontFamily: "Helvetica",
-    width: 110,
-    flexShrink: 0,
-  },
-  kvValue: {
-    fontSize: 7.5,
-    color: C.dark,
-    fontFamily: "Helvetica",
-    flex: 1,
-  },
-  trrcLink: {
-    fontSize: 7.5,
-    color: C.link,
-    fontFamily: "Helvetica",
-    textDecoration: "underline",
-  },
-  // Table
+  flagLabel: { fontSize: 7, fontFamily: "Helvetica-Bold", letterSpacing: 0.5, marginBottom: 3 },
+  flagItem: { fontSize: 7.5, fontFamily: "Helvetica", marginBottom: 2 },
   tableHeader: {
     flexDirection: "row",
     backgroundColor: C.navy,
     paddingVertical: 4,
     paddingHorizontal: 6,
   },
-  tableHeaderCell: {
-    color: C.white,
-    fontFamily: "Helvetica-Bold",
-    fontSize: 7,
-  },
+  tableHeaderCell: { color: C.white, fontFamily: "Helvetica-Bold", fontSize: 7 },
   tableRow: {
     flexDirection: "row",
     paddingVertical: 3,
@@ -183,405 +153,953 @@ const S = StyleSheet.create({
     borderBottomColor: C.border,
     backgroundColor: C.offWhite,
   },
-  tableCell: {
-    fontSize: 7,
-    color: C.dark,
-    fontFamily: "Helvetica",
+  tableCell:     { fontSize: 7, color: C.dark, fontFamily: "Helvetica" },
+  tableCellMono: { fontSize: 7, color: C.dark, fontFamily: "Courier" },
+  summaryStatBox: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 4,
+    padding: 8,
+    flex: 1,
+    marginRight: 6,
   },
-  tableCellMono: {
-    fontSize: 7,
-    color: C.dark,
-    fontFamily: "Courier",
-  },
+  noteText: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica-Oblique", marginBottom: 6 },
+  bodyText: { fontSize: 8, color: C.dark, fontFamily: "Helvetica", lineHeight: 1.5, marginBottom: 6 },
+  trrcLink: { fontSize: 7.5, color: C.link, fontFamily: "Helvetica", textDecoration: "underline" },
+  divider: { borderBottomWidth: 0.5, borderBottomColor: C.border, marginVertical: 6 },
 });
 
-// ─── Source labels ─────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const SOURCE_LABELS: Record<string, string> = {
-  search_by_api:              "Wellbore Query (API Number)",
-  search_by_lease:            "Wellbore Query (Lease Number)",
-  search_by_operator:         "Operator / P5 Organization",
-  search_by_legal_description:"Legal Description (GIS)",
-  fetch_production:           "Production Data",
-  fetch_completion_records:   "Completion Records (W-2)",
-  fetch_well_status:          "Well Status",
-  fetch_inactive_well_status: "Inactive Well Aging Report (IWAR)",
-  fetch_orphan_well:          "Orphan Well Check",
-  fetch_plugging_records:     "Plugging Records (W-3C)",
-  fetch_p4_records:           "P-4 Production Test Records",
-  fetch_proration:            "Proration Schedule / Daily Allowable",
-  fetch_injection_records:    "UIC / Injection Well Records",
-  fetch_severance_records:    "Wellbore Severance Records",
-  fetch_compliance_violations:"Compliance Violations",
-  fetch_imaged_records:       "Imaged Document Packets (CMPL)",
-};
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function badge(label: string, bg: string, color: string) {
-  return React.createElement(
-    Text,
-    { style: [S.badge, { backgroundColor: bg, color }] },
-    label,
-  );
+function fmtMonth(iso: string): string {
+  const [yr, mo] = iso.split("-");
+  return `${MONTH_NAMES[(parseInt(mo ?? "1") - 1)] ?? mo} ${yr}`;
 }
 
-function kv(label: string, value: string) {
+function fmtNum(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "NO RPT";
+  return v.toLocaleString("en-US");
+}
+
+function str(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return String(v).trim();
+}
+
+function kv(label: string, value: string | null | undefined, highlight?: "red" | "yellow") {
+  const color = highlight === "red" ? C.red : highlight === "yellow" ? C.yellow : C.dark;
   return React.createElement(
-    View,
-    { style: S.kvRow },
+    View, { style: S.kvRow },
     React.createElement(Text, { style: S.kvLabel }, label),
-    React.createElement(Text, { style: S.kvValue }, value || "—"),
+    React.createElement(Text, { style: [S.kvValue, { color }] }, value || "—"),
   );
 }
 
 function Footer({ generatedAt, runId }: { generatedAt: string; runId: string }) {
-  const date = generatedAt.slice(0, 10);
   return React.createElement(
-    View,
-    { style: S.footer },
+    View, { style: S.footer },
     React.createElement(Text, { style: S.footerText }, "CONFIDENTIAL — Mineral Flow AI — TRRC Public Records"),
-    React.createElement(Text, { style: S.footerText }, `Run ${runId.slice(0, 8)} · ${date}`),
+    React.createElement(Text, { style: S.footerText }, `Run ${runId.slice(0, 8)} · ${generatedAt.slice(0, 10)}`),
   );
 }
 
-// ─── Cover Page ───────────────────────────────────────────────────────────────
-
-function CoverPage({ run, generatedAt }: { run: TrrcDueDiligenceRun; generatedAt: string }) {
-  const date = new Date(generatedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-
-  return React.createElement(
-    Page,
-    { size: "LETTER", style: S.coverPage },
-
-    // Title block
-    React.createElement(
-      View,
-      { style: { marginBottom: 40 } },
-      React.createElement(Text, {
-        style: { fontSize: 10, color: "#94A3B8", fontFamily: "Helvetica-Bold", letterSpacing: 2, marginBottom: 16 },
-      }, "MINERAL FLOW AI"),
-      React.createElement(Text, {
-        style: { fontSize: 28, color: C.white, fontFamily: "Helvetica-Bold", lineHeight: 1.25, marginBottom: 8 },
-      }, "TRRC PUBLIC RECORDS"),
-      React.createElement(Text, {
-        style: { fontSize: 13, color: "#94A3B8", fontFamily: "Helvetica" },
-      }, "Due Diligence Report"),
-    ),
-
-    // Identifiers used
-    React.createElement(
-      View,
-      { style: { marginBottom: 36, paddingVertical: 16, paddingHorizontal: 20, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" } },
-      run.resolved_primary_api ? React.createElement(
-        View, { style: { marginBottom: 10 } },
-        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 } }, "API Number"),
-        React.createElement(Text, { style: { fontSize: 14, color: C.white, fontFamily: "Helvetica-Bold" } }, run.resolved_primary_api),
-      ) : null,
-      run.resolved_lease_number ? React.createElement(
-        View, { style: { marginBottom: 10 } },
-        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 } }, "Lease Number"),
-        React.createElement(Text, { style: { fontSize: 14, color: C.white, fontFamily: "Helvetica-Bold" } }, run.resolved_lease_number),
-      ) : null,
-      React.createElement(
-        View, {},
-        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 } }, "Original Input"),
-        React.createElement(Text, { style: { fontSize: 11, color: "#CBD5E1", fontFamily: "Helvetica" } }, run.original_input),
-      ),
-    ),
-
-    // Meta
-    React.createElement(
-      View,
-      { style: { flexDirection: "row", gap: 24 } },
-      React.createElement(
-        View, {},
-        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "GENERATED"),
-        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, date),
-      ),
-      run.resolved_district ? React.createElement(
-        View, {},
-        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "TRRC DISTRICT"),
-        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, run.resolved_district),
-      ) : null,
-    ),
-
-    // Disclaimer
-    React.createElement(
-      View,
-      { style: { position: "absolute", bottom: 32, left: 50, right: 50 } },
-      React.createElement(Text, {
-        style: { fontSize: 6.5, color: "#475569", fontFamily: "Helvetica", textAlign: "center", lineHeight: 1.6 },
-      }, "This report compiles publicly available TRRC records for preliminary screening only. It is not a title opinion, reserve report, or legal due diligence. Records may be incomplete, delayed, or unavailable online."),
-    ),
-  );
+function SectionTitle({ children }: { children: string }) {
+  return React.createElement(Text, { style: S.sectionTitle }, children);
 }
 
-// ─── Records Page ─────────────────────────────────────────────────────────────
+// ─── Data extraction ──────────────────────────────────────────────────────────
 
-function extractKeyFacts(data: Record<string, unknown>): Array<[string, string]> {
-  const facts: Array<[string, string]> = [];
+function getAttempt(attempts: LiteSourceAttempt[], ...names: string[]): Record<string, unknown> | null {
+  for (const name of names) {
+    const a = attempts.find(x => x.source_name === name && x.status === "success");
+    if (a?.result_data_json) return a.result_data_json;
+  }
+  return null;
+}
 
-  // Common fields we want to surface
-  const wanted: Array<[string, string]> = [
-    ["api_number",       "API Number"],
-    ["formatted_api",    "API (Formatted)"],
-    ["uic_no_",          "UIC Permit #"],
-    ["uic_no",           "UIC Permit #"],
-    ["lease_no",         "Lease Number"],
-    ["lease_no_",        "Lease Number"],
-    ["operator",         "Operator"],
-    ["operator_name",    "Operator Name"],
-    ["operator_number",  "Operator #"],
-    ["district",         "District"],
-    ["county",           "County"],
-    ["well_type",        "Well Type"],
-    ["on_schedule",      "On Schedule"],
-    ["is_inactive",      "Inactive"],
-    ["is_orphan",        "Orphan Well"],
-    ["count",            "Records Found"],
-    ["inactive_record_count", "Inactive Records"],
-    ["total_wellbores",  "Total Wellbores"],
-    ["field",            "Field"],
-    ["formation",        "Formation"],
-  ];
+function getAttemptRaw(attempts: LiteSourceAttempt[], name: string): LiteSourceAttempt | null {
+  return attempts.find(x => x.source_name === name) ?? null;
+}
 
-  for (const [key, label] of wanted) {
-    const val = data[key];
-    if (val === undefined || val === null || val === "") continue;
-    if (typeof val === "boolean") {
-      facts.push([label, val ? "Yes" : "No"]);
-    } else if (typeof val === "string" || typeof val === "number") {
-      const s = String(val).trim();
-      if (s) facts.push([label, s]);
+interface WellIdentity {
+  wellName: string;
+  operator: string;
+  operatorNo: string;
+  county: string;
+  field: string;
+  formation: string;
+  wellType: string;
+  district: string;
+  apiNumber: string;
+  leaseNumber: string;
+  leaseNumbers: string[];
+}
+
+function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDiligenceRun): WellIdentity {
+  const wb = getAttempt(attempts, "search_by_api", "search_by_lease");
+  const records = Array.isArray(wb?.["wellbores"]) ? (wb!["wellbores"] as Record<string, unknown>[]) :
+                  Array.isArray(wb?.["records"])   ? (wb!["records"]   as Record<string, unknown>[]) : [];
+  const first = records[0] ?? {};
+
+  const leaseNumbers = records.map(r => str(r["lease_no"])).filter(Boolean);
+
+  return {
+    wellName:    str(first["lease_name"] ?? first["well_name"] ?? wb?.["well_name"]),
+    operator:    str(first["operator_name"] ?? wb?.["operator_name"]),
+    operatorNo:  str(first["operator_no"]   ?? wb?.["operator_no"]),
+    county:      str(first["county"]        ?? wb?.["county"]),
+    field:       str(first["field"]         ?? wb?.["field"]),
+    formation:   str(first["formation"]     ?? wb?.["formation"]),
+    wellType:    str(first["well_type"]     ?? wb?.["well_type"]),
+    district:    str(first["dist_code"]     ?? run.resolved_district ?? wb?.["district"]),
+    apiNumber:   run.resolved_primary_api ?? str(run.original_input),
+    leaseNumber: run.resolved_lease_number ?? leaseNumbers[0] ?? "",
+    leaseNumbers,
+  };
+}
+
+// ─── Production analytics ─────────────────────────────────────────────────────
+
+interface ProductionAnalytics {
+  months: TrrcDDProductionRow[];
+  recent12AvgOil: number | null;
+  prior12AvgOil: number | null;
+  yoyDeclineOil: number | null;
+  recent12AvgGas: number | null;
+  cumulativeOil: number | null;
+  cumulativeGas: number | null;
+  currentWOR: number | null;
+  worTrend: "Stable" | "Rising" | "Declining" | "N/A";
+  zeroMonths: number;
+  declineFlagged: boolean;
+}
+
+function computeProductionAnalytics(production: TrrcDDProductionRow[]): ProductionAnalytics {
+  const sorted = [...production].sort((a, b) => a.production_month.localeCompare(b.production_month));
+
+  const avg = (rows: TrrcDDProductionRow[], key: keyof TrrcDDProductionRow): number | null => {
+    const vals = rows.map(r => r[key] as number | null).filter((v): v is number => v !== null && v !== undefined);
+    if (vals.length === 0) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  };
+
+  const sum = (rows: TrrcDDProductionRow[], key: keyof TrrcDDProductionRow): number | null => {
+    const vals = rows.map(r => r[key] as number | null).filter((v): v is number => v !== null && v !== undefined);
+    if (vals.length === 0) return null;
+    return vals.reduce((a, b) => a + b, 0);
+  };
+
+  const recent = sorted.slice(-12);
+  const prior  = sorted.slice(-24, -12);
+
+  const recent12AvgOil = avg(recent, "oil_bbl");
+  const prior12AvgOil  = avg(prior, "oil_bbl");
+  const recent12AvgGas = avg(recent, "gas_mcf");
+
+  let yoyDeclineOil: number | null = null;
+  if (recent12AvgOil !== null && prior12AvgOil !== null && prior12AvgOil > 0) {
+    yoyDeclineOil = ((prior12AvgOil - recent12AvgOil) / prior12AvgOil) * 100;
+  }
+
+  const cumulativeOil = sum(sorted, "oil_bbl");
+  const cumulativeGas = sum(sorted, "gas_mcf");
+
+  // WOR on last 3 months
+  const last3 = sorted.slice(-3);
+  const last3Oil   = sum(last3, "oil_bbl") ?? 0;
+  const last3Water = sum(last3, "water_bbl") ?? 0;
+  const currentWOR = last3Oil > 0 ? last3Water / last3Oil : null;
+
+  // WOR trend: compare last 3 vs prior 3
+  const prev3 = sorted.slice(-6, -3);
+  const prev3Oil   = sum(prev3, "oil_bbl") ?? 0;
+  const prev3Water = sum(prev3, "water_bbl") ?? 0;
+  const prevWOR = prev3Oil > 0 ? prev3Water / prev3Oil : null;
+
+  let worTrend: "Stable" | "Rising" | "Declining" | "N/A" = "N/A";
+  if (currentWOR !== null && prevWOR !== null) {
+    const delta = currentWOR - prevWOR;
+    if (delta > 0.1) worTrend = "Rising";
+    else if (delta < -0.1) worTrend = "Declining";
+    else worTrend = "Stable";
+  }
+
+  const zeroMonths = sorted.filter(r => (r.oil_bbl ?? 0) === 0 && (r.gas_mcf ?? 0) === 0).length;
+  const declineFlagged = yoyDeclineOil !== null && yoyDeclineOil > 30;
+
+  return {
+    months: sorted,
+    recent12AvgOil,
+    prior12AvgOil,
+    yoyDeclineOil,
+    recent12AvgGas,
+    cumulativeOil,
+    cumulativeGas,
+    currentWOR,
+    worTrend,
+    zeroMonths,
+    declineFlagged,
+  };
+}
+
+// ─── Flag generation ──────────────────────────────────────────────────────────
+
+interface Flags {
+  critical: string[];
+  important: string[];
+}
+
+function generateFlags(
+  attempts: LiteSourceAttempt[],
+  analytics: ProductionAnalytics,
+): Flags {
+  const critical: string[] = [];
+  const important: string[] = [];
+
+  // Orphan well
+  const orphan = getAttempt(attempts, "fetch_orphan_well");
+  if (orphan?.["is_orphan"] === true) {
+    critical.push("ORPHAN WELL — operator has forfeited bond; no responsible party. Do not proceed without legal counsel.");
+  }
+
+  // P-5 status
+  const p5 = getAttempt(attempts, "search_by_operator");
+  const p5Records = Array.isArray(p5?.["records"]) ? (p5!["records"] as Record<string, unknown>[]) : [];
+  const p5First = p5Records[0] ?? {};
+  const p5Status = str(p5First["p5_status"] ?? p5?.["p5_status"]);
+  if (p5Status && /inactive|revoked/i.test(p5Status)) {
+    critical.push(`OPERATOR P-5 STATUS: ${p5Status.toUpperCase()} — operator may not be legally permitted to operate wells in Texas.`);
+  }
+
+  // Plugged well with no W-3C
+  const wellStatus = getAttempt(attempts, "fetch_well_status");
+  const statusStr = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]);
+  const plugging = getAttempt(attempts, "fetch_plugging_records");
+  if (/plugged/i.test(statusStr) && plugging?.["found"] === false) {
+    critical.push("WELL SHOWS PLUGGED STATUS but no W-3C plugging certificate found — possible abandonment without proper documentation.");
+  }
+
+  // >30% YoY production decline
+  if (analytics.declineFlagged && analytics.yoyDeclineOil !== null) {
+    critical.push(`PRODUCTION DECLINE ${analytics.yoyDeclineOil.toFixed(1)}% YoY (oil) — material finding. Verify whether shut-in or reporting gap.`);
+  }
+
+  // Bond adequacy
+  const bondAmt = str(p5First["bond_amount"] ?? p5?.["bond_amount"]);
+  if (bondAmt && bondAmt !== "—") {
+    const bondNum = parseFloat(bondAmt.replace(/[^0-9.]/g, ""));
+    if (!isNaN(bondNum) && bondNum < 25000) {
+      important.push(`OPERATOR BOND $${bondNum.toLocaleString()} — may be below statutory minimum for the number of wells operated.`);
     }
   }
 
-  // Pull from nested records array if present
-  const records = data["records"] as Record<string, unknown>[] | undefined;
-  const wellbores = data["wellbores"] as Record<string, unknown>[] | undefined;
-  const arr = records ?? wellbores;
-  if (Array.isArray(arr) && arr.length > 0) {
-    const first = arr[0];
-    if (typeof first === "object" && first !== null) {
-      for (const [key, label] of wanted) {
-        if (facts.find(f => f[0] === label)) continue;
-        const val = (first as Record<string, unknown>)[key];
-        if (val !== undefined && val !== null && val !== "") {
-          facts.push([label, String(val).trim()]);
-        }
+  // Inactive well plugging deadline
+  const inactive = getAttempt(attempts, "fetch_inactive_well_status");
+  const inactiveRecords = Array.isArray(inactive?.["records"]) ? (inactive!["records"] as Record<string, unknown>[]) : [];
+  for (const rec of inactiveRecords) {
+    const deadline = str(rec["plugging_deadline_date"] ?? rec["deadline"]);
+    if (deadline) {
+      const deadlineDate = new Date(deadline);
+      const monthsOut = (deadlineDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30);
+      if (monthsOut <= 12) {
+        important.push(`INACTIVE WELL — plugging deadline ${deadline} is within 12 months. Material liability.`);
       }
     }
   }
 
-  return facts.slice(0, 8);
-}
-
-function RecordCard({ attempt }: { attempt: LiteSourceAttempt }) {
-  const label = SOURCE_LABELS[attempt.source_name] ?? attempt.source_name;
-  const data = attempt.result_data_json ?? {};
-  const url = typeof data["trrc_source_url"] === "string" ? data["trrc_source_url"] : null;
-  const isError = attempt.status === "failed_transient" || attempt.status === "failed_permanent";
-  const isManual = data["data_gap"] === true || data["endpoint_available"] === false;
-  const notFound = data["found"] === false;
-  const found = !isError && !isManual && !notFound;
-
-  let statusBg: string;
-  let statusColor: string;
-  let statusLabel: string;
-
-  if (isError) {
-    statusBg = C.redBg; statusColor = C.red; statusLabel = "FAILED";
-  } else if (isManual) {
-    statusBg = C.yellowBg; statusColor = C.yellow; statusLabel = "MANUAL REQUIRED";
-  } else if (notFound) {
-    statusBg = C.offWhite; statusColor = C.gray; statusLabel = "NOT FOUND";
-  } else {
-    statusBg = C.greenBg; statusColor = C.green; statusLabel = "FOUND";
+  // P-4 decline from IP
+  const p4 = getAttempt(attempts, "fetch_p4_records");
+  const p4Records = Array.isArray(p4?.["records"]) ? (p4!["records"] as Record<string, unknown>[]) : [];
+  if (p4Records.length >= 2) {
+    const newest = p4Records[0];
+    const oldest = p4Records[p4Records.length - 1];
+    const newestOil = parseFloat(str(newest["oil_rate_bbl_day"])) || 0;
+    const oldestOil = parseFloat(str(oldest["oil_rate_bbl_day"])) || 0;
+    if (oldestOil > 0 && newestOil / oldestOil < 0.1) {
+      important.push(`P-4 RATE DECLINE — current test rate (${newestOil} BBL/d) is less than 10% of original completion test rate (${oldestOil} BBL/d). Significant decline.`);
+    }
   }
 
-  const facts = found ? extractKeyFacts(data) : [];
-  const errorMsg = isError ? (attempt.error_message ?? "Query failed") : null;
-  const manualMsg = isManual ? (typeof data["message"] === "string" ? (data["message"] as string).slice(0, 180) : "Manual retrieval required.") : null;
+  // No P-4 in 5+ years
+  if (p4Records.length > 0) {
+    const latestDate = str(p4Records[0]?.["test_date"] ?? p4Records[0]?.["date"]);
+    if (latestDate) {
+      const yearsSince = (Date.now() - new Date(latestDate).getTime()) / (1000 * 60 * 60 * 24 * 365);
+      if (yearsSince > 5) {
+        important.push(`NO P-4 TEST IN ${yearsSince.toFixed(0)} YEARS — last test was ${latestDate}. Productive capacity unverified.`);
+      }
+    }
+  } else if (p4?.["found"] === false) {
+    important.push("NO P-4 POTENTIAL TESTS ON FILE — productive capacity under controlled conditions unverified.");
+  }
+
+  // Open compliance violations
+  const violations = getAttempt(attempts, "fetch_compliance_violations");
+  const openCount = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : 0;
+  if (openCount > 0) {
+    important.push(`${openCount} OPEN COMPLIANCE VIOLATION(S) — unresolved violations are a material liability that transfers with the asset.`);
+  }
+
+  // Zero production months
+  if (analytics.zeroMonths > 3) {
+    important.push(`${analytics.zeroMonths} MONTHS WITH ZERO PRODUCTION — may indicate shut-in periods or reporting gaps. Verify with operator.`);
+  }
+
+  // WOR rising
+  if (analytics.worTrend === "Rising") {
+    important.push("RISING WATER-TO-OIL RATIO — indicator of reservoir depletion or water encroachment.");
+  }
+
+  return { critical, important };
+}
+
+// ─── Cover Page ───────────────────────────────────────────────────────────────
+
+function CoverPage({ run, id: identity, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  generatedAt: string;
+}) {
+  const date = new Date(generatedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   return React.createElement(
-    View,
-    { style: S.card },
+    Page, { size: "LETTER", style: S.coverPage },
 
-    // Card header
-    React.createElement(
-      View,
-      { style: S.cardHeader },
-      React.createElement(Text, { style: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: C.navy, flex: 1 } }, label),
-      React.createElement(
-        View,
-        { style: { flexDirection: "row", alignItems: "center", gap: 8 } },
-        badge(statusLabel, statusBg, statusColor),
-        url ? React.createElement(
-          Link,
-          { src: url, style: S.trrcLink },
-          "View on TRRC ↗",
-        ) : null,
-      ),
+    React.createElement(View, { style: { marginBottom: 40 } },
+      React.createElement(Text, { style: { fontSize: 10, color: "#94A3B8", fontFamily: "Helvetica-Bold", letterSpacing: 2, marginBottom: 16 } }, "MINERAL FLOW AI"),
+      React.createElement(Text, { style: { fontSize: 26, color: C.white, fontFamily: "Helvetica-Bold", lineHeight: 1.25, marginBottom: 6 } }, "TRRC DUE DILIGENCE REPORT"),
+      React.createElement(Text, { style: { fontSize: 11, color: "#94A3B8", fontFamily: "Helvetica" } }, "Veteran-Grade Well Research — Manus Protocol"),
     ),
 
-    // Card body
-    React.createElement(
-      View,
-      { style: S.cardBody },
-      errorMsg ? React.createElement(Text, { style: { fontSize: 7.5, color: C.red, fontFamily: "Helvetica" } }, errorMsg) : null,
-      manualMsg ? React.createElement(Text, { style: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica-Oblique" } }, manualMsg) : null,
-      notFound && !isManual ? React.createElement(Text, { style: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica-Oblique" } }, typeof data["message"] === "string" ? (data["message"] as string).slice(0, 160) : "No records found.") : null,
-      facts.length > 0 ? React.createElement(
-        View,
-        {},
-        ...facts.map(([lbl, val], i) =>
-          React.createElement(
-            View,
-            { key: String(i), style: S.kvRow },
-            React.createElement(Text, { style: S.kvLabel }, lbl),
-            React.createElement(Text, { style: S.kvValue }, val),
-          ),
-        ),
+    React.createElement(View, { style: { marginBottom: 32, paddingVertical: 16, paddingHorizontal: 20, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" } },
+      identity.wellName ? React.createElement(View, { style: { marginBottom: 8 } },
+        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "WELL NAME"),
+        React.createElement(Text, { style: { fontSize: 13, color: C.white, fontFamily: "Helvetica-Bold" } }, identity.wellName),
       ) : null,
+      React.createElement(View, { style: { marginBottom: 8 } },
+        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "API NUMBER"),
+        React.createElement(Text, { style: { fontSize: 13, color: C.white, fontFamily: "Helvetica-Bold" } }, identity.apiNumber || run.original_input),
+      ),
+      identity.operator ? React.createElement(View, { style: { marginBottom: 8 } },
+        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "OPERATOR"),
+        React.createElement(Text, { style: { fontSize: 11, color: "#CBD5E1", fontFamily: "Helvetica" } }, identity.operator),
+      ) : null,
+    ),
+
+    React.createElement(View, { style: { flexDirection: "row", gap: 24, marginBottom: 20 } },
+      React.createElement(View, {},
+        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "GENERATED"),
+        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, date),
+      ),
+      React.createElement(View, {},
+        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "PREPARED BY"),
+        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, "Claude / MineralFlow AI"),
+      ),
+      identity.district ? React.createElement(View, {},
+        React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "TRRC DISTRICT"),
+        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, identity.district),
+      ) : null,
+    ),
+
+    React.createElement(View, { style: { position: "absolute", bottom: 32, left: 50, right: 50 } },
+      React.createElement(Text, { style: { fontSize: 6.5, color: "#475569", fontFamily: "Helvetica", textAlign: "center", lineHeight: 1.6 } },
+        "This report compiles publicly available TRRC records for preliminary screening only. It is not a title opinion, reserve report, or legal due diligence. Records may be incomplete, delayed, or unavailable online.",
+      ),
     ),
   );
 }
 
-function RecordsPage({
-  attempts,
-  run,
-  generatedAt,
-}: {
-  attempts: LiteSourceAttempt[];
+// ─── Section 1 — Executive Summary ───────────────────────────────────────────
+
+function ExecutiveSummaryPage({ run, id: identity, flags, wellStatus, generatedAt }: {
   run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  flags: Flags;
+  wellStatus: string;
   generatedAt: string;
 }) {
-  const seen = new Set<string>();
-  const unique = attempts.filter(a => {
-    if (a.source_name === "submit_report") return false;
-    if (seen.has(a.source_name)) return false;
-    seen.add(a.source_name);
-    return true;
-  });
-
-  const found    = unique.filter(a => a.status === "success" && (a.result_data_json?.["found"] !== false) && !a.result_data_json?.["data_gap"] && a.result_data_json?.["endpoint_available"] !== false);
-  const notFound = unique.filter(a => a.status === "success" && (a.result_data_json?.["found"] === false || a.result_data_json?.["data_gap"] === true || a.result_data_json?.["endpoint_available"] === false));
-  const failed   = unique.filter(a => a.status !== "success");
-
-  const renderGroup = (title: string, items: LiteSourceAttempt[]) => {
-    if (items.length === 0) return null;
-    return React.createElement(
-      View,
-      { style: { marginBottom: 14 } },
-      React.createElement(Text, { style: { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.gray, letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 6 } }, title),
-      ...items.map(a => React.createElement(RecordCard, { key: a.source_id, attempt: a })),
-    );
-  };
+  const hasCritical = flags.critical.length > 0;
+  const hasImportant = flags.important.length > 0;
 
   return React.createElement(
-    Page,
-    { size: "LETTER", style: S.page },
+    Page, { size: "LETTER", style: S.page },
 
-    // Page header
-    React.createElement(
-      View,
-      { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
       React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
-      React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica" } }, run.original_input),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "TRRC Records"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 1 — EXECUTIVE SUMMARY"),
 
-    renderGroup("Records Found", found),
-    renderGroup("No Records / Manual Required", notFound),
-    renderGroup("Query Failed", failed),
+    // Well identity block
+    React.createElement(View, { style: { marginBottom: 12 } },
+      kv("Well Name",       identity.wellName),
+      kv("Operator",        identity.operator),
+      kv("County",          identity.county),
+      kv("Field",           identity.field),
+      kv("Formation",       identity.formation),
+      kv("Well Type",       identity.wellType),
+      kv("Current Status",  wellStatus || "—", /shut.in|inactive|plugged|abandon/i.test(wellStatus) ? "yellow" : undefined),
+      kv("RRC District",    identity.district),
+      kv("API Number",      identity.apiNumber),
+      kv("Lease Number(s)", identity.leaseNumbers.join(", ") || identity.leaseNumber),
+    ),
 
-    unique.length === 0 ? React.createElement(
-      Text,
-      { style: { fontSize: 8.5, color: C.gray, fontFamily: "Helvetica-Oblique" } },
-      "No source queries were recorded for this run.",
+    // Critical flags
+    hasCritical ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.redBg, marginBottom: 8 }] },
+      React.createElement(Text, { style: [S.flagLabel, { color: C.red }] }, `⚠ CRITICAL FLAGS (${flags.critical.length})`),
+      ...flags.critical.map((f, i) => React.createElement(Text, { key: String(i), style: [S.flagItem, { color: C.red }] }, `• ${f}`)),
+    ) : null,
+
+    // Important flags
+    hasImportant ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg }] },
+      React.createElement(Text, { style: [S.flagLabel, { color: C.yellow }] }, `▲ IMPORTANT FLAGS (${flags.important.length})`),
+      ...flags.important.map((f, i) => React.createElement(Text, { key: String(i), style: [S.flagItem, { color: C.yellow }] }, `• ${f}`)),
+    ) : null,
+
+    !hasCritical && !hasImportant ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.greenBg }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.green }] }, "✓ No critical or important flags identified based on available TRRC records."),
     ) : null,
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
   );
 }
 
-// ─── Production Table Page ────────────────────────────────────────────────────
+// ─── Section 2 — Operator Standing ───────────────────────────────────────────
 
-const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-function formatProductionMonth(iso: string): string {
-  const [year, month] = iso.split("-");
-  const mo = parseInt(month ?? "0", 10);
-  return `${MONTH_NAMES[mo - 1] ?? month} ${year}`;
-}
-
-function fmtNum(val: number | null): string {
-  if (val === null || val === undefined) return "NO RPT";
-  return val.toLocaleString("en-US");
-}
-
-function ProductionPage({
-  production,
-  run,
-  generatedAt,
-}: {
-  production: TrrcDDProductionRow[];
+function OperatorStandingPage({ run, id: identity, attempts, flags, generatedAt }: {
   run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  flags: Flags;
   generatedAt: string;
 }) {
-  const cols = [
-    { label: "Month",              width: "16%"  },
-    { label: "Oil (BBL)",          width: "17%"  },
-    { label: "Gas (MCF)",          width: "17%"  },
-    { label: "Casinghead (MCF)",   width: "17%"  },
-    { label: "Condensate (BBL)",   width: "17%"  },
-    { label: "Water (BBL)",        width: "16%"  },
-  ];
+  const p5 = getAttempt(attempts, "search_by_operator");
+  const p5Records = Array.isArray(p5?.["records"]) ? (p5!["records"] as Record<string, unknown>[]) : [];
+  const p5First = p5Records[0] ?? (p5 ?? {});
+
+  const violations = getAttempt(attempts, "fetch_compliance_violations");
+  const openCount = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : null;
+  const totalCount = typeof violations?.["violation_count"] === "number" ? violations["violation_count"] as number : null;
+  const violList = Array.isArray(violations?.["violations"]) ? (violations!["violations"] as Record<string, string>[]) : [];
+  const p5Url = typeof p5?.["trrc_source_url"] === "string" ? p5["trrc_source_url"] as string : null;
+  const vUrl  = typeof violations?.["trrc_source_url"] === "string" ? violations["trrc_source_url"] as string : null;
 
   return React.createElement(
-    Page,
-    { size: "LETTER", style: S.page },
+    Page, { size: "LETTER", style: S.page },
 
-    // Page header
-    React.createElement(
-      View,
-      { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
       React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
-      React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica" } }, run.original_input),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "Production History"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 2 — OPERATOR STANDING"),
 
-    // Source note
-    React.createElement(Text, {
-      style: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica-Oblique", marginBottom: 10 },
-    }, `${production.length} month(s) retrieved from TRRC specificLeaseQueryAction.do. All values are lease-level — single-well attribution requires per-well allocation. "NO RPT" = no production reported for that month.`),
+    React.createElement(Text, { style: S.subTitle }, "P-5 Operator Registration"),
+    p5 ? React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Operator Name",     str(p5First["operator_name"] ?? identity.operator)),
+      kv("Operator Number",   str(p5First["operator_no"] ?? identity.operatorNo)),
+      kv("P-5 Status",        str(p5First["p5_status"]), /inactive|revoked/i.test(str(p5First["p5_status"])) ? "red" : undefined),
+      kv("Bond Amount on File", str(p5First["bond_amount"])),
+      kv("Registered Agent",  str(p5First["agent_name"])),
+      kv("Mailing Address",   str(p5First["address"])),
+      p5Url ? React.createElement(View, { style: S.kvRow },
+        React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
+        React.createElement(Link, { src: p5Url, style: S.trrcLink }, "View P-5 Record ↗"),
+      ) : null,
+    ) : React.createElement(Text, { style: S.noteText }, "P-5 registration data not retrieved."),
 
-    // Table header
-    React.createElement(
-      View,
-      { style: S.tableHeader },
-      ...cols.map(c => React.createElement(
-        Text,
-        { style: [S.tableHeaderCell, { width: c.width }] },
-        c.label,
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Compliance Violation History"),
+    violations ? React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Total Violations",  totalCount !== null ? String(totalCount) : "—"),
+      kv("Open (Unresolved)", openCount !== null ? String(openCount) : "—", openCount && openCount > 0 ? "red" : undefined),
+      kv("Searched By",       str(violations["searched_by"])),
+      vUrl ? React.createElement(View, { style: S.kvRow },
+        React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
+        React.createElement(Link, { src: vUrl, style: S.trrcLink }, "View ICE Portal ↗"),
+      ) : null,
+    ) : React.createElement(Text, { style: S.noteText }, "Compliance violation data not retrieved."),
+
+    // Violation table (first 10)
+    violList.length > 0 ? React.createElement(View, { style: { marginTop: 6 } },
+      React.createElement(Text, { style: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: C.dark, marginBottom: 4 } }, `Violation Detail (${Math.min(violList.length, 10)} of ${totalCount ?? violList.length})`),
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "Date"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "22%" }] }, "Rule Violated"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "12%" }] }, "Major"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "22%" }] }, "Last Action"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "28%" }] }, "Compliant"),
+      ),
+      ...violList.slice(0, 10).map((v, i) => React.createElement(
+        View, { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCellMono, { width: "16%" }] }, v["violation_discovery_date"] ?? ""),
+        React.createElement(Text, { style: [S.tableCell, { width: "22%" }] }, v["violated_rule_description"]?.slice(0, 30) ?? v["violated_rule"] ?? ""),
+        React.createElement(Text, { style: [S.tableCell, { width: "12%" }] }, v["major_violation"] ?? ""),
+        React.createElement(Text, { style: [S.tableCell, { width: "22%" }] }, v["last_enforcement_action"] ?? ""),
+        React.createElement(Text, { style: [S.tableCell, { width: "28%" }] }, v["compliant_on_reinspection"] === "Y" ? "Yes" : v["compliant_on_reinspection"] === "N" ? "No (OPEN)" : "—"),
+      )),
+    ) : null,
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 3 — Production History ──────────────────────────────────────────
+
+function ProductionPage({ run, id: identity, analytics, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  analytics: ProductionAnalytics;
+  generatedAt: string;
+}) {
+  const { months, recent12AvgOil, prior12AvgOil, yoyDeclineOil, recent12AvgGas, cumulativeOil, cumulativeGas, currentWOR, worTrend, zeroMonths, declineFlagged } = analytics;
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 3 — PRODUCTION HISTORY"),
+
+    // Analytics summary
+    React.createElement(View, { style: { flexDirection: "row", marginBottom: 10 } },
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "12-MO AVG OIL"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, recent12AvgOil !== null ? `${recent12AvgOil.toFixed(0)} BBL/mo` : "—"),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "12-MO AVG GAS"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, recent12AvgGas !== null ? `${recent12AvgGas.toFixed(0)} MCF/mo` : "—"),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "YOY DECLINE (OIL)"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: declineFlagged ? C.red : C.navy } },
+          yoyDeclineOil !== null ? `${yoyDeclineOil > 0 ? "▼" : "▲"} ${Math.abs(yoyDeclineOil).toFixed(1)}%` : "—",
+        ),
+      ),
+      React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "WOR TREND"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: worTrend === "Rising" ? C.red : C.navy } }, worTrend),
+      ),
+    ),
+
+    React.createElement(View, { style: { marginBottom: 8 } },
+      kv("Prior 12-Mo Avg Oil",       prior12AvgOil !== null ? `${prior12AvgOil.toFixed(0)} BBL/mo` : "—"),
+      kv("Cumulative Oil Production",  cumulativeOil !== null ? `${cumulativeOil.toLocaleString("en-US")} BBL` : "—"),
+      kv("Cumulative Gas Production",  cumulativeGas !== null ? `${cumulativeGas.toLocaleString("en-US")} MCF` : "—"),
+      kv("Current Water-to-Oil Ratio", currentWOR !== null ? currentWOR.toFixed(2) : "—"),
+      kv("Zero-Production Months",     String(zeroMonths), zeroMonths > 3 ? "yellow" : undefined),
+      kv("Months of History",          String(months.length)),
+    ),
+
+    declineFlagged ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.redBg, marginBottom: 8 }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.red }] }, `⚠ Production decline greater than 30% year-over-year is a material finding. Months with zero reported production should be explained — verify with operator whether well was shut in or reporting gap.`),
+    ) : null,
+
+    // Monthly table
+    React.createElement(Text, { style: S.noteText }, `${months.length} month(s) retrieved from TRRC. Lease-level data — single-well attribution requires per-well allocation. "NO RPT" = no production reported.`),
+
+    months.length > 0 ? React.createElement(View, {},
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "15%" }] }, "Month"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Oil (BBL)"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Gas (MCF)"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Casinghead"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Condensate"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Water (BBL)"),
+      ),
+      ...months.map((row, i) => React.createElement(
+        View, { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCellMono, { width: "15%" }] }, fmtMonth(row.production_month)),
+        React.createElement(Text, { style: [S.tableCell, { width: "17%", textAlign: "right" }] }, fmtNum(row.oil_bbl)),
+        React.createElement(Text, { style: [S.tableCell, { width: "17%", textAlign: "right" }] }, fmtNum(row.gas_mcf)),
+        React.createElement(Text, { style: [S.tableCell, { width: "17%", textAlign: "right" }] }, fmtNum(row.casinghead_gas_mcf)),
+        React.createElement(Text, { style: [S.tableCell, { width: "17%", textAlign: "right" }] }, fmtNum(row.condensate_bbl)),
+        React.createElement(Text, { style: [S.tableCell, { width: "17%", textAlign: "right" }] }, fmtNum(row.water_bbl)),
+      )),
+    ) : React.createElement(Text, { style: S.noteText }, "No production records retrieved."),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 4 — Well Construction ───────────────────────────────────────────
+
+function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  generatedAt: string;
+}) {
+  const comp   = getAttempt(attempts, "fetch_completion_records");
+  const imaged = getAttempt(attempts, "fetch_imaged_records");
+  const p4     = getAttempt(attempts, "fetch_p4_records");
+  const p4Records = Array.isArray(p4?.["records"]) ? (p4!["records"] as Record<string, unknown>[]) : [];
+  const newest = p4Records[0];
+  const oldest = p4Records[p4Records.length - 1];
+  const compUrl  = typeof comp?.["trrc_source_url"] === "string"   ? comp["trrc_source_url"] as string   : null;
+  const imagedUrl = typeof imaged?.["trrc_source_url"] === "string" ? imaged["trrc_source_url"] as string : null;
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 4 — WELL CONSTRUCTION"),
+
+    React.createElement(Text, { style: S.subTitle }, "W-2 Completion Record (EWA Structured Data)"),
+    comp ? React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Completion Date",        str(comp["completion_date"])),
+      kv("Producing Formation",    str(comp["producing_formation"])),
+      kv("Producing Interval",     str(comp["producing_interval"] ?? comp["depth_interval"])),
+      kv("Perforation Intervals",  str(comp["perforations"] ?? comp["perforation_intervals"])),
+      kv("Stimulation Method",     str(comp["stimulation_method"])),
+      kv("Fracture Fluid Volume",  str(comp["fracture_fluid_volume"])),
+      kv("Proppant Type",          str(comp["proppant_type"])),
+      kv("Surface Casing",         str(comp["surface_casing"])),
+      kv("Production Casing",      str(comp["production_casing"])),
+      kv("Tubing",                 str(comp["tubing"])),
+      compUrl ? React.createElement(View, { style: S.kvRow },
+        React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
+        React.createElement(Link, { src: compUrl, style: S.trrcLink }, "View W-2 Record ↗"),
+      ) : null,
+    ) : React.createElement(Text, { style: S.noteText }, "W-2 completion record not retrieved — manual lookup required."),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "P-4 Potential Test Records"),
+    p4Records.length > 0 ? React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Most Recent Test Date",  str(newest?.["test_date"] ?? newest?.["date"])),
+      kv("Most Recent Oil Rate",   str(newest?.["oil_rate_bbl_day"]) ? `${str(newest?.["oil_rate_bbl_day"])} BBL/d` : "—"),
+      kv("Most Recent Gas Rate",   str(newest?.["gas_rate_mcf_day"]) ? `${str(newest?.["gas_rate_mcf_day"])} MCF/d` : "—"),
+      oldest && oldest !== newest ? kv("Original Completion Test", `${str(oldest?.["date"] ?? oldest?.["test_date"])} — Oil: ${str(oldest?.["oil_rate_bbl_day"])} BBL/d`) : null,
+    ) : React.createElement(Text, { style: S.noteText }, p4?.["found"] === false ? "No P-4 potential test records on file." : "P-4 records not retrieved."),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Imaged Documents (CODA)"),
+    imaged ? React.createElement(View, { style: { marginBottom: 8 } },
+      kv("CODA Status",     str(imaged["message"]).slice(0, 80) || "Manual retrieval required"),
+      imagedUrl ? React.createElement(View, { style: S.kvRow },
+        React.createElement(Text, { style: S.kvLabel }, "TRRC CODA"),
+        React.createElement(Link, { src: imagedUrl, style: S.trrcLink }, "Search Imaged Records ↗"),
+      ) : null,
+      React.createElement(Text, { style: [S.noteText, { marginTop: 4 }] }, "Document types to retrieve: W-2 (original completion), G-1 (gas completion), W-3C (plugging certificate), H-15 (well history), Sundry Notices (zone changes, recompletions), P-12 (plugging extension)."),
+    ) : React.createElement(Text, { style: S.noteText }, "CODA imaged record lookup not completed."),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 5 — Compliance and Legal Status ─────────────────────────────────
+
+function CompliancePage({ run, id: identity, attempts, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  generatedAt: string;
+}) {
+  const wellStatus = getAttempt(attempts, "fetch_well_status");
+  const inactive   = getAttempt(attempts, "fetch_inactive_well_status");
+  const orphan     = getAttempt(attempts, "fetch_orphan_well");
+  const plugging   = getAttempt(attempts, "fetch_plugging_records");
+  const injection  = getAttempt(attempts, "fetch_injection_records");
+  const severance  = getAttempt(attempts, "fetch_severance_records");
+
+  const inactiveRecords = Array.isArray(inactive?.["records"]) ? (inactive!["records"] as Record<string, unknown>[]) : [];
+  const plugRecords     = Array.isArray(plugging?.["records"]) ? (plugging!["records"] as Record<string, unknown>[]) : [];
+
+  const statusStr  = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]);
+  const isOrphan   = orphan?.["is_orphan"] === true;
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 5 — COMPLIANCE AND LEGAL STATUS"),
+
+    kv("Well Status (Official RRC)", statusStr || "—", /shut.in|inactive|plugged/i.test(statusStr) ? "yellow" : undefined),
+    kv("Inactive Well Designation",  inactive?.["found"] ? "Yes" : inactive?.["found"] === false ? "No" : "—"),
+    inactiveRecords.length > 0 ? kv("Plugging Deadline", str(inactiveRecords[0]?.["plugging_deadline_date"] ?? inactiveRecords[0]?.["deadline"]), "yellow") : null,
+    kv("Orphan Well Program",        isOrphan ? "YES — CRITICAL" : orphan?.["found"] === false ? "No" : "—", isOrphan ? "red" : undefined),
+    kv("Plugging Records (W-3C)",    plugging?.["found"] === true ? "Filed" : plugging?.["found"] === false ? "Not Filed" : "—"),
+
+    plugRecords.length > 0 ? React.createElement(View, { style: { marginTop: 4, marginBottom: 6 } },
+      kv("Plug Date",        str(plugRecords[0]?.["plug_date"] ?? plugRecords[0]?.["date"])),
+      kv("Plugging Contractor", str(plugRecords[0]?.["contractor"])),
+      kv("RRC Certified",    str(plugRecords[0]?.["certified"])),
+    ) : null,
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Injection / UIC Permits"),
+    injection ? React.createElement(View, { style: { marginBottom: 8 } },
+      kv("UIC Records Found",  injection["found"] === true ? "Yes" : "No"),
+      kv("Active UIC Permits", str(injection["count"])),
+      typeof injection["trrc_source_url"] === "string" ? React.createElement(View, { style: S.kvRow },
+        React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
+        React.createElement(Link, { src: injection["trrc_source_url"] as string, style: S.trrcLink }, "View UIC Records ↗"),
+      ) : null,
+    ) : React.createElement(Text, { style: S.noteText }, "UIC/Injection records not retrieved."),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Severance Tax Records"),
+    severance ? React.createElement(View, { style: { marginBottom: 8 } },
+      kv("Exemption Type",    str(severance["exemption_type"])),
+      kv("Expiration Date",   str(severance["expiration_date"])),
+    ) : React.createElement(Text, { style: S.noteText }, "Severance tax records not retrieved."),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 6 — Legal Description and Location ───────────────────────────────
+
+function LegalDescriptionPage({ run, id: identity, attempts, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  generatedAt: string;
+}) {
+  const gis = getAttempt(attempts, "fetch_gis_plat");
+  const glo = getAttempt(attempts, "fetch_glo_survey");
+
+  const survey  = gis?.["survey"] as Record<string, unknown> | null ?? {};
+  const gisLat  = typeof gis?.["latitude_nad83"]  === "number" ? (gis["latitude_nad83"]  as number).toFixed(6) : null;
+  const gisLng  = typeof gis?.["longitude_nad83"] === "number" ? (gis["longitude_nad83"] as number).toFixed(6) : null;
+  const alerts  = Array.isArray(gis?.["alert_areas"]) ? (gis!["alert_areas"] as string[]) : [];
+  const gisUrl  = typeof gis?.["trrc_source_url"] === "string" ? gis["trrc_source_url"] as string : null;
+  const gloUrl  = typeof glo?.["trrc_source_url"] === "string" ? glo["trrc_source_url"] as string : null;
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 6 — LEGAL DESCRIPTION AND LOCATION"),
+
+    React.createElement(Text, { style: S.subTitle }, "Survey Data"),
+    React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Abstract Number",  str(survey["abstract_number"] ?? glo?.["abstract_number"])),
+      kv("Survey Name",      str(survey["survey_name"] ?? glo?.["survey_name"])),
+      kv("Block Number",     str(survey["block_number"] ?? glo?.["block"])),
+      kv("Section",          str(survey["section_name"] ?? glo?.["section"])),
+      kv("County",           identity.county),
+      kv("Mineral Ownership", str(glo?.["mineral_ownership"]) || "Private (no GLO record found)"),
+      gloUrl ? React.createElement(View, { style: S.kvRow },
+        React.createElement(Text, { style: S.kvLabel }, "Texas GLO"),
+        React.createElement(Link, { src: gloUrl, style: S.trrcLink }, "View GLO Survey ↗"),
+      ) : null,
+    ),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "GIS / Surface Location"),
+    gis?.["found"] ? React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Coordinates (NAD83)", gisLat && gisLng ? `${gisLat}°N, ${gisLng}°W` : "—"),
+      kv("Well Type",           str(gis?.["well_type"])),
+      kv("Location Source",     str(gis?.["location_source"])),
+      kv("Location Reliability",str(gis?.["location_reliability"])),
+      alerts.length > 0 ? kv("Alert Areas", alerts.join("; "), "yellow") : null,
+      gisUrl ? React.createElement(View, { style: S.kvRow },
+        React.createElement(Text, { style: S.kvLabel }, "RRC GIS Viewer"),
+        React.createElement(Link, { src: gisUrl, style: S.trrcLink }, "View on GIS Map ↗"),
+      ) : null,
+    ) : React.createElement(Text, { style: S.noteText }, gis?.["found"] === false ? "Well not found in RRC GIS database — manual GIS verification required." : "GIS data not retrieved."),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 7 — Missing Documents and Gaps ──────────────────────────────────
+
+function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  generatedAt: string;
+}) {
+  const SOURCE_LABELS: Record<string, string> = {
+    search_by_api:               "S1 — Wellbore Identity",
+    search_by_lease:             "S2 — Lease Well Inventory",
+    search_by_operator:          "S3 — P-5 Operator Registration",
+    fetch_well_status:           "S4 — Well Status",
+    fetch_inactive_well_status:  "S5 — Inactive Well Designation",
+    fetch_orphan_well:           "S6 — Orphan Well Program",
+    fetch_severance_records:     "S7 — Severance Tax Records",
+    fetch_production:            "S8 — Monthly Production",
+    fetch_p4_records:            "S9 — P-4 Production Tests",
+    fetch_completion_records:    "S10 — W-2 Completion Record",
+    fetch_plugging_records:      "S11 — Plugging Records (W-3C)",
+    fetch_imaged_records:        "S12 — CODA Imaged Documents",
+    fetch_compliance_violations: "S13 — Compliance Violations",
+    fetch_injection_records:     "S14 — UIC / Injection Permits",
+    fetch_glo_survey:            "S15 — Texas GLO Survey",
+    fetch_gis_plat:              "S16 — RRC GIS / Plat Map",
+  };
+
+  const seen = new Set<string>();
+  const gaps: Array<{ label: string; reason: string; severity: "red" | "yellow" | "none" }> = [];
+
+  for (const a of attempts) {
+    if (a.source_name === "submit_report") continue;
+    if (seen.has(a.source_name)) continue;
+    seen.add(a.source_name);
+
+    const d = a.result_data_json ?? {};
+    const label = SOURCE_LABELS[a.source_name] ?? a.source_name;
+
+    if (a.status !== "success") {
+      gaps.push({ label, reason: `Query failed — ${a.error_message ?? "transient error"}`, severity: "red" });
+    } else if (d["data_gap"] === true || d["endpoint_available"] === false) {
+      gaps.push({ label, reason: str(d["message"]) || "Manual retrieval required (site requires browser interaction)", severity: "yellow" });
+    } else if (d["found"] === false) {
+      gaps.push({ label, reason: str(d["note"] ?? d["message"]) || "No records found", severity: "none" });
+    }
+  }
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 7 — MISSING DOCUMENTS AND GAPS"),
+
+    React.createElement(Text, { style: S.noteText }, "Every source that returned no records, failed, or requires manual retrieval is listed here. A gap that is not applicable for this well type is noted as such; gaps in critical sources are flagged."),
+
+    gaps.length === 0 ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.greenBg }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.green }] }, "✓ All queried sources returned data successfully."),
+    ) : React.createElement(View, {},
+      ...gaps.map((g, i) => React.createElement(
+        View, { key: String(i), style: { marginBottom: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: g.severity === "red" ? C.red : g.severity === "yellow" ? C.yellow : C.border } },
+        React.createElement(Text, { style: { fontSize: 8, fontFamily: "Helvetica-Bold", color: g.severity === "red" ? C.red : g.severity === "yellow" ? C.yellow : C.dark, marginBottom: 2 } }, g.label),
+        React.createElement(Text, { style: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica" } }, g.reason),
       )),
     ),
 
-    // Table rows
-    ...production.map((row, i) =>
-      React.createElement(
-        View,
-        { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
-        React.createElement(Text, { style: [S.tableCellMono, { width: "16%" }] }, formatProductionMonth(row.production_month)),
-        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.oil_bbl)),
-        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.gas_mcf)),
-        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.casinghead_gas_mcf)),
-        React.createElement(Text, { style: [S.tableCell,     { width: "17%", textAlign: "right" }] }, fmtNum(row.condensate_bbl)),
-        React.createElement(Text, { style: [S.tableCell,     { width: "16%", textAlign: "right" }] }, fmtNum(row.water_bbl)),
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 8 — Overall Assessment ──────────────────────────────────────────
+
+function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  flags: Flags;
+  analytics: ProductionAnalytics;
+  generatedAt: string;
+}) {
+  const seen = new Set<string>();
+  let sourcesChecked = 0;
+  let sourcesWithData = 0;
+  let sourcesManual = 0;
+  let sourcesFailed = 0;
+
+  for (const a of attempts) {
+    if (a.source_name === "submit_report") continue;
+    if (seen.has(a.source_name)) continue;
+    seen.add(a.source_name);
+    sourcesChecked++;
+    const d = a.result_data_json ?? {};
+    if (a.status !== "success") { sourcesFailed++; }
+    else if (d["data_gap"] === true || d["endpoint_available"] === false) { sourcesManual++; }
+    else if (d["found"] !== false) { sourcesWithData++; }
+  }
+
+  const dataCompleteness = sourcesChecked > 0 ? Math.round((sourcesWithData / sourcesChecked) * 100) : 0;
+
+  // Build narrative
+  const wellDesc = [
+    identity.wellName ? `"${identity.wellName}"` : "the subject well",
+    identity.county ? `in ${identity.county} County` : "",
+    identity.operator ? `operated by ${identity.operator}` : "",
+  ].filter(Boolean).join(" ");
+
+  const productionNarrative = analytics.months.length > 0
+    ? `Production history covers ${analytics.months.length} months. The 12-month average is ${analytics.recent12AvgOil !== null ? `${analytics.recent12AvgOil.toFixed(0)} BBL/month (oil)` : "unavailable"} and ${analytics.recent12AvgGas !== null ? `${analytics.recent12AvgGas.toFixed(0)} MCF/month (gas)` : "gas data unavailable"}. ${analytics.yoyDeclineOil !== null ? `Year-over-year production has ${analytics.yoyDeclineOil > 0 ? `declined ${analytics.yoyDeclineOil.toFixed(1)}%` : `increased ${Math.abs(analytics.yoyDeclineOil).toFixed(1)}%`}.` : ""} ${analytics.zeroMonths > 0 ? `${analytics.zeroMonths} month(s) with zero reported production require follow-up.` : ""}`
+    : "Production data was not retrieved or the well has no production history on file.";
+
+  const complianceNarrative = flags.critical.length > 0
+    ? `${flags.critical.length} critical issue(s) were identified that require resolution before proceeding with any transaction. ${flags.important.length > 0 ? `Additionally, ${flags.important.length} important flag(s) warrant further due diligence.` : ""}`
+    : flags.important.length > 0
+    ? `No critical issues were identified. ${flags.important.length} important flag(s) were noted and should be evaluated in the context of the transaction.`
+    : "No critical or important compliance issues were identified based on available TRRC public records.";
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — OVERALL ASSESSMENT"),
+
+    // Stats row
+    React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "DATA COMPLETENESS"),
+        React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: dataCompleteness >= 70 ? C.green : C.yellow } }, `${dataCompleteness}%`),
+        React.createElement(Text, { style: { fontSize: 6.5, color: C.gray } }, `${sourcesWithData} / ${sourcesChecked} sources`),
       ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "CRITICAL FLAGS"),
+        React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: flags.critical.length > 0 ? C.red : C.green } }, String(flags.critical.length)),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "IMPORTANT FLAGS"),
+        React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: flags.important.length > 0 ? C.yellow : C.green } }, String(flags.important.length)),
+      ),
+      React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "MANUAL FOLLOW-UP"),
+        React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: C.navy } }, String(sourcesManual)),
+        React.createElement(Text, { style: { fontSize: 6.5, color: C.gray } }, "sources require manual review"),
+      ),
+    ),
+
+    React.createElement(Text, { style: S.subTitle }, "Summary"),
+
+    React.createElement(Text, { style: S.bodyText },
+      `This report covers ${wellDesc}. ${productionNarrative}`,
+    ),
+
+    React.createElement(Text, { style: S.bodyText }, complianceNarrative),
+
+    React.createElement(Text, { style: [S.bodyText, { color: C.gray }] },
+      "This report does not constitute a buy/sell recommendation — it presents public TRRC records and flags material issues for the buyer's review. A title opinion, reserve engineering report, and environmental assessment may be required before closing.",
+    ),
+
+    React.createElement(View, { style: [S.divider, { marginTop: 12 }] }),
+
+    React.createElement(View, { style: { marginTop: 8 } },
+      kv("Sources Checked",              String(sourcesChecked)),
+      kv("Sources Returning Data",        String(sourcesWithData)),
+      kv("Sources Requiring Manual Review",String(sourcesManual)),
+      kv("Sources Failed",               String(sourcesFailed)),
+      kv("Report Completed",             new Date(generatedAt).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short" })),
     ),
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
@@ -601,19 +1119,39 @@ export async function buildTrrcPdfReport(
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
 
+  // Deduplicate attempts (keep latest per source_name)
+  const seen = new Set<string>();
+  const attempts = sourceAttempts.filter(a => {
+    if (a.source_name === "submit_report") return false;
+    if (seen.has(a.source_name)) return false;
+    seen.add(a.source_name);
+    return true;
+  });
+
+  const identity  = extractIdentity(attempts, run);
+  const analytics = computeProductionAnalytics(production);
+  const flags     = generateFlags(attempts, analytics);
+
+  const wellStatusAttempt = getAttempt(attempts, "fetch_well_status");
+  const wellStatus = str(wellStatusAttempt?.["status"] ?? wellStatusAttempt?.["well_status"]);
+
   const doc = React.createElement(
     Document,
     {
-      title: `Mineral Flow AI — TRRC Records — ${run.original_input}`,
+      title: `Mineral Flow AI — TRRC Due Diligence — ${identity.apiNumber || run.original_input}`,
       author: "Mineral Flow AI",
-      subject: "TRRC Public Records",
+      subject: "TRRC Public Records Due Diligence",
       creator: "Mineral Flow AI",
     },
-    React.createElement(CoverPage, { run, generatedAt }),
-    React.createElement(RecordsPage, { attempts: sourceAttempts, run, generatedAt }),
-    production.length > 0
-      ? React.createElement(ProductionPage, { production, run, generatedAt })
-      : null,
+    React.createElement(CoverPage,              { run, id: identity, generatedAt }),
+    React.createElement(ExecutiveSummaryPage,   { run, id: identity, flags, wellStatus, generatedAt }),
+    React.createElement(OperatorStandingPage,   { run, id: identity, attempts, flags, generatedAt }),
+    React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
+    React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
+    React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
+    React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, generatedAt }),
+    React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
+    React.createElement(OverallAssessmentPage,  { run, id: identity, attempts, flags, analytics, generatedAt }),
   );
 
   const buffer = await renderToBuffer(doc);
