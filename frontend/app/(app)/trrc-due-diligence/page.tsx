@@ -204,6 +204,16 @@ export default function TrrcDueDiligencePage() {
 
   const handleSubmit = useCallback(async () => {
     setError(null);
+    // Diagnostic: log all cookies and flag any with non-ASCII characters
+    document.cookie.split(";").forEach((c) => {
+      const [name, ...rest] = c.trim().split("=");
+      const val = rest.join("=");
+      for (let i = 0; i < val.length; i++) {
+        if (val.charCodeAt(i) > 127) {
+          console.error(`[cookie-diag] NON-ASCII in cookie "${name?.trim()}" at index ${i}: U+${val.charCodeAt(i).toString(16).toUpperCase()} (${val.charCodeAt(i)})`);
+        }
+      }
+    });
     try {
       // Use the most specific identifier as the primary input.
       // Any additional filled fields are passed as supplemental context.
