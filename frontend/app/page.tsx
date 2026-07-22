@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default async function HomePage() {
   const user = await getSessionUser();
   if (user) {
-    redirect("/trrc-due-diligence");
+    redirect("/dashboard");
   }
 
   return <LandingPage />;

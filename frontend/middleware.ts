@@ -5,6 +5,7 @@ import { getSupabasePublicConfig } from "@/lib/supabase/env";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
+  "/trrc-due-diligence",
   "/documents",
   "/leads",
   "/alerts",
@@ -108,7 +109,10 @@ export async function middleware(request: NextRequest) {
 
   let user: User | null = null;
   try {
-    const { data } = await supabase.auth.getUser();
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("middleware auth timeout")), 5000)
+    );
+    const { data } = await Promise.race([supabase.auth.getUser(), timeout]);
     user = data.user;
   } catch (err) {
     console.error("[middleware] getUser failed; treating as signed out", err);

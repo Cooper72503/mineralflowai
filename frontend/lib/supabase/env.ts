@@ -32,6 +32,7 @@ export function getSupabasePublicConfig(): SupabasePublicConfig {
   // The anon key is base64url + underscores — all ASCII. Any char > 127 is garbage.
   const cleanAnonKey = anonKey.replace(/[^\x00-\x7F]/g, "");
   const cleanUrl = url.replace(/[^\x00-\x7F]/g, "");
+  if (!cleanAnonKey || !cleanUrl) return { ok: false };
   return { ok: true, url: cleanUrl, anonKey: cleanAnonKey };
 }
 

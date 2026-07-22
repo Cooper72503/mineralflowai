@@ -157,8 +157,7 @@ export function SignupForm() {
       }
 
       if (data.session) {
-        router.replace("/onboarding");
-        router.refresh();
+        window.location.href = "/onboarding";
         return;
       }
 
