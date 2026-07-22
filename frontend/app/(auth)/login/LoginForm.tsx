@@ -152,12 +152,10 @@ export function LoginForm() {
       } catch {
         // Fall through
       }
-      // Session not ready or checkout failed — go to pricing with plan param so it auto-retries
-      router.replace(`/pricing?plan=${plan}`);
+      window.location.href = `/pricing?plan=${plan}`;
       return;
     }
-    router.replace(redirectTo);
-    router.refresh();
+    window.location.href = redirectTo;
   }
 
   useEffect(() => {
