@@ -28,7 +28,11 @@ export function getSupabasePublicConfig(): SupabasePublicConfig {
       warnNonAscii("NEXT_PUBLIC_SUPABASE_URL", url);
     }
   }
-  return { ok: true, url, anonKey };
+  // Strip any non-ASCII characters that may have been introduced by copy-paste corruption.
+  // The anon key is base64url + underscores — all ASCII. Any char > 127 is garbage.
+  const cleanAnonKey = anonKey.replace(/[^\x00-\x7F]/g, "");
+  const cleanUrl = url.replace(/[^\x00-\x7F]/g, "");
+  return { ok: true, url: cleanUrl, anonKey: cleanAnonKey };
 }
 
 export function requireSupabasePublicConfig(): { url: string; anonKey: string } {
