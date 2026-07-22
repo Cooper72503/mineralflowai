@@ -116,7 +116,7 @@ function formatAuthErrorForUi(err: AuthError): string {
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("redirect") ?? "/underwriting";
+  const redirectTo = searchParams.get("redirect") ?? "/dashboard";
   const plan = searchParams.get("plan") as "basic" | "pro" | null;
 
   const [email, setEmail] = useState("");

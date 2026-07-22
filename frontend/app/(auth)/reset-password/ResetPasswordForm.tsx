@@ -81,7 +81,7 @@ export function ResetPasswordForm() {
         return;
       }
       setStatus("success");
-      setTimeout(() => router.replace("/underwriting"), 2000);
+      setTimeout(() => router.replace("/dashboard"), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

@@ -17,7 +17,7 @@ export default async function OnboardingPage() {
 
   // Already has an active trial or paid plan — send to dashboard
   if (trialStatus.state === "active" || trialStatus.state === "paid") {
-    redirect("/underwriting");
+    redirect("/dashboard");
   }
 
   return <OnboardingClient email={user.email ?? ""} />;

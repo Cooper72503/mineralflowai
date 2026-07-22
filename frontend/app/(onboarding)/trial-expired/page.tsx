@@ -16,7 +16,7 @@ export default async function TrialExpiredPage() {
 
   // Still active or paid — no business being here
   if (trialStatus.state === "active" || trialStatus.state === "paid") {
-    redirect("/underwriting");
+    redirect("/dashboard");
   }
 
   return (

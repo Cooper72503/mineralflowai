@@ -42,8 +42,7 @@ export function OnboardingClient({ email }: { email: string }) {
         return;
       }
 
-      router.replace("/underwriting");
-      router.refresh();
+      window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error. Please try again.");
     } finally {
