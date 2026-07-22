@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export function SignOutButton() {
-  const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   async function handleSignOut() {
@@ -13,13 +11,11 @@ export function SignOutButton() {
     setIsSigningOut(true);
     const supabase = createClient();
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) { setIsSigningOut(false); return; }
-      router.replace("/login");
-      router.refresh();
+      await supabase.auth.signOut();
     } catch {
-      setIsSigningOut(false);
+      // signOut clears local session even if the API call fails
     }
+    window.location.href = "/login";
   }
 
   return (

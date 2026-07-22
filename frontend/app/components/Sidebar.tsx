@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -74,7 +74,6 @@ const accountNav = [
 
 // ── SignOut (inside sidebar) ───────────────────────────────────────────────
 function SidebarSignOut() {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
 
   async function handleSignOut() {
@@ -83,11 +82,10 @@ function SidebarSignOut() {
     const supabase = createClient();
     try {
       await supabase.auth.signOut();
-      router.replace("/login");
-      router.refresh();
     } catch {
-      setLoading(false);
+      // signOut clears local session even if the API call fails
     }
+    window.location.href = "/login";
   }
 
   return (
