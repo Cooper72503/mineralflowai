@@ -1,21 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 export function SignOutButton() {
   const [isSigningOut, setIsSigningOut] = useState(false);
 
-  async function handleSignOut() {
+  function handleSignOut() {
     if (isSigningOut) return;
     setIsSigningOut(true);
-    const supabase = createClient();
-    try {
-      await supabase.auth.signOut();
-    } catch {
-      // signOut clears local session even if the API call fails
-    }
-    window.location.href = "/login";
+    window.location.href = "/api/auth/signout";
   }
 
   return (

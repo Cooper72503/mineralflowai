@@ -251,7 +251,14 @@ export default function TrrcDueDiligencePage() {
       // Trigger execute
       await fetch(`/api/trrc/due-diligence/${id}/execute`, { method: "POST" });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      const msg = err instanceof Error ? err.message : String(err);
+      // ByteString errors (U+8226 bullet) mean the session cookie or env key is corrupted.
+      const isByteString = msg.includes("ByteString") || msg.includes("8226");
+      setError(
+        isByteString
+          ? "Session error — your browser session appears corrupted. Click 'Sign out' in the sidebar, then sign back in."
+          : msg
+      );
       setPhase("error");
     }
   }, [form]);

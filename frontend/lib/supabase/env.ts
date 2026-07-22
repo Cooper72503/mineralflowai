@@ -2,10 +2,32 @@ export type SupabasePublicConfig =
   | { ok: true; url: string; anonKey: string }
   | { ok: false };
 
+/** Log any non-ASCII character in an env var value so Vercel logs expose corrupted keys. */
+function warnNonAscii(label: string, value: string): void {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code > 127) {
+      console.error(
+        `[supabase/env] CRITICAL: ${label} contains non-ASCII character at index ${i}: ` +
+        `U+${code.toString(16).toUpperCase().padStart(4, "0")} (decimal ${code}). ` +
+        `This causes ByteString errors in fetch() calls. Fix the Vercel environment variable.`
+      );
+    }
+  }
+}
+
 export function getSupabasePublicConfig(): SupabasePublicConfig {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   if (!url || !anonKey) return { ok: false };
+  if (typeof process !== "undefined" && typeof process.env !== "undefined") {
+    // Only log server-side (NEXT_PUBLIC vars are available on both sides; this avoids
+    // redundant browser-console noise while keeping Vercel function logs clean)
+    if (typeof window === "undefined") {
+      warnNonAscii("NEXT_PUBLIC_SUPABASE_ANON_KEY", anonKey);
+      warnNonAscii("NEXT_PUBLIC_SUPABASE_URL", url);
+    }
+  }
   return { ok: true, url, anonKey };
 }
 

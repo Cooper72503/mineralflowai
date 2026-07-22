@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 function IconDashboard() {
@@ -76,16 +75,12 @@ const accountNav = [
 function SidebarSignOut() {
   const [loading, setLoading] = useState(false);
 
-  async function handleSignOut() {
+  function handleSignOut() {
     if (loading) return;
     setLoading(true);
-    const supabase = createClient();
-    try {
-      await supabase.auth.signOut();
-    } catch {
-      // signOut clears local session even if the API call fails
-    }
-    window.location.href = "/login";
+    // Hard navigation bypasses fetch() ByteString validation on corrupted cookies.
+    // /api/auth/signout signs out server-side, expires all auth cookies, then redirects to /login.
+    window.location.href = "/api/auth/signout";
   }
 
   return (
