@@ -210,7 +210,7 @@ export function LoginForm() {
     const submittedPassword = password;
 
     try {
-      console.log("LOGIN START");
+      console.log("LOGIN START — Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL ?? "(not set)");
       const supabase = createClient();
       const result = await withTimeout(
         supabase.auth.signInWithPassword({
