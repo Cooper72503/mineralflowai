@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import type {
   TrrcDueDiligenceRun,
   TrrcIdentifierType,
   ResolvedEntity,
 } from "../../../lib/trrc/types";
+import { createClient } from "@/lib/supabase/client";
 // detectInputType unused — each field has an explicit type now
 
 // ─── Design tokens (matches UnderwritingPage.tsx exactly) ─────────────────────
@@ -162,6 +163,28 @@ export default function TrrcDueDiligencePage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError]           = useState<string | null>(null);
 
+  // Keep a fresh Bearer token in a ref so all fetches can use it without cookies.
+  // Bypassing cookies eliminates the ByteString error caused by non-ASCII cookie values.
+  const tokenRef = useRef<string>("");
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getSession().then(({ data }) => {
+      tokenRef.current = data.session?.access_token ?? "";
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      tokenRef.current = session?.access_token ?? "";
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const apiFetch = useCallback((url: string, init: RequestInit = {}) => {
+    const headers: Record<string, string> = {
+      ...(init.headers as Record<string, string> ?? {}),
+      ...(tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {}),
+    };
+    return fetch(url, { ...init, credentials: "omit", headers });
+  }, []);
+
   const [form, setForm] = useState<FormState>({
     apiNumber: "",
     leaseNumber: "",
@@ -178,7 +201,7 @@ export default function TrrcDueDiligencePage() {
     if (!runId || phase !== "running") return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/trrc/due-diligence/${runId}`);
+        const res = await apiFetch(`/api/trrc/due-diligence/${runId}`);
         const data = await res.json();
         if (data.ok) {
           if (data.data.status === "complete") {
@@ -200,23 +223,11 @@ export default function TrrcDueDiligencePage() {
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [runId, phase]);
+  }, [runId, phase, apiFetch]);
 
   const handleSubmit = useCallback(async () => {
     setError(null);
-    // Diagnostic: log all cookies and flag any with non-ASCII characters
-    document.cookie.split(";").forEach((c) => {
-      const [name, ...rest] = c.trim().split("=");
-      const val = rest.join("=");
-      for (let i = 0; i < val.length; i++) {
-        if (val.charCodeAt(i) > 127) {
-          console.error(`[cookie-diag] NON-ASCII in cookie "${name?.trim()}" at index ${i}: U+${val.charCodeAt(i).toString(16).toUpperCase()} (${val.charCodeAt(i)})`);
-        }
-      }
-    });
     try {
-      // Use the most specific identifier as the primary input.
-      // Any additional filled fields are passed as supplemental context.
       const api = form.apiNumber.trim();
       const lease = form.leaseNumber.trim();
       const operator = form.operatorName.trim();
@@ -238,7 +249,6 @@ export default function TrrcDueDiligencePage() {
       const payload = {
         input: primaryInput,
         input_type_override: inputTypeOverride,
-        // Supplemental context — always pass the other fields so the agent starts pre-seeded
         lease_number: lease || undefined,
         operator_name: operator || undefined,
         county: form.county.trim() || undefined,
@@ -247,7 +257,8 @@ export default function TrrcDueDiligencePage() {
         include_offset_wells: form.includeOffsetWells,
         production_months: form.productionMonths,
       };
-      const res = await fetch("/api/trrc/due-diligence", {
+
+      const res = await apiFetch("/api/trrc/due-diligence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -258,45 +269,38 @@ export default function TrrcDueDiligencePage() {
       setRunId(id);
       setRun(data.data);
       setPhase("running");
-      // Trigger execute
-      await fetch(`/api/trrc/due-diligence/${id}/execute`, { method: "POST" });
+      await apiFetch(`/api/trrc/due-diligence/${id}/execute`, { method: "POST" });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      // ByteString errors (U+8226 bullet) mean the session cookie or env key is corrupted.
-      const isByteString = msg.includes("ByteString") || msg.includes("8226");
-      setError(
-        isByteString
-          ? "Session error — your browser session appears corrupted. Click 'Sign out' in the sidebar, then sign back in."
-          : msg
-      );
+      setError(msg);
       setPhase("error");
     }
-  }, [form]);
+  }, [form, apiFetch]);
 
   const handleCancel = useCallback(async () => {
     if (runId) {
-      await fetch(`/api/trrc/due-diligence/${runId}/cancel`, { method: "POST" }).catch(() => {});
+      await apiFetch(`/api/trrc/due-diligence/${runId}/cancel`, { method: "POST" }).catch(() => {});
     }
     setRunId(null);
     setRun(null);
     setPhase("form");
     setError(null);
-  }, [runId]);
+  }, [runId, apiFetch]);
 
   const handleResolve = useCallback(async (entityId: string) => {
     if (!runId) return;
     try {
-      await fetch(`/api/trrc/due-diligence/${runId}/resolve`, {
+      await apiFetch(`/api/trrc/due-diligence/${runId}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entity_id: entityId }),
       });
       setPhase("running");
-      await fetch(`/api/trrc/due-diligence/${runId}/execute`, { method: "POST" });
+      await apiFetch(`/api/trrc/due-diligence/${runId}/execute`, { method: "POST" });
     } catch {
       setError("Failed to resolve entity selection.");
     }
-  }, [runId]);
+  }, [runId, apiFetch]);
 
   const handleReset = useCallback(() => {
     setPhase("form");
