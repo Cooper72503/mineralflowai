@@ -8,12 +8,15 @@ export async function getSessionUser() {
   if (!cfg.ok) return null;
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("auth timeout")), 4000)
+    );
+    const { data: { user } } = await Promise.race([
+      supabase.auth.getUser(),
+      timeout,
+    ]);
     return user;
   } catch {
-    // Invalid/expired cookies or transient Supabase errors should not break public pages.
     return null;
   }
 }

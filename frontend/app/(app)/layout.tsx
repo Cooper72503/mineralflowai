@@ -19,9 +19,16 @@ export default async function AppLayout({
   const pathname = headersList.get("x-pathname") ?? "/";
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("auth timeout")), 4000)
+  );
+  let user = null;
+  try {
+    const { data } = await Promise.race([supabase.auth.getUser(), timeout]);
+    user = data.user;
+  } catch {
+    redirect("/login");
+  }
 
   // Middleware handles unauthenticated → /login, but guard here too
   if (!user) redirect("/login");
