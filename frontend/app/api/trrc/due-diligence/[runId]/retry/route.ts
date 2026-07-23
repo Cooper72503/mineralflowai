@@ -94,11 +94,13 @@ export async function POST(
     );
   }
 
-  // 4. Reset run status to "retrieving"
+  // 4. Reset run status to "pending" so the worker can claim it.
+  //    "retrieving" is blocked by the execute route (it's in TERMINAL_OR_RUNNING),
+  //    which would orphan the run.
   const { error: updateError } = await supabase
     .from("trrc_due_diligence_runs")
     .update({
-      status: "retrieving",
+      status: "pending",
       progress_percent: 0,
       error_summary: null,
       updated_at: new Date().toISOString(),
