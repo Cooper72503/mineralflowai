@@ -66,7 +66,7 @@ export async function POST(
     return NextResponse.json(
       {
         ok: false,
-        error: `Run is in status "${runStatus}" — only "retrieving" or "pending" runs can be executed.`,
+        error: `Run is in status "${runStatus}" — only "pending" runs can be executed.`,
       },
       { status: 409 },
     );
