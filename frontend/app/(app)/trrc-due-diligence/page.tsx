@@ -329,8 +329,24 @@ export default function TrrcDueDiligencePage() {
 
   const handleDownload = useCallback(async (type: "report" | "archive" | "manifest") => {
     if (!runId) return;
-    window.open(`/api/trrc/due-diligence/${runId}/${type}`, "_blank");
-  }, [runId]);
+    const res = await apiFetch(`/api/trrc/due-diligence/${runId}/${type}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Download failed" }));
+      setError((err as { error?: string }).error ?? "Download failed");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename="([^"]+)"/);
+    a.download = match?.[1] ?? `trrc-${type}-${runId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [runId, apiFetch]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
