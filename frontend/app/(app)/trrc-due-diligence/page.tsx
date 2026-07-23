@@ -197,22 +197,34 @@ export default function TrrcDueDiligencePage() {
   });
 
   // Polling
+  const terminalReachedRef = useRef(false);
   useEffect(() => {
     if (!runId || phase !== "running") return;
+    terminalReachedRef.current = false;
     const interval = setInterval(async () => {
       try {
         const res = await apiFetch(`/api/trrc/due-diligence/${runId}`);
         const data = await res.json();
+        // clearInterval() only stops FUTURE ticks — it doesn't cancel a fetch
+        // that's already in flight. With a 3s interval, two polls can be
+        // outstanding at once, and a slower "still running" response can
+        // resolve AFTER a faster "complete" response, silently reverting the
+        // UI back to a stale in-progress state right after it finished. Once
+        // any poll has reached a terminal state, ignore every later response.
+        if (terminalReachedRef.current) return;
         if (data.ok) {
           if (data.data.status === "complete") {
+            terminalReachedRef.current = true;
             setRun({ ...data.data, progress_percent: 100 });
             setPhase("complete");
             clearInterval(interval);
           } else if (data.data.status === "awaiting_selection") {
+            terminalReachedRef.current = true;
             setRun(data.data);
             setPhase("selecting");
             clearInterval(interval);
           } else if (data.data.status === "failed" || data.data.status === "cancelled") {
+            terminalReachedRef.current = true;
             setError(data.data.error_summary ?? "The run failed or was cancelled.");
             setPhase("error");
             clearInterval(interval);
