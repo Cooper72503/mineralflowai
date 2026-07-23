@@ -34,15 +34,25 @@ const activeRuns = new Set<string>();
 
 async function claimAndRun(runId: string, input: string): Promise<void> {
   if (activeRuns.has(runId)) return;
+
+  // Atomic claim: update only succeeds if status is still "pending".
+  // If another process already claimed it, data will be empty — we abort.
+  const { data: claimed } = await supabase
+    .from("trrc_due_diligence_runs")
+    .update({
+      status:           "running",
+      progress_percent: 2,
+      updated_at:       new Date().toISOString(),
+    })
+    .eq("id", runId)
+    .eq("status", "pending")
+    .select("id");
+
+  if (!claimed || claimed.length === 0) {
+    return; // lost the race to another worker process
+  }
+
   activeRuns.add(runId);
-
-  // Mark as running immediately to prevent double-claiming
-  await supabase.from("trrc_due_diligence_runs").update({
-    status:           "running",
-    progress_percent: 2,
-    updated_at:       new Date().toISOString(),
-  }).eq("id", runId).eq("status", "pending");
-
   console.log(`[worker] starting run ${runId} — "${input}"`);
 
   try {
