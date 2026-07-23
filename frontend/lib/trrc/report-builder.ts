@@ -359,25 +359,32 @@ function generateFlags(
   const important: string[] = [];
 
   // Well identity unverifiable — if the wellbore PDQ, GIS location database,
-  // and CODA imaged documents all independently report "not found" for this
-  // input, the asset itself cannot be confirmed to exist. This must be the
-  // lead critical flag, not silence: none of the other checks below can fire
-  // without underlying data, so a report with zero data would otherwise
-  // render as "no critical or important flags identified" — the opposite of
-  // the truth.
-  const wellbore = getAttempt(attempts, "search_by_api");
-  const gis = getAttempt(attempts, "fetch_gis_plat");
-  const coda = getAttempt(attempts, "fetch_coda_records");
-  const wellboreNotFound = wellbore != null && wellbore["found"] === false;
-  const gisNotFound = gis != null && gis["found"] === false;
-  const codaDocs = Array.isArray(coda?.["documents"]) ? (coda!["documents"] as unknown[]) : null;
-  const codaEmpty = coda != null && (coda["found"] === false || (codaDocs != null && codaDocs.length === 0));
-  if (wellboreNotFound && gisNotFound && codaEmpty) {
+  // and CODA imaged documents all fail to positively confirm this asset
+  // exists, it cannot be confirmed at all. "Positively confirm" must count
+  // a FAILED lookup (TRRC error, unparseable response) the same as an
+  // explicit "not found" — a failed query is not evidence of anything, and
+  // treating it as neutral would let a report with real TRRC outages still
+  // render as "no critical or important flags identified." Only a genuine
+  // found:true (or CODA returning at least one document) counts as positive
+  // confirmation; getAttempt() only returns success-status rows, so failures
+  // must be read via getAttemptRaw() or they're invisible to this check.
+  const notPositivelyConfirmed = (raw: LiteSourceAttempt | null): boolean => {
+    if (!raw || raw.status !== "success") return true;
+    const d = raw.result_data_json ?? {};
+    if (d["found"] === true) return false;
+    if (Array.isArray(d["documents"]) && (d["documents"] as unknown[]).length > 0) return false;
+    return true;
+  };
+  const wellboreUnconfirmed = notPositivelyConfirmed(getAttemptRaw(attempts, "search_by_api"));
+  const gisUnconfirmed = notPositivelyConfirmed(getAttemptRaw(attempts, "fetch_gis_plat"));
+  const codaUnconfirmed = notPositivelyConfirmed(getAttemptRaw(attempts, "fetch_coda_records"));
+  if (wellboreUnconfirmed && gisUnconfirmed && codaUnconfirmed) {
     critical.push(
-      "WELL IDENTITY COULD NOT BE VERIFIED — this identifier was not found in the TRRC wellbore PDQ, " +
-      "GIS well-location database, or CODA imaged documents. The asset may be misidentified, the API/lease " +
-      "number may be incorrect, or the well may not exist as described. Do not proceed until the seller " +
-      "provides a verifiable identifier.",
+      "WELL IDENTITY COULD NOT BE VERIFIED — this identifier was not positively confirmed in the TRRC " +
+      "wellbore PDQ, GIS well-location database, or CODA imaged documents (either no record was found, or " +
+      "the lookup failed). The asset may be misidentified, the API/lease number may be incorrect, or the " +
+      "well may not exist as described. Do not proceed until the seller provides a verifiable identifier " +
+      "and, if any lookups failed due to a TRRC outage, re-run this research once the source is restored.",
     );
   }
 
