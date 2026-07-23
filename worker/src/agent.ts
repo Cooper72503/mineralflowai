@@ -85,6 +85,7 @@ async function dispatchTool(
   state: AgentState,
   runId: string,
   supabase: SupabaseClient,
+  callIndex: number,
 ): Promise<unknown> {
   await logStep(supabase, runId, name, "running");
 
@@ -241,7 +242,7 @@ async function dispatchTool(
 
   await supabase.from("trrc_source_attempts").upsert({
     run_id:           runId,
-    source_id:        `${sourceName}_1`,
+    source_id:        `${sourceName}_${callIndex}`,
     source_name:      sourceName,
     status:           isOk ? "success" : "failed_transient",
     result_count:     count,
@@ -304,6 +305,7 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
   ];
 
   let stepCount = 0;
+  let toolCallIndex = 0;
   const MAX_STEPS = 60;
   let finalReport: Record<string, unknown> | null = null;
 
@@ -339,9 +341,10 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
 
       const toolName  = block.name;
       const toolInput = block.input as Record<string, unknown>;
+      toolCallIndex++;
 
       try {
-        const result = await dispatchTool(toolName, toolInput, state, runId, supabase);
+        const result = await dispatchTool(toolName, toolInput, state, runId, supabase, toolCallIndex);
 
         if (toolName === "submit_report") {
           finalReport = toolInput as Record<string, unknown>;
