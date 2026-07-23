@@ -396,8 +396,11 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
         water_bbl:          r.water_bbl,
       }));
 
+    // Conflict key excludes api_number because it may be NULL;
+    // PostgreSQL NULL != NULL in unique indexes so upsert would insert
+    // duplicates instead of deduplicating.
     await supabase.from("trrc_production_monthly").upsert(prodRows, {
-      onConflict: "run_id,entity_type,api_number,lease_number,production_month",
+      onConflict: "run_id,entity_type,district,lease_number,production_month",
       ignoreDuplicates: true,
     }).then(null, () => {});
   }
