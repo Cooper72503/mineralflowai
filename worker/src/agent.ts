@@ -333,6 +333,15 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
 
     if (response.stop_reason !== "tool_use") break;
 
+    // Check for cancellation between steps so a cancelled run is not
+    // overwritten with "complete" at the end of the loop.
+    const { data: statusCheck } = await supabase
+      .from("trrc_due_diligence_runs")
+      .select("status")
+      .eq("id", runId)
+      .single();
+    if (statusCheck?.["status"] === "cancelled") return;
+
     // Execute all tool calls in this response
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
 

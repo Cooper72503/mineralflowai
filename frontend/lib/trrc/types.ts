@@ -234,7 +234,7 @@ export interface TrrcDueDiligenceRun {
   detected_input_type: TrrcIdentifierType;
   selected_input_type: TrrcIdentifierType;
   normalized_input: string;
-  status: 'pending' | 'resolving' | 'retrieving' | 'analyzing' | 'generating' | 'complete' | 'failed' | 'cancelled' | 'awaiting_selection';
+  status: 'pending' | 'running' | 'resolving' | 'retrieving' | 'analyzing' | 'generating' | 'complete' | 'failed' | 'cancelled' | 'awaiting_selection';
   started_at: string;
   completed_at: string | null;
   progress_percent: number;

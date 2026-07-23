@@ -726,6 +726,7 @@ function ProgressUI({ run, onCancel }: { run: TrrcDueDiligenceRun; onCancel: () 
 
   const stageLabel: Record<string, string> = {
     pending:            "Initializing",
+    running:            "Running",
     resolving:          "Resolving Identifiers",
     awaiting_selection: "Awaiting Selection",
     retrieving:         "Retrieving Records",
