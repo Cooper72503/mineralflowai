@@ -411,15 +411,22 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
   const successCount = (attempts ?? []).filter(a => a["status"] === "success").length;
   const totalCount   = (attempts ?? []).length;
 
+  const didComplete = finalReport !== null;
+
   await supabase.from("trrc_due_diligence_runs").update({
-    status:                   "complete",
-    progress_percent:         100,
+    status:                   didComplete ? "complete" : "failed",
+    progress_percent:         didComplete ? 100 : 90,
     completed_at:             new Date().toISOString(),
     updated_at:               new Date().toISOString(),
     resolved_primary_api:     state.apiNumber,
     resolved_district:        state.district,
     resolved_lease_number:    state.leaseNumber,
     resolved_operator_number: state.operatorNumber,
-    result_summary:           `${successCount} of ${totalCount} sources retrieved. ${state.production.length} production months found.`,
+    result_summary:           didComplete
+      ? `${successCount} of ${totalCount} sources retrieved. ${state.production.length} production months found.`
+      : null,
+    error_summary:            didComplete
+      ? null
+      : `Agent exhausted ${MAX_STEPS} steps without submitting a report. ${successCount} of ${totalCount} sources retrieved.`,
   }).eq("id", runId);
 }
