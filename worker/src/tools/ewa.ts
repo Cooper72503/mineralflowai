@@ -20,15 +20,50 @@ function formBody(params: Record<string, string>): string {
 
 async function ewaFetch(path: string, params?: Record<string, string>, cookies?: string): Promise<string> {
   const url = `${EWA_BASE}/${path}`;
-  const headers: Record<string, string> = {
-    ...BROWSER_HEADERS,
-    "Content-Type": "application/x-www-form-urlencoded",
-    ...(cookies ? { Cookie: cookies } : {}),
-  };
-  const res = await fetch(url, {
-    method: params ? "POST" : "GET",
-    headers,
-    body: params ? formBody({ ...params, methodToCall: "search" }) : undefined,
+
+  // GET-only path — no session needed
+  if (!params) {
+    const res = await fetch(url, {
+      headers: { ...BROWSER_HEADERS },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`EWA ${path} returned HTTP ${res.status}`);
+    return res.text();
+  }
+
+  // POST path — establish a JSESSIONID session first if no caller-supplied cookie
+  let sessionCookie = cookies ?? null;
+  let viewState = "";
+
+  if (!sessionCookie) {
+    const sessionRes = await fetch(url, {
+      headers: { ...BROWSER_HEADERS },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!sessionRes.ok) throw new Error(`EWA ${path} session GET returned HTTP ${sessionRes.status}`);
+    const sessionHtml = await sessionRes.text();
+    const jSessionMatch = sessionRes.headers.get("set-cookie")?.match(/JSESSIONID=([^;]+)/);
+    sessionCookie = jSessionMatch ? `JSESSIONID=${jSessionMatch[1]}` : null;
+    const viewStateMatch = sessionHtml.match(/id="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
+    viewState = viewStateMatch?.[1] ?? "";
+  }
+
+  const postUrl = sessionCookie
+    ? `${url};jsessionid=${sessionCookie.replace("JSESSIONID=", "")}`
+    : url;
+
+  const res = await fetch(postUrl, {
+    method: "POST",
+    headers: {
+      ...BROWSER_HEADERS,
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(sessionCookie ? { Cookie: sessionCookie } : {}),
+    },
+    body: formBody({
+      ...params,
+      ...(viewState ? { "javax.faces.ViewState": viewState } : {}),
+      methodToCall: "search",
+    }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`EWA ${path} returned HTTP ${res.status}`);
