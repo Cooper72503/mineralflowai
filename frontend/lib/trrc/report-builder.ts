@@ -239,7 +239,12 @@ interface WellIdentity {
 
 function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDiligenceRun): WellIdentity {
   const wb = getAttempt(attempts, "search_by_api", "search_by_lease");
-  const records = Array.isArray(wb?.["wellbores"]) ? (wb!["wellbores"] as Record<string, unknown>[]) :
+  // searchWellbore()'s actual return shape (worker/src/tools/ewa.ts) puts
+  // rows under the key "wells" — "wellbores"/"records" never matched
+  // anything, which silently voided every field below that depended on
+  // `first`, even though the real data was present one key over.
+  const records = Array.isArray(wb?.["wells"])     ? (wb!["wells"]     as Record<string, unknown>[]) :
+                  Array.isArray(wb?.["wellbores"]) ? (wb!["wellbores"] as Record<string, unknown>[]) :
                   Array.isArray(wb?.["records"])   ? (wb!["records"]   as Record<string, unknown>[]) : [];
   const first = records[0] ?? {};
 
@@ -247,13 +252,13 @@ function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDiligenceRun
 
   return {
     wellName:    str(first["lease_name"] ?? first["well_name"] ?? wb?.["well_name"]),
-    operator:    str(first["operator_name"] ?? wb?.["operator_name"]),
-    operatorNo:  str(first["operator_no"]   ?? wb?.["operator_no"]),
+    operator:    str(first["operator_name"] ?? wb?.["operator_name"] ?? wb?.["operator"]),
+    operatorNo:  str(first["operator_no"]   ?? wb?.["operator_no"]   ?? wb?.["operator_number"]),
     county:      str(first["county"]        ?? wb?.["county"]),
-    field:       str(first["field"]         ?? wb?.["field"]),
+    field:       str(first["field_name"]    ?? first["field"]       ?? wb?.["field"]),
     formation:   str(first["formation"]     ?? wb?.["formation"]),
     wellType:    str(first["well_type"]     ?? wb?.["well_type"]),
-    district:    str(first["dist_code"]     ?? run.resolved_district ?? wb?.["district"]),
+    district:    str(first["dist_code"]     ?? first["district"]    ?? run.resolved_district ?? wb?.["district"]),
     apiNumber:   run.resolved_primary_api ?? str(run.original_input),
     leaseNumber: run.resolved_lease_number ?? leaseNumbers[0] ?? "",
     leaseNumbers,
@@ -354,6 +359,7 @@ interface Flags {
 function generateFlags(
   attempts: LiteSourceAttempt[],
   analytics: ProductionAnalytics,
+  run: TrrcDueDiligenceRun,
 ): Flags {
   const critical: string[] = [];
   const important: string[] = [];
@@ -472,9 +478,24 @@ function generateFlags(
     important.push(`${openCount} OPEN COMPLIANCE VIOLATION(S) — unresolved violations are a material liability that transfers with the asset.`);
   }
 
-  // Zero production months
+  // Zero production months (within retrieved rows)
   if (analytics.zeroMonths > 3) {
     important.push(`${analytics.zeroMonths} MONTHS WITH ZERO PRODUCTION — may indicate shut-in periods or reporting gaps. Verify with operator.`);
+  }
+
+  // Production genuinely attempted (lease + district resolved, so the query
+  // actually ran) but zero rows came back at all — a distinct, more severe
+  // case than "some retrieved months show zero." Without this check, a
+  // fully-resolved well with no production history on file renders as "no
+  // critical or important flags identified," which is the opposite of the
+  // truth: a mineral buyer has zero documented royalty income for the asset.
+  if (run.resolved_lease_number && run.resolved_district && analytics.months.length === 0) {
+    critical.push(
+      `ZERO REPORTED PRODUCTION — lease ${run.resolved_lease_number} (District ${run.resolved_district}) ` +
+      "returned no production rows over the queryable history, despite the lease/district resolving " +
+      "successfully. This means no royalty income stream is documented for this asset. Confirm whether " +
+      "the well is long-idle, produced out, or reporting under a different lease ID before assigning value.",
+    );
   }
 
   // WOR rising
@@ -1164,7 +1185,7 @@ export async function buildTrrcPdfReport(
 
   const identity  = extractIdentity(attempts, run);
   const analytics = computeProductionAnalytics(production);
-  const flags     = generateFlags(attempts, analytics);
+  const flags     = generateFlags(attempts, analytics, run);
 
   const wellStatusAttempt = getAttempt(attempts, "fetch_well_status");
   const wellStatus = str(wellStatusAttempt?.["status"] ?? wellStatusAttempt?.["well_status"]);
