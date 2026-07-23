@@ -112,21 +112,25 @@ const COUNTY_NAME_TO_DISTRICT: Record<string, string> = {
   hays: "10", travis: "10", comal: "10", guadalupe: "10",
   atascosa: "10",
 
-  // District C1
-  gaines: "C1", andrews: "C1", ector: "C1", midland: "C1",
-  martin: "C1", howard: "C1", glasscock: "C1", sterling: "C1",
+  // Permian Basin — codes verified against the authoritative FIPS-keyed
+  // table in normalization.ts (COUNTY_TO_DISTRICT). These previously used
+  // fabricated "C1"/"C2"/"C3" codes that don't exist in VALID_DISTRICT_CODES
+  // and would always fail TRRC EWA queries.
+  gaines: "04", andrews: "8A", ector: "03", midland: "03",
+  martin: "03", howard: "03", glasscock: "03", sterling: "03",
+  ward: "03", loving: "03", winkler: "03", crane: "03",
+  upton: "03", reagan: "03", irion: "03",
+  "tom green": "04", mason: "04", lampasas: "04",
 
-  // District C2
-  ward: "C2", loving: "C2", winkler: "C2", crane: "C2",
-  upton: "C2", reagan: "C2", irion: "C2", concho: "C2",
-  "tom green": "C2", menard: "C2", mason: "C2", llano: "C2",
-  "san saba": "C2", lampasas: "C2", burnet: "C2", williamson: "C2",
+  // Panhandle / South Plains — same source.
+  moore: "09", hutchinson: "9B", roberts: "09", hemphill: "09",
+  ochiltree: "09", hansford: "09", sherman: "09", oldham: "09",
+  hartley: "09", dallam: "09",
 
-  // District C3
-  moore: "C3", potter: "C3", hutchinson: "C3", carson: "C3",
-  roberts: "C3", hemphill: "C3", lipscomb: "C3", ochiltree: "C3",
-  hansford: "C3", sherman: "C3", oldham: "C3", hartley: "C3",
-  dallam: "C3",
+  // concho, menard, llano, san saba, burnet, williamson, potter, carson,
+  // and lipscomb are intentionally omitted — normalization.ts has no
+  // verified district for them either. Falling back to "district unknown"
+  // (null) is correct here; a guessed code would silently fail downstream.
 };
 
 /**

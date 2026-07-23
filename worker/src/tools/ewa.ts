@@ -136,9 +136,10 @@ export async function searchWellbore(apiNumber: string): Promise<{
   operator_number: string | null;
   county: string | null;
   message: string;
+  error?: string;
 }> {
   const split = splitApi(apiNumber);
-  if (!split) return { found: false, wells: [], lease_number: null, district: null, operator: null, operator_number: null, county: null, message: "Invalid API number format" };
+  if (!split) return { found: false, wells: [], lease_number: null, district: null, operator: null, operator_number: null, county: null, message: "Invalid API number format", error: "Invalid API number format" };
 
   try {
     const html = await ewaFetch("wellboreQueryAction.do", {
@@ -152,7 +153,7 @@ export async function searchWellbore(apiNumber: string): Promise<{
     }
 
     const table = findDataTable(html, 3);
-    if (!table) return { found: false, wells: [], lease_number: null, district: null, operator: null, operator_number: null, county: null, message: "Could not parse wellbore response" };
+    if (!table) return { found: false, wells: [], lease_number: null, district: null, operator: null, operator_number: null, county: null, message: "Could not parse wellbore response", error: "Could not parse wellbore response" };
 
     const wells = rowsToObjects(table.header, table.rows.slice(0, 20));
     const first = wells[0] ?? {};
@@ -167,7 +168,7 @@ export async function searchWellbore(apiNumber: string): Promise<{
       message:         `Found ${wells.length} wellbore(s) for 42-${split.prefix}-${split.suffix}`,
     };
   } catch (e) {
-    return { found: false, wells: [], lease_number: null, district: null, operator: null, operator_number: null, county: null, message: `Error: ${String(e)}` };
+    return { found: false, wells: [], lease_number: null, district: null, operator: null, operator_number: null, county: null, message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -177,6 +178,7 @@ export async function searchLeaseWells(leaseNumber: string, district: string): P
   found: boolean;
   wells: Record<string, string>[];
   message: string;
+  error?: string;
 }> {
   const tryLeaseType = async (lt: string) => {
     const html = await ewaFetch("leaseWellQueryAction.do", {
@@ -198,7 +200,7 @@ export async function searchLeaseWells(leaseNumber: string, district: string): P
     }
     return { found: false, wells: [], message: `No wells found for lease ${leaseNumber} district ${district}` };
   } catch (e) {
-    return { found: false, wells: [], message: `Error: ${String(e)}` };
+    return { found: false, wells: [], message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -210,11 +212,12 @@ export async function searchOperator(operatorName: string | null, operatorNumber
   p5_status: string | null;
   bond_amount: string | null;
   message: string;
+  error?: string;
 }> {
   const params: Record<string, string> = {};
   if (operatorNumber) params["searchArgs.operatorNoArg"] = operatorNumber;
   else if (operatorName) params["searchArgs.operatorNameArg"] = operatorName;
-  else return { found: false, records: [], p5_status: null, bond_amount: null, message: "No operator name or number provided" };
+  else return { found: false, records: [], p5_status: null, bond_amount: null, message: "No operator name or number provided", error: "No operator name or number provided" };
 
   try {
     const html = await ewaFetch("organizationQueryAction.do", params);
@@ -222,7 +225,7 @@ export async function searchOperator(operatorName: string | null, operatorNumber
       return { found: false, records: [], p5_status: null, bond_amount: null, message: "Operator not found in P-5 registry" };
     }
     const table = findDataTable(html, 2);
-    if (!table) return { found: false, records: [], p5_status: null, bond_amount: null, message: "Could not parse P-5 response" };
+    if (!table) return { found: false, records: [], p5_status: null, bond_amount: null, message: "Could not parse P-5 response", error: "Could not parse P-5 response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 10));
     const first = records[0] ?? {};
     return {
@@ -233,7 +236,7 @@ export async function searchOperator(operatorName: string | null, operatorNumber
       message:     `Found ${records.length} P-5 record(s)`,
     };
   } catch (e) {
-    return { found: false, records: [], p5_status: null, bond_amount: null, message: `Error: ${String(e)}` };
+    return { found: false, records: [], p5_status: null, bond_amount: null, message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -246,6 +249,7 @@ export async function getWellStatus(apiNumber: string, leaseNumber?: string | nu
   lease_number: string | null;
   district: string | null;
   message: string;
+  error?: string;
 }> {
   const tryQuery = async (params: Record<string, string>) => {
     const html = await ewaFetch("wellStatusQueryAction.do", params);
@@ -289,7 +293,7 @@ export async function getWellStatus(apiNumber: string, leaseNumber?: string | nu
 
     return { found: false, status: null, records: [], lease_number: null, district: null, message: "Well status not found" };
   } catch (e) {
-    return { found: false, status: null, records: [], lease_number: null, district: null, message: `Error: ${String(e)}` };
+    return { found: false, status: null, records: [], lease_number: null, district: null, message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -300,9 +304,10 @@ export async function getInactiveWellStatus(apiNumber: string, operatorNumber?: 
   records: Record<string, string>[];
   plugging_deadline: string | null;
   message: string;
+  error?: string;
 }> {
   const split = splitApi(apiNumber);
-  if (!split) return { is_inactive: false, records: [], plugging_deadline: null, message: "Invalid API" };
+  if (!split) return { is_inactive: false, records: [], plugging_deadline: null, message: "Invalid API", error: "Invalid API" };
 
   try {
     const html = await ewaFetch("inactiveWellQueryAction.do", {
@@ -313,12 +318,12 @@ export async function getInactiveWellStatus(apiNumber: string, operatorNumber?: 
       return { is_inactive: false, records: [], plugging_deadline: null, message: "Not in inactive well report" };
     }
     const table = findDataTable(html, 2);
-    if (!table) return { is_inactive: false, records: [], plugging_deadline: null, message: "No inactive well data" };
+    if (!table) return { is_inactive: false, records: [], plugging_deadline: null, message: "No inactive well data", error: "No inactive well data — response received but table could not be parsed" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 10));
     const deadline = records[0]?.["plugging_deadline_date"] || records[0]?.["deadline"] || null;
     return { is_inactive: true, records, plugging_deadline: deadline, message: `INACTIVE — ${records.length} record(s)${deadline ? `, deadline ${deadline}` : ""}` };
   } catch (e) {
-    return { is_inactive: false, records: [], plugging_deadline: null, message: `Error: ${String(e)}` };
+    return { is_inactive: false, records: [], plugging_deadline: null, message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -327,9 +332,10 @@ export async function getInactiveWellStatus(apiNumber: string, operatorNumber?: 
 export async function getOrphanWell(apiNumber: string): Promise<{
   is_orphan: boolean;
   message: string;
+  error?: string;
 }> {
   const split = splitApi(apiNumber);
-  if (!split) return { is_orphan: false, message: "Invalid API" };
+  if (!split) return { is_orphan: false, message: "Invalid API", error: "Invalid API" };
 
   try {
     const html = await ewaFetch("orphanWellQueryAction.do", {
@@ -339,7 +345,7 @@ export async function getOrphanWell(apiNumber: string): Promise<{
     const isOrphan = !/no results found/i.test(html) && /orphan/i.test(html);
     return { is_orphan: isOrphan, message: isOrphan ? "ORPHAN WELL — operator forfeited bond" : "Not in orphan well program" };
   } catch (e) {
-    return { is_orphan: false, message: `Error: ${String(e)}` };
+    return { is_orphan: false, message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -349,8 +355,9 @@ export async function getSeveranceRecords(leaseNumber: string | null, district: 
   found: boolean;
   records: Record<string, string>[];
   message: string;
+  error?: string;
 }> {
-  if (!leaseNumber || !district) return { found: false, records: [], message: "Need lease number and district for severance lookup" };
+  if (!leaseNumber || !district) return { found: false, records: [], message: "Need lease number and district for severance lookup", error: "Need lease number and district for severance lookup" };
 
   try {
     const html = await ewaFetch("severanceQueryAction.do", {
@@ -359,11 +366,11 @@ export async function getSeveranceRecords(leaseNumber: string | null, district: 
     });
     if (/no results found/i.test(html)) return { found: false, records: [], message: "No severance records" };
     const table = findDataTable(html, 2);
-    if (!table) return { found: false, records: [], message: "Could not parse severance response" };
+    if (!table) return { found: false, records: [], message: "Could not parse severance response", error: "Could not parse severance response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 10));
     return { found: true, records, message: `${records.length} severance record(s)` };
   } catch (e) {
-    return { found: false, records: [], message: `Error: ${String(e)}` };
+    return { found: false, records: [], message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -384,9 +391,17 @@ export async function getProduction(leaseNumber: string | null, district: string
   lease_number: string | null;
   district: string | null;
   message: string;
+  error?: string;
 }> {
   if (!leaseNumber || !district) {
-    return { found: false, rows: [], lease_number: leaseNumber, district, message: "Production requires lease number + district — not resolved yet" };
+    // Production is the single most important data point for a buyer — a
+    // missing lease number must never be recorded as a confirmed "no
+    // production," it's a blocked lookup and has to surface as MISSING.
+    return {
+      found: false, rows: [], lease_number: leaseNumber, district,
+      message: "Production requires lease number + district — not resolved yet",
+      error: "Production requires lease number + district — not resolved yet",
+    };
   }
 
   const parseNum = (v: string): number | null => {
@@ -461,7 +476,7 @@ export async function getProduction(leaseNumber: string | null, district: string
     }
     return { found: false, rows: [], lease_number: leaseNumber, district, message: `No production found for lease ${leaseNumber} district ${district}` };
   } catch (e) {
-    return { found: false, rows: [], lease_number: leaseNumber, district, message: `Error: ${String(e)}` };
+    return { found: false, rows: [], lease_number: leaseNumber, district, message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -473,9 +488,10 @@ export async function getP4Tests(apiNumber: string, leaseNumber?: string | null,
   most_recent: Record<string, string> | null;
   original_completion: Record<string, string> | null;
   message: string;
+  error?: string;
 }> {
   const split = splitApi(apiNumber);
-  if (!split) return { found: false, records: [], most_recent: null, original_completion: null, message: "Invalid API" };
+  if (!split) return { found: false, records: [], most_recent: null, original_completion: null, message: "Invalid API", error: "Invalid API" };
 
   try {
     const html = await ewaFetch("p4QueryAction.do", {
@@ -484,7 +500,7 @@ export async function getP4Tests(apiNumber: string, leaseNumber?: string | null,
     });
     if (/no results found/i.test(html)) return { found: false, records: [], most_recent: null, original_completion: null, message: "No P-4 production tests on file" };
     const table = findDataTable(html, 3);
-    if (!table) return { found: false, records: [], most_recent: null, original_completion: null, message: "Could not parse P-4 response" };
+    if (!table) return { found: false, records: [], most_recent: null, original_completion: null, message: "Could not parse P-4 response", error: "Could not parse P-4 response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 30));
     return {
       found: true,
@@ -494,7 +510,7 @@ export async function getP4Tests(apiNumber: string, leaseNumber?: string | null,
       message:             `${records.length} P-4 test(s) on file`,
     };
   } catch (e) {
-    return { found: false, records: [], most_recent: null, original_completion: null, message: `Error: ${String(e)}` };
+    return { found: false, records: [], most_recent: null, original_completion: null, message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -504,9 +520,10 @@ export async function getCompletionRecords(apiNumber: string): Promise<{
   found: boolean;
   records: Record<string, string>[];
   message: string;
+  error?: string;
 }> {
   const split = splitApi(apiNumber);
-  if (!split) return { found: false, records: [], message: "Invalid API" };
+  if (!split) return { found: false, records: [], message: "Invalid API", error: "Invalid API" };
 
   try {
     const html = await ewaFetch("completionQueryAction.do", {
@@ -515,11 +532,11 @@ export async function getCompletionRecords(apiNumber: string): Promise<{
     });
     if (/no results found/i.test(html)) return { found: false, records: [], message: "No completion records on file" };
     const table = findDataTable(html, 2);
-    if (!table) return { found: false, records: [], message: "Could not parse completion response" };
+    if (!table) return { found: false, records: [], message: "Could not parse completion response", error: "Could not parse completion response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 20));
     return { found: true, records, message: `${records.length} completion record(s)` };
   } catch (e) {
-    return { found: false, records: [], message: `Error: ${String(e)}` };
+    return { found: false, records: [], message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -529,9 +546,10 @@ export async function getPluggingRecords(apiNumber: string): Promise<{
   found: boolean;
   records: Record<string, string>[];
   message: string;
+  error?: string;
 }> {
   const split = splitApi(apiNumber);
-  if (!split) return { found: false, records: [], message: "Invalid API" };
+  if (!split) return { found: false, records: [], message: "Invalid API", error: "Invalid API" };
 
   try {
     const html = await ewaFetch("pluggingQueryAction.do", {
@@ -540,11 +558,11 @@ export async function getPluggingRecords(apiNumber: string): Promise<{
     });
     if (/no results found/i.test(html)) return { found: false, records: [], message: "No plugging records" };
     const table = findDataTable(html, 2);
-    if (!table) return { found: false, records: [], message: "Could not parse plugging response" };
+    if (!table) return { found: false, records: [], message: "Could not parse plugging response", error: "Could not parse plugging response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 10));
     return { found: true, records, message: `${records.length} plugging record(s)` };
   } catch (e) {
-    return { found: false, records: [], message: `Error: ${String(e)}` };
+    return { found: false, records: [], message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -554,9 +572,10 @@ export async function getInjectionRecords(apiNumber: string, operatorNumber?: st
   found: boolean;
   records: Record<string, string>[];
   message: string;
+  error?: string;
 }> {
   const split = splitApi(apiNumber);
-  if (!split) return { found: false, records: [], message: "Invalid API" };
+  if (!split) return { found: false, records: [], message: "Invalid API", error: "Invalid API" };
 
   try {
     const html = await ewaFetch("uicQueryAction.do", {
@@ -565,11 +584,11 @@ export async function getInjectionRecords(apiNumber: string, operatorNumber?: st
     });
     if (/no results found/i.test(html)) return { found: false, records: [], message: "No UIC/injection records" };
     const table = findDataTable(html, 2);
-    if (!table) return { found: false, records: [], message: "Could not parse UIC response" };
+    if (!table) return { found: false, records: [], message: "Could not parse UIC response", error: "Could not parse UIC response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 10));
     return { found: true, records, message: `${records.length} UIC/injection record(s)` };
   } catch (e) {
-    return { found: false, records: [], message: `Error: ${String(e)}` };
+    return { found: false, records: [], message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 
@@ -583,6 +602,7 @@ export async function getGisLocation(apiNumber: string): Promise<{
   survey: Record<string, string> | null;
   alert_areas: string[];
   message: string;
+  error?: string;
 }> {
   const digits = apiNumber.replace(/\D/g, "");
   const api8 = digits.slice(2, 10);
@@ -627,7 +647,7 @@ export async function getGisLocation(apiNumber: string): Promise<{
       message: `GIS location: ${lat?.toFixed(4)}°N, ${lng?.toFixed(4)}°W${alertAreas.length ? ` | Alerts: ${alertAreas.join(", ")}` : ""}`,
     };
   } catch (e) {
-    return { found: false, latitude: null, longitude: null, well_type: null, survey: null, alert_areas: [], message: `GIS error: ${String(e)}` };
+    return { found: false, latitude: null, longitude: null, well_type: null, survey: null, alert_areas: [], message: `GIS error: ${String(e)}`, error: String(e) };
   }
 }
 

@@ -8,6 +8,18 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
+import type { FindingSeverity } from "@/lib/trrc/types";
+
+// Postgres text ordering on `severity` sorts alphabetically (critical, high,
+// info, low, medium) which misplaces "info" ahead of "low"/"medium" and puts
+// "medium" last. Rank explicitly so the most severe findings lead.
+const SEVERITY_RANK: Record<FindingSeverity, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  info: 4,
+};
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,8 +71,7 @@ export async function GET(
       supabase
         .from("trrc_due_diligence_findings")
         .select("*")
-        .eq("run_id", runId)
-        .order("severity", { ascending: true }),
+        .eq("run_id", runId),
       supabase
         .from("trrc_production_monthly")
         .select("*")
@@ -69,13 +80,17 @@ export async function GET(
         .limit(120),
     ]);
 
+  const findings = (findingsResult.data ?? []).slice().sort(
+    (a, b) => SEVERITY_RANK[a.severity as FindingSeverity] - SEVERITY_RANK[b.severity as FindingSeverity],
+  );
+
   return NextResponse.json({
     ok: true,
     data: {
       ...run,
       entities: entitiesResult.data ?? [],
       source_attempts: attemptsResult.data ?? [],
-      findings: findingsResult.data ?? [],
+      findings,
       missing_items: [],
       production: productionResult.data ?? [],
       scorecard: run.scorecard_json ?? null,

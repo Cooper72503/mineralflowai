@@ -28,6 +28,30 @@ if (!process.env.ANTHROPIC_API_KEY) {
   process.exit(1);
 }
 
+// Every request header (Anthropic x-api-key, Supabase auth, Cookie) must be a
+// valid ByteString — any character above code point 255 makes fetch() throw
+// before a single request goes out, and every run in the queue fails silently
+// with no source_attempts recorded. This is a real incident: a copy-pasted
+// masked key display (e.g. "sk-ant-a•••...") once made every run fail this way
+// with zero visibility into why. Fail loudly at boot instead of at request time.
+function assertCleanSecret(name: string, value: string): void {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code > 255) {
+      console.error(
+        `[worker] ${name} contains a non-ByteString character at index ${i} ` +
+        `(code point ${code}, "${value[i]}"). This is usually a masked/redacted ` +
+        `key pasted by mistake instead of the real secret. Refusing to start.`,
+      );
+      process.exit(1);
+    }
+  }
+}
+
+assertCleanSecret("SUPABASE_URL", SUPABASE_URL);
+assertCleanSecret("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY);
+assertCleanSecret("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY);
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const activeRuns = new Set<string>();

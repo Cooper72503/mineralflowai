@@ -143,10 +143,12 @@ function deriveMissingItems(
   let idx = 0;
 
   for (const cov of coverage) {
+    // "not_checked" is deliberately NOT skipped here — a source that was
+    // never queried at all is a coverage gap, not a confirmed-clean result,
+    // and must surface in missing_items rather than disappear silently.
     if (
       cov.status === "complete" ||
-      cov.status === "no_applicable_record" ||
-      cov.status === "not_checked"
+      cov.status === "no_applicable_record"
     ) {
       continue;
     }
@@ -170,12 +172,16 @@ function deriveMissingItems(
           ? `Records in category "${cov.label}" require manual analyst retrieval.`
           : cov.status === "retrieval_failed"
           ? `Automated retrieval failed for "${cov.label}" — records may exist but could not be fetched.`
+          : cov.status === "not_checked"
+          ? `Source "${cov.label}" was never queried during this run.`
           : `Partial or incomplete data for "${cov.label}".`,
       source_checked: cov.sources_checked.join(", "),
       manual_retrieval_url: null,
       recommended_action:
         cov.status === "manual_required"
           ? "Manually retrieve records from the source URL and document findings."
+          : cov.status === "not_checked"
+          ? "Run this source's query and document the result."
           : "Re-run the query or manually verify through the TRRC EWA portal.",
     });
   }

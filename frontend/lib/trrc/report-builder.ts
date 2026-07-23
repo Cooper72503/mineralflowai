@@ -358,6 +358,29 @@ function generateFlags(
   const critical: string[] = [];
   const important: string[] = [];
 
+  // Well identity unverifiable — if the wellbore PDQ, GIS location database,
+  // and CODA imaged documents all independently report "not found" for this
+  // input, the asset itself cannot be confirmed to exist. This must be the
+  // lead critical flag, not silence: none of the other checks below can fire
+  // without underlying data, so a report with zero data would otherwise
+  // render as "no critical or important flags identified" — the opposite of
+  // the truth.
+  const wellbore = getAttempt(attempts, "search_by_api");
+  const gis = getAttempt(attempts, "fetch_gis_plat");
+  const coda = getAttempt(attempts, "fetch_coda_records");
+  const wellboreNotFound = wellbore != null && wellbore["found"] === false;
+  const gisNotFound = gis != null && gis["found"] === false;
+  const codaDocs = Array.isArray(coda?.["documents"]) ? (coda!["documents"] as unknown[]) : null;
+  const codaEmpty = coda != null && (coda["found"] === false || (codaDocs != null && codaDocs.length === 0));
+  if (wellboreNotFound && gisNotFound && codaEmpty) {
+    critical.push(
+      "WELL IDENTITY COULD NOT BE VERIFIED — this identifier was not found in the TRRC wellbore PDQ, " +
+      "GIS well-location database, or CODA imaged documents. The asset may be misidentified, the API/lease " +
+      "number may be incorrect, or the well may not exist as described. Do not proceed until the seller " +
+      "provides a verifiable identifier.",
+    );
+  }
+
   // Orphan well
   const orphan = getAttempt(attempts, "fetch_orphan_well");
   if (orphan?.["is_orphan"] === true) {
@@ -495,7 +518,7 @@ function CoverPage({ run, id: identity, generatedAt }: {
       ),
       React.createElement(View, {},
         React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "PREPARED BY"),
-        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, "Claude / MineralFlow AI"),
+        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, "Mineral Flow AI"),
       ),
       identity.district ? React.createElement(View, {},
         React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "TRRC DISTRICT"),
@@ -1026,7 +1049,11 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
     const d = a.result_data_json ?? {};
     if (a.status !== "success") { sourcesFailed++; }
     else if (d["data_gap"] === true || d["endpoint_available"] === false) { sourcesManual++; }
-    else if (d["found"] !== false) { sourcesWithData++; }
+    // result_count is the ground-truth signal computed centrally in the
+    // worker's dispatcher — some fetchers (orphan/inactive-well) never set a
+    // "found" key at all, and `d["found"] !== false` treated that absence as
+    // "has data" rather than "found nothing," overstating completeness.
+    else if (a.result_count > 0) { sourcesWithData++; }
   }
 
   const dataCompleteness = sourcesChecked > 0 ? Math.round((sourcesWithData / sourcesChecked) * 100) : 0;

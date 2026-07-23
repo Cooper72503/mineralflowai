@@ -18,6 +18,7 @@ import type {
   TrrcDDProductionRow,
 } from "@/lib/trrc/types";
 import type { TrrcManifest } from "@/lib/trrc/manifest-builder";
+import { deriveCoverageFromAttempts } from "@/lib/trrc/coverage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,7 +86,7 @@ export async function GET(
   }
 
   // 3b. Load related data for on-the-fly build
-  const [findingsResult, productionResult] = await Promise.all([
+  const [findingsResult, productionResult, attemptsResult] = await Promise.all([
     supabase.from("trrc_due_diligence_findings").select("*").eq("run_id", runId),
     supabase
       .from("trrc_production_monthly")
@@ -93,6 +94,11 @@ export async function GET(
       .eq("run_id", runId)
       .order("production_month", { ascending: false })
       .limit(120),
+    supabase
+      .from("trrc_source_attempts")
+      .select("source_id, source_name, status, result_count, result_data_json, attempted_at, error_message")
+      .eq("run_id", runId)
+      .order("attempted_at", { ascending: true }),
   ]);
 
   const findings: TrrcFinding[] = (findingsResult.data ?? []).map((f) => ({
@@ -125,7 +131,24 @@ export async function GET(
     water_bbl: (p["water_bbl"] as number | null) ?? null,
   }));
 
-  const coverage: SourceCoverageStatus[] = (runRaw["coverage_json"] as SourceCoverageStatus[]) ?? [];
+  const sourceAttemptRows = (attemptsResult.data ?? []).map((a) => ({
+    source_id: a["source_id"] as string,
+    source_name: a["source_name"] as string,
+    status: a["status"] as string,
+    result_count: (a["result_count"] as number) ?? 0,
+    error_message: (a["error_message"] as string | null) ?? null,
+    attempted_at: a["attempted_at"] as string,
+    result_data_json: (a["result_data_json"] ?? null) as Record<string, unknown> | null,
+  }));
+
+  // Prefer stored coverage_json if present, but the current worker never
+  // writes that column — fall back to deriving it from source attempts
+  // (same logic the /report route uses) rather than silently shipping an
+  // empty coverage section in the manifest.
+  const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
+  const coverage: SourceCoverageStatus[] = storedCoverage.length > 0
+    ? storedCoverage
+    : deriveCoverageFromAttempts(sourceAttemptRows);
   const scorecard: AcquisitionScorecard | null = (runRaw["scorecard_json"] as AcquisitionScorecard | null) ?? null;
 
   const run: TrrcDueDiligenceRun = {
@@ -220,7 +243,7 @@ export async function GET(
   try {
     const reportMod = await import("@/lib/trrc/report-builder");
     if (scorecard) {
-      pdfBuffer = await reportMod.buildTrrcPdfReport(run, manifest, findings, scorecard, production, coverage);
+      pdfBuffer = await reportMod.buildTrrcPdfReport(run, manifest, findings, scorecard, production, coverage, sourceAttemptRows);
     }
   } catch (err) {
     console.warn("[archive] PDF generation skipped:", err instanceof Error ? err.message : String(err));

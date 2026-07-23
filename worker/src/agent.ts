@@ -425,6 +425,10 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
 
   const didComplete = finalReport !== null;
 
+  // Guard against clobbering a cancellation that landed after the last
+  // in-loop check (e.g. during the final end_turn response or the last
+  // tool execution) — .neq("status", "cancelled") makes this update a
+  // no-op if the run was cancelled in that window.
   await supabase.from("trrc_due_diligence_runs").update({
     status:                   didComplete ? "complete" : "failed",
     progress_percent:         didComplete ? 100 : 90,
@@ -440,5 +444,5 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
     error_summary:            didComplete
       ? null
       : `Agent exhausted ${MAX_STEPS} steps without submitting a report. ${successCount} of ${totalCount} sources retrieved.`,
-  }).eq("id", runId);
+  }).eq("id", runId).neq("status", "cancelled");
 }

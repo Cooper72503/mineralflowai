@@ -314,11 +314,16 @@ export function detectInputType(raw: string): TrrcIdentifierType {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return "unknown";
 
-  // 1. API number: starts with "42" (with or without dashes) or is 8-digit county+well
+  // 1. API number: starts with "42" (with or without dashes) or is 8-digit county+well.
+  // Real API numbers contain only digits/dashes/spaces — reject anything with a letter
+  // (e.g. "G42123456") before stripping non-digits, otherwise a Gas Well ID prefix like
+  // "G" gets silently stripped and the remaining digits get misparsed as a fabricated API.
+  const isDigitsAndPunctuationOnly = /^[\d\s-]+$/.test(trimmed);
   const digits = trimmed.replace(/\D/g, "");
   if (
-    (digits.startsWith("42") && digits.length >= 8 && digits.length <= 14) ||
-    (digits.length === 8 && /^\d{3}-\d{5}$/.test(trimmed))
+    isDigitsAndPunctuationOnly &&
+    ((digits.startsWith("42") && digits.length >= 8 && digits.length <= 14) ||
+      (digits.length === 8 && /^\d{3}-\d{5}$/.test(trimmed)))
   ) {
     const parsed = normalizeApiNumber(trimmed);
     if (parsed) return "api_number";

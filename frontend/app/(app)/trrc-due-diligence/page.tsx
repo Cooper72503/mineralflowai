@@ -977,8 +977,14 @@ function ResultsDashboard({
   const attempts = run.source_attempts ?? [];
   const found = attempts.filter(a => a.status === "success" && a.result_count > 0);
   const manual = attempts.filter(a => a.status === "manual_required");
-  const notFound = attempts.filter(a => a.status === "success" && a.result_count === 0);
-  const failed = attempts.filter(a => a.status !== "success" && a.status !== "manual_required");
+  // "no_results" is a legitimate confirmed absence (query succeeded, nothing there) —
+  // group it with "Not Found", not "Failed", same as success+result_count===0.
+  const notFound = attempts.filter(a =>
+    (a.status === "success" && a.result_count === 0) || a.status === "no_results",
+  );
+  const failed = attempts.filter(a =>
+    a.status !== "success" && a.status !== "manual_required" && a.status !== "no_results",
+  );
 
   return (
     <div>

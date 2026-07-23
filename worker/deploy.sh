@@ -43,8 +43,14 @@ EOF
 fi
 
 # 7. Start with pm2
+# --env production does NOT load .env — that flag only applies to an
+# ecosystem.config.js env_production block, which we don't have. Node
+# doesn't read .env files automatically either. Without --node-args here,
+# the process starts with none of the secrets in .env and crash-loops on
+# "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required".
+pm2 delete mineralflow-worker 2>/dev/null || true
 pm2 start dist/index.js --name mineralflow-worker \
-  --env production \
+  --node-args="--env-file=.env" \
   --log ./logs/worker.log \
   --time \
   --restart-delay 5000 \

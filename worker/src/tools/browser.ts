@@ -48,14 +48,17 @@ export async function getComplianceViolations(
   total_count: number;
   searched_by: string;
   message: string;
+  error?: string;
 }> {
-  const browser = await getBrowser();
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  });
-  const page = await context.newPage();
+  let context: BrowserContext | null = null;
 
   try {
+    const browser = await getBrowser();
+    context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    });
+    const page = await context.newPage();
+
     await page.goto("https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml", {
       waitUntil: "networkidle",
       timeout: 30_000,
@@ -137,9 +140,9 @@ export async function getComplianceViolations(
       message:     `${violations.length} violation(s) found, ${openCount} open`,
     };
   } catch (e) {
-    return { found: false, violations: [], open_count: 0, total_count: 0, searched_by: "", message: `ICE portal error: ${String(e)}` };
+    return { found: false, violations: [], open_count: 0, total_count: 0, searched_by: "", message: `ICE portal error: ${String(e)}`, error: String(e) };
   } finally {
-    await context.close();
+    await context?.close();
   }
 }
 
@@ -159,6 +162,7 @@ export async function getCodaDocuments(apiNumber: string): Promise<{
   document_types_present: string[];
   coda_search_url: string;
   message: string;
+  error?: string;
 }> {
   const digits = apiNumber.replace(/\D/g, "");
   const prefix = digits.slice(2, 5);
@@ -168,13 +172,15 @@ export async function getCodaDocuments(apiNumber: string): Promise<{
   const codaSearchUrl = `https://www.rrc.texas.gov/resource-center/research/oil-gas-data/public-gis-viewer/?api=${digits.slice(0, 10)}`;
   const codaDirectUrl = `https://webapps2.rrc.texas.gov/EWA/cogisQueryAction.do?searchArgs.apiNoPrefixArg=${prefix}&searchArgs.apiNoSuffixArg=${suffix}&methodToCall=search`;
 
-  const browser = await getBrowser();
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  });
-  const page = await context.newPage();
+  let context: BrowserContext | null = null;
 
   try {
+    const browser = await getBrowser();
+    context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    });
+    const page = await context.newPage();
+
     await page.goto(codaDirectUrl, { waitUntil: "networkidle", timeout: 30_000 });
     await page.waitForSelector("table", { timeout: 10_000 }).catch(() => null);
 
@@ -225,8 +231,9 @@ export async function getCodaDocuments(apiNumber: string): Promise<{
       document_types_present: [],
       coda_search_url: codaDirectUrl,
       message: `CODA search failed (${String(e).slice(0, 60)}). Manual link: ${codaDirectUrl}`,
+      error: String(e),
     };
   } finally {
-    await context.close();
+    await context?.close();
   }
 }

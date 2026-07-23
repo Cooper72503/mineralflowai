@@ -27,8 +27,14 @@ const PROXY_SECRET = process.env.TRRC_EWA_PROXY_SECRET;
 const EWA_ORIGIN   = "https://webapps2.rrc.texas.gov";
 
 export async function POST(req: NextRequest) {
+  // Fail closed: if the secret isn't configured, this route must not become
+  // an open proxy to *.rrc.texas.gov for anyone on the internet.
+  if (!PROXY_SECRET) {
+    return NextResponse.json({ error: "Proxy not configured" }, { status: 503 });
+  }
+
   const auth = req.headers.get("authorization") ?? "";
-  if (PROXY_SECRET && auth !== `Bearer ${PROXY_SECRET}`) {
+  if (auth !== `Bearer ${PROXY_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
