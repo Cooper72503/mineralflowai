@@ -105,8 +105,9 @@ export async function POST(request: NextRequest) {
   }
 
   const needs_user_selection = resolution.needs_user_selection;
-  // Always start as pending — the Edge Function / agent handles entity resolution
-  const status = "pending";
+  // If multiple candidates were returned, hold in awaiting_selection until the
+  // user picks one. Otherwise go straight to pending so the worker can claim it.
+  const status = needs_user_selection ? "awaiting_selection" : "pending";
 
   // 6. Insert run row
   const { data: runRow, error: runInsertError } = await supabase

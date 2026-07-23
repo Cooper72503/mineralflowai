@@ -268,8 +268,16 @@ export default function TrrcDueDiligencePage() {
       const id: string = data.data.id;
       setRunId(id);
       setRun(data.data);
-      setPhase("running");
-      await apiFetch(`/api/trrc/due-diligence/${id}/execute`, { method: "POST" });
+      if (data.data.needs_user_selection) {
+        setPhase("selecting");
+      } else {
+        setPhase("running");
+        const execRes = await apiFetch(`/api/trrc/due-diligence/${id}/execute`, { method: "POST" });
+        const execData = await execRes.json();
+        if (!execRes.ok || !execData.ok) {
+          throw new Error(execData.error ?? "Failed to start execution");
+        }
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -290,15 +298,24 @@ export default function TrrcDueDiligencePage() {
   const handleResolve = useCallback(async (entityId: string) => {
     if (!runId) return;
     try {
-      await apiFetch(`/api/trrc/due-diligence/${runId}/resolve`, {
+      const resolveRes = await apiFetch(`/api/trrc/due-diligence/${runId}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entity_id: entityId }),
       });
+      const resolveData = await resolveRes.json();
+      if (!resolveRes.ok || !resolveData.ok) {
+        throw new Error(resolveData.error ?? "Failed to resolve entity selection");
+      }
       setPhase("running");
-      await apiFetch(`/api/trrc/due-diligence/${runId}/execute`, { method: "POST" });
-    } catch {
-      setError("Failed to resolve entity selection.");
+      const execRes = await apiFetch(`/api/trrc/due-diligence/${runId}/execute`, { method: "POST" });
+      const execData = await execRes.json();
+      if (!execRes.ok || !execData.ok) {
+        throw new Error(execData.error ?? "Failed to start execution after resolve");
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to resolve entity selection.");
+      setPhase("error");
     }
   }, [runId, apiFetch]);
 
