@@ -216,6 +216,12 @@ export default function TrrcDueDiligencePage() {
             setError(data.data.error_summary ?? "The run failed or was cancelled.");
             setPhase("error");
             clearInterval(interval);
+          } else {
+            // Non-terminal status (pending/running/resolving/etc.) — the worker
+            // updates progress_percent continuously; without this branch `run`
+            // stayed frozen at its initial 0%/pending value for the entire
+            // duration of a run, making a working run look permanently stuck.
+            setRun(data.data);
           }
         }
       } catch {
