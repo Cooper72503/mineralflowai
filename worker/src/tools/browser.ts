@@ -121,7 +121,6 @@ export async function getComplianceViolations(
 
     const openCount = violations.filter(v =>
       v.compliant_on_reinspection === "N" ||
-      v.compliant_on_reinspection === "" ||
       /open|unresolved/i.test(v.last_enforcement_action)
     ).length;
 
