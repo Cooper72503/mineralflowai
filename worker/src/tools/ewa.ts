@@ -3,6 +3,8 @@
  * No proxy needed on the droplet — Node.js OpenSSL handles RSA TLS fine.
  */
 
+import * as cheerio from "cheerio";
+
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 const PDA_BASE = "https://webapps2.rrc.texas.gov/PDA";
 
@@ -71,37 +73,63 @@ async function ewaFetch(path: string, params?: Record<string, string>, cookies?:
 }
 
 // ─── HTML parsing helpers ─────────────────────────────────────────────────────
+//
+// Cheerio-based (real DOM tree), not regex. TRRC's EWA pages are built with
+// deeply nested layout tables, and per-cell nested tables for columns that
+// carry an action-link dropdown (e.g. wellbore PDQ's API No. and Lease No.
+// columns). A regex like /<table>([\s\S]*?)<\/table>/ has no concept of
+// nesting — its non-greedy match stops at the FIRST </table> regardless of
+// whether that's the real closing tag for the one it opened on, silently
+// truncating or fragmenting every nested table on the page. `.children()`
+// in Cheerio always means direct children only, so a table's own rows are
+// never confused with a nested table's rows, no matter how deep the nesting.
 
-function extractTables(html: string): string[][][] {
+// Exported for direct unit testing against real captured fixtures — not
+// used by any other module.
+export function extractTables(html: string): string[][][] {
+  const $ = cheerio.load(html);
   const tables: string[][][] = [];
-  const tableRe = /<table[^>]*>([\s\S]*?)<\/table>/gi;
-  let tMatch: RegExpExecArray | null;
-  while ((tMatch = tableRe.exec(html)) !== null) {
+
+  $("table").each((_, tableEl) => {
+    const $table = $(tableEl);
+    // A table's own rows are its direct <tr> children, or <tr> children of
+    // a direct-child <tbody>/<thead>/<tfoot> — never rows belonging to a
+    // table nested inside one of this table's own cells.
+    const directRows = $table.children("tr").toArray();
+    const containerRows = $table.children("tbody, thead, tfoot").toArray()
+      .flatMap(container => $(container).children("tr").toArray());
+    const rowEls = [...directRows, ...containerRows];
+
     const rows: string[][] = [];
-    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    let rMatch: RegExpExecArray | null;
-    while ((rMatch = rowRe.exec(tMatch[1])) !== null) {
-      const cells: string[] = [];
-      const cellRe = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
-      let cMatch: RegExpExecArray | null;
-      while ((cMatch = cellRe.exec(rMatch[1])) !== null) {
-        cells.push(cMatch[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim());
-      }
-      if (cells.length > 0) rows.push(cells);
+    for (const rowEl of rowEls) {
+      const $row = $(rowEl);
+      const cellEls = $row.children("td, th").toArray();
+      const cells = cellEls.map(cellEl =>
+        $(cellEl).text().replace(/ /g, " ").replace(/\s+/g, " ").trim(),
+      );
+      if (cells.some(c => c.length > 0)) rows.push(cells);
     }
     if (rows.length > 0) tables.push(rows);
-  }
+  });
+
   return tables;
 }
 
-function findDataTable(html: string, minCols: number): { header: string[]; rows: string[][] } | null {
+export function findDataTable(html: string, minCols: number): { header: string[]; rows: string[][] } | null {
   const tables = extractTables(html);
   for (const table of tables) {
     const nonEmpty = table.filter(r => r.some(c => c.length > 0));
     if (nonEmpty.length < 2) continue;
-    const header = nonEmpty[0];
-    if (header.length < minCols) continue;
-    const rows = nonEmpty.slice(1).filter(r =>
+    // The header isn't always row 0 — some TRRC results tables prefix the
+    // real header with a one-cell pagination/toolbar row (e.g. "1 results /
+    // Page 1 of 1 / Page Size"). Use the first row wide enough to plausibly
+    // BE a header rather than assuming it's always the first row; this is a
+    // strict generalization of the old "row 0 is the header" behavior — for
+    // pages where row 0 already meets minCols, headerIdx is still 0.
+    const headerIdx = nonEmpty.findIndex(r => r.length >= minCols);
+    if (headerIdx === -1) continue;
+    const header = nonEmpty[headerIdx];
+    const rows = nonEmpty.slice(headerIdx + 1).filter(r =>
       r.some(c => c.length > 0) &&
       !r.every(c => /^[A-Z\s]+:?$/.test(c) || c.length === 0)
     );
@@ -123,6 +151,26 @@ function splitApi(api: string): { prefix: string; suffix: string } | null {
   const d = api.replace(/\D/g, "");
   if (d.length < 10) return null;
   return { prefix: d.slice(2, 5), suffix: d.slice(5, 10) };
+}
+
+// Some wellbore PDQ columns (API No., Lease No.) wrap their value in a
+// nested per-cell <table> alongside an action-link dropdown ("Links /
+// Images / GIS Viewer / Completion"), so cell text for those two columns
+// comes back noisy (e.g. "01973 Links Images"). The real, clean values are
+// present as query parameters on the row's own leaseDetailAction.do link —
+// pull them from there instead of trusting cell-text position for these
+// specific identifiers.
+function extractLeaseDetailIdentifiers(html: string): { apiNo: string | null; distCode: string | null; leaseNo: string | null } | null {
+  const $ = cheerio.load(html);
+  const link = $('a[href*="leaseDetailAction.do"]').first();
+  const href = link.attr("href");
+  if (!href) return null;
+  const qs = new URLSearchParams(href.split("?")[1] ?? "");
+  return {
+    apiNo: qs.get("apiNo"),
+    distCode: qs.get("distCode"),
+    leaseNo: qs.get("leaseNo"),
+  };
 }
 
 // ─── S1 — Wellbore Identity ───────────────────────────────────────────────────
@@ -156,12 +204,22 @@ export async function searchWellbore(apiNumber: string): Promise<{
     if (!table) return { found: false, wells: [], lease_number: null, district: null, operator: null, operator_number: null, county: null, message: "Could not parse wellbore response", error: "Could not parse wellbore response" };
 
     const wells = rowsToObjects(table.header, table.rows.slice(0, 20));
+
+    // Prefer the clean, href-derived identifiers for the first well over
+    // its possibly action-link-noisy cell text.
+    const ids = extractLeaseDetailIdentifiers(html);
+    if (ids && wells[0]) {
+      if (ids.apiNo)    wells[0]["api_no"]   = ids.apiNo;
+      if (ids.leaseNo)  wells[0]["lease_no"] = ids.leaseNo;
+      if (ids.distCode) wells[0]["district"] = ids.distCode;
+    }
+
     const first = wells[0] ?? {};
     return {
       found: true,
       wells,
-      lease_number:    first["lease_no"]      || first["oil_lease_no"]  || null,
-      district:        first["dist_code"]     || first["district"]       || null,
+      lease_number:    ids?.leaseNo || first["lease_no"]      || first["oil_lease_no"]  || null,
+      district:        ids?.distCode || first["dist_code"]     || first["district"]       || null,
       operator:        first["operator_name"] || first["operator"]       || null,
       operator_number: first["operator_no"]   || first["operator_number"]|| null,
       county:          first["county"]        || null,

@@ -1,0 +1,862 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8;"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=5, IE=8, IE=9, IE=10" />
+    <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+
+    <script type="text/javascript">
+      var dojoConfig = {
+      parseOnLoad: true,
+      isDebug: false,
+
+      has: {
+      "dojo-debug-messages": false
+      },
+
+      packages:
+       [ { name:"rrcGisModules", location:location.pathname.replace(/\/[^/]+$/, '') + '/gis/javascript'} ]
+
+      };
+    </script>
+
+    <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.3compact"></script>
+    <script type="text/javascript"> 
+      require(["dojo/parser", "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dojo/query", 
+               "dojo/dom-construct", "dojo/NodeList-manipulate", "dojo/dom-attr", "dojo/dom",
+               "dojo/_base/connect", "dojo/_base/event"]);
+    </script>
+
+    <title>Wellbore Query Results</title>
+  </head>
+
+  <body>
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td>
+
+
+
+
+
+<script type="text/javascript">
+function openHelp(obj) {
+
+  var help = '/EWA/help/' + obj;
+  //alert(help+', '+obj);
+
+  hold = window.open(help, 'popupWindow',
+                     'resizable=yes,menubar=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');
+  hold.focus();
+  return false;
+}
+</script>
+
+<!-- System Header -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/rrc_online_header.gif"></td>
+    <td class="MainHeader" align="right" nowrap>&nbsp;</td>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+  </tr>
+  <tr><td colspan="3" style="height: 3px;" class="BorderLines"/></tr>
+</table>
+
+<!--Application Header-->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr> 
+    <td class="AppHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+    <td class="AppHeader">Oil & Gas Data Query</td>
+  </tr>
+</table>
+
+<!-- Top Nav Level 2 -->
+<!--Navigation Table Level 2 and 3 -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr><td colspan="2" style="height: 2px;" class="BorderLines"/></tr>
+  <!--Level 2 navigation row-->
+  <tr>
+    <td class="AppNavMain" width="1%"><img src="/EWA/commonuiImages/spacer.gif" height="1px"></td>
+    <td class="AppNavMain">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Main -->
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <td class="AppNavMainSelected">
+            <a href="/EWA/ewaMain.do">Query Menu</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help-->
+          <td class="AppNavMain">
+            
+            <a href="#" onclick="openHelp('Wellbore_TOC.html');">Help</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help END-->
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td colspan="2" style="height: 1px;" class="BorderLines"/></tr>
+</table>
+
+</td></tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr valign="top">
+        <td style="width: 100%;" class="ContentArea">
+          <span id="messageArea">
+
+
+
+
+
+<!-- /tiles/messages.jsp BEGIN -->
+
+
+
+
+<!-- /tiles/messages.jsp END -->
+</span>
+          
+
+
+
+
+
+
+
+
+
+
+
+<script type="text/javascript" src="/EWA/js/ewaPageUtils.js">
+</script>
+
+
+
+<script>
+  function doSearch(){
+    document.forms["wellboreQueryActionForm"].elements["methodToCall"].value = "search";
+    document.forms["wellboreQueryActionForm"].submit();
+  }
+
+  function doSort(columnName, direction) {
+    ewaDoSort(document.forms["wellboreQueryActionForm"], "searchArgs", columnName, direction);
+  }
+
+function generateWellboreCriteriaReportCsv() {
+    document.forms["wellboreQueryActionForm"].methodToCall.value = 
+        "generateWellboreCriteriaReportCsv";
+    document.forms["wellboreQueryActionForm"].submit();
+}
+</script>
+
+<!--Content Area-->
+<form name="wellboreQueryActionForm" method="post" action="/EWA/wellboreQueryAction.do">
+
+  <input type="hidden" name="searchArgs.orderByColumnName" value="">
+  
+    <input type="hidden" name="searchArgs.countyCodeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.drillingPermitArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.apiNoPrefixArgHndlr.inputValue" value="151">
+    <input type="hidden" name="searchArgs.apiNoSuffixArgHndlr.inputValue" value="01734">
+    <input type="hidden" name="searchArgs.scheduleTypeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.wellTypeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.orderByHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.leaseTypeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.districtCodeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.leaseNumberArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.fieldNumbersArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.operatorNumbersArgHndlr.inputValue" value="">
+
+  
+    
+  
+
+
+
+
+
+
+
+
+  
+
+  
+    <input type="hidden" name="methodToCall" value="search">
+  
+
+  
+
+
+
+  <input type="hidden" name="actionManager.recordCountHndlr.inputValue" value="2">
+  <input type="hidden" name="actionManager.currentIndexHndlr.inputValue" value="1">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].actionDisplayNmHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[0].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionHndlr.inputValue" value="/wellboreQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionMethodHndlr.inputValue" value="returnToSearch">
+    <input type="hidden" name="actionManager.actionRcrd[0].pagerParameterKeyHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].argRcrdParameters(searchArgs.paramValue)" value="|7=151|8=01734">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].actionDisplayNmHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[1].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[1].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionHndlr.inputValue" value="/wellboreQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionMethodHndlr.inputValue" value="search">
+    <input type="hidden" name="actionManager.actionRcrd[1].pagerParameterKeyHndlr.inputValue" value="wellborePager.paramValue">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[1].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(searchArgs.paramValue)" value="|7=151|8=01734">
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(wellborePager.paramValue)" value="|1=1|2=10|3=1|4=0|5=1|6=10">
+
+
+
+
+  <table class="ewaPage">
+    <tr>
+      <td>
+        <h2 class="style5">Wellbore Query Results</h2>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <table class="TabBox2" cellspacing="0" cellpadding="4" border="0">
+          <tr>
+            <td>
+              <table style="white-space: nowrap; width:99%; margin: auto;">
+                <tr>
+                  <td>
+                    <p><b>Search Criteria:</b></p>
+                    <p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <strong>API No.:</strong>
+  42-151-01734
+  <br>
+
+
+
+
+
+
+</p>
+                  </td>
+                  <td valign="bottom">
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/wellboreQueryAction.do?methodToCall=returnToSearch&searchArgs.paramValue=|7=151|8=01734&rrcActionMan=H4sIAAAAAAAAAG2OMQ-CMBCFf42OTUtLcOnQGN1VogNxKOUCJoWSaxFN-PGeuLq9fN-7y1sE51osggvNt4jOuPQIw9lhU_G7XvkMtR3HmDHSLMHLRtaG50YapSQVMr3JjoeboSi_cQbv64BwmgDfv3esCWSV7iF1oSnD3npPINcIacKhDBew6DpCuz8rqrhag21ko0XbX62fgMYVWuRioRNRSPUBF9eFMskAAAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr><td>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table style="white-space: normal; width:98%; text-align: center; margin: auto;" 
+       class="DataGrid" border="1" cellpadding="4" cellspacing="0" bordercolor="#666666">
+  <tr>
+    <td colspan="10" height="25" class="PagerBanner">
+      
+        
+      
+
+
+
+
+
+
+
+
+
+
+
+
+  <table style="width:100%; white-space: nowrap;">
+    <tr>
+      <td style="text-align: left; border-style:none; font-weight: bold">
+        1 results
+      </td>
+      <td style="text-align: center; border-style:none;">
+        
+          
+            Page: 1 of 1 <!-- Simple case, single page output -->
+          
+
+          
+        
+      </td>
+
+      <!-- Page size control -->  
+      <td style="text-align: right; border-style:none;">
+        <label>
+          Page Size:
+          <select name="pager.pageSize" onchange="doSearch()"><option value="-1">View All</option></select>
+        </label>
+      </td>
+
+    </tr>
+  </table>
+
+
+
+    </td>
+  </tr>
+
+  <tr>
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('API_NO','ASC')">API No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('DISTRICT_CODE','ASC')">District</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('LEASE_NUMBER','ASC')">Lease No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('LEASE_NAME','ASC')">Lease Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('WELL_NO','ASC')">Well No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('FIELD_NAME','ASC')">Field Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('OPERATOR_NAME','ASC')">Operator Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('COUNTY_NAME','ASC')">County</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('ON_SCHEDULE','ASC')">On Schedule</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('API_DEPTH','ASC')">API Depth</a>
+
+  
+
+</th>
+
+
+  </tr>
+
+  
+    
+    <tr>    
+      <td>  
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=1&apiNo=15101734&distCode=7B&leaseNo=01973&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA" title="Lease detail for API number 15101734">15101734</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:15101734"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=15101734&amp;rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=15101734&amp;rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=15101734&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      
+      <td>
+        
+          
+
+          
+            
+
+            <a href="wellboreByDistrictQueryAction.do?methodToCall=search&district=7B&rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA">7B</a>
+          
+        
+      </td>
+
+      <td>
+        
+          
+
+           
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=1&distCode=7B&leaseNo=01973&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA" title="Lease detail for district 7B and lease number 01973">01973</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=7B&amp;lease_id=01973&amp;rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+
+      <td>TEAGARDEN, M. -B-</td>
+      <td>2</td>
+
+      <td>
+        
+          
+
+          
+            
+
+            <a href="wellboreByFieldQueryAction.do?methodToCall=search&field=78819001&rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA" title="Field # 78819001">ROYSTON</a>
+          
+        
+      </td>
+      
+      <td>
+        
+          
+
+          
+            
+
+            <a href="wellboreByOperatorQueryAction.do?methodToCall=search&operator=102055&rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA" title="Operator # 102055">AMERICAN ENERGY TEXAS INC</a>
+          
+        
+      </td>
+
+      <td>
+        
+          
+
+          
+            
+
+            <a href="wellboreByCountyQueryAction.do?methodToCall=search&county=151&rrcActionMan=H4sIAAAAAAAAALWPzWrDMBCEnyY9Cq0kJ7nswZT0nD-ag-lBsRe7oERmZTct6OG7SQmUJr0UetIwo5G-yaA1mgwaEB6Y67IeXuNxXXNT6Re8-Cfa-75PRkmsBnr3SbXxbWJL56xcMDgxT4tdKdKe5YlC2Eem1Uj88fWcaqKkDg80dLHZxkcfghgFMg0jH7dxQ57rTqw56huKKl3Sktukes_-8OzDSAI3QyggSwVm1v2owf_Dpyv0FK-1pW-Jv0HeXQR_XVT99s15K0I2CDpbEQ51LuScivEJr9rdLeEBAAA" title="County # 151">FISHER</a>
+          
+        
+      </td>
+
+      <td>Y</td>
+      <td>5219</td>
+    </tr>
+  
+
+</table>
+</td></tr>          
+
+          <tr>
+            <td>
+              <table style="white-space: nowrap; text-align: center; width:99%; margin: auto;">
+                <tr>
+                  <td align="left">
+                    
+                                 
+                      <input type="button" name="unused" value="Download" onclick="generateWellboreCriteriaReportCsv();">
+                     
+                  </td>
+                  <td align="right">
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/wellboreQueryAction.do?methodToCall=returnToSearch&searchArgs.paramValue=|7=151|8=01734&rrcActionMan=H4sIAAAAAAAAAG2OMQ-CMBCFf42OTUtLcOnQGN1VogNxKOUCJoWSaxFN-PGeuLq9fN-7y1sE51osggvNt4jOuPQIw9lhU_G7XvkMtR3HmDHSLMHLRtaG50YapSQVMr3JjoeboSi_cQbv64BwmgDfv3esCWSV7iF1oSnD3npPINcIacKhDBew6DpCuz8rqrhag21ko0XbX62fgMYVWuRioRNRSPUBF9eFMskAAAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+    <tr><td>&nbsp;&nbsp;</td></tr>
+  </table>
+</form>
+
+        </td>
+      </tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td><table style="width: 100%" class="MainFooter">
+  <tr><td style="width: 100%;" class="BorderLines"></td></tr>
+  <tr>
+    <td style="width: 100%; height: 100%;" align="center" class="MainFooter">
+      <a target="_blank" href="http://www.rrc.texas.gov/site-policies/">Disclaimer</a> |
+      <a target="_blank" href="http://www.rrc.texas.gov">RRC Home</a> |
+      <a href="mailto:helpdesk@rrc.texas.gov?subject=Oil & Gas Queries">Contact</a>
+    </td>
+  </tr>
+</table>
+</td></tr>
+    </table>
+  </body>
+</html>
+
