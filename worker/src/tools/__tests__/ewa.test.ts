@@ -19,12 +19,13 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const populatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/wellbore-populated.html"), "utf8");
 const emptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/wellbore-empty.html"), "utf8");
+const applicationErrorHtml = fs.readFileSync(path.join(__dirname, "fixtures/trrc-application-error.html"), "utf8");
 
 // ─── Direct unit tests of the extraction primitives ────────────────────────
 
@@ -113,6 +114,48 @@ describe("searchWellbore — end to end against real fixtures", () => {
       on_schedule: "Y",
       api_depth: "5219",
     });
+  });
+});
+
+// ─── TRRC internal "Application Error" page detection ──────────────────────
+//
+// Confirmed live: productionQueryAction.do returned HTTP 200 with TRRC's own
+// <title>Expanded Web Access(EWA) - General Exception</title> error page
+// instead of real results. Since it's a 200 status and doesn't contain "no
+// results found", this previously fell through silently to "no production
+// found" / "not found" — a genuine TRRC server error reported identically to
+// a confirmed-empty result. This is the exact "failed download != clean
+// compliance" violation this whole session has been about, in a new shape.
+
+describe("Application Error page detection", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("searchWellbore reports a real error instead of silently returning not-found", async () => {
+    mockFetchSequence(["<html></html>", applicationErrorHtml]);
+    const result = await searchWellbore("4215101734");
+
+    expect(result.found).toBe(false);
+    expect(result.error, "expected .error to be set so this surfaces as a failure, not confirmed-clean").toBeDefined();
+    expect(result.error).toMatch(/Application Error/i);
+  });
+
+  it("getProduction reports a real error instead of silently returning 'no production found'", async () => {
+    mockFetchSequence([applicationErrorHtml]);
+    const result = await getProduction("01973", "7B");
+
+    expect(result.found).toBe(false);
+    expect(result.error, "expected .error to be set — a TRRC server error is not the same as confirmed no production").toBeDefined();
+    expect(result.error).toMatch(/Application Error/i);
+  });
+
+  it("does not false-positive on real populated or empty-result fixtures", () => {
+    // Regression guard: the detection string must never appear in genuine
+    // TRRC content, only in TRRC's own error page.
+    expect(populatedHtml).not.toMatch(/General Exception|Application Error/i);
+    expect(emptyHtml).not.toMatch(/General Exception|Application Error/i);
   });
 });
 

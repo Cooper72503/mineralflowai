@@ -20,6 +20,24 @@ function formBody(params: Record<string, string>): string {
     .join("&");
 }
 
+// TRRC's EWA app sometimes fails with its own internal error page instead of
+// a raw HTTP error status — confirmed live: productionQueryAction.do returned
+// HTTP 200 with <title>Expanded Web Access(EWA) - General Exception</title>
+// and body text "Application Error... Error Report Number: ...". Since it's
+// a 200 and doesn't match "no results found", this silently fell through to
+// findDataTable (which correctly found no table and returned null), making a
+// genuine TRRC server error indistinguishable from a confirmed-empty result.
+// Treat it as a real failure, the same as a non-2xx HTTP status.
+function isTrrcApplicationError(html: string): boolean {
+  return /General Exception|Application Error/i.test(html);
+}
+
+function assertNotTrrcApplicationError(html: string, path: string): void {
+  if (isTrrcApplicationError(html)) {
+    throw new Error(`EWA ${path} returned a TRRC internal Application Error page`);
+  }
+}
+
 async function ewaFetch(path: string, params?: Record<string, string>, cookies?: string): Promise<string> {
   const url = `${EWA_BASE}/${path}`;
 
@@ -30,7 +48,9 @@ async function ewaFetch(path: string, params?: Record<string, string>, cookies?:
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`EWA ${path} returned HTTP ${res.status}`);
-    return res.text();
+    const html = await res.text();
+    assertNotTrrcApplicationError(html, path);
+    return html;
   }
 
   // POST path — establish a JSESSIONID session first if no caller-supplied cookie
@@ -69,7 +89,9 @@ async function ewaFetch(path: string, params?: Record<string, string>, cookies?:
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`EWA ${path} returned HTTP ${res.status}`);
-  return res.text();
+  const html = await res.text();
+  assertNotTrrcApplicationError(html, path);
+  return html;
 }
 
 // ─── HTML parsing helpers ─────────────────────────────────────────────────────
@@ -501,6 +523,10 @@ export async function getProduction(leaseNumber: string | null, district: string
       }),
       signal: AbortSignal.timeout(30_000),
     }).then(r => r.text());
+
+    // getProduction has its own inline fetch (not routed through ewaFetch),
+    // so it needs its own Application Error check — see isTrrcApplicationError.
+    assertNotTrrcApplicationError(html, "productionQueryAction.do");
 
     if (/no results found|no production/i.test(html)) return null;
 

@@ -1,0 +1,184 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8;"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=5, IE=8, IE=9, IE=10" />
+    <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+
+    <script type="text/javascript">
+      var dojoConfig = {
+      parseOnLoad: true,
+      isDebug: false,
+
+      has: {
+      "dojo-debug-messages": false
+      },
+
+      packages:
+       [ { name:"rrcGisModules", location:location.pathname.replace(/\/[^/]+$/, '') + '/gis/javascript'} ]
+
+      };
+    </script>
+
+    <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.3compact"></script>
+    <script type="text/javascript"> 
+      require(["dojo/parser", "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dojo/query", 
+               "dojo/dom-construct", "dojo/NodeList-manipulate", "dojo/dom-attr", "dojo/dom",
+               "dojo/_base/connect", "dojo/_base/event"]);
+    </script>
+
+    <title>Expanded Web Access(EWA) - General Exception</title>
+  </head>
+
+  <body>
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td>
+
+
+
+
+
+<script type="text/javascript">
+function openHelp(obj) {
+
+  var help = '/EWA/help/' + obj;
+  //alert(help+', '+obj);
+
+  hold = window.open(help, 'popupWindow',
+                     'resizable=yes,menubar=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');
+  hold.focus();
+  return false;
+}
+</script>
+
+<!-- System Header -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/rrc_online_header.gif"></td>
+    <td class="MainHeader" align="right" nowrap>&nbsp;</td>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+  </tr>
+  <tr><td colspan="3" style="height: 3px;" class="BorderLines"/></tr>
+</table>
+
+<!--Application Header-->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr> 
+    <td class="AppHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+    <td class="AppHeader">Oil & Gas Data Query</td>
+  </tr>
+</table>
+
+<!-- Top Nav Level 2 -->
+<!--Navigation Table Level 2 and 3 -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr><td colspan="2" style="height: 2px;" class="BorderLines"/></tr>
+  <!--Level 2 navigation row-->
+  <tr>
+    <td class="AppNavMain" width="1%"><img src="/EWA/commonuiImages/spacer.gif" height="1px"></td>
+    <td class="AppNavMain">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Main -->
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <td class="AppNavMainSelected">
+            <a href="/EWA/ewaMain.do">Query Menu</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help-->
+          <td class="AppNavMain">
+            
+            <a href="#" onclick="openHelp('???en_US.???');">Help</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help END-->
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td colspan="2" style="height: 1px;" class="BorderLines"/></tr>
+</table>
+
+</td></tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr valign="top">
+        <td style="width: 100%;" class="ContentArea">
+          <span id="messageArea">
+
+
+
+
+
+<!-- /tiles/messages.jsp BEGIN -->
+
+
+
+
+<!-- /tiles/messages.jsp END -->
+</span>
+          
+
+
+
+
+
+
+
+
+<p style="white-space: nowrap; font-family: Arial; font-size: large; font-weight:bold" class="Error">
+  Application Error
+</p>
+
+
+  <p>
+    Please reference the following <b>Error Report Number</b> if reporting this issue:
+    <b>RRC_20260723.19328.118_webapps2.rrc.texas.gov</b>
+  </p>
+
+
+<form action="/EWA/ewaMain.do">
+  <input type="hidden" name="action" value="home">
+  <input type="submit" value="Return to the Application">
+</form>
+
+
+  <pre id="RrcApplicationError">
+    Stack Trace: N/A
+  </pre>
+
+
+
+        </td>
+      </tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td><table style="width: 100%" class="MainFooter">
+  <tr><td style="width: 100%;" class="BorderLines"></td></tr>
+  <tr>
+    <td style="width: 100%; height: 100%;" align="center" class="MainFooter">
+      <a target="_blank" href="http://www.rrc.texas.gov/site-policies/">Disclaimer</a> |
+      <a target="_blank" href="http://www.rrc.texas.gov">RRC Home</a> |
+      <a href="mailto:helpdesk@rrc.texas.gov?subject=Oil & Gas Queries">Contact</a>
+    </td>
+  </tr>
+</table>
+</td></tr>
+    </table>
+  </body>
+</html>
+
