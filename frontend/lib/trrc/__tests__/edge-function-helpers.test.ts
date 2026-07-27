@@ -107,7 +107,7 @@ const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string }> = {
   fetch_proration:           { category: "proration",          label: "Proration Schedule / Daily Allowable" },
   fetch_injection_records:   { category: "injection",          label: "UIC / Injection Well Records" },
   fetch_severance_records:   { category: "severance",          label: "Wellbore Severance Records" },
-  fetch_imaged_records:      { category: "imaged_records",     label: "Imaged Document Packets (CMPL)" },
+  fetch_coda_records:        { category: "imaged_records",     label: "Imaged Document Packets (CODA)" },
 };
 
 function buildCoverageFromAttempts(

@@ -160,6 +160,17 @@ export const TRRC_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_drilling_permits",
+    description: "Get W-1 drilling permit records from TRRC — permit approval/submission dates, filing purpose (New Drill, Recompletion, etc.), wellbore profile, amendments, and permit status. Useful for confirming a well was permitted before drilling and understanding its development timeline.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        api_number: { type: "string", description: "API number" },
+      },
+      required: ["api_number"],
+    },
+  },
+  {
     name: "get_coda_documents",
     description: "Get list of imaged documents available in TRRC CODA system — W-2 originals, sundry notices, G-1, H-15, W-3C. Returns document list with direct download URLs where available.",
     input_schema: {

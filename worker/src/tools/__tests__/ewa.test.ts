@@ -19,13 +19,15 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const populatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/wellbore-populated.html"), "utf8");
 const emptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/wellbore-empty.html"), "utf8");
 const applicationErrorHtml = fs.readFileSync(path.join(__dirname, "fixtures/trrc-application-error.html"), "utf8");
+const permitPopulatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/drilling-permit-populated.html"), "utf8");
+const permitEmptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/drilling-permit-empty.html"), "utf8");
 
 // ─── Direct unit tests of the extraction primitives ────────────────────────
 
@@ -219,6 +221,59 @@ describe("no-results vs parse-failure disambiguation", () => {
     const result = await getProduction("01973", "7B");
     expect(result.found).toBe(false);
     expect(result.error, "an unrecognized response must not look like confirmed-zero-production").toBeDefined();
+  });
+});
+
+// ─── getDrillingPermits (S17, W-1) — end to end against real fixtures ─────
+//
+// drilling-permit-populated.html: real drillingPermitsQueryAction.do response
+// for API 42-329-46771 (Chevron, Midland County), captured live. Ground
+// truth read directly from the page: 2 permit rows for this API — an
+// original "New Drill" filing (Amend: N) and a 2025 amendment (Amend: Y),
+// both under the same permit/status number 896719.
+//
+// drilling-permit-empty.html: real "No results found" response for API
+// 42-151-01734 (the wellbore fixture's well) — this well predates the W-1
+// system's online records (permits are only online from ~2000 onward),
+// so a genuine empty result here is expected, not a retrieval failure.
+
+describe("getDrillingPermits — end to end against real fixtures", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("extracts both permit rows for the known real well, with clean API numbers", async () => {
+    mockFetchSequence(["<html></html>", permitPopulatedHtml]);
+    const result = await getDrillingPermits("4232946771");
+
+    expect(result.found, `expected found:true, got message: "${result.message}"`).toBe(true);
+    expect(result.permits).toHaveLength(2);
+    expect(result.permits[0]).toMatchObject({
+      api_no: "32946771",
+      district: "08",
+      lease: "CMC BUTTERCUP 25-37 UNIT",
+      well_number: "0371WA",
+      permitted_operator: "CHEVRON U. S. A. INC.(148113)",
+      county: "MIDLAND",
+      status_number: "896719",
+      filing_purpose: "New Drill",
+      amend: "N",
+      status: "APPROVED",
+    });
+    expect(result.permits[1]).toMatchObject({
+      amend: "Y",
+      status_number: "896719",
+    });
+  });
+
+  it("returns found:false with no fabricated permits on a genuine empty result", async () => {
+    mockFetchSequence(["<html></html>", permitEmptyHtml]);
+    const result = await getDrillingPermits("4215101734");
+
+    expect(result.found).toBe(false);
+    expect(result.permits).toEqual([]);
+    expect(result.error).toBeUndefined();
   });
 });
 

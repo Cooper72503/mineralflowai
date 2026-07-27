@@ -789,12 +789,15 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   attempts: LiteSourceAttempt[];
   generatedAt: string;
 }) {
-  const comp   = getAttempt(attempts, "fetch_completion_records");
-  const imaged = getAttempt(attempts, "fetch_imaged_records");
-  const p4     = getAttempt(attempts, "fetch_p4_records");
+  const comp    = getAttempt(attempts, "fetch_completion_records");
+  const imaged  = getAttempt(attempts, "fetch_coda_records");
+  const p4      = getAttempt(attempts, "fetch_p4_records");
+  const permits = getAttempt(attempts, "fetch_drilling_permits");
   const p4Records = Array.isArray(p4?.["records"]) ? (p4!["records"] as Record<string, unknown>[]) : [];
   const newest = p4Records[0];
   const oldest = p4Records[p4Records.length - 1];
+  const permitRecords = Array.isArray(permits?.["permits"]) ? (permits!["permits"] as Record<string, unknown>[]) : [];
+  const latestPermit = permitRecords[permitRecords.length - 1];
   const compUrl  = typeof comp?.["trrc_source_url"] === "string"   ? comp["trrc_source_url"] as string   : null;
   const imagedUrl = typeof imaged?.["trrc_source_url"] === "string" ? imaged["trrc_source_url"] as string : null;
 
@@ -835,6 +838,18 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
       kv("Most Recent Gas Rate",   str(newest?.["gas_rate_mcf_day"]) ? `${str(newest?.["gas_rate_mcf_day"])} MCF/d` : "—"),
       oldest && oldest !== newest ? kv("Original Completion Test", `${str(oldest?.["date"] ?? oldest?.["test_date"])} — Oil: ${str(oldest?.["oil_rate_bbl_day"])} BBL/d`) : null,
     ) : React.createElement(Text, { style: S.noteText }, p4?.["found"] === false ? "No P-4 potential test records on file." : "P-4 records not retrieved."),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Drilling Permit (W-1) Records"),
+    permitRecords.length > 0 ? React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Filing Purpose",   str(latestPermit?.["filing_purpose"])),
+      kv("Status",           str(latestPermit?.["status"])),
+      kv("Status Date",      str(latestPermit?.["status_date"])),
+      kv("Wellbore Profile", str(latestPermit?.["wellbore_profiles"])),
+      kv("Total Depth",      str(latestPermit?.["total_depth"])),
+      kv("Amended",          str(latestPermit?.["amend"]) === "Y" ? `Yes (${permitRecords.length} filing${permitRecords.length === 1 ? "" : "s"} on record)` : "No"),
+    ) : React.createElement(Text, { style: S.noteText }, permits?.["found"] === false ? "No drilling permit (W-1) on record for this API." : "Drilling permit records not retrieved."),
 
     React.createElement(View, { style: S.divider }),
 
@@ -1000,11 +1015,12 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
     fetch_p4_records:            "S9 — P-4 Production Tests",
     fetch_completion_records:    "S10 — W-2 Completion Record",
     fetch_plugging_records:      "S11 — Plugging Records (W-3C)",
-    fetch_imaged_records:        "S12 — CODA Imaged Documents",
+    fetch_coda_records:          "S12 — CODA Imaged Documents",
     fetch_compliance_violations: "S13 — Compliance Violations",
     fetch_injection_records:     "S14 — UIC / Injection Permits",
     fetch_glo_survey:            "S15 — Texas GLO Survey",
     fetch_gis_plat:              "S16 — RRC GIS / Plat Map",
+    fetch_drilling_permits:      "S17 — Drilling Permit Records (W-1)",
   };
 
   const seen = new Set<string>();

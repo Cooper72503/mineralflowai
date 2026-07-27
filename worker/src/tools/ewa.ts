@@ -777,4 +777,51 @@ export async function getGisLocation(apiNumber: string): Promise<{
   }
 }
 
+// ─── S17 — Drilling Permit (W-1) Query ───────────────────────────────────────
+//
+// Live TRRC endpoint confirmed via the EWA query menu (ewaMain.do lists it as
+// "Drilling Permit (W-1) Query") — not previously wired into this pipeline.
+// Same nested per-cell table on the API No. column as wellbore PDQ (a dropdown
+// of Links/Images/GIS Viewer/Completion action links sits beside the value),
+// so cell text comes back as e.g. "32946771 Links Images GIS Viewer
+// Completion". Unlike wellbore PDQ, the clean numeric value is trivially
+// recoverable with a leading-digit-run match — no href/query-param parsing
+// needed here since the API number is always purely numeric.
+
+export async function getDrillingPermits(apiNumber: string): Promise<{
+  found: boolean;
+  permits: Record<string, string>[];
+  message: string;
+  error?: string;
+}> {
+  const split = splitApi(apiNumber);
+  if (!split) return { found: false, permits: [], message: "Invalid API number format", error: "Invalid API number format" };
+
+  try {
+    const html = await ewaFetch("drillingPermitsQueryAction.do", {
+      "searchArgs.apiNoHndlr.inputValue": `${split.prefix}${split.suffix}`,
+    });
+
+    if (/no results found/i.test(html)) {
+      return { found: false, permits: [], message: `No drilling permit (W-1) on record for 42-${split.prefix}-${split.suffix}` };
+    }
+
+    const table = findDataTable(html, 5);
+    if (!table) return { found: false, permits: [], message: "Could not parse drilling permit response", error: "Could not parse drilling permit response" };
+
+    const permits = rowsToObjects(table.header, table.rows).map(p => ({
+      ...p,
+      api_no: p["api_no"]?.match(/^\d+/)?.[0] ?? p["api_no"] ?? "",
+    }));
+
+    return {
+      found: true,
+      permits,
+      message: `Found ${permits.length} drilling permit record(s) for 42-${split.prefix}-${split.suffix}`,
+    };
+  } catch (e) {
+    return { found: false, permits: [], message: `Error: ${String(e)}`, error: String(e) };
+  }
+}
+
 export { PDA_BASE };

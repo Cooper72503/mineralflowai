@@ -210,6 +210,11 @@ async function dispatchTool(
       sourceName = "fetch_injection_records";
       break;
 
+    case "get_drilling_permits":
+      result = await ewa.getDrillingPermits(String(input.api_number ?? state.apiNumber ?? ""));
+      sourceName = "fetch_drilling_permits";
+      break;
+
     case "get_coda_documents":
       result = await browser.getCodaDocuments(String(input.api_number ?? state.apiNumber ?? ""));
       sourceName = "fetch_coda_records";
@@ -236,6 +241,7 @@ async function dispatchTool(
     Array.isArray(resultData?.["violations"]) ? (resultData["violations"] as unknown[]).length :
     Array.isArray(resultData?.["rows"])       ? (resultData["rows"]       as unknown[]).length :
     Array.isArray(resultData?.["documents"])  ? (resultData["documents"]  as unknown[]).length :
+    Array.isArray(resultData?.["permits"])    ? (resultData["permits"]    as unknown[]).length :
     resultData?.["found"] === true ? 1 : 0;
 
   const isOk = resultData?.["error"] == null && name !== "submit_report";

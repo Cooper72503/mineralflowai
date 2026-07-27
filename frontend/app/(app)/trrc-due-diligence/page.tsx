@@ -980,7 +980,8 @@ const SOURCE_LABELS: Record<string, string> = {
   fetch_proration:            "Proration / Daily Allowable",
   fetch_injection_records:    "UIC / Injection Well Records",
   fetch_severance_records:    "Severance & Seal Orders",
-  fetch_imaged_records:       "Imaged Document Packets",
+  fetch_coda_records:         "Imaged Document Packets",
+  fetch_drilling_permits:     "Drilling Permit Records (W-1)",
 };
 
 function ResultsDashboard({
