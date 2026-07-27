@@ -239,12 +239,17 @@ export async function GET(
   };
 
   // 3d. Generate PDF
+  //
+  // The scorecard feature is deliberately unimplemented (scorecard_json is
+  // never written by the worker), so `scorecard` here is always null. That
+  // previously gated PDF generation entirely — buildTrrcPdfReport's
+  // scorecard parameter isn't even read internally — so every archived ZIP
+  // shipped a 0-byte PDF. The /report route calls the same function
+  // unconditionally with the same `?? {}` fallback; match that here.
   let pdfBuffer: Buffer = Buffer.alloc(0);
   try {
     const reportMod = await import("@/lib/trrc/report-builder");
-    if (scorecard) {
-      pdfBuffer = await reportMod.buildTrrcPdfReport(run, manifest, findings, scorecard, production, coverage, sourceAttemptRows);
-    }
+    pdfBuffer = await reportMod.buildTrrcPdfReport(run, manifest, findings, scorecard ?? ({} as AcquisitionScorecard), production, coverage, sourceAttemptRows);
   } catch (err) {
     console.warn("[archive] PDF generation skipped:", err instanceof Error ? err.message : String(err));
   }
@@ -259,6 +264,7 @@ export async function GET(
       production,
       findings,
       coverage,
+      sourceAttemptRows,
     );
 
     return new NextResponse(new Uint8Array(zipBuffer), {

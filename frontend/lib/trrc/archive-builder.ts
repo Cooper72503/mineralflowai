@@ -16,6 +16,7 @@ import * as zlib from "zlib";
 import { promisify } from "util";
 import type { TrrcDueDiligenceRun, TrrcFinding, TrrcDDProductionRow, SourceCoverageStatus } from "./types";
 import type { TrrcManifest } from "./manifest-builder";
+import type { LiteSourceAttempt } from "./coverage";
 
 const deflateRaw = promisify(zlib.deflateRaw);
 
@@ -268,11 +269,95 @@ function buildManualLinksCsv(manifest: TrrcManifest): string {
 // ─── README placeholder text ──────────────────────────────────────────────────
 
 const PLACEHOLDER_README =
-  "No records were downloaded automatically for this category.\n\n" +
+  "No automated source in this pipeline queries this category — nothing was attempted.\n\n" +
   "See manual retrieval URLs in Source_Manifest.json (manual_retrieval_required array)\n" +
   "and the Missing_Records_Checklist.csv for recommended follow-up actions.\n\n" +
   "IMPORTANT: The absence of a result from a query does not confirm the absence of a record.\n" +
   "TRRC records may be delayed, incorrectly indexed, or available only through manual retrieval.\n";
+
+// ─── Category folder population from real source attempts ───────────────────
+//
+// Previously every non-production folder shipped the same generic
+// "No records were downloaded automatically" README regardless of whether
+// the corresponding source actually ran and returned real data — e.g.
+// Drilling_Permits and Well_Status_Tests always looked empty even when
+// trrc_source_attempts had successful, populated results for them. This
+// maps each folder to the source_name(s) that actually feed it and writes
+// the real retrieved JSON plus an accurate per-source status README instead.
+
+const FOLDER_SOURCES: Record<string, string[]> = {
+  "01_Identity_and_Wellbore":            ["search_by_api", "search_by_lease"],
+  "02_Drilling_Permits":                 ["fetch_drilling_permits"],
+  "03_Completions_and_Cementing":        ["fetch_completion_records"],
+  "05_Well_Status_Tests":                ["fetch_well_status", "fetch_p4_records", "fetch_inactive_well_status"],
+  "06_Injection_and_MIT":                ["fetch_injection_records"],
+  "07_Plugging_and_Inactive_Well":       ["fetch_plugging_records", "fetch_orphan_well"],
+  "08_Operator_and_P5":                  ["search_by_operator"],
+  "10_Inspections_Violations_Severance": ["fetch_compliance_violations", "fetch_severance_records"],
+  "11_GIS_Maps_and_Plats":               ["fetch_gis_plat"],
+  "12_Well_File_Correspondence":         ["fetch_coda_records"],
+};
+
+function findAttempt(attempts: LiteSourceAttempt[], sourceName: string): LiteSourceAttempt | null {
+  return attempts.find((a) => a.source_name === sourceName) ?? null;
+}
+
+function isPopulated(a: LiteSourceAttempt): boolean {
+  if (a.status !== "success") return false;
+  if (a.result_count > 0) return true;
+  const d = a.result_data_json;
+  return d != null && d["found"] === true;
+}
+
+function buildCategoryEntries(
+  folderPath: string,
+  sourceNames: string[],
+  attempts: LiteSourceAttempt[],
+): ArchiveEntry[] {
+  const entries: ArchiveEntry[] = [];
+  const statusLines: string[] = [];
+  let anyAttempted = false;
+
+  for (const sourceName of sourceNames) {
+    const attempt = findAttempt(attempts, sourceName);
+    if (!attempt) {
+      statusLines.push(`${sourceName}: not attempted for this run.`);
+      continue;
+    }
+    anyAttempted = true;
+    const when = attempt.attempted_at;
+
+    if (attempt.status !== "success") {
+      statusLines.push(
+        `${sourceName}: RETRIEVAL FAILED on ${when} — ${attempt.error_message ?? "unknown error"}. ` +
+        `This does NOT confirm absence of records — see Missing_Records_Checklist.csv.`,
+      );
+      continue;
+    }
+
+    if (!isPopulated(attempt)) {
+      statusLines.push(`${sourceName}: queried on ${when} — TRRC returned no records. Confirmed absence, not a retrieval failure.`);
+      continue;
+    }
+
+    statusLines.push(`${sourceName}: retrieved on ${when} — see ${sourceName}.json in this folder.`);
+    entries.push({
+      path: `${folderPath}${sourceName}.json`,
+      content: JSON.stringify(attempt.result_data_json, null, 2),
+    });
+  }
+
+  if (!anyAttempted) {
+    entries.push({ path: `${folderPath}README.txt`, content: PLACEHOLDER_README });
+    return entries;
+  }
+
+  entries.push({
+    path: `${folderPath}README.txt`,
+    content: statusLines.join("\n\n") + "\n",
+  });
+  return entries;
+}
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -283,6 +368,7 @@ export async function buildTrrcZipArchive(
   production: TrrcDDProductionRow[],
   findings: TrrcFinding[],
   coverage: SourceCoverageStatus[],
+  sourceAttempts: LiteSourceAttempt[] = [],
 ): Promise<Buffer> {
   const now = new Date();
 
@@ -314,22 +400,13 @@ export async function buildTrrcZipArchive(
     },
 
     // 01_Identity_and_Wellbore
-    {
-      path: `${rootDir}01_Identity_and_Wellbore/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}01_Identity_and_Wellbore/`, FOLDER_SOURCES["01_Identity_and_Wellbore"], sourceAttempts),
 
     // 02_Drilling_Permits
-    {
-      path: `${rootDir}02_Drilling_Permits/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}02_Drilling_Permits/`, FOLDER_SOURCES["02_Drilling_Permits"], sourceAttempts),
 
     // 03_Completions_and_Cementing
-    {
-      path: `${rootDir}03_Completions_and_Cementing/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}03_Completions_and_Cementing/`, FOLDER_SOURCES["03_Completions_and_Cementing"], sourceAttempts),
 
     // 04_Production
     {
@@ -342,28 +419,16 @@ export async function buildTrrcZipArchive(
     },
 
     // 05_Well_Status_Tests
-    {
-      path: `${rootDir}05_Well_Status_Tests/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}05_Well_Status_Tests/`, FOLDER_SOURCES["05_Well_Status_Tests"], sourceAttempts),
 
     // 06_Injection_and_MIT
-    {
-      path: `${rootDir}06_Injection_and_MIT/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}06_Injection_and_MIT/`, FOLDER_SOURCES["06_Injection_and_MIT"], sourceAttempts),
 
     // 07_Plugging_and_Inactive_Well
-    {
-      path: `${rootDir}07_Plugging_and_Inactive_Well/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}07_Plugging_and_Inactive_Well/`, FOLDER_SOURCES["07_Plugging_and_Inactive_Well"], sourceAttempts),
 
     // 08_Operator_and_P5
-    {
-      path: `${rootDir}08_Operator_and_P5/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}08_Operator_and_P5/`, FOLDER_SOURCES["08_Operator_and_P5"], sourceAttempts),
 
     // 09_P4_Gatherer_Purchaser
     {
@@ -376,18 +441,13 @@ export async function buildTrrcZipArchive(
       path: `${rootDir}10_Inspections_Violations_Severance/findings_compliance.json`,
       content: JSON.stringify(complianceFindings, null, 2),
     },
+    ...buildCategoryEntries(`${rootDir}10_Inspections_Violations_Severance/`, FOLDER_SOURCES["10_Inspections_Violations_Severance"], sourceAttempts),
 
     // 11_GIS_Maps_and_Plats
-    {
-      path: `${rootDir}11_GIS_Maps_and_Plats/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}11_GIS_Maps_and_Plats/`, FOLDER_SOURCES["11_GIS_Maps_and_Plats"], sourceAttempts),
 
     // 12_Well_File_Correspondence
-    {
-      path: `${rootDir}12_Well_File_Correspondence/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}12_Well_File_Correspondence/`, FOLDER_SOURCES["12_Well_File_Correspondence"], sourceAttempts),
 
     // 13_Logs_and_Surveys
     {
