@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -156,6 +156,69 @@ describe("Application Error page detection", () => {
     // TRRC content, only in TRRC's own error page.
     expect(populatedHtml).not.toMatch(/General Exception|Application Error/i);
     expect(emptyHtml).not.toMatch(/General Exception|Application Error/i);
+  });
+});
+
+// ─── Ambiguous "no results" vs "couldn't parse" disambiguation ─────────────
+//
+// searchLeaseWells, getWellStatus's lease-type fallback, and getProduction's
+// lease-type loop each try multiple lease types (O/G/C) and used to collapse
+// "TRRC explicitly said no results" and "we got a 200 response we couldn't
+// recognize as a data table" into the same `null`, so a genuine parse
+// failure looked identical to a confirmed absence. This is synthetic HTML
+// (no real captured fixture reproduces this specific ambiguity), representing
+// the general case of an unrecognized 200-status response — not a specific
+// TRRC quirk like the nested-table or Application-Error cases, which do have
+// real fixtures.
+
+const unparsableHtml = `<html><body><p>An unexpected TRRC page shape that is neither a data table nor the standard empty-result message.</p></body></html>`;
+
+describe("no-results vs parse-failure disambiguation", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("searchLeaseWells: genuine 'no results found' still reports found:false with no error", async () => {
+    mockFetchSequence(["<html></html>", "no results found"]);
+    const result = await searchLeaseWells("01973", "7B");
+    expect(result.found).toBe(false);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("searchLeaseWells: an unparsable response now surfaces as a real error, not a confirmed absence", async () => {
+    mockFetchSequence(["<html></html>", unparsableHtml]);
+    const result = await searchLeaseWells("01973", "7B");
+    expect(result.found).toBe(false);
+    expect(result.error, "an unrecognized response must not look like confirmed-clean").toBeDefined();
+  });
+
+  it("getWellStatus: genuine 'no results found' still reports found:false with no error", async () => {
+    mockFetchSequence(["<html></html>", "no results found"]);
+    const result = await getWellStatus("4215101734", "01973", "7B");
+    expect(result.found).toBe(false);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("getWellStatus: an unparsable response now surfaces as a real error", async () => {
+    mockFetchSequence(["<html></html>", unparsableHtml]);
+    const result = await getWellStatus("4215101734", "01973", "7B");
+    expect(result.found).toBe(false);
+    expect(result.error).toBeDefined();
+  });
+
+  it("getProduction: genuine 'no results found' still reports found:false with no error", async () => {
+    mockFetchSequence(["no results found"]);
+    const result = await getProduction("01973", "7B");
+    expect(result.found).toBe(false);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("getProduction: an unparsable response now surfaces as a real error, not '0 production months'", async () => {
+    mockFetchSequence([unparsableHtml]);
+    const result = await getProduction("01973", "7B");
+    expect(result.found).toBe(false);
+    expect(result.error, "an unrecognized response must not look like confirmed-zero-production").toBeDefined();
   });
 });
 

@@ -254,29 +254,49 @@ export async function searchWellbore(apiNumber: string): Promise<{
 
 // ─── S2 — Lease Well Inventory ────────────────────────────────────────────────
 
+// A "not found" tryLeaseType result and a "found a response we couldn't
+// parse" result used to both collapse to `null`, so a genuine parse
+// failure on one lease type silently looked identical to a confirmed
+// absence, same as this function's overall result once all three lease
+// types had been tried. Distinguishing them means a real failure surfaces
+// as .error instead of "no wells found," even if some of the other lease
+// types genuinely came back empty.
+type LeaseTypeResult =
+  | { status: "found"; table: { header: string[]; rows: string[][] } }
+  | { status: "not_found" }
+  | { status: "parse_failed" };
+
 export async function searchLeaseWells(leaseNumber: string, district: string): Promise<{
   found: boolean;
   wells: Record<string, string>[];
   message: string;
   error?: string;
 }> {
-  const tryLeaseType = async (lt: string) => {
+  const tryLeaseType = async (lt: string): Promise<LeaseTypeResult> => {
     const html = await ewaFetch("leaseWellQueryAction.do", {
       "searchArgs.leaseNumberArg":  leaseNumber,
       "searchArgs.districtCodeArg": district,
       "searchArgs.leaseTypeArg":    lt,
     });
-    if (/no results found/i.test(html)) return null;
-    return findDataTable(html, 2);
+    if (/no results found/i.test(html)) return { status: "not_found" };
+    const table = findDataTable(html, 2);
+    if (!table) return { status: "parse_failed" };
+    return { status: "found", table };
   };
 
   try {
+    let anyParseFailed = false;
     for (const lt of ["O", "G", "C"]) {
-      const table = await tryLeaseType(lt);
-      if (table) {
-        const wells = rowsToObjects(table.header, table.rows.slice(0, 50));
+      const result = await tryLeaseType(lt);
+      if (result.status === "found") {
+        const wells = rowsToObjects(result.table.header, result.table.rows.slice(0, 50));
         return { found: true, wells, message: `${wells.length} wells on lease ${leaseNumber} district ${district} (${lt})` };
       }
+      if (result.status === "parse_failed") anyParseFailed = true;
+    }
+    if (anyParseFailed) {
+      const msg = `Could not parse lease well response for lease ${leaseNumber} district ${district} on at least one lease type`;
+      return { found: false, wells: [], message: msg, error: msg };
     }
     return { found: false, wells: [], message: `No wells found for lease ${leaseNumber} district ${district}` };
   } catch (e) {
@@ -331,46 +351,56 @@ export async function getWellStatus(apiNumber: string, leaseNumber?: string | nu
   message: string;
   error?: string;
 }> {
-  const tryQuery = async (params: Record<string, string>) => {
+  const tryQuery = async (params: Record<string, string>): Promise<LeaseTypeResult> => {
     const html = await ewaFetch("wellStatusQueryAction.do", params);
-    if (/no results found/i.test(html)) return null;
-    return findDataTable(html, 2);
+    if (/no results found/i.test(html)) return { status: "not_found" };
+    const table = findDataTable(html, 2);
+    if (!table) return { status: "parse_failed" };
+    return { status: "found", table };
   };
 
   try {
+    let anyParseFailed = false;
+
     // Try by API first
     const split = splitApi(apiNumber);
     if (split) {
-      const table = await tryQuery({
+      const result = await tryQuery({
         "searchArgs.apiNoPrefixArg": split.prefix,
         "searchArgs.apiNoSuffixArg": split.suffix,
       });
-      if (table) {
-        const records = rowsToObjects(table.header, table.rows.slice(0, 20));
+      if (result.status === "found") {
+        const records = rowsToObjects(result.table.header, result.table.rows.slice(0, 20));
         const first = records[0] ?? {};
         const statusVal = first["well_status"] || first["status"] || null;
         const leaseVal  = first["lease_no"]    || first["oil_lease_no"] || leaseNumber || null;
         const distVal   = first["dist_code"]   || first["district"]     || district    || null;
         return { found: true, status: statusVal, records, lease_number: leaseVal, district: distVal, message: `Well status: ${statusVal ?? "unknown"}` };
       }
+      if (result.status === "parse_failed") anyParseFailed = true;
     }
 
     // Fall back to lease + district
     if (leaseNumber && district) {
       for (const lt of ["O", "G"]) {
-        const table = await tryQuery({
+        const result = await tryQuery({
           "searchArgs.leaseNumberArg":  leaseNumber,
           "searchArgs.districtCodeArg": district,
           "searchArgs.leaseTypeArg":    lt,
         });
-        if (table) {
-          const records = rowsToObjects(table.header, table.rows.slice(0, 20));
+        if (result.status === "found") {
+          const records = rowsToObjects(result.table.header, result.table.rows.slice(0, 20));
           const first = records[0] ?? {};
           return { found: true, status: first["well_status"] || null, records, lease_number: leaseNumber, district, message: `Well status via lease: ${first["well_status"] ?? "unknown"}` };
         }
+        if (result.status === "parse_failed") anyParseFailed = true;
       }
     }
 
+    if (anyParseFailed) {
+      const msg = `Could not parse well status response for API ${apiNumber}${leaseNumber ? ` / lease ${leaseNumber}` : ""}`;
+      return { found: false, status: null, records: [], lease_number: null, district: null, message: msg, error: msg };
+    }
     return { found: false, status: null, records: [], lease_number: null, district: null, message: "Well status not found" };
   } catch (e) {
     return { found: false, status: null, records: [], lease_number: null, district: null, message: `Error: ${String(e)}`, error: String(e) };
@@ -490,7 +520,12 @@ export async function getProduction(leaseNumber: string | null, district: string
     return isNaN(n) ? null : n;
   };
 
-  const tryType = async (lt: string): Promise<ProductionRow[] | null> => {
+  type ProductionTypeResult =
+    | { status: "found"; rows: ProductionRow[] }
+    | { status: "not_found" }
+    | { status: "parse_failed" };
+
+  const tryType = async (lt: string): Promise<ProductionTypeResult> => {
     // Step 1: get session
     const sessionRes = await fetch(`${EWA_BASE}/productionQueryAction.do`, {
       headers: { ...BROWSER_HEADERS },
@@ -528,12 +563,12 @@ export async function getProduction(leaseNumber: string | null, district: string
     // so it needs its own Application Error check — see isTrrcApplicationError.
     assertNotTrrcApplicationError(html, "productionQueryAction.do");
 
-    if (/no results found|no production/i.test(html)) return null;
+    if (/no results found|no production/i.test(html)) return { status: "not_found" };
 
     const table = findDataTable(html, 4);
-    if (!table) return null;
+    if (!table) return { status: "parse_failed" };
 
-    return table.rows.slice(0, 120).map(row => {
+    const rows = table.rows.slice(0, 120).map(row => {
       const obj: Record<string, string> = {};
       table.header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
       const year  = obj["year"]  || obj["prod_yr"]   || "";
@@ -548,15 +583,22 @@ export async function getProduction(leaseNumber: string | null, district: string
         water_bbl:          parseNum(obj["water_bbl"]      || obj["water"]),
       } as ProductionRow;
     }).filter((r): r is ProductionRow => r !== null);
+    return { status: "found", rows };
   };
 
   try {
     const types = leaseType ? [leaseType] : ["O", "G", "C"];
+    let anyParseFailed = false;
     for (const lt of types) {
-      const rows = await tryType(lt);
-      if (rows && rows.length > 0) {
-        return { found: true, rows, lease_number: leaseNumber, district, message: `${rows.length} months of production history (${lt} lease)` };
+      const result = await tryType(lt);
+      if (result.status === "found" && result.rows.length > 0) {
+        return { found: true, rows: result.rows, lease_number: leaseNumber, district, message: `${result.rows.length} months of production history (${lt} lease)` };
       }
+      if (result.status === "parse_failed") anyParseFailed = true;
+    }
+    if (anyParseFailed) {
+      const msg = `Could not parse production response for lease ${leaseNumber} district ${district} on at least one lease type`;
+      return { found: false, rows: [], lease_number: leaseNumber, district, message: msg, error: msg };
     }
     return { found: false, rows: [], lease_number: leaseNumber, district, message: `No production found for lease ${leaseNumber} district ${district}` };
   } catch (e) {
