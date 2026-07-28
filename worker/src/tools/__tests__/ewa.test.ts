@@ -277,6 +277,49 @@ describe("getDrillingPermits — end to end against real fixtures", () => {
   });
 });
 
+// ─── getProduction — header-key trailing-underscore regression guard ──────
+//
+// No real fixture is available here — productionQueryAction.do is hit by
+// TRRC's own live outage as of 2026-07-27 (confirmed live: it returns the
+// "Application Error" page for every request). This is a reconstructed
+// table shaped to match the established convention used throughout this
+// codebase for TRRC column headers (a unit suffix in parens, e.g. the PDF
+// report's own "BBL/mo" / "MCF/mo" labels) — its purpose is narrowly to
+// prove the specific mechanical bug: getProduction's own header-to-key
+// transform was missing the trailing-underscore strip that the shared
+// rowsToObjects() helper has, so a header like "Oil (BBL)" became key
+// "oil_bbl_" (trailing underscore) instead of "oil_bbl" and silently
+// missed the value lookup — while "Year"/"Month" have no parens to strip
+// and matched fine regardless, which is exactly the split symptom actually
+// observed in trrc_production_monthly: correct production_month values,
+// but null oil_bbl/gas_mcf on every stored row. This test does not confirm
+// TRRC's exact real header text — only that this specific failure mode,
+// once it exists, is now fixed.
+
+const productionHtml = `<html><body><table>
+  <tr><th>Year</th><th>Month</th><th>Oil (BBL)</th><th>Gas (MCF)</th><th>Water (BBL)</th></tr>
+  <tr><td>2024</td><td>4</td><td>1,200</td><td>3,000</td><td>200</td></tr>
+  <tr><td>2024</td><td>5</td><td>871</td><td>2,456</td><td>220</td></tr>
+</table></body></html>`;
+
+describe("getProduction — header-key trailing-underscore regression guard", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("parses real oil/gas/water values instead of nulling them out on a unit-suffixed header", async () => {
+    mockFetchSequence(["<html></html>", productionHtml]);
+    const result = await getProduction("60509", "08");
+
+    expect(result.found, `expected found:true, got message: "${result.message}"`).toBe(true);
+    expect(result.rows).toEqual([
+      { production_month: "2024-04", oil_bbl: 1200, gas_mcf: 3000, casinghead_gas_mcf: null, condensate_bbl: null, water_bbl: 200 },
+      { production_month: "2024-05", oil_bbl: 871,  gas_mcf: 2456, casinghead_gas_mcf: null, condensate_bbl: null, water_bbl: 220 },
+    ]);
+  });
+});
+
 // ─── Backward-compatibility regression guard ───────────────────────────────
 //
 // No real captured fixture is available for the other eight findDataTable

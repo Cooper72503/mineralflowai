@@ -570,7 +570,15 @@ export async function getProduction(leaseNumber: string | null, district: string
 
     const rows = table.rows.slice(0, 120).map(row => {
       const obj: Record<string, string> = {};
-      table.header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_")] = row[i] ?? ""; });
+      // Must match rowsToObjects's key transform exactly (including the
+      // trailing-underscore strip) — a unit-suffixed header like "Oil (BBL)"
+      // otherwise becomes key "oil_bbl_" instead of "oil_bbl" and silently
+      // misses every lookup below, while a plain header like "Year" has no
+      // parens to strip and matches fine either way. That divergence between
+      // this inline duplicate and the shared helper is consistent with what
+      // production data actually shows: correct production_month values but
+      // null oil_bbl/gas_mcf/etc. on every row ever stored.
+      table.header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/g, "")] = row[i] ?? ""; });
       const year  = obj["year"]  || obj["prod_yr"]   || "";
       const month = obj["month"] || obj["prod_month"] || "";
       if (!year || !month) return null;
