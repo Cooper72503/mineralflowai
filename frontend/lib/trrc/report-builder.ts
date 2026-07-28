@@ -1,15 +1,17 @@
 /**
  * TRRC Due Diligence Report Builder — Manus Protocol
  *
- * 8-section structured report:
+ * 10-section structured report:
  *   1. Executive Summary (well identity + critical/important flags)
  *   2. Operator Standing (P-5 registration, bond, compliance)
- *   3. Production History (monthly table + computed analytics)
- *   4. Well Construction (W-2 completion data + imaged docs)
+ *   3. Production History (monthly table + computed analytics + charts)
+ *   4. Well Construction (W-2 completion data + W-1 permits + imaged docs)
  *   5. Compliance and Legal Status (violations, orphan, plugging)
  *   6. Legal Description and Location (GLO + GIS)
  *   7. Missing Documents and Gaps
- *   8. Overall Assessment (data completeness, narrative)
+ *   8. Timeline (dated regulatory events, chronological)
+ *   9. Evidence Index (per-source query ledger)
+ *  10. Overall Assessment (data completeness, narrative)
  */
 
 import React from "react";
@@ -34,6 +36,7 @@ import type {
 } from "./types";
 import type { TrrcManifest } from "./manifest-builder";
 import { buildEvidenceIndex } from "./evidence-index";
+import { buildTimeline } from "./timeline-builder";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1169,7 +1172,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 8 — Evidence Index ──────────────────────────────────────────────
+// ─── Section 8 — Timeline ─────────────────────────────────────────────────────
 
 const EVIDENCE_STATUS_LABEL: Record<string, string> = {
   retrieved: "Retrieved",
@@ -1178,6 +1181,53 @@ const EVIDENCE_STATUS_LABEL: Record<string, string> = {
   retrieval_failed: "Retrieval Failed",
   not_attempted: "Not Attempted",
 };
+
+const TIMELINE_CATEGORY_COLOR: Record<string, string> = {
+  permit: C.accent,
+  completion: C.navy,
+  production: C.green,
+  plugging: C.red,
+  compliance: C.yellow,
+  status: C.gray,
+};
+
+function TimelinePage({ run, id: identity, attempts, production, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  production: TrrcDDProductionRow[];
+  generatedAt: string;
+}) {
+  const timeline = buildTimeline(attempts, production);
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — TIMELINE"),
+
+    React.createElement(Text, { style: S.noteText }, "Dated regulatory events assembled from sources already retrieved elsewhere in this report — permits, completion, plugging, compliance, and production. An event only appears here if a date could be confidently parsed from the underlying TRRC record; nothing is estimated."),
+
+    timeline.length === 0
+      ? React.createElement(Text, { style: [S.noteText, { marginTop: 8 }] }, "No dated events could be assembled from the sources retrieved for this run.")
+      : React.createElement(View, { style: { marginTop: 10 } },
+          ...timeline.map((e, i) => React.createElement(
+            View, { key: String(i), style: { flexDirection: "row", marginBottom: 7, alignItems: "flex-start" } },
+            React.createElement(Text, { style: { width: 70, fontSize: 8, fontFamily: "Helvetica-Bold", color: C.dark } }, e.date),
+            React.createElement(View, { style: { width: 8, height: 8, borderRadius: 4, backgroundColor: TIMELINE_CATEGORY_COLOR[e.category] ?? C.gray, marginTop: 1.5, marginRight: 8 } }),
+            React.createElement(Text, { style: { fontSize: 8.5, color: C.dark, flex: 1 } }, e.label),
+          )),
+        ),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 9 — Evidence Index ──────────────────────────────────────────────
 
 function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1195,7 +1245,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — EVIDENCE INDEX"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — EVIDENCE INDEX"),
 
     React.createElement(Text, { style: S.noteText }, "Every TRRC source this pipeline supports, what was queried, and what came back. TRRC's own query portals are inconsistent about honoring pre-filled links for an unauthenticated visitor, so links here point to the portal itself — re-enter the criteria listed to independently reproduce a result."),
 
@@ -1219,7 +1269,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 9 — Overall Assessment ──────────────────────────────────────────
+// ─── Section 10 — Overall Assessment ─────────────────────────────────────────
 
 function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1277,7 +1327,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — OVERALL ASSESSMENT"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — OVERALL ASSESSMENT"),
 
     // Stats row
     React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
@@ -1372,6 +1422,7 @@ export async function buildTrrcPdfReport(
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
+    React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
     React.createElement(OverallAssessmentPage,  { run, id: identity, attempts, flags, analytics, generatedAt }),
   );

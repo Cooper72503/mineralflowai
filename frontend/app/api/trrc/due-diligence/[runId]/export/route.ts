@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * GET /api/trrc/due-diligence/[runId]/export?type=production|coverage|evidence|xlsx
+ * GET /api/trrc/due-diligence/[runId]/export?type=production|coverage|evidence|timeline|xlsx
  *
  * Standalone table downloads — for a user who wants one table (or a
  * combined workbook) in a spreadsheet, not the full ZIP evidence package.
@@ -14,14 +14,15 @@ import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-reques
 import type { TrrcDueDiligenceRun, SourceCoverageStatus, TrrcDDProductionRow } from "@/lib/trrc/types";
 import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
 import { deriveCoverageFromAttempts } from "@/lib/trrc/coverage";
-import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv } from "@/lib/trrc/archive-builder";
+import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv, buildTimelineCsv } from "@/lib/trrc/archive-builder";
 import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
+import { buildTimeline } from "@/lib/trrc/timeline-builder";
 import { buildXlsxWorkbook, type XlsxSheet } from "@/lib/trrc/xlsx-builder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPORT_TYPES = ["production", "coverage", "evidence", "xlsx"] as const;
+const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "xlsx"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
 async function loadProduction(supabase, runId: string): Promise<TrrcDDProductionRow[]> {
@@ -172,6 +173,11 @@ export async function GET(
         ],
         rows: buildEvidenceIndex(attempts, run).map(e => [e.label, e.portal, e.portal_url, e.query_criteria, e.status, e.record_count, e.retrieved_at ?? ""]),
       },
+      {
+        name: "Timeline",
+        columns: [{ header: "Date", width: 14 }, { header: "Category", width: 14 }, { header: "Event", width: 44 }],
+        rows: buildTimeline(attempts, production).map(e => [e.date, e.category, e.label]),
+      },
     ];
 
     const xlsx = await buildXlsxWorkbook(sheets);
@@ -191,17 +197,20 @@ export async function GET(
     const production = await loadProduction(supabase, runId);
     csv = buildProductionCsv(production);
     filename = `Production_${identifier}_${datePart}.csv`;
+  } else if (type === "coverage") {
+    const attempts = await loadAttempts(supabase, runId);
+    const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
+    const coverage = storedCoverage.length > 0 ? storedCoverage : deriveCoverageFromAttempts(attempts);
+    csv = buildCoverageCsv(coverage);
+    filename = `Source_Coverage_${identifier}_${datePart}.csv`;
+  } else if (type === "timeline") {
+    const [production, attempts] = await Promise.all([loadProduction(supabase, runId), loadAttempts(supabase, runId)]);
+    csv = buildTimelineCsv(attempts, production);
+    filename = `Timeline_${identifier}_${datePart}.csv`;
   } else {
     const attempts = await loadAttempts(supabase, runId);
-    if (type === "coverage") {
-      const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
-      const coverage = storedCoverage.length > 0 ? storedCoverage : deriveCoverageFromAttempts(attempts);
-      csv = buildCoverageCsv(coverage);
-      filename = `Source_Coverage_${identifier}_${datePart}.csv`;
-    } else {
-      csv = buildEvidenceIndexCsv(run, attempts);
-      filename = `Evidence_Index_${identifier}_${datePart}.csv`;
-    }
+    csv = buildEvidenceIndexCsv(run, attempts);
+    filename = `Evidence_Index_${identifier}_${datePart}.csv`;
   }
 
   return new NextResponse(csv, {

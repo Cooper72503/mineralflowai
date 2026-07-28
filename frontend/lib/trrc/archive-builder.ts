@@ -18,6 +18,7 @@ import type { TrrcDueDiligenceRun, TrrcFinding, TrrcDDProductionRow, SourceCover
 import type { TrrcManifest } from "./manifest-builder";
 import type { LiteSourceAttempt } from "./coverage";
 import { buildEvidenceIndex } from "./evidence-index";
+import { buildTimeline } from "./timeline-builder";
 
 const deflateRaw = promisify(zlib.deflateRaw);
 
@@ -259,6 +260,12 @@ function buildMissingRecordsCsv(manifest: TrrcManifest): string {
   return header + rows.join("");
 }
 
+export function buildTimelineCsv(sourceAttempts: LiteSourceAttempt[], production: TrrcDDProductionRow[]): string {
+  const header = csvRow(["date", "category", "label"]);
+  const rows = buildTimeline(sourceAttempts, production).map((e) => csvRow([e.date, e.category, e.label]));
+  return header + rows.join("");
+}
+
 export function buildEvidenceIndexCsv(run: TrrcDueDiligenceRun, sourceAttempts: LiteSourceAttempt[]): string {
   const header = csvRow([
     "source", "portal", "portal_url", "query_criteria", "status",
@@ -441,6 +448,10 @@ export async function buildTrrcZipArchive(
     {
       path: `${rootDir}00_Report/Evidence_Index.csv`,
       content: buildEvidenceIndexCsv(run, sourceAttempts),
+    },
+    {
+      path: `${rootDir}00_Report/Timeline.csv`,
+      content: buildTimelineCsv(sourceAttempts, production),
     },
 
     // 01_Identity_and_Wellbore
