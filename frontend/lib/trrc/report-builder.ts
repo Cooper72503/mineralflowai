@@ -21,6 +21,9 @@ import {
   StyleSheet,
   renderToBuffer,
   Link,
+  Svg,
+  Line,
+  Polyline,
 } from "@react-pdf/renderer";
 import type {
   TrrcDueDiligenceRun,
@@ -179,6 +182,12 @@ function fmtMonth(iso: string): string {
   return `${MONTH_NAMES[(parseInt(mo ?? "1") - 1)] ?? mo} ${yr}`;
 }
 
+function fmtMonthShort(iso: string): string {
+  const [yr, mo] = iso.split("-");
+  const name = MONTH_NAMES[(parseInt(mo ?? "1") - 1)] ?? mo;
+  return `${name.slice(0, 3)} '${(yr ?? "").slice(2)}`;
+}
+
 function fmtNum(v: number | null | undefined): string {
   if (v === null || v === undefined) return "NO RPT";
   return v.toLocaleString("en-US");
@@ -187,6 +196,88 @@ function fmtNum(v: number | null | undefined): string {
 function str(v: unknown): string {
   if (v === null || v === undefined) return "";
   return String(v).trim();
+}
+
+// ─── Production chart (hand-rolled SVG, one axis per chart) ─────────────────
+//
+// Oil (BBL) and gas (MCF) are different units on different scales — rendered
+// as two separate single-axis charts rather than one dual-axis chart, since
+// a shared axis would silently misrepresent one series' magnitude relative
+// to the other. Null months render as a gap in the line, never as a false
+// zero — a missing report is not the same claim as a reported zero.
+
+function ProductionChart({ months, metricKey, title, unit, color }: {
+  months: TrrcDDProductionRow[];
+  metricKey: "oil_bbl" | "gas_mcf";
+  title: string;
+  unit: string;
+  color: string;
+}) {
+  const width = 252, height = 92;
+  const padLeft = 34, padRight = 6, padTop = 10, padBottom = 16;
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+
+  const known = months
+    .map(m => m[metricKey] as number | null)
+    .filter((v): v is number => v !== null && v !== undefined);
+
+  if (known.length === 0) {
+    return React.createElement(
+      View, { style: { width, marginRight: 8 } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.dark, marginBottom: 2 } }, `${title} (${unit})`),
+      React.createElement(View, { style: { width, height, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: C.border } },
+        React.createElement(Text, { style: { fontSize: 7, color: C.lightGray } }, "No data retrieved"),
+      ),
+    );
+  }
+
+  const maxV = Math.max(...known);
+  const range = maxV || 1; // anchored at zero — production volumes are never negative
+  const n = months.length;
+  const xStep = n > 1 ? plotW / (n - 1) : 0;
+
+  // Break the line at each null month instead of interpolating through it.
+  const segments: string[] = [];
+  let current: string[] = [];
+  months.forEach((m, i) => {
+    const v = m[metricKey] as number | null;
+    if (v === null || v === undefined) {
+      if (current.length > 1) segments.push(current.join(" "));
+      current = [];
+      return;
+    }
+    const x = padLeft + i * xStep;
+    const y = padTop + plotH - (v / range) * plotH;
+    current.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  });
+  if (current.length > 1) segments.push(current.join(" "));
+
+  const labelIdx = n <= 1 ? [0]
+    : n <= 4 ? months.map((_, i) => i)
+    : [0, Math.round((n - 1) / 3), Math.round((2 * (n - 1)) / 3), n - 1];
+
+  return React.createElement(
+    View, { style: { width, marginRight: 8 } },
+    React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.dark, marginBottom: 2 } }, `${title} (${unit})`),
+    React.createElement(
+      Svg, { width, height, viewBox: `0 0 ${width} ${height}` },
+      React.createElement(Line, { x1: padLeft, y1: padTop, x2: padLeft, y2: padTop + plotH, stroke: C.border, strokeWidth: 0.5 }),
+      React.createElement(Line, { x1: padLeft, y1: padTop + plotH, x2: width - padRight, y2: padTop + plotH, stroke: C.border, strokeWidth: 0.5 }),
+      React.createElement(Text, { x: 2, y: padTop + 4, style: { fontSize: 5.5, fill: C.lightGray } }, fmtNum(Math.round(maxV))),
+      React.createElement(Text, { x: 2, y: padTop + plotH + 3, style: { fontSize: 5.5, fill: C.lightGray } }, "0"),
+      ...segments.map((pts, i) => React.createElement(Polyline, {
+        key: String(i), points: pts, fill: "none", stroke: color, strokeWidth: 1.5,
+        strokeLinejoin: "round", strokeLinecap: "round",
+      })),
+      ...labelIdx.map(i => React.createElement(Text, {
+        key: `lbl${i}`,
+        x: Math.max(padLeft, Math.min(width - padRight - 16, padLeft + i * xStep - 8)),
+        y: height - 4,
+        style: { fontSize: 5.5, fill: C.lightGray },
+      }, fmtMonthShort(months[i].production_month))),
+    ),
+  );
 }
 
 function kv(label: string, value: string | null | undefined, highlight?: "red" | "yellow") {
@@ -607,7 +698,7 @@ function ExecutiveSummaryPage({ run, id: identity, flags, wellStatus, generatedA
 
     // Important flags
     hasImportant ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg }] },
-      React.createElement(Text, { style: [S.flagLabel, { color: C.yellow }] }, `▲ IMPORTANT FLAGS (${flags.important.length})`),
+      React.createElement(Text, { style: [S.flagLabel, { color: C.yellow }] }, `⚠ IMPORTANT FLAGS (${flags.important.length})`),
       ...flags.important.map((f, i) => React.createElement(Text, { key: String(i), style: [S.flagItem, { color: C.yellow }] }, `• ${f}`)),
     ) : null,
 
@@ -733,7 +824,10 @@ function ProductionPage({ run, id: identity, analytics, generatedAt }: {
       React.createElement(View, { style: S.summaryStatBox },
         React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "YOY DECLINE (OIL)"),
         React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: declineFlagged ? C.red : C.navy } },
-          yoyDeclineOil !== null ? `${yoyDeclineOil > 0 ? "▼" : "▲"} ${Math.abs(yoyDeclineOil).toFixed(1)}%` : "—",
+          // Standard PDF core fonts (Helvetica) don't reliably render Unicode
+          // arrow glyphs (▼/▲) — they render as a missing/fallback glyph that
+          // overlaps the adjacent digit. Plain +/- reads just as clearly.
+          yoyDeclineOil !== null ? `${yoyDeclineOil > 0 ? "-" : "+"}${Math.abs(yoyDeclineOil).toFixed(1)}%` : "—",
         ),
       ),
       React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
@@ -741,6 +835,11 @@ function ProductionPage({ run, id: identity, analytics, generatedAt }: {
         React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: worTrend === "Rising" ? C.red : C.navy } }, worTrend),
       ),
     ),
+
+    months.length > 0 ? React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
+      React.createElement(ProductionChart, { months, metricKey: "oil_bbl", title: "Oil Production", unit: "BBL/mo", color: C.accent }),
+      React.createElement(ProductionChart, { months, metricKey: "gas_mcf", title: "Gas Production", unit: "MCF/mo", color: C.navy }),
+    ) : null,
 
     React.createElement(View, { style: { marginBottom: 8 } },
       kv("Prior 12-Mo Avg Oil",       prior12AvgOil !== null ? `${prior12AvgOil.toFixed(0)} BBL/mo` : "—"),
