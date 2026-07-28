@@ -14,7 +14,7 @@ import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-reques
 import type { TrrcDueDiligenceRun, SourceCoverageStatus, TrrcDDProductionRow } from "@/lib/trrc/types";
 import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
 import { deriveCoverageFromAttempts } from "@/lib/trrc/coverage";
-import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv, buildTimelineCsv, buildOffsetWellsCsv, buildLateralPathCsv } from "@/lib/trrc/archive-builder";
+import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv, buildTimelineCsv, buildOffsetWellsCsv, buildLateralPathCsv, buildCountyRecordsCsv, type CountyRecordEntry } from "@/lib/trrc/archive-builder";
 import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
 import { buildTimeline } from "@/lib/trrc/timeline-builder";
 import { fetchOffsetWells } from "@/lib/trrc/offset-wells";
@@ -26,7 +26,7 @@ import { buildXlsxWorkbook, type XlsxSheet } from "@/lib/trrc/xlsx-builder";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "offset", "lateral", "xlsx"] as const;
+const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "offset", "lateral", "county", "xlsx"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
 async function loadProduction(supabase, runId: string): Promise<TrrcDDProductionRow[]> {
@@ -145,6 +145,10 @@ export async function GET(
     const lateralPath = gisLat !== null && gisLng !== null && run.resolved_primary_api
       ? await fetchLateralPath(run.resolved_primary_api, gisLat, gisLng)
       : null;
+    const countyAttempt = attempts.find(a => a.source_name === "fetch_county_records");
+    const countyRecords = Array.isArray(countyAttempt?.result_data_json?.["records"])
+      ? countyAttempt.result_data_json["records"] as CountyRecordEntry[]
+      : [];
 
     const analytics = computeProductionAnalytics(production);
     const flags = generateFlags(attempts, analytics, run);
@@ -243,6 +247,17 @@ export async function GET(
           ["Bearing from Surface", lateralPath.bearing],
         ] : [["Not applicable", "No horizontal drainhole on record (vertical well or not found)"]],
       },
+      {
+        name: "County Records",
+        columns: [
+          { header: "Grantor", width: 26 }, { header: "Grantee", width: 26 }, { header: "Doc Type", width: 20 },
+          { header: "Recorded Date", width: 14 }, { header: "Doc Number", width: 14 },
+          { header: "Book/Volume/Page", width: 18 }, { header: "Legal Description", width: 40 },
+        ],
+        rows: countyRecords.length > 0
+          ? countyRecords.map(r => [r.grantor, r.grantee, r.doc_type, r.recorded_date, r.doc_number, r.book_volume_page, r.legal_description])
+          : [["Not applicable", countyAttempt?.result_data_json?.["data_gap"] === true ? "No automated connector for this well's county" : "No county records retrieved for this run"]],
+      },
     ];
 
     const xlsx = await buildXlsxWorkbook(sheets);
@@ -293,6 +308,17 @@ export async function GET(
     }
     csv = buildLateralPathCsv(lateralPath);
     filename = `Lateral_Path_${identifier}_${datePart}.csv`;
+  } else if (type === "county") {
+    const attempts = await loadAttempts(supabase, runId);
+    const countyAttempt = attempts.find(a => a.source_name === "fetch_county_records");
+    const records = Array.isArray(countyAttempt?.result_data_json?.["records"])
+      ? countyAttempt.result_data_json["records"] as CountyRecordEntry[]
+      : [];
+    if (records.length === 0) {
+      return NextResponse.json({ ok: false, error: "No county records retrieved for this run (either no automated connector for the well's county, or no matching records found)." }, { status: 404 });
+    }
+    csv = buildCountyRecordsCsv(records);
+    filename = `County_Records_${identifier}_${datePart}.csv`;
   } else {
     const attempts = await loadAttempts(supabase, runId);
     csv = buildEvidenceIndexCsv(run, attempts);

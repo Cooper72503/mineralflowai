@@ -314,6 +314,24 @@ export function buildOffsetWellsCsv(offsetWells: OffsetWell[]): string {
   return header + rows.join("");
 }
 
+export type CountyRecordEntry = {
+  grantor: string;
+  grantee: string;
+  doc_type: string;
+  recorded_date: string;
+  doc_number: string;
+  book_volume_page: string;
+  legal_description: string;
+};
+
+export function buildCountyRecordsCsv(records: CountyRecordEntry[]): string {
+  const header = csvRow(["grantor", "grantee", "doc_type", "recorded_date", "doc_number", "book_volume_page", "legal_description"]);
+  const rows = records.map((r) =>
+    csvRow([r.grantor, r.grantee, r.doc_type, r.recorded_date, r.doc_number, r.book_volume_page, r.legal_description]),
+  );
+  return header + rows.join("");
+}
+
 export function buildEvidenceIndexCsv(run: TrrcDueDiligenceRun, sourceAttempts: LiteSourceAttempt[]): string {
   const header = csvRow([
     "source", "portal", "portal_url", "query_criteria", "status",
@@ -477,6 +495,7 @@ export async function buildTrrcZipArchive(
   // Static well-location map (TRRC's own public GIS export — no API key,
   // graceful null on any failure). Same mechanism the PDF uses.
   const gisAttempt = sourceAttempts.find(a => a.source_name === "fetch_gis_plat");
+  const countyRecordsAttempt = sourceAttempts.find(a => a.source_name === "fetch_county_records") ?? null;
   const mapLat = typeof gisAttempt?.result_data_json?.["latitude"] === "number" ? gisAttempt.result_data_json["latitude"] as number : null;
   const mapLng = typeof gisAttempt?.result_data_json?.["longitude"] === "number" ? gisAttempt.result_data_json["longitude"] as number : null;
   const mapImage = mapLat !== null && mapLng !== null ? await fetchStaticMapImage(mapLat, mapLng) : null;
@@ -617,6 +636,12 @@ export async function buildTrrcZipArchive(
       path: `${rootDir}15_Unavailable_Record_Links/manual_retrieval_links.csv`,
       content: buildManualLinksCsv(manifest),
     },
+
+    // 16_County_Records
+    ...buildCategoryEntries(`${rootDir}16_County_Records/`, FOLDER_SOURCES["16_County_Records"], sourceAttempts),
+    ...(Array.isArray(countyRecordsAttempt?.result_data_json?.["records"]) && (countyRecordsAttempt.result_data_json["records"] as unknown[]).length > 0
+      ? [{ path: `${rootDir}16_County_Records/county_records.csv`, content: buildCountyRecordsCsv(countyRecordsAttempt.result_data_json["records"] as CountyRecordEntry[]) }]
+      : []),
   ];
 
   return buildZipBuffer(entries, now);

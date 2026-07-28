@@ -16,7 +16,7 @@
 
 import { describe, it, expect } from "vitest";
 import * as zlib from "zlib";
-import { buildTrrcZipArchive } from "../archive-builder";
+import { buildTrrcZipArchive, buildCountyRecordsCsv } from "../archive-builder";
 import type { LiteSourceAttempt } from "../coverage";
 import type { TrrcDueDiligenceRun } from "../types";
 import type { TrrcManifest } from "../manifest-builder";
@@ -134,5 +134,80 @@ describe("buildTrrcZipArchive — category folder population", () => {
     const pdfPath = Object.keys(files).find(p => p.endsWith(".pdf"));
     expect(pdfPath).toBeDefined();
     expect(files[pdfPath!].equals(pdfBytes)).toBe(true);
+  });
+
+  it("reports a manual_required/data_gap source as needing manual review, not as a confirmed absence", async () => {
+    // county-records.ts sets data_gap:true (and found:false) for any county
+    // with no automated connector. Before this fix, buildCategoryEntries had
+    // no branch for data_gap, so this fell through to the confirmed-absence
+    // branch and claimed "TRRC returned no records" — false, since the
+    // source was never actually queried, just deflected to a manual link.
+    const countyResult = {
+      found: false,
+      status: "manual_required",
+      county: "Karnes",
+      provider: "none",
+      records: [],
+      total_count: 0,
+      search_url: "https://www.texasfile.com/search/texas/karnes-county/county-clerk-records/",
+      message: "No automated county records connector for Karnes County yet — manual search required.",
+      data_gap: true,
+    };
+    const attempts: LiteSourceAttempt[] = [
+      attempt({ source_name: "fetch_county_records", status: "success", result_count: 0, result_data_json: countyResult }),
+    ];
+
+    const zip = await buildTrrcZipArchive(baseRun, baseManifest, Buffer.from("fake pdf"), [], [], [], attempts);
+    const files = readZipEntries(zip);
+    const readmePath = Object.keys(files).find(p => p.endsWith("16_County_Records/README.txt"));
+    const readme = files[readmePath!].toString("utf8");
+
+    expect(readme).toMatch(/manual review required/i);
+    expect(readme).toMatch(/texasfile\.com/);
+    expect(readme).not.toMatch(/confirmed absence/i);
+    expect(readme).not.toMatch(/TRRC returned no records/i);
+  });
+
+  it("writes a county_records.csv alongside the JSON when the automated connector returns real records", async () => {
+    const countyResult = {
+      found: true,
+      status: "automated",
+      county: "Midland",
+      provider: "publicsearch.us",
+      records: [
+        { grantor: "Chevron U.S.A. Inc", grantee: "Jane Doe", doc_type: "Mineral Deed", recorded_date: "01/15/2024", doc_number: "2024-001234", book_volume_page: "1234/567", legal_description: "Section 12, Block 40" },
+      ],
+      total_count: 1,
+      search_url: "https://midland.tx.publicsearch.us/results?...",
+      message: `1 record(s) found for "Chevron" in Midland County.`,
+    };
+    const attempts: LiteSourceAttempt[] = [
+      attempt({ source_name: "fetch_county_records", status: "success", result_count: 1, result_data_json: countyResult }),
+    ];
+
+    const zip = await buildTrrcZipArchive(baseRun, baseManifest, Buffer.from("fake pdf"), [], [], [], attempts);
+    const files = readZipEntries(zip);
+    const csvPath = Object.keys(files).find(p => p.endsWith("16_County_Records/county_records.csv"));
+    expect(csvPath, `expected county_records.csv, got: ${Object.keys(files).join(", ")}`).toBeDefined();
+    const csv = files[csvPath!].toString("utf8");
+    expect(csv).toMatch(/grantor,grantee,doc_type/);
+    expect(csv).toMatch(/Chevron U\.S\.A\. Inc/);
+    expect(csv).toMatch(/Section 12, Block 40/);
+  });
+});
+
+describe("buildCountyRecordsCsv", () => {
+  it("formats records as CSV with a header row", () => {
+    const csv = buildCountyRecordsCsv([
+      { grantor: "Acme Oil LLC", grantee: "Jane Doe", doc_type: "Deed", recorded_date: "03/01/2023", doc_number: "2023-000567", book_volume_page: "890/12", legal_description: "Block 5, Lot 3" },
+    ]);
+    const lines = csv.trim().split("\r\n");
+    expect(lines[0]).toBe("grantor,grantee,doc_type,recorded_date,doc_number,book_volume_page,legal_description");
+    expect(lines[1]).toBe("Acme Oil LLC,Jane Doe,Deed,03/01/2023,2023-000567,890/12,\"Block 5, Lot 3\"");
+  });
+
+  it("returns just the header row for an empty list", () => {
+    const csv = buildCountyRecordsCsv([]);
+    expect(csv.trim()).toBe("grantor,grantee,doc_type,recorded_date,doc_number,book_volume_page,legal_description");
   });
 });

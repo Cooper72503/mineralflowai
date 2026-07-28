@@ -163,6 +163,7 @@ const DOWNLOAD_PATHS = {
   "export-timeline":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=timeline`,
   "export-offset":     (id: string) => `/api/trrc/due-diligence/${id}/export?type=offset`,
   "export-lateral":    (id: string) => `/api/trrc/due-diligence/${id}/export?type=lateral`,
+  "export-county":     (id: string) => `/api/trrc/due-diligence/${id}/export?type=county`,
   "export-xlsx":       (id: string) => `/api/trrc/due-diligence/${id}/export?type=xlsx`,
 } as const;
 
@@ -1138,6 +1139,7 @@ function ResultsDashboard({
             { type: "export-timeline" as const,     label: "Timeline CSV" },
             { type: "export-offset" as const,       label: "Offset Wells CSV" },
             { type: "export-lateral" as const,      label: "Lateral Path CSV" },
+            { type: "export-county" as const,       label: "County Records CSV" },
           ]).map(({ type, label }) => (
             <button key={type} onClick={() => onDownload(type)} style={{
               background: COLORS.surfaceAlt, border: `1px solid ${COLORS.borderStrong}`,
