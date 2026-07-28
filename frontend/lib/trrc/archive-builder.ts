@@ -20,6 +20,7 @@ import type { LiteSourceAttempt } from "./coverage";
 import { buildEvidenceIndex } from "./evidence-index";
 import { buildTimeline } from "./timeline-builder";
 import { fetchStaticMapImage } from "./maps-builder";
+import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
 
 const deflateRaw = promisify(zlib.deflateRaw);
 
@@ -267,6 +268,14 @@ export function buildTimelineCsv(sourceAttempts: LiteSourceAttempt[], production
   return header + rows.join("");
 }
 
+export function buildOffsetWellsCsv(offsetWells: OffsetWell[]): string {
+  const header = csvRow(["api", "well_number", "status", "distance_miles", "bearing", "latitude", "longitude"]);
+  const rows = offsetWells.map((w) =>
+    csvRow([w.api, w.well_number, w.status, w.distance_miles.toFixed(3), w.bearing, w.latitude, w.longitude]),
+  );
+  return header + rows.join("");
+}
+
 export function buildEvidenceIndexCsv(run: TrrcDueDiligenceRun, sourceAttempts: LiteSourceAttempt[]): string {
   const header = csvRow([
     "source", "portal", "portal_url", "query_criteria", "status",
@@ -426,6 +435,9 @@ export async function buildTrrcZipArchive(
   const mapLat = typeof gisAttempt?.result_data_json?.["latitude"] === "number" ? gisAttempt.result_data_json["latitude"] as number : null;
   const mapLng = typeof gisAttempt?.result_data_json?.["longitude"] === "number" ? gisAttempt.result_data_json["longitude"] as number : null;
   const mapImage = mapLat !== null && mapLng !== null ? await fetchStaticMapImage(mapLat, mapLng) : null;
+  const offsetWells = mapLat !== null && mapLng !== null
+    ? await fetchOffsetWells(mapLat, mapLng, run.resolved_primary_api ?? null)
+    : [];
 
   // Build a safe identifier: strip non-alphanumeric except underscores/hyphens
   const identifier = run.normalized_input.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60);
@@ -509,6 +521,7 @@ export async function buildTrrcZipArchive(
     // 11_GIS_Maps_and_Plats
     ...buildCategoryEntries(`${rootDir}11_GIS_Maps_and_Plats/`, FOLDER_SOURCES["11_GIS_Maps_and_Plats"], sourceAttempts),
     ...(mapImage ? [{ path: `${rootDir}11_GIS_Maps_and_Plats/well_location_map.png`, content: mapImage }] : []),
+    ...(offsetWells.length > 0 ? [{ path: `${rootDir}11_GIS_Maps_and_Plats/offset_wells.csv`, content: buildOffsetWellsCsv(offsetWells) }] : []),
 
     // 12_Well_File_Correspondence
     ...buildCategoryEntries(`${rootDir}12_Well_File_Correspondence/`, FOLDER_SOURCES["12_Well_File_Correspondence"], sourceAttempts),

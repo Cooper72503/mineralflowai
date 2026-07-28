@@ -161,6 +161,7 @@ const DOWNLOAD_PATHS = {
   "export-coverage":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=coverage`,
   "export-evidence":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=evidence`,
   "export-timeline":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=timeline`,
+  "export-offset":     (id: string) => `/api/trrc/due-diligence/${id}/export?type=offset`,
   "export-xlsx":       (id: string) => `/api/trrc/due-diligence/${id}/export?type=xlsx`,
 } as const;
 
@@ -1133,6 +1134,7 @@ function ResultsDashboard({
             { type: "export-coverage" as const,     label: "Coverage CSV" },
             { type: "export-evidence" as const,     label: "Evidence Index CSV" },
             { type: "export-timeline" as const,     label: "Timeline CSV" },
+            { type: "export-offset" as const,       label: "Offset Wells CSV" },
           ]).map(({ type, label }) => (
             <button key={type} onClick={() => onDownload(type)} style={{
               background: COLORS.surfaceAlt, border: `1px solid ${COLORS.borderStrong}`,

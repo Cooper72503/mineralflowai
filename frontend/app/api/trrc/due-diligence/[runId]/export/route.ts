@@ -14,15 +14,16 @@ import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-reques
 import type { TrrcDueDiligenceRun, SourceCoverageStatus, TrrcDDProductionRow } from "@/lib/trrc/types";
 import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
 import { deriveCoverageFromAttempts } from "@/lib/trrc/coverage";
-import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv, buildTimelineCsv } from "@/lib/trrc/archive-builder";
+import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv, buildTimelineCsv, buildOffsetWellsCsv } from "@/lib/trrc/archive-builder";
 import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
 import { buildTimeline } from "@/lib/trrc/timeline-builder";
+import { fetchOffsetWells } from "@/lib/trrc/offset-wells";
 import { buildXlsxWorkbook, type XlsxSheet } from "@/lib/trrc/xlsx-builder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "xlsx"] as const;
+const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "offset", "xlsx"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
 async function loadProduction(supabase, runId: string): Promise<TrrcDDProductionRow[]> {
@@ -132,6 +133,13 @@ export async function GET(
     const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
     const coverage = storedCoverage.length > 0 ? storedCoverage : deriveCoverageFromAttempts(attempts);
 
+    const gisAttempt = attempts.find(a => a.source_name === "fetch_gis_plat");
+    const gisLat = typeof gisAttempt?.result_data_json?.["latitude"] === "number" ? gisAttempt.result_data_json["latitude"] as number : null;
+    const gisLng = typeof gisAttempt?.result_data_json?.["longitude"] === "number" ? gisAttempt.result_data_json["longitude"] as number : null;
+    const offsetWells = gisLat !== null && gisLng !== null
+      ? await fetchOffsetWells(gisLat, gisLng, run.resolved_primary_api)
+      : [];
+
     const sheets: XlsxSheet[] = [
       {
         name: "Identity",
@@ -178,6 +186,15 @@ export async function GET(
         columns: [{ header: "Date", width: 14 }, { header: "Category", width: 14 }, { header: "Event", width: 44 }],
         rows: buildTimeline(attempts, production).map(e => [e.date, e.category, e.label]),
       },
+      {
+        name: "Offset Wells",
+        columns: [
+          { header: "API", width: 14 }, { header: "Well No.", width: 12 }, { header: "Status", width: 20 },
+          { header: "Distance (mi)", width: 14 }, { header: "Bearing", width: 10 },
+          { header: "Latitude", width: 12 }, { header: "Longitude", width: 12 },
+        ],
+        rows: offsetWells.map(w => [w.api, w.well_number, w.status, Number(w.distance_miles.toFixed(3)), w.bearing, w.latitude, w.longitude]),
+      },
     ];
 
     const xlsx = await buildXlsxWorkbook(sheets);
@@ -207,6 +224,14 @@ export async function GET(
     const [production, attempts] = await Promise.all([loadProduction(supabase, runId), loadAttempts(supabase, runId)]);
     csv = buildTimelineCsv(attempts, production);
     filename = `Timeline_${identifier}_${datePart}.csv`;
+  } else if (type === "offset") {
+    const attempts = await loadAttempts(supabase, runId);
+    const gisAttempt = attempts.find(a => a.source_name === "fetch_gis_plat");
+    const gisLat = typeof gisAttempt?.result_data_json?.["latitude"] === "number" ? gisAttempt.result_data_json["latitude"] as number : null;
+    const gisLng = typeof gisAttempt?.result_data_json?.["longitude"] === "number" ? gisAttempt.result_data_json["longitude"] as number : null;
+    const offsetWells = gisLat !== null && gisLng !== null ? await fetchOffsetWells(gisLat, gisLng, run.resolved_primary_api) : [];
+    csv = buildOffsetWellsCsv(offsetWells);
+    filename = `Offset_Wells_${identifier}_${datePart}.csv`;
   } else {
     const attempts = await loadAttempts(supabase, runId);
     csv = buildEvidenceIndexCsv(run, attempts);

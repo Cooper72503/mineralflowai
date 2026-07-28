@@ -39,6 +39,7 @@ import type { TrrcManifest } from "./manifest-builder";
 import { buildEvidenceIndex } from "./evidence-index";
 import { buildTimeline } from "./timeline-builder";
 import { fetchStaticMapImage } from "./maps-builder";
+import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1041,11 +1042,12 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
 
 // ─── Section 6 — Legal Description and Location ───────────────────────────────
 
-function LegalDescriptionPage({ run, id: identity, attempts, mapImage, generatedAt }: {
+function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWells, generatedAt }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   attempts: LiteSourceAttempt[];
   mapImage: Buffer | null;
+  offsetWells: OffsetWell[];
   generatedAt: string;
 }) {
   const gis = getAttempt(attempts, "fetch_gis_plat");
@@ -1111,6 +1113,26 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, generated
         }),
       ),
       React.createElement(Text, { style: [S.noteText, { marginTop: 3 }] }, "Subject well (red circle) among nearby offset wells. Source: TRRC GIS Well Locations layer (rrc_public/RRC_Public_Viewer_Srvs), rendered directly — coordinates only, no basemap imagery."),
+    ) : null,
+
+    offsetWells.length > 0 ? React.createElement(View, { style: { marginTop: 10 } },
+      React.createElement(Text, { style: S.subTitle }, `Nearest Offset Wells (${offsetWells.length} within 1 mi.)`),
+      React.createElement(Text, { style: S.noteText }, "Operator is not available from this GIS layer without a per-well lookup and is not included here — status reflects the GIS symbol classification, not necessarily current TRRC well-status records."),
+      React.createElement(View, { style: [S.tableHeader, { marginTop: 6 }] },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "20%" }] }, "API"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "Well No."),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "Distance"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "12%" }] }, "Bearing"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "36%" }] }, "Status"),
+      ),
+      ...offsetWells.slice(0, 10).map((w, i) => React.createElement(
+        View, { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCellMono, { width: "20%" }] }, w.api),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "16%" }] }, w.well_number),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "16%" }] }, `${w.distance_miles.toFixed(2)} mi`),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "12%" }] }, w.bearing),
+        React.createElement(Text, { style: [S.tableCell, { width: "36%" }] }, w.status),
+      )),
     ) : null,
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
@@ -1426,6 +1448,9 @@ export async function buildTrrcPdfReport(
   const mapLat = typeof gisForMap?.["latitude"] === "number" ? gisForMap["latitude"] as number : null;
   const mapLng = typeof gisForMap?.["longitude"] === "number" ? gisForMap["longitude"] as number : null;
   const mapImage = mapLat !== null && mapLng !== null ? await fetchStaticMapImage(mapLat, mapLng) : null;
+  const offsetWells = mapLat !== null && mapLng !== null
+    ? await fetchOffsetWells(mapLat, mapLng, identity.apiNumber)
+    : [];
   const analytics = computeProductionAnalytics(production);
   const flags     = generateFlags(attempts, analytics, run);
 
@@ -1446,7 +1471,7 @@ export async function buildTrrcPdfReport(
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
-    React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, generatedAt }),
+    React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, generatedAt }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
