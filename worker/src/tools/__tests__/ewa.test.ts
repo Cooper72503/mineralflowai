@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +28,10 @@ const emptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/wellbore-empty.
 const applicationErrorHtml = fs.readFileSync(path.join(__dirname, "fixtures/trrc-application-error.html"), "utf8");
 const permitPopulatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/drilling-permit-populated.html"), "utf8");
 const permitEmptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/drilling-permit-empty.html"), "utf8");
+const gisWellFoundJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-well-found.json"), "utf8");
+const gisWellEmptyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-well-empty.json"), "utf8");
+const gisAlertAreasJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-alert-areas.json"), "utf8");
+const gisSurveyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-survey.json"), "utf8");
 
 // ─── Direct unit tests of the extraction primitives ────────────────────────
 
@@ -347,5 +351,71 @@ describe("findDataTable — backward compatibility on a simple (non-nested) tabl
     expect(table).not.toBeNull();
     expect(table!.header).toEqual(["Operator Name", "Operator No", "P5 Status"]);
     expect(table!.rows).toEqual([["EXAMPLE OPERATING CO", "123456", "ACTIVE"]]);
+  });
+});
+
+// ─── getGisLocation — real ArcGIS schema regression guard ──────────────────
+//
+// Live-tested directly against TRRC's ArcGIS server on 2026-07-27: the
+// well-location query filtered on a field named "API8" that doesn't
+// exist (the real field is "API"), so it 400'd on every call — and the
+// response-handling code treated any response without a `features` array,
+// including an ArcGIS error body, as a confirmed empty result. The
+// survey/alert-area queries had the same problem plus a structural one:
+// those are polygon layers with no API field at all, so they need a
+// spatial point-in-polygon query using the well's own coordinates, not an
+// attribute filter. These fixtures are real captured responses for API
+// 42-329-46771 (the Chevron/Midland well used throughout tonight's W-1
+// work) — ground truth confirmed live, not guessed.
+
+function mockFetchJsonSequence(bodies: string[]): void {
+  let call = 0;
+  globalThis.fetch = (async () => {
+    const body = bodies[Math.min(call, bodies.length - 1)];
+    call++;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => JSON.parse(body),
+      text: async () => body,
+    } as unknown as Response;
+  }) as typeof fetch;
+}
+
+describe("getGisLocation — real ArcGIS schema regression guard", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("resolves real coordinates and well type for a well genuinely in the GIS database", async () => {
+    mockFetchJsonSequence([gisWellFoundJson, gisAlertAreasJson, gisSurveyJson]);
+    const result = await getGisLocation("4232946771");
+
+    expect(result.found, `expected found:true, got message: "${result.message}"`).toBe(true);
+    expect(result.latitude).toBeCloseTo(31.6687, 3);
+    expect(result.longitude).toBeCloseTo(-101.9487, 3);
+    expect(result.well_type).toBe("Oil Well");
+  });
+
+  it("resolves survey polygons via a spatial query, not a nonexistent API attribute filter", async () => {
+    mockFetchJsonSequence([gisWellFoundJson, gisAlertAreasJson, gisSurveyJson]);
+    const result = await getGisLocation("4232946771");
+
+    expect(result.survey).not.toBeNull();
+    expect(result.survey!.abstract_number).toBe("329236");
+    expect(result.survey!.survey_name).toBe("T&P RR CO");
+    expect(result.survey!.block_number).toBe("39 T4S");
+  });
+
+  it("returns found:false with no fabricated coordinates on a genuine empty result", async () => {
+    mockFetchJsonSequence([gisWellEmptyJson]);
+    const result = await getGisLocation("4299999999");
+
+    expect(result.found).toBe(false);
+    expect(result.latitude).toBeNull();
+    expect(result.longitude).toBeNull();
+    expect(result.error).toBeUndefined();
   });
 });

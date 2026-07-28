@@ -727,6 +727,25 @@ export async function getInjectionRecords(apiNumber: string, operatorNumber?: st
 }
 
 // ─── S16 — RRC GIS (ArcGIS REST) ─────────────────────────────────────────────
+//
+// Confirmed live against the real ArcGIS service schema (2026-07-27) that
+// this function had two independent bugs, both silently turning "the well
+// IS in the GIS database" into a false "not found":
+//   1. The well-location query (layer 1, "Well Locations") filtered on
+//      `API8`, but the field is actually named `API` — every query 400'd,
+//      and the response-handling code treated any response without a
+//      `features` array (including an ArcGIS error body) as zero results.
+//   2. The survey (layer 24) and alert-area (layer 26) queries filtered by
+//      `where=API=...`, but those layers are polygons with no API field at
+//      all — they need a spatial point-in-polygon query using the well's
+//      own coordinates, not an attribute filter. Also read field names
+//      (SURVEY_NAME, BLOCK_NUMBER, SECTION_NAME, AlertAreaName) that don't
+//      exist in the real schema (LEVEL1_SURVEY_NAME, LEVEL2_BLOCK_NUMBER,
+//      LEVEL3_SURVEY_NUMBER, AREA_NAME).
+// Verified directly: API 32946771 (the real Chevron/Midland well used
+// throughout tonight's W-1 work) returns a real point, two intersecting
+// survey polygons, and geometry from these corrected queries where the
+// original code always returned "not found."
 
 export async function getGisLocation(apiNumber: string): Promise<{
   found: boolean;
@@ -741,10 +760,10 @@ export async function getGisLocation(apiNumber: string): Promise<{
   const digits = apiNumber.replace(/\D/g, "");
   const api8 = digits.slice(2, 10);
   const GIS_BASE = "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer";
-  const qs = `f=json&where=API8%3D%27${api8}%27&outFields=*&returnGeometry=true&geometryType=esriGeometryPoint&outSR=4326`;
 
   try {
-    const res = await fetch(`${GIS_BASE}/1/query?${qs}`, { signal: AbortSignal.timeout(20_000) });
+    const wellQs = `f=json&where=API%3D%27${api8}%27&outFields=*&returnGeometry=true&outSR=4326`;
+    const res = await fetch(`${GIS_BASE}/1/query?${wellQs}`, { signal: AbortSignal.timeout(20_000) });
     const json = await res.json() as { features?: Array<{ geometry?: { x?: number; y?: number }; attributes?: Record<string, unknown> }> };
 
     if (!json.features || json.features.length === 0) {
@@ -756,26 +775,35 @@ export async function getGisLocation(apiNumber: string): Promise<{
     const lng = feat.geometry?.x ?? null;
     const attrs = feat.attributes ?? {};
 
-    // Query alert areas (layer 26)
-    const alertRes = await fetch(`${GIS_BASE}/26/query?${qs.replace("outFields=*", "outFields=AlertAreaName")}&geometryType=esriGeometryPoint`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    const alertJson = alertRes ? await alertRes.json() as { features?: Array<{ attributes?: { AlertAreaName?: string } }> } : null;
-    const alertAreas = (alertJson?.features ?? []).map(f => f.attributes?.AlertAreaName ?? "").filter(Boolean);
+    let alertAreas: string[] = [];
+    let surveyAttrs: Record<string, unknown> | null = null;
 
-    // Query survey layer (layer 24)
-    const surveyRes = await fetch(`${GIS_BASE}/24/query?${qs}&outFields=ABSTRACT_NUMBER,SURVEY_NAME,BLOCK_NUMBER,SECTION_NAME`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    const surveyJson = surveyRes ? await surveyRes.json() as { features?: Array<{ attributes?: Record<string, unknown> }> } : null;
-    const surveyAttrs = surveyJson?.features?.[0]?.attributes ?? null;
+    if (lat !== null && lng !== null) {
+      const spatialQs = `f=json&geometry=${lng},${lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false`;
+
+      // Alert areas and surveys are polygon layers — find the one(s) this
+      // point falls inside, not a nonexistent per-record API field.
+      const alertRes = await fetch(`${GIS_BASE}/26/query?${spatialQs}&outFields=AREA_NAME`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      const alertJson = alertRes ? await alertRes.json() as { features?: Array<{ attributes?: { AREA_NAME?: string } }> } : null;
+      alertAreas = (alertJson?.features ?? []).map(f => f.attributes?.AREA_NAME ?? "").filter(Boolean);
+
+      const surveyRes = await fetch(`${GIS_BASE}/24/query?${spatialQs}&outFields=ABSTRACT_NUMBER,LEVEL1_SURVEY_NAME,LEVEL2_BLOCK_NUMBER,LEVEL3_SURVEY_NUMBER`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      const surveyJson = surveyRes ? await surveyRes.json() as { features?: Array<{ attributes?: Record<string, unknown> }> } : null;
+      surveyAttrs = surveyJson?.features?.[0]?.attributes ?? null;
+    }
 
     return {
       found: true,
       latitude: lat,
       longitude: lng,
-      well_type: String(attrs["WellType"] ?? attrs["WELL_TYPE"] ?? ""),
+      well_type: String(attrs["GIS_SYMBOL_DESCRIPTION"] ?? ""),
       survey: surveyAttrs ? {
         abstract_number: String(surveyAttrs["ABSTRACT_NUMBER"] ?? ""),
-        survey_name:     String(surveyAttrs["SURVEY_NAME"] ?? ""),
-        block_number:    String(surveyAttrs["BLOCK_NUMBER"] ?? ""),
-        section_name:    String(surveyAttrs["SECTION_NAME"] ?? ""),
+        survey_name:     String(surveyAttrs["LEVEL1_SURVEY_NAME"] ?? ""),
+        block_number:    String(surveyAttrs["LEVEL2_BLOCK_NUMBER"] ?? ""),
+        // The real schema has no literal "section" field; LEVEL3_SURVEY_NUMBER
+        // is the closest equivalent TRRC actually publishes at this level.
+        section_name:    String(surveyAttrs["LEVEL3_SURVEY_NUMBER"] ?? ""),
       } : null,
       alert_areas: alertAreas,
       message: `GIS location: ${lat?.toFixed(4)}°N, ${lng?.toFixed(4)}°W${alertAreas.length ? ` | Alerts: ${alertAreas.join(", ")}` : ""}`,
