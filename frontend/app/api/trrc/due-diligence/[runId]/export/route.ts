@@ -14,16 +14,17 @@ import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-reques
 import type { TrrcDueDiligenceRun, SourceCoverageStatus, TrrcDDProductionRow } from "@/lib/trrc/types";
 import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
 import { deriveCoverageFromAttempts } from "@/lib/trrc/coverage";
-import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv, buildTimelineCsv, buildOffsetWellsCsv } from "@/lib/trrc/archive-builder";
+import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv, buildTimelineCsv, buildOffsetWellsCsv, buildLateralPathCsv } from "@/lib/trrc/archive-builder";
 import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
 import { buildTimeline } from "@/lib/trrc/timeline-builder";
 import { fetchOffsetWells } from "@/lib/trrc/offset-wells";
+import { fetchLateralPath } from "@/lib/trrc/lateral-path";
 import { buildXlsxWorkbook, type XlsxSheet } from "@/lib/trrc/xlsx-builder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "offset", "xlsx"] as const;
+const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "offset", "lateral", "xlsx"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
 async function loadProduction(supabase, runId: string): Promise<TrrcDDProductionRow[]> {
@@ -139,6 +140,9 @@ export async function GET(
     const offsetWells = gisLat !== null && gisLng !== null
       ? await fetchOffsetWells(gisLat, gisLng, run.resolved_primary_api)
       : [];
+    const lateralPath = gisLat !== null && gisLng !== null && run.resolved_primary_api
+      ? await fetchLateralPath(run.resolved_primary_api, gisLat, gisLng)
+      : null;
 
     const sheets: XlsxSheet[] = [
       {
@@ -195,6 +199,18 @@ export async function GET(
         ],
         rows: offsetWells.map(w => [w.api, w.well_number, w.status, Number(w.distance_miles.toFixed(3)), w.bearing, w.latitude, w.longitude]),
       },
+      {
+        name: "Lateral Path",
+        columns: [{ header: "Field", width: 26 }, { header: "Value", width: 30 }],
+        rows: lateralPath ? [
+          ["Surface Latitude", lateralPath.surface_latitude],
+          ["Surface Longitude", lateralPath.surface_longitude],
+          ["Drainhole Latitude", lateralPath.drainhole_latitude],
+          ["Drainhole Longitude", lateralPath.drainhole_longitude],
+          ["Straight-Line Length (ft)", Number(lateralPath.straight_line_length_ft.toFixed(1))],
+          ["Bearing from Surface", lateralPath.bearing],
+        ] : [["Not applicable", "No horizontal drainhole on record (vertical well or not found)"]],
+      },
     ];
 
     const xlsx = await buildXlsxWorkbook(sheets);
@@ -232,6 +248,19 @@ export async function GET(
     const offsetWells = gisLat !== null && gisLng !== null ? await fetchOffsetWells(gisLat, gisLng, run.resolved_primary_api) : [];
     csv = buildOffsetWellsCsv(offsetWells);
     filename = `Offset_Wells_${identifier}_${datePart}.csv`;
+  } else if (type === "lateral") {
+    const attempts = await loadAttempts(supabase, runId);
+    const gisAttempt = attempts.find(a => a.source_name === "fetch_gis_plat");
+    const gisLat = typeof gisAttempt?.result_data_json?.["latitude"] === "number" ? gisAttempt.result_data_json["latitude"] as number : null;
+    const gisLng = typeof gisAttempt?.result_data_json?.["longitude"] === "number" ? gisAttempt.result_data_json["longitude"] as number : null;
+    const lateralPath = gisLat !== null && gisLng !== null && run.resolved_primary_api
+      ? await fetchLateralPath(run.resolved_primary_api, gisLat, gisLng)
+      : null;
+    if (!lateralPath) {
+      return NextResponse.json({ ok: false, error: "No horizontal drainhole on record for this well (vertical well, or not found in TRRC GIS data)." }, { status: 404 });
+    }
+    csv = buildLateralPathCsv(lateralPath);
+    filename = `Lateral_Path_${identifier}_${datePart}.csv`;
   } else {
     const attempts = await loadAttempts(supabase, runId);
     csv = buildEvidenceIndexCsv(run, attempts);

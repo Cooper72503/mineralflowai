@@ -40,6 +40,7 @@ import { buildEvidenceIndex } from "./evidence-index";
 import { buildTimeline } from "./timeline-builder";
 import { fetchStaticMapImage } from "./maps-builder";
 import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
+import { fetchLateralPath, type LateralPath } from "./lateral-path";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1042,12 +1043,13 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
 
 // ─── Section 6 — Legal Description and Location ───────────────────────────────
 
-function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWells, generatedAt }: {
+function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   attempts: LiteSourceAttempt[];
   mapImage: Buffer | null;
   offsetWells: OffsetWell[];
+  lateralPath: LateralPath | null;
   generatedAt: string;
 }) {
   const gis = getAttempt(attempts, "fetch_gis_plat");
@@ -1133,6 +1135,16 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
         React.createElement(Text, { style: [S.tableCellMono, { width: "12%" }] }, w.bearing),
         React.createElement(Text, { style: [S.tableCell, { width: "36%" }] }, w.status),
       )),
+    ) : null,
+
+    lateralPath ? React.createElement(View, { style: { marginTop: 10 } },
+      React.createElement(Text, { style: S.subTitle }, "Horizontal Wellbore Path"),
+      React.createElement(Text, { style: S.noteText }, "Straight-line surface-to-drainhole distance, not the full curved directional survey — TRRC's public GIS layers don't publish the intermediate path, only these two endpoints."),
+      React.createElement(View, { style: { marginTop: 4 } },
+        kv("Drainhole Coordinates (NAD83)", `${lateralPath.drainhole_latitude.toFixed(6)}°N, ${lateralPath.drainhole_longitude.toFixed(6)}°W`),
+        kv("Lateral Length (straight-line)", `${Math.round(lateralPath.straight_line_length_ft).toLocaleString("en-US")} ft (${(lateralPath.straight_line_length_ft / 5280).toFixed(2)} mi)`),
+        kv("Bearing from Surface", lateralPath.bearing),
+      ),
     ) : null,
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
@@ -1451,6 +1463,9 @@ export async function buildTrrcPdfReport(
   const offsetWells = mapLat !== null && mapLng !== null
     ? await fetchOffsetWells(mapLat, mapLng, identity.apiNumber)
     : [];
+  const lateralPath = mapLat !== null && mapLng !== null
+    ? await fetchLateralPath(identity.apiNumber, mapLat, mapLng)
+    : null;
   const analytics = computeProductionAnalytics(production);
   const flags     = generateFlags(attempts, analytics, run);
 
@@ -1471,7 +1486,7 @@ export async function buildTrrcPdfReport(
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
-    React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, generatedAt }),
+    React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
