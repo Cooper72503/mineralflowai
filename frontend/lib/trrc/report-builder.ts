@@ -30,6 +30,7 @@ import type {
   SourceCoverageStatus,
 } from "./types";
 import type { TrrcManifest } from "./manifest-builder";
+import { buildEvidenceIndex } from "./evidence-index";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -799,7 +800,7 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   const permitRecords = Array.isArray(permits?.["permits"]) ? (permits!["permits"] as Record<string, unknown>[]) : [];
   const latestPermit = permitRecords[permitRecords.length - 1];
   const compUrl  = typeof comp?.["trrc_source_url"] === "string"   ? comp["trrc_source_url"] as string   : null;
-  const imagedUrl = typeof imaged?.["trrc_source_url"] === "string" ? imaged["trrc_source_url"] as string : null;
+  const imagedUrl = typeof imaged?.["coda_search_url"] === "string" ? imaged["coda_search_url"] as string : null;
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -1069,7 +1070,57 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 8 — Overall Assessment ──────────────────────────────────────────
+// ─── Section 8 — Evidence Index ──────────────────────────────────────────────
+
+const EVIDENCE_STATUS_LABEL: Record<string, string> = {
+  retrieved: "Retrieved",
+  confirmed_absent: "No Records Found",
+  manual_required: "Manual Required",
+  retrieval_failed: "Retrieval Failed",
+  not_attempted: "Not Attempted",
+};
+
+function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  attempts: LiteSourceAttempt[];
+  generatedAt: string;
+}) {
+  const index = buildEvidenceIndex(attempts, run);
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — EVIDENCE INDEX"),
+
+    React.createElement(Text, { style: S.noteText }, "Every TRRC source this pipeline supports, what was queried, and what came back. TRRC's own query portals are inconsistent about honoring pre-filled links for an unauthenticated visitor, so links here point to the portal itself — re-enter the criteria listed to independently reproduce a result."),
+
+    React.createElement(View, { style: [S.tableHeader, { marginTop: 8 }] },
+      React.createElement(Text, { style: [S.tableHeaderCell, { width: "26%" }] }, "Source"),
+      React.createElement(Text, { style: [S.tableHeaderCell, { width: "22%" }] }, "Query Criteria"),
+      React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "Status"),
+      React.createElement(Text, { style: [S.tableHeaderCell, { width: "10%" }] }, "Records"),
+      React.createElement(Text, { style: [S.tableHeaderCell, { width: "26%" }] }, "Retrieved At (UTC)"),
+    ),
+    ...index.map((e, i) => React.createElement(
+      View, { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+      React.createElement(Text, { style: [S.tableCell, { width: "26%" }] }, e.label),
+      React.createElement(Text, { style: [S.tableCellMono, { width: "22%" }] }, e.query_criteria),
+      React.createElement(Text, { style: [S.tableCell, { width: "16%" }, e.status === "retrieval_failed" ? { color: C.red } : e.status === "manual_required" ? { color: C.yellow } : {}] }, EVIDENCE_STATUS_LABEL[e.status]),
+      React.createElement(Text, { style: [S.tableCellMono, { width: "10%" }] }, String(e.record_count)),
+      React.createElement(Text, { style: [S.tableCellMono, { width: "26%" }] }, e.retrieved_at ?? "—"),
+    )),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 9 — Overall Assessment ──────────────────────────────────────────
 
 function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1127,7 +1178,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — OVERALL ASSESSMENT"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — OVERALL ASSESSMENT"),
 
     // Stats row
     React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
@@ -1222,6 +1273,7 @@ export async function buildTrrcPdfReport(
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
+    React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
     React.createElement(OverallAssessmentPage,  { run, id: identity, attempts, flags, analytics, generatedAt }),
   );
 

@@ -17,6 +17,7 @@ import { promisify } from "util";
 import type { TrrcDueDiligenceRun, TrrcFinding, TrrcDDProductionRow, SourceCoverageStatus } from "./types";
 import type { TrrcManifest } from "./manifest-builder";
 import type { LiteSourceAttempt } from "./coverage";
+import { buildEvidenceIndex } from "./evidence-index";
 
 const deflateRaw = promisify(zlib.deflateRaw);
 
@@ -258,6 +259,20 @@ function buildMissingRecordsCsv(manifest: TrrcManifest): string {
   return header + rows.join("");
 }
 
+function buildEvidenceIndexCsv(run: TrrcDueDiligenceRun, sourceAttempts: LiteSourceAttempt[]): string {
+  const header = csvRow([
+    "source", "portal", "portal_url", "query_criteria", "status",
+    "status_note", "record_count", "retrieved_at_utc",
+  ]);
+  const rows = buildEvidenceIndex(sourceAttempts, run).map((e) =>
+    csvRow([
+      e.label, e.portal, e.portal_url, e.query_criteria, e.status,
+      e.status_note, e.record_count, e.retrieved_at ?? "",
+    ]),
+  );
+  return header + rows.join("");
+}
+
 function buildManualLinksCsv(manifest: TrrcManifest): string {
   const header = csvRow(["source", "category", "url", "description"]);
   const rows = manifest.manual_retrieval_required.map((mr) =>
@@ -397,6 +412,10 @@ export async function buildTrrcZipArchive(
     {
       path: `${rootDir}00_Report/Missing_Records_Checklist.csv`,
       content: buildMissingRecordsCsv(manifest),
+    },
+    {
+      path: `${rootDir}00_Report/Evidence_Index.csv`,
+      content: buildEvidenceIndexCsv(run, sourceAttempts),
     },
 
     // 01_Identity_and_Wellbore
