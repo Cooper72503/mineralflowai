@@ -374,6 +374,31 @@ function buildCategoryEntries(
   return entries;
 }
 
+// ─── Generic ZIP assembly (shared with xlsx-builder.ts — XLSX is itself a ─────
+// ZIP container of XML parts, so the same from-scratch writer applies) ────────
+
+export async function buildZipBuffer(entries: ArchiveEntry[], modDate: Date = new Date()): Promise<Buffer> {
+  const records: ZipFileRecord[] = [];
+  let currentOffset = 0;
+
+  for (const entry of entries) {
+    const record = await buildZipFileRecord(entry, currentOffset, modDate);
+    records.push(record);
+    currentOffset += record.localHeader.length + record.compressedData.length;
+  }
+
+  const centralDirOffset = currentOffset;
+  const centralDirBuffers = records.map((r) => r.centralDirEntry);
+  const centralDirSize = centralDirBuffers.reduce((sum, b) => sum + b.length, 0);
+  const eocd = buildEndOfCentralDirectory(records.length, centralDirSize, centralDirOffset);
+
+  return Buffer.concat([
+    ...records.flatMap((r) => [r.localHeader, r.compressedData]),
+    ...centralDirBuffers,
+    eocd,
+  ]);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function buildTrrcZipArchive(
@@ -487,30 +512,5 @@ export async function buildTrrcZipArchive(
     },
   ];
 
-  // ── Build ZIP file records
-  const records: ZipFileRecord[] = [];
-  let currentOffset = 0;
-
-  for (const entry of entries) {
-    const record = await buildZipFileRecord(entry, currentOffset, now);
-    records.push(record);
-    currentOffset += record.localHeader.length + record.compressedData.length;
-  }
-
-  // ── Assemble central directory
-  const centralDirOffset = currentOffset;
-  const centralDirBuffers = records.map((r) => r.centralDirEntry);
-  const centralDirSize = centralDirBuffers.reduce((sum, b) => sum + b.length, 0);
-
-  // ── End of central directory
-  const eocd = buildEndOfCentralDirectory(records.length, centralDirSize, centralDirOffset);
-
-  // ── Concatenate everything
-  const parts: Buffer[] = [
-    ...records.flatMap((r) => [r.localHeader, r.compressedData]),
-    ...centralDirBuffers,
-    eocd,
-  ];
-
-  return Buffer.concat(parts);
+  return buildZipBuffer(entries, now);
 }

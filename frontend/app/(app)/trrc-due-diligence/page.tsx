@@ -160,6 +160,7 @@ const DOWNLOAD_PATHS = {
   "export-production": (id: string) => `/api/trrc/due-diligence/${id}/export?type=production`,
   "export-coverage":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=coverage`,
   "export-evidence":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=evidence`,
+  "export-xlsx":       (id: string) => `/api/trrc/due-diligence/${id}/export?type=xlsx`,
 } as const;
 
 // ─── Main page component ───────────────────────────────────────────────────────
@@ -1126,6 +1127,7 @@ function ResultsDashboard({
             { type: "report" as const,             label: "PDF Report" },
             { type: "archive" as const,             label: "ZIP Archive" },
             { type: "manifest" as const,            label: "JSON Manifest" },
+            { type: "export-xlsx" as const,         label: "Excel Workbook" },
             { type: "export-production" as const,   label: "Production CSV" },
             { type: "export-coverage" as const,     label: "Coverage CSV" },
             { type: "export-evidence" as const,     label: "Evidence Index CSV" },

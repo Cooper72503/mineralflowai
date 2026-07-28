@@ -1,25 +1,83 @@
 // @ts-nocheck
 /**
- * GET /api/trrc/due-diligence/[runId]/export?type=production|coverage|evidence
+ * GET /api/trrc/due-diligence/[runId]/export?type=production|coverage|evidence|xlsx
  *
- * Standalone single-table CSV downloads — for a user who wants one table in
- * a spreadsheet, not the full ZIP evidence package. Reuses the exact same
- * CSV builders the ZIP archive uses (lib/trrc/archive-builder.ts), so the
- * numbers are always identical to what's in the archive — no separate
- * code path to drift out of sync.
+ * Standalone table downloads — for a user who wants one table (or a
+ * combined workbook) in a spreadsheet, not the full ZIP evidence package.
+ * Reuses the exact same builders the ZIP archive uses (lib/trrc/
+ * archive-builder.ts), so the numbers are always identical to what's in
+ * the archive — no separate code path to drift out of sync.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import type { TrrcDueDiligenceRun, SourceCoverageStatus, TrrcDDProductionRow } from "@/lib/trrc/types";
+import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
 import { deriveCoverageFromAttempts } from "@/lib/trrc/coverage";
 import { buildProductionCsv, buildCoverageCsv, buildEvidenceIndexCsv } from "@/lib/trrc/archive-builder";
+import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
+import { buildXlsxWorkbook, type XlsxSheet } from "@/lib/trrc/xlsx-builder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPORT_TYPES = ["production", "coverage", "evidence"] as const;
+const EXPORT_TYPES = ["production", "coverage", "evidence", "xlsx"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
+
+async function loadProduction(supabase, runId: string): Promise<TrrcDDProductionRow[]> {
+  const { data } = await supabase
+    .from("trrc_production_monthly")
+    .select("*")
+    .eq("run_id", runId)
+    .order("production_month", { ascending: true })
+    .limit(240);
+
+  return (data ?? []).map((p) => ({
+    entity_type: p["entity_type"] as "lease" | "api",
+    api_number: (p["api_number"] as string | null) ?? null,
+    district: (p["district"] as string) ?? "",
+    lease_number: (p["lease_number"] as string | null) ?? null,
+    gas_id: (p["gas_id"] as string | null) ?? null,
+    operator_number: (p["operator_number"] as string | null) ?? null,
+    production_month: p["production_month"] as string,
+    oil_bbl: (p["oil_bbl"] as number | null) ?? null,
+    casinghead_gas_mcf: (p["casinghead_gas_mcf"] as number | null) ?? null,
+    gas_mcf: (p["gas_mcf"] as number | null) ?? null,
+    condensate_bbl: (p["condensate_bbl"] as number | null) ?? null,
+    water_bbl: (p["water_bbl"] as number | null) ?? null,
+  }));
+}
+
+async function loadAttempts(supabase, runId: string): Promise<LiteSourceAttempt[]> {
+  const { data } = await supabase
+    .from("trrc_source_attempts")
+    .select("source_id, source_name, status, result_count, result_data_json, attempted_at, error_message")
+    .eq("run_id", runId)
+    .order("attempted_at", { ascending: true });
+
+  return (data ?? []).map((a) => ({
+    source_id: a["source_id"] as string,
+    source_name: a["source_name"] as string,
+    status: a["status"] as string,
+    result_count: (a["result_count"] as number) ?? 0,
+    error_message: (a["error_message"] as string | null) ?? null,
+    attempted_at: a["attempted_at"] as string,
+    result_data_json: (a["result_data_json"] ?? null) as Record<string, unknown> | null,
+  }));
+}
+
+function toRun(runRaw: Record<string, unknown>, userId: string): TrrcDueDiligenceRun {
+  return {
+    id: runRaw["id"] as string,
+    user_id: userId,
+    original_input: runRaw["original_input"] as string,
+    normalized_input: runRaw["normalized_input"] as string,
+    resolved_primary_api: (runRaw["resolved_primary_api"] as string | null) ?? null,
+    resolved_district: (runRaw["resolved_district"] as string | null) ?? null,
+    resolved_lease_number: (runRaw["resolved_lease_number"] as string | null) ?? null,
+    resolved_operator_number: (runRaw["resolved_operator_number"] as string | null) ?? null,
+  } as TrrcDueDiligenceRun;
+}
 
 export async function GET(
   request: NextRequest,
@@ -63,68 +121,85 @@ export async function GET(
   const normalizedInput = (runRaw["normalized_input"] as string | null) ?? runId;
   const identifier = normalizedInput.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const run = toRun(runRaw, user.id);
+
+  if (type === "xlsx") {
+    const [production, attempts] = await Promise.all([
+      loadProduction(supabase, runId),
+      loadAttempts(supabase, runId),
+    ]);
+    const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
+    const coverage = storedCoverage.length > 0 ? storedCoverage : deriveCoverageFromAttempts(attempts);
+
+    const sheets: XlsxSheet[] = [
+      {
+        name: "Identity",
+        columns: [{ header: "Field", width: 26 }, { header: "Value", width: 34 }],
+        rows: [
+          ["Original Input", run.original_input],
+          ["Normalized Input", run.normalized_input],
+          ["API Number", run.resolved_primary_api],
+          ["District", run.resolved_district],
+          ["Lease Number", run.resolved_lease_number],
+          ["Operator Number", run.resolved_operator_number],
+          ["Run ID", run.id],
+          ["Generated At (UTC)", new Date().toISOString()],
+        ],
+      },
+      {
+        name: "Production",
+        columns: [
+          { header: "Month", width: 12 }, { header: "Oil (BBL)", width: 12 },
+          { header: "Gas (MCF)", width: 12 }, { header: "Casinghead (MCF)", width: 14 },
+          { header: "Condensate (BBL)", width: 14 }, { header: "Water (BBL)", width: 12 },
+        ],
+        rows: production.map(p => [p.production_month, p.oil_bbl, p.gas_mcf, p.casinghead_gas_mcf, p.condensate_bbl, p.water_bbl]),
+      },
+      {
+        name: "Coverage",
+        columns: [
+          { header: "Category", width: 20 }, { header: "Label", width: 34 }, { header: "Status", width: 16 },
+          { header: "Records Found", width: 12 }, { header: "Sources Checked", width: 24 }, { header: "Notes", width: 40 },
+        ],
+        rows: coverage.map(c => [c.category, c.label, c.status, c.records_found, c.sources_checked.join("; "), c.notes ?? ""]),
+      },
+      {
+        name: "Evidence Index",
+        columns: [
+          { header: "Source", width: 32 }, { header: "Portal", width: 30 }, { header: "Portal URL", width: 40 },
+          { header: "Query Criteria", width: 24 }, { header: "Status", width: 16 },
+          { header: "Records", width: 10 }, { header: "Retrieved At (UTC)", width: 24 },
+        ],
+        rows: buildEvidenceIndex(attempts, run).map(e => [e.label, e.portal, e.portal_url, e.query_criteria, e.status, e.record_count, e.retrieved_at ?? ""]),
+      },
+    ];
+
+    const xlsx = await buildXlsxWorkbook(sheets);
+    return new NextResponse(xlsx, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="MineralFlowAI_${identifier}_${datePart}.xlsx"`,
+      },
+    });
+  }
 
   let csv: string;
   let filename: string;
 
   if (type === "production") {
-    const { data } = await supabase
-      .from("trrc_production_monthly")
-      .select("*")
-      .eq("run_id", runId)
-      .order("production_month", { ascending: true })
-      .limit(240);
-
-    const production: TrrcDDProductionRow[] = (data ?? []).map((p) => ({
-      entity_type: p["entity_type"] as "lease" | "api",
-      api_number: (p["api_number"] as string | null) ?? null,
-      district: (p["district"] as string) ?? "",
-      lease_number: (p["lease_number"] as string | null) ?? null,
-      gas_id: (p["gas_id"] as string | null) ?? null,
-      operator_number: (p["operator_number"] as string | null) ?? null,
-      production_month: p["production_month"] as string,
-      oil_bbl: (p["oil_bbl"] as number | null) ?? null,
-      casinghead_gas_mcf: (p["casinghead_gas_mcf"] as number | null) ?? null,
-      gas_mcf: (p["gas_mcf"] as number | null) ?? null,
-      condensate_bbl: (p["condensate_bbl"] as number | null) ?? null,
-      water_bbl: (p["water_bbl"] as number | null) ?? null,
-    }));
+    const production = await loadProduction(supabase, runId);
     csv = buildProductionCsv(production);
     filename = `Production_${identifier}_${datePart}.csv`;
   } else {
-    const { data: attemptsData } = await supabase
-      .from("trrc_source_attempts")
-      .select("source_id, source_name, status, result_count, result_data_json, attempted_at, error_message")
-      .eq("run_id", runId)
-      .order("attempted_at", { ascending: true });
-
-    const sourceAttemptRows = (attemptsData ?? []).map((a) => ({
-      source_id: a["source_id"] as string,
-      source_name: a["source_name"] as string,
-      status: a["status"] as string,
-      result_count: (a["result_count"] as number) ?? 0,
-      error_message: (a["error_message"] as string | null) ?? null,
-      attempted_at: a["attempted_at"] as string,
-      result_data_json: (a["result_data_json"] ?? null) as Record<string, unknown> | null,
-    }));
-
+    const attempts = await loadAttempts(supabase, runId);
     if (type === "coverage") {
       const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
-      const coverage = storedCoverage.length > 0 ? storedCoverage : deriveCoverageFromAttempts(sourceAttemptRows);
+      const coverage = storedCoverage.length > 0 ? storedCoverage : deriveCoverageFromAttempts(attempts);
       csv = buildCoverageCsv(coverage);
       filename = `Source_Coverage_${identifier}_${datePart}.csv`;
     } else {
-      const run: TrrcDueDiligenceRun = {
-        id: runRaw["id"] as string,
-        user_id: user.id,
-        original_input: runRaw["original_input"] as string,
-        normalized_input: runRaw["normalized_input"] as string,
-        resolved_primary_api: (runRaw["resolved_primary_api"] as string | null) ?? null,
-        resolved_district: (runRaw["resolved_district"] as string | null) ?? null,
-        resolved_lease_number: (runRaw["resolved_lease_number"] as string | null) ?? null,
-        resolved_operator_number: (runRaw["resolved_operator_number"] as string | null) ?? null,
-      } as TrrcDueDiligenceRun;
-      csv = buildEvidenceIndexCsv(run, sourceAttemptRows);
+      csv = buildEvidenceIndexCsv(run, attempts);
       filename = `Evidence_Index_${identifier}_${datePart}.csv`;
     }
   }
