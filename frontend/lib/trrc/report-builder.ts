@@ -26,6 +26,7 @@ import {
   Svg,
   Line,
   Polyline,
+  Image,
 } from "@react-pdf/renderer";
 import type {
   TrrcDueDiligenceRun,
@@ -37,6 +38,7 @@ import type {
 import type { TrrcManifest } from "./manifest-builder";
 import { buildEvidenceIndex } from "./evidence-index";
 import { buildTimeline } from "./timeline-builder";
+import { fetchStaticMapImage } from "./maps-builder";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1039,21 +1041,24 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
 
 // ─── Section 6 — Legal Description and Location ───────────────────────────────
 
-function LegalDescriptionPage({ run, id: identity, attempts, generatedAt }: {
+function LegalDescriptionPage({ run, id: identity, attempts, mapImage, generatedAt }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   attempts: LiteSourceAttempt[];
+  mapImage: Buffer | null;
   generatedAt: string;
 }) {
   const gis = getAttempt(attempts, "fetch_gis_plat");
   const glo = getAttempt(attempts, "fetch_glo_survey");
 
-  const survey  = gis?.["survey"] as Record<string, unknown> | null ?? {};
-  const gisLat  = typeof gis?.["latitude_nad83"]  === "number" ? (gis["latitude_nad83"]  as number).toFixed(6) : null;
-  const gisLng  = typeof gis?.["longitude_nad83"] === "number" ? (gis["longitude_nad83"] as number).toFixed(6) : null;
-  const alerts  = Array.isArray(gis?.["alert_areas"]) ? (gis!["alert_areas"] as string[]) : [];
-  const gisUrl  = typeof gis?.["trrc_source_url"] === "string" ? gis["trrc_source_url"] as string : null;
-  const gloUrl  = typeof glo?.["trrc_source_url"] === "string" ? glo["trrc_source_url"] as string : null;
+  const survey    = gis?.["survey"] as Record<string, unknown> | null ?? {};
+  const gisLatNum = typeof gis?.["latitude"]  === "number" ? gis["latitude"]  as number : null;
+  const gisLngNum = typeof gis?.["longitude"] === "number" ? gis["longitude"] as number : null;
+  const gisLat    = gisLatNum !== null ? gisLatNum.toFixed(6) : null;
+  const gisLng    = gisLngNum !== null ? gisLngNum.toFixed(6) : null;
+  const alerts    = Array.isArray(gis?.["alert_areas"]) ? (gis!["alert_areas"] as string[]) : [];
+  const gisUrl    = typeof gis?.["trrc_source_url"] === "string" ? gis["trrc_source_url"] as string : null;
+  const gloUrl    = typeof glo?.["trrc_source_url"] === "string" ? glo["trrc_source_url"] as string : null;
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -1093,6 +1098,20 @@ function LegalDescriptionPage({ run, id: identity, attempts, generatedAt }: {
         React.createElement(Link, { src: gisUrl, style: S.trrcLink }, "View on GIS Map ↗"),
       ) : null,
     ) : React.createElement(Text, { style: S.noteText }, gis?.["found"] === false ? "Well not found in RRC GIS database — manual GIS verification required." : "GIS data not retrieved."),
+
+    mapImage ? React.createElement(View, { style: { marginTop: 10 } },
+      React.createElement(Text, { style: S.subTitle }, "Well Location Map"),
+      React.createElement(View, { style: { position: "relative", width: 320, height: 240 } },
+        React.createElement(Image, { src: mapImage, style: { width: 320, height: 240, borderWidth: 1, borderColor: C.border } }),
+        React.createElement(View, {
+          style: {
+            position: "absolute", top: 120 - 7, left: 160 - 7,
+            width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: C.red,
+          },
+        }),
+      ),
+      React.createElement(Text, { style: [S.noteText, { marginTop: 3 }] }, "Subject well (red circle) among nearby offset wells. Source: TRRC GIS Well Locations layer (rrc_public/RRC_Public_Viewer_Srvs), rendered directly — coordinates only, no basemap imagery."),
+    ) : null,
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
   );
@@ -1400,6 +1419,13 @@ export async function buildTrrcPdfReport(
   });
 
   const identity  = extractIdentity(attempts, run);
+
+  // Static well-location map (TRRC's own public GIS export — no API key,
+  // graceful null on any failure so this can never break report generation).
+  const gisForMap = getAttempt(attempts, "fetch_gis_plat");
+  const mapLat = typeof gisForMap?.["latitude"] === "number" ? gisForMap["latitude"] as number : null;
+  const mapLng = typeof gisForMap?.["longitude"] === "number" ? gisForMap["longitude"] as number : null;
+  const mapImage = mapLat !== null && mapLng !== null ? await fetchStaticMapImage(mapLat, mapLng) : null;
   const analytics = computeProductionAnalytics(production);
   const flags     = generateFlags(attempts, analytics, run);
 
@@ -1420,7 +1446,7 @@ export async function buildTrrcPdfReport(
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
-    React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, generatedAt }),
+    React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, generatedAt }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),

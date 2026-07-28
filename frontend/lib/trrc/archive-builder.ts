@@ -19,6 +19,7 @@ import type { TrrcManifest } from "./manifest-builder";
 import type { LiteSourceAttempt } from "./coverage";
 import { buildEvidenceIndex } from "./evidence-index";
 import { buildTimeline } from "./timeline-builder";
+import { fetchStaticMapImage } from "./maps-builder";
 
 const deflateRaw = promisify(zlib.deflateRaw);
 
@@ -419,6 +420,13 @@ export async function buildTrrcZipArchive(
 ): Promise<Buffer> {
   const now = new Date();
 
+  // Static well-location map (TRRC's own public GIS export — no API key,
+  // graceful null on any failure). Same mechanism the PDF uses.
+  const gisAttempt = sourceAttempts.find(a => a.source_name === "fetch_gis_plat");
+  const mapLat = typeof gisAttempt?.result_data_json?.["latitude"] === "number" ? gisAttempt.result_data_json["latitude"] as number : null;
+  const mapLng = typeof gisAttempt?.result_data_json?.["longitude"] === "number" ? gisAttempt.result_data_json["longitude"] as number : null;
+  const mapImage = mapLat !== null && mapLng !== null ? await fetchStaticMapImage(mapLat, mapLng) : null;
+
   // Build a safe identifier: strip non-alphanumeric except underscores/hyphens
   const identifier = run.normalized_input.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60);
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
@@ -500,6 +508,7 @@ export async function buildTrrcZipArchive(
 
     // 11_GIS_Maps_and_Plats
     ...buildCategoryEntries(`${rootDir}11_GIS_Maps_and_Plats/`, FOLDER_SOURCES["11_GIS_Maps_and_Plats"], sourceAttempts),
+    ...(mapImage ? [{ path: `${rootDir}11_GIS_Maps_and_Plats/well_location_map.png`, content: mapImage }] : []),
 
     // 12_Well_File_Correspondence
     ...buildCategoryEntries(`${rootDir}12_Well_File_Correspondence/`, FOLDER_SOURCES["12_Well_File_Correspondence"], sourceAttempts),
