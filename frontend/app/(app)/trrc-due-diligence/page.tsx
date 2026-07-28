@@ -995,6 +995,7 @@ const SOURCE_LABELS: Record<string, string> = {
   fetch_severance_records:    "Severance & Seal Orders",
   fetch_coda_records:         "Imaged Document Packets",
   fetch_drilling_permits:     "Drilling Permit Records (W-1)",
+  fetch_county_records:       "County Real Property Records",
 };
 
 function ResultsDashboard({

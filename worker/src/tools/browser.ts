@@ -9,7 +9,9 @@ import { chromium, type Browser, type BrowserContext } from "playwright";
 
 let _browser: Browser | null = null;
 
-async function getBrowser(): Promise<Browser> {
+// Exported so other Playwright-based tools (e.g. county-records.ts) share
+// this same browser instance instead of each launching their own Chromium.
+export async function getBrowser(): Promise<Browser> {
   if (!_browser || !_browser.isConnected()) {
     _browser = await chromium.launch({
       headless: true,

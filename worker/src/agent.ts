@@ -11,6 +11,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { TRRC_TOOLS } from "./tools/definitions.js";
 import * as ewa from "./tools/ewa.js";
 import * as browser from "./tools/browser.js";
+import * as countyRecords from "./tools/county-records.js";
 import { reportProgress, logStep } from "./progress.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProductionRow } from "./tools/ewa.js";
@@ -76,6 +77,7 @@ interface AgentState {
   district:       string | null;
   operatorName:   string | null;
   operatorNumber: string | null;
+  county:         string | null;
   production:     ProductionRow[];
 }
 
@@ -100,6 +102,7 @@ async function dispatchTool(
         if (r.district        && !state.district)        state.district        = r.district;
         if (r.operator        && !state.operatorName)    state.operatorName    = r.operator;
         if (r.operator_number && !state.operatorNumber)  state.operatorNumber  = r.operator_number;
+        if (r.county          && !state.county)          state.county          = r.county;
       }
       result = r;
       sourceName = "search_by_api";
@@ -220,6 +223,14 @@ async function dispatchTool(
       sourceName = "fetch_coda_records";
       break;
 
+    case "get_county_records":
+      result = await countyRecords.getCountyRecords(
+        String(input.county ?? state.county ?? ""),
+        String(input.search_value ?? state.operatorName ?? ""),
+      );
+      sourceName = "fetch_county_records";
+      break;
+
     case "get_gis_location":
       result = await ewa.getGisLocation(String(input.api_number ?? state.apiNumber ?? ""));
       sourceName = "fetch_gis_plat";
@@ -277,6 +288,7 @@ export async function runLandmanAgent(
     district:       null,
     operatorName:   null,
     operatorNumber: null,
+    county:         null,
     production:     [],
   };
 

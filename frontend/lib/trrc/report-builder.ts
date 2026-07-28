@@ -1179,6 +1179,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
     fetch_glo_survey:            "S15 — Texas GLO Survey",
     fetch_gis_plat:              "S16 — RRC GIS / Plat Map",
     fetch_drilling_permits:      "S17 — Drilling Permit Records (W-1)",
+    fetch_county_records:        "S18 — County Real Property Records",
   };
 
   const seen = new Set<string>();

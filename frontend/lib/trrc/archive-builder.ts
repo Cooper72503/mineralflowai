@@ -366,6 +366,7 @@ const FOLDER_SOURCES: Record<string, string[]> = {
   "10_Inspections_Violations_Severance": ["fetch_compliance_violations", "fetch_severance_records"],
   "11_GIS_Maps_and_Plats":               ["fetch_gis_plat"],
   "12_Well_File_Correspondence":         ["fetch_coda_records"],
+  "16_County_Records":                   ["fetch_county_records"],
 };
 
 function findAttempt(attempts: LiteSourceAttempt[], sourceName: string): LiteSourceAttempt | null {
@@ -402,6 +403,12 @@ function buildCategoryEntries(
         `${sourceName}: RETRIEVAL FAILED on ${when} — ${attempt.error_message ?? "unknown error"}. ` +
         `This does NOT confirm absence of records — see Missing_Records_Checklist.csv.`,
       );
+      continue;
+    }
+
+    if (attempt.result_data_json?.["data_gap"] === true) {
+      const url = typeof attempt.result_data_json?.["search_url"] === "string" ? ` Manual link: ${attempt.result_data_json["search_url"]}` : "";
+      statusLines.push(`${sourceName}: no automated connector for this source as of ${when} — manual review required.${url}`);
       continue;
     }
 

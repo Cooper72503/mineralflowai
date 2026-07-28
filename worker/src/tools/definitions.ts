@@ -171,6 +171,18 @@ export const TRRC_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_county_records",
+    description: "Search county clerk real property records (deeds, mineral deeds, leases, assignments, releases, liens) by grantor/grantee name — typically the operator name or a mineral owner name. This is COUNTY data, not TRRC data, and is only automated for a small set of counties so far (Midland, Reeves, Reagan, Live Oak) — for any other county this returns a manual-search link instead of records, which is expected and should be reported as such, not treated as a failure. Use the well's resolved county and the operator name as the search value.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        county: { type: "string", description: "Texas county name, e.g. 'Midland' (no need to include the word 'County')" },
+        search_value: { type: "string", description: "Grantor or grantee name to search for — typically the operator name" },
+      },
+      required: ["county", "search_value"],
+    },
+  },
+  {
     name: "get_coda_documents",
     description: "Get list of imaged documents available in TRRC CODA system — W-2 originals, sundry notices, G-1, H-15, W-3C. Returns document list with direct download URLs where available.",
     input_schema: {

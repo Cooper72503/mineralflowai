@@ -38,6 +38,7 @@ export const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string
   fetch_severance_records:    { category: "severance",          label: "Wellbore Severance Records" },
   fetch_coda_records:         { category: "imaged_records",     label: "Imaged Document Packets (CODA)" },
   fetch_drilling_permits:     { category: "drilling_permits",   label: "Drilling Permit Records (W-1)" },
+  fetch_county_records:       { category: "county_records",     label: "County Real Property Records (Deeds/Leases)" },
 };
 
 export function deriveCoverageFromAttempts(attempts: LiteSourceAttempt[]): SourceCoverageStatus[] {
@@ -62,7 +63,7 @@ export function deriveCoverageFromAttempts(attempts: LiteSourceAttempt[]): Sourc
       notes = a.error_message?.slice(0, 120) ?? "Query failed.";
     } else if (isDataGap) {
       status = "manual_required";
-      notes = "Automated access unavailable — manual review required via TRRC EWA.";
+      notes = typeof data["message"] === "string" ? data["message"].slice(0, 120) : "Automated access unavailable — manual review required via TRRC EWA.";
     } else if (found === false) {
       status = "no_applicable_record";
       notes = typeof data["message"] === "string" ? data["message"].slice(0, 120) : "No records found.";
