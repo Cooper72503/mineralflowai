@@ -153,6 +153,15 @@ type FormState = {
 type Phase = "form" | "running" | "selecting" | "complete" | "error";
 type TabKey = "summary" | "scorecard" | "production" | "findings" | "coverage" | "missing";
 
+const DOWNLOAD_PATHS = {
+  report:              (id: string) => `/api/trrc/due-diligence/${id}/report`,
+  archive:             (id: string) => `/api/trrc/due-diligence/${id}/archive`,
+  manifest:            (id: string) => `/api/trrc/due-diligence/${id}/manifest`,
+  "export-production": (id: string) => `/api/trrc/due-diligence/${id}/export?type=production`,
+  "export-coverage":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=coverage`,
+  "export-evidence":   (id: string) => `/api/trrc/due-diligence/${id}/export?type=evidence`,
+} as const;
+
 // ─── Main page component ───────────────────────────────────────────────────────
 
 export default function TrrcDueDiligencePage() {
@@ -345,9 +354,9 @@ export default function TrrcDueDiligencePage() {
     setActiveTab("summary");
   }, []);
 
-  const handleDownload = useCallback(async (type: "report" | "archive" | "manifest") => {
+  const handleDownload = useCallback(async (type: keyof typeof DOWNLOAD_PATHS) => {
     if (!runId) return;
-    const res = await apiFetch(`/api/trrc/due-diligence/${runId}/${type}`);
+    const res = await apiFetch(DOWNLOAD_PATHS[type](runId));
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Download failed" }));
       setError((err as { error?: string }).error ?? "Download failed");
@@ -991,7 +1000,7 @@ function ResultsDashboard({
   activeTab: TabKey;
   setActiveTab: (t: TabKey) => void;
   onReset: () => void;
-  onDownload: (type: "report" | "archive" | "manifest") => void;
+  onDownload: (type: keyof typeof DOWNLOAD_PATHS) => void;
 }) {
   const attempts = run.source_attempts ?? [];
   const found = attempts.filter(a => a.status === "success" && a.result_count > 0);
@@ -1114,9 +1123,12 @@ function ResultsDashboard({
         </div>
         <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" as const }}>
           {([
-            { type: "report" as const,   label: "PDF Report" },
-            { type: "archive" as const,  label: "ZIP Archive" },
-            { type: "manifest" as const, label: "JSON Manifest" },
+            { type: "report" as const,             label: "PDF Report" },
+            { type: "archive" as const,             label: "ZIP Archive" },
+            { type: "manifest" as const,            label: "JSON Manifest" },
+            { type: "export-production" as const,   label: "Production CSV" },
+            { type: "export-coverage" as const,     label: "Coverage CSV" },
+            { type: "export-evidence" as const,     label: "Evidence Index CSV" },
           ]).map(({ type, label }) => (
             <button key={type} onClick={() => onDownload(type)} style={{
               background: COLORS.surfaceAlt, border: `1px solid ${COLORS.borderStrong}`,

@@ -214,7 +214,7 @@ function csvRow(fields: (string | number | null | undefined)[]): string {
   return fields.map(csvEscape).join(",") + "\r\n";
 }
 
-function buildProductionCsv(production: TrrcDDProductionRow[]): string {
+export function buildProductionCsv(production: TrrcDDProductionRow[]): string {
   const header = csvRow([
     "entity_type", "api_number", "district", "lease_number", "gas_id",
     "operator_number", "production_month", "oil_bbl", "casinghead_gas_mcf",
@@ -230,7 +230,7 @@ function buildProductionCsv(production: TrrcDDProductionRow[]): string {
   return header + rows.join("");
 }
 
-function buildCoverageCsv(coverage: SourceCoverageStatus[]): string {
+export function buildCoverageCsv(coverage: SourceCoverageStatus[]): string {
   const header = csvRow([
     "category", "label", "status", "records_found", "data_current_through",
     "sources_checked", "notes",
@@ -259,7 +259,7 @@ function buildMissingRecordsCsv(manifest: TrrcManifest): string {
   return header + rows.join("");
 }
 
-function buildEvidenceIndexCsv(run: TrrcDueDiligenceRun, sourceAttempts: LiteSourceAttempt[]): string {
+export function buildEvidenceIndexCsv(run: TrrcDueDiligenceRun, sourceAttempts: LiteSourceAttempt[]): string {
   const header = csvRow([
     "source", "portal", "portal_url", "query_criteria", "status",
     "status_note", "record_count", "retrieved_at_utc",
