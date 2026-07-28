@@ -22,6 +22,8 @@ import { buildTimeline } from "./timeline-builder";
 import { fetchStaticMapImage } from "./maps-builder";
 import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
 import { fetchLateralPath, type LateralPath } from "./lateral-path";
+import { buildAcquisitionScorecard } from "./scorecard-builder";
+import { computeProductionAnalytics, generateFlags } from "./report-builder";
 
 const deflateRaw = promisify(zlib.deflateRaw);
 
@@ -269,6 +271,28 @@ export function buildTimelineCsv(sourceAttempts: LiteSourceAttempt[], production
   return header + rows.join("");
 }
 
+export function buildScorecardSummaryCsv(scorecard: ReturnType<typeof buildAcquisitionScorecard>): string {
+  const header = csvRow(["field", "value"]);
+  const rows = [
+    csvRow(["recommendation", scorecard.recommendation]),
+    csvRow(["opportunity_score", scorecard.opportunity_score]),
+    csvRow(["risk_score", scorecard.risk_score]),
+    csvRow(["overall_confidence", scorecard.overall_confidence]),
+    csvRow(["gating_conditions", scorecard.gating_conditions.join(" | ")]),
+    csvRow(["reasons_for", scorecard.reasons_for.join(" | ")]),
+    csvRow(["reasons_against", scorecard.reasons_against.join(" | ")]),
+  ];
+  return header + rows.join("");
+}
+
+export function buildScorecardDimensionsCsv(scorecard: ReturnType<typeof buildAcquisitionScorecard>): string {
+  const header = csvRow(["dimension", "label", "score", "weight", "rationale", "data_points"]);
+  const rows = Object.entries(scorecard.dimensions).map(([key, d]) =>
+    csvRow([key, d.label, d.score, d.weight, d.rationale, d.data_points.join(" | ")]),
+  );
+  return header + rows.join("");
+}
+
 export function buildLateralPathCsv(lateralPath: LateralPath): string {
   const header = csvRow(["field", "value"]);
   const rows = [
@@ -456,6 +480,23 @@ export async function buildTrrcZipArchive(
     ? await fetchLateralPath(run.resolved_primary_api, mapLat, mapLng)
     : null;
 
+  const analytics = computeProductionAnalytics(production);
+  const flags = generateFlags(sourceAttempts, analytics, run);
+  const scorecard = buildAcquisitionScorecard({
+    attempts: sourceAttempts, production, coverage,
+    criticalFlags: flags.critical,
+    importantFlags: flags.important,
+    monthsOfHistory: analytics.months.length,
+    recentAvgOil: analytics.recent12AvgOil,
+    yoyDeclineOilPct: analytics.yoyDeclineOil,
+    zeroProductionMonths: analytics.zeroMonths,
+    worTrend: analytics.worTrend,
+    offsetWellCount: offsetWells.length,
+    hasLateralPath: lateralPath !== null,
+    resolvedLeaseNumber: run.resolved_lease_number,
+    resolvedDistrict: run.resolved_district,
+  });
+
   // Build a safe identifier: strip non-alphanumeric except underscores/hyphens
   const identifier = run.normalized_input.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60);
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
@@ -489,6 +530,14 @@ export async function buildTrrcZipArchive(
     {
       path: `${rootDir}00_Report/Timeline.csv`,
       content: buildTimelineCsv(sourceAttempts, production),
+    },
+    {
+      path: `${rootDir}00_Report/Scorecard_Summary.csv`,
+      content: buildScorecardSummaryCsv(scorecard),
+    },
+    {
+      path: `${rootDir}00_Report/Scorecard_Dimensions.csv`,
+      content: buildScorecardDimensionsCsv(scorecard),
     },
 
     // 01_Identity_and_Wellbore

@@ -19,6 +19,8 @@ import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
 import { buildTimeline } from "@/lib/trrc/timeline-builder";
 import { fetchOffsetWells } from "@/lib/trrc/offset-wells";
 import { fetchLateralPath } from "@/lib/trrc/lateral-path";
+import { buildAcquisitionScorecard } from "@/lib/trrc/scorecard-builder";
+import { computeProductionAnalytics, generateFlags } from "@/lib/trrc/report-builder";
 import { buildXlsxWorkbook, type XlsxSheet } from "@/lib/trrc/xlsx-builder";
 
 export const runtime = "nodejs";
@@ -144,7 +146,37 @@ export async function GET(
       ? await fetchLateralPath(run.resolved_primary_api, gisLat, gisLng)
       : null;
 
+    const analytics = computeProductionAnalytics(production);
+    const flags = generateFlags(attempts, analytics, run);
+    const scorecard = buildAcquisitionScorecard({
+      attempts, production, coverage,
+      criticalFlags: flags.critical,
+      importantFlags: flags.important,
+      monthsOfHistory: analytics.months.length,
+      recentAvgOil: analytics.recent12AvgOil,
+      yoyDeclineOilPct: analytics.yoyDeclineOil,
+      zeroProductionMonths: analytics.zeroMonths,
+      worTrend: analytics.worTrend,
+      offsetWellCount: offsetWells.length,
+      hasLateralPath: lateralPath !== null,
+      resolvedLeaseNumber: run.resolved_lease_number,
+      resolvedDistrict: run.resolved_district,
+    });
+
     const sheets: XlsxSheet[] = [
+      {
+        name: "Scorecard",
+        columns: [{ header: "Field", width: 24 }, { header: "Value", width: 60 }],
+        rows: [
+          ["Recommendation", scorecard.recommendation],
+          ["Opportunity Score", scorecard.opportunity_score],
+          ["Risk Score", scorecard.risk_score],
+          ["Overall Confidence", scorecard.overall_confidence],
+          ["Gating Conditions", scorecard.gating_conditions.join(" | ") || "(none)"],
+          ...Object.entries(scorecard.dimensions).map(([, d]) => [`${d.label} (${(d.weight * 100).toFixed(0)}%)`, `${d.score} — ${d.rationale}`]),
+          ["Reasons Against", scorecard.reasons_against.join(" | ") || "(none)"],
+        ],
+      },
       {
         name: "Identity",
         columns: [{ header: "Field", width: 26 }, { header: "Value", width: 34 }],

@@ -1,17 +1,18 @@
 /**
  * TRRC Due Diligence Report Builder — Manus Protocol
  *
- * 10-section structured report:
+ * 11-section structured report:
  *   1. Executive Summary (well identity + critical/important flags)
  *   2. Operator Standing (P-5 registration, bond, compliance)
  *   3. Production History (monthly table + computed analytics + charts)
  *   4. Well Construction (W-2 completion data + W-1 permits + imaged docs)
  *   5. Compliance and Legal Status (violations, orphan, plugging)
- *   6. Legal Description and Location (GLO + GIS)
+ *   6. Legal Description and Location (GLO + GIS + Maps + offset wells + lateral path)
  *   7. Missing Documents and Gaps
  *   8. Timeline (dated regulatory events, chronological)
  *   9. Evidence Index (per-source query ledger)
- *  10. Overall Assessment (data completeness, narrative)
+ *  10. Acquisition Scorecard (transparent rule-based screening aid)
+ *  11. Overall Assessment (data completeness, narrative)
  */
 
 import React from "react";
@@ -41,6 +42,7 @@ import { buildTimeline } from "./timeline-builder";
 import { fetchStaticMapImage } from "./maps-builder";
 import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
 import { fetchLateralPath, type LateralPath } from "./lateral-path";
+import { buildAcquisitionScorecard } from "./scorecard-builder";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -366,7 +368,7 @@ function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDiligenceRun
 
 // ─── Production analytics ─────────────────────────────────────────────────────
 
-interface ProductionAnalytics {
+export interface ProductionAnalytics {
   months: TrrcDDProductionRow[];
   recent12AvgOil: number | null;
   prior12AvgOil: number | null;
@@ -380,7 +382,7 @@ interface ProductionAnalytics {
   declineFlagged: boolean;
 }
 
-function computeProductionAnalytics(production: TrrcDDProductionRow[]): ProductionAnalytics {
+export function computeProductionAnalytics(production: TrrcDDProductionRow[]): ProductionAnalytics {
   const sorted = [...production].sort((a, b) => a.production_month.localeCompare(b.production_month));
 
   const avg = (rows: TrrcDDProductionRow[], key: keyof TrrcDDProductionRow): number | null => {
@@ -450,12 +452,12 @@ function computeProductionAnalytics(production: TrrcDDProductionRow[]): Producti
 
 // ─── Flag generation ──────────────────────────────────────────────────────────
 
-interface Flags {
+export interface Flags {
   critical: string[];
   important: string[];
 }
 
-function generateFlags(
+export function generateFlags(
   attempts: LiteSourceAttempt[],
   analytics: ProductionAnalytics,
   run: TrrcDueDiligenceRun,
@@ -1324,6 +1326,86 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
 
 // ─── Section 10 — Overall Assessment ─────────────────────────────────────────
 
+const RECOMMENDATION_COLOR: Record<string, string> = {
+  PURSUE: C.green, REVIEW: C.yellow, PASS: C.gray, BLOCKED: C.red,
+};
+
+function scoreColor(score: number): string {
+  if (score >= 70) return C.green;
+  if (score >= 40) return C.yellow;
+  return C.red;
+}
+
+// ─── Section 10 — Acquisition Scorecard ──────────────────────────────────────
+
+function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  scorecard: AcquisitionScorecard;
+  generatedAt: string;
+}) {
+  const dimensionEntries = Object.values(scorecard.dimensions);
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — ACQUISITION SCORECARD"),
+
+    React.createElement(Text, { style: S.noteText },
+      "A transparent, rule-based screening aid computed only from the TRRC records retrieved in this report — not a black-box model, not investment advice, and not a substitute for the buyer's own underwriting. Every score below states exactly which retrieved facts produced it. Missing data always scores low, never neutral-good.",
+    ),
+
+    React.createElement(View, { style: { flexDirection: "row", marginTop: 10, marginBottom: 10 } },
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "SCREENING RESULT"),
+        React.createElement(Text, { style: { fontSize: 13, fontFamily: "Helvetica-Bold", color: RECOMMENDATION_COLOR[scorecard.recommendation] ?? C.navy } }, scorecard.recommendation),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "OPPORTUNITY"),
+        React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: scoreColor(scorecard.opportunity_score) } }, String(scorecard.opportunity_score)),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "RISK"),
+        React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: scoreColor(100 - scorecard.risk_score) } }, String(scorecard.risk_score)),
+      ),
+      React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "CONFIDENCE"),
+        React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: scoreColor(scorecard.overall_confidence) } }, String(scorecard.overall_confidence)),
+      ),
+    ),
+
+    scorecard.gating_conditions.length > 0 ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.redBg, marginBottom: 8 }] },
+      React.createElement(Text, { style: [S.flagLabel, { color: C.red }] }, "⚠ SCREENING RESULT IS GATED"),
+      React.createElement(Text, { style: [S.flagItem, { color: C.red }] }, "One or more critical findings force a BLOCKED result regardless of the dimension scores below — see Section 1 for detail."),
+    ) : null,
+
+    React.createElement(Text, { style: [S.subTitle, { marginTop: 4 }] }, "Scoring Dimensions (0-100)"),
+    ...dimensionEntries.map((d, i) => React.createElement(
+      View, { key: String(i), style: { marginBottom: 6, paddingBottom: 6, borderBottomWidth: i < dimensionEntries.length - 1 ? 0.5 : 0, borderBottomColor: C.border } },
+      React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", marginBottom: 1 } },
+        React.createElement(Text, { style: { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.dark } }, `${d.label} (weight ${(d.weight * 100).toFixed(0)}%)`),
+        React.createElement(Text, { style: { fontSize: 9, fontFamily: "Helvetica-Bold", color: scoreColor(d.score) } }, String(d.score)),
+      ),
+      React.createElement(Text, { style: { fontSize: 7.5, color: C.gray } }, d.rationale),
+      d.data_points.length > 0 ? React.createElement(Text, { style: { fontSize: 7, color: C.lightGray, marginTop: 1 } }, d.data_points.join(" · ")) : null,
+    )),
+
+    scorecard.reasons_against.length > 0 ? React.createElement(View, { style: { marginTop: 8 } },
+      React.createElement(Text, { style: S.subTitle }, "Reasons Against"),
+      ...scorecard.reasons_against.slice(0, 6).map((r, i) => React.createElement(Text, { key: String(i), style: [S.bodyText, { fontSize: 7.5, color: C.red, marginBottom: 2 }] }, `• ${r}`)),
+    ) : null,
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 11 — Overall Assessment ─────────────────────────────────────────
+
 function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, generatedAt }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
@@ -1380,7 +1462,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — OVERALL ASSESSMENT"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — OVERALL ASSESSMENT"),
 
     // Stats row
     React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
@@ -1436,9 +1518,9 @@ export async function buildTrrcPdfReport(
   run: TrrcDueDiligenceRun,
   _manifest: TrrcManifest,
   _findings: TrrcFinding[],
-  _scorecard: AcquisitionScorecard,
+  _scorecardArg: AcquisitionScorecard,
   production: TrrcDDProductionRow[],
-  _coverage: SourceCoverageStatus[],
+  coverage: SourceCoverageStatus[],
   sourceAttempts: LiteSourceAttempt[] = [],
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
@@ -1468,6 +1550,20 @@ export async function buildTrrcPdfReport(
     : null;
   const analytics = computeProductionAnalytics(production);
   const flags     = generateFlags(attempts, analytics, run);
+  const scorecard = buildAcquisitionScorecard({
+    attempts, production, coverage,
+    criticalFlags: flags.critical,
+    importantFlags: flags.important,
+    monthsOfHistory: analytics.months.length,
+    recentAvgOil: analytics.recent12AvgOil,
+    yoyDeclineOilPct: analytics.yoyDeclineOil,
+    zeroProductionMonths: analytics.zeroMonths,
+    worTrend: analytics.worTrend,
+    offsetWellCount: offsetWells.length,
+    hasLateralPath: lateralPath !== null,
+    resolvedLeaseNumber: run.resolved_lease_number,
+    resolvedDistrict: run.resolved_district,
+  });
 
   const wellStatusAttempt = getAttempt(attempts, "fetch_well_status");
   const wellStatus = str(wellStatusAttempt?.["status"] ?? wellStatusAttempt?.["well_status"]);
@@ -1490,6 +1586,7 @@ export async function buildTrrcPdfReport(
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
+    React.createElement(AcquisitionScorecardPage, { run, id: identity, scorecard, generatedAt }),
     React.createElement(OverallAssessmentPage,  { run, id: identity, attempts, flags, analytics, generatedAt }),
   );
 
