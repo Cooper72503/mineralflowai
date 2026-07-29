@@ -1300,7 +1300,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
     ),
     ...index.map((e, i) => React.createElement(
       View, { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
-      React.createElement(Text, { style: [S.tableCell, { width: "26%" }] }, e.label),
+      React.createElement(Link, { src: e.portal_url, style: [S.tableCell, S.trrcLink, { width: "26%" }] }, e.label),
       React.createElement(Text, { style: [S.tableCellMono, { width: "22%" }] }, e.query_criteria),
       React.createElement(Text, { style: [S.tableCell, { width: "16%" }, e.status === "retrieval_failed" ? { color: C.red } : e.status === "manual_required" ? { color: C.yellow } : {}] }, EVIDENCE_STATUS_LABEL[e.status]),
       React.createElement(Text, { style: [S.tableCellMono, { width: "10%" }] }, String(e.record_count)),

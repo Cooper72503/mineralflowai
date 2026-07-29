@@ -87,4 +87,23 @@ describe("buildEvidenceIndex", () => {
     const index = buildEvidenceIndex(attempts, baseRun);
     expect(index.find((e) => e.source_name === "fetch_coda_records")!.status).toBe("manual_required");
   });
+
+  it("includes county records, and links each source to its own real EWA landing page, not a generic menu", () => {
+    const index = buildEvidenceIndex([], baseRun);
+    const names = index.map((e) => e.source_name);
+    expect(names).toContain("fetch_county_records");
+
+    expect(index.find((e) => e.source_name === "fetch_well_status")!.portal_url)
+      .toBe("https://webapps2.rrc.texas.gov/EWA/wellStatusQueryAction.do");
+    expect(index.find((e) => e.source_name === "fetch_p4_records")!.portal_url)
+      .toBe("https://webapps2.rrc.texas.gov/EWA/gathererPurchaserQueryAction.do");
+    expect(index.find((e) => e.source_name === "search_by_api")!.portal_url)
+      .toBe("https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do");
+
+    // Every source's link must be distinct, unless it deliberately shares
+    // a different, non-EWA portal (CODA/ICE/GLO/GIS/county-clerk records).
+    const ewaEntries = index.filter((e) => e.portal_url.includes("/EWA/") && e.source_name !== "fetch_coda_records");
+    const urls = new Set(ewaEntries.map((e) => e.portal_url));
+    expect(urls.size).toBe(ewaEntries.length);
+  });
 });

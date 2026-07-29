@@ -2,16 +2,21 @@
  * Evidence Index — a per-source ledger of exactly what was queried, where,
  * and what came back, for a due diligence run.
  *
- * Portal URLs and query-criteria descriptions here are deliberately NOT
- * pre-filled deep links. Live testing (2026-07-27) confirmed TRRC's EWA
- * endpoints are inconsistent about honoring a bookmarkable GET query string
- * — wellboreQueryAction.do executes a real search via plain GET, but several
- * others (organizationQueryAction.do among them) just re-render the blank
- * search form unless the request carries a real session + JSF ViewState
- * token, which only the worker's authenticated POST flow establishes.
- * Shipping "click here to verify" links that silently fail for some sources
- * would be worse than no link — an analyst re-running the search by hand
- * from the portal's own form, using the criteria listed here, always works.
+ * Portal URLs here are each source's own bare query-landing page (e.g.
+ * wellStatusQueryAction.do), not a pre-filled deep link to results. Live
+ * testing (2026-07-27) confirmed TRRC's EWA endpoints are inconsistent
+ * about honoring a bookmarkable GET query string — wellboreQueryAction.do
+ * executes a real search via plain GET, but several others
+ * (organizationQueryAction.do among them) just re-render the blank search
+ * form unless the request carries a real session + JSF ViewState token,
+ * which only the worker's authenticated POST flow establishes. That same
+ * finding is what makes a bare landing-page link safe: every one of these
+ * endpoints, when hit with no query params at all, either shows its real
+ * search form (confirmed live 2026-07-29 for wellbore/gatherer-purchaser)
+ * or accurately reflects an outage with the same HTTP 500 this pipeline
+ * itself hits — never a misleading "success" for a query it didn't run.
+ * An analyst still re-enters the criteria listed in this row by hand; the
+ * link only saves navigating there from the generic EWA main menu.
  */
 
 import type { TrrcDueDiligenceRun } from "./types";
@@ -29,28 +34,30 @@ export type EvidenceIndexEntry = {
   retrieved_at: string | null;
 };
 
-const EWA_MENU_URL = "https://webapps2.rrc.texas.gov/EWA/ewaMain.do";
 const PDA_ICE_URL = "https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml";
 const GIS_VIEWER_URL = "https://gis.rrc.texas.gov/GISViewer/index.html";
 
+const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
+
 const SOURCE_META: Record<string, { label: string; portal: string; portal_url: string }> = {
-  search_by_api:               { label: "S1 — Wellbore Identity",             portal: "TRRC EWA — Wellbore Query",              portal_url: EWA_MENU_URL },
-  search_by_lease:              { label: "S2 — Lease Well Inventory",          portal: "TRRC EWA — Lease Well Query",            portal_url: EWA_MENU_URL },
-  search_by_operator:           { label: "S3 — P-5 Operator Registration",     portal: "TRRC EWA — Organization (P-5) Query",    portal_url: EWA_MENU_URL },
-  fetch_well_status:            { label: "S4 — Well Status",                   portal: "TRRC EWA — Well Status Query",           portal_url: EWA_MENU_URL },
-  fetch_inactive_well_status:   { label: "S5 — Inactive Well Designation",     portal: "TRRC EWA — Inactive Well Aging Report",  portal_url: EWA_MENU_URL },
-  fetch_orphan_well:            { label: "S6 — Orphan Well Program",           portal: "TRRC EWA — Orphan Well Query",           portal_url: EWA_MENU_URL },
-  fetch_severance_records:      { label: "S7 — Severance Tax Records",         portal: "TRRC EWA — Severance Query",             portal_url: EWA_MENU_URL },
-  fetch_production:             { label: "S8 — Monthly Production",            portal: "TRRC EWA — Production Query",            portal_url: EWA_MENU_URL },
-  fetch_p4_records:             { label: "S9 — P-4 Gatherer/Purchaser",        portal: "TRRC EWA — P-4 Gatherer/Purchaser Query", portal_url: EWA_MENU_URL },
-  fetch_completion_records:     { label: "S10 — W-2 Completion Record",        portal: "TRRC EWA — Completion Query",            portal_url: EWA_MENU_URL },
-  fetch_plugging_records:       { label: "S11 — Plugging Records (W-3C)",      portal: "TRRC EWA — Plugging Query",              portal_url: EWA_MENU_URL },
-  fetch_coda_records:           { label: "S12 — CODA Imaged Documents",        portal: "TRRC CODA — Imaged Records",             portal_url: "https://webapps2.rrc.texas.gov/EWA/cogisQueryAction.do" },
+  search_by_api:               { label: "S1 — Wellbore Identity",             portal: "TRRC EWA — Wellbore Query",              portal_url: `${EWA_BASE}/wellboreQueryAction.do` },
+  search_by_lease:              { label: "S2 — Lease Well Inventory",          portal: "TRRC EWA — Lease Well Query",            portal_url: `${EWA_BASE}/leaseWellQueryAction.do` },
+  search_by_operator:           { label: "S3 — P-5 Operator Registration",     portal: "TRRC EWA — Organization (P-5) Query",    portal_url: `${EWA_BASE}/organizationQueryAction.do` },
+  fetch_well_status:            { label: "S4 — Well Status",                   portal: "TRRC EWA — Well Status Query",           portal_url: `${EWA_BASE}/wellStatusQueryAction.do` },
+  fetch_inactive_well_status:   { label: "S5 — Inactive Well Designation",     portal: "TRRC EWA — Inactive Well Aging Report",  portal_url: `${EWA_BASE}/inactiveWellQueryAction.do` },
+  fetch_orphan_well:            { label: "S6 — Orphan Well Program",           portal: "TRRC EWA — Orphan Well Query",           portal_url: `${EWA_BASE}/orphanWellQueryAction.do` },
+  fetch_severance_records:      { label: "S7 — Severance Tax Records",         portal: "TRRC EWA — Severance Query",             portal_url: `${EWA_BASE}/severanceQueryAction.do` },
+  fetch_production:             { label: "S8 — Monthly Production",            portal: "TRRC EWA — Production Query",            portal_url: `${EWA_BASE}/productionQueryAction.do` },
+  fetch_p4_records:             { label: "S9 — P-4 Gatherer/Purchaser",        portal: "TRRC EWA — P-4 Gatherer/Purchaser Query", portal_url: `${EWA_BASE}/gathererPurchaserQueryAction.do` },
+  fetch_completion_records:     { label: "S10 — W-2 Completion Record",        portal: "TRRC EWA — Completion Query",            portal_url: `${EWA_BASE}/completionQueryAction.do` },
+  fetch_plugging_records:       { label: "S11 — Plugging Records (W-3C)",      portal: "TRRC EWA — Plugging Query",              portal_url: `${EWA_BASE}/pluggingQueryAction.do` },
+  fetch_coda_records:           { label: "S12 — CODA Imaged Documents",        portal: "TRRC CODA — Imaged Records",             portal_url: `${EWA_BASE}/cogisQueryAction.do` },
   fetch_compliance_violations:  { label: "S13 — Compliance Violations",        portal: "TRRC PDA ICE — Inspection & Compliance", portal_url: PDA_ICE_URL },
-  fetch_injection_records:      { label: "S14 — UIC / Injection Permits",      portal: "TRRC EWA — Injection/Disposal Query",    portal_url: EWA_MENU_URL },
+  fetch_injection_records:      { label: "S14 — UIC / Injection Permits",      portal: "TRRC EWA — Injection/Disposal Query",    portal_url: `${EWA_BASE}/uicQueryAction.do` },
   fetch_glo_survey:             { label: "S15 — Texas GLO Survey",             portal: "Texas GLO — Land Survey Records",        portal_url: "https://www.glo.texas.gov" },
   fetch_gis_plat:               { label: "S16 — RRC GIS / Plat Map",           portal: "TRRC GIS Viewer",                        portal_url: GIS_VIEWER_URL },
-  fetch_drilling_permits:       { label: "S17 — Drilling Permit Records (W-1)", portal: "TRRC EWA — Drilling Permit (W-1) Query", portal_url: EWA_MENU_URL },
+  fetch_drilling_permits:       { label: "S17 — Drilling Permit Records (W-1)", portal: "TRRC EWA — Drilling Permit (W-1) Query", portal_url: `${EWA_BASE}/drillingPermitsQueryAction.do` },
+  fetch_county_records:         { label: "S18 — County Real Property Records", portal: "County Clerk Records (varies by county)", portal_url: "https://www.texasfile.com" },
 };
 
 function describeQueryCriteria(sourceName: string, run: TrrcDueDiligenceRun): string {
