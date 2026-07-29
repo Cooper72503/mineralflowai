@@ -773,7 +773,7 @@ function OperatorStandingPage({ run, id: identity, attempts, flags, generatedAt 
     violations ? React.createElement(View, { style: { marginBottom: 10 } },
       kv("Total Violations",  totalCount !== null ? String(totalCount) : "—"),
       kv("Open (Unresolved)", openCount !== null ? String(openCount) : "—", openCount && openCount > 0 ? "red" : undefined),
-      kv("Searched By",       str(violations["searched_by"])),
+      kv("Searched By",       violations["searched_by"] === "operator_number" ? "Operator Number" : violations["searched_by"] === "api_number" ? "API Number" : "—"),
       vUrl ? React.createElement(View, { style: S.kvRow },
         React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
         React.createElement(Link, { src: vUrl, style: S.trrcLink }, "View ICE Portal ↗"),
