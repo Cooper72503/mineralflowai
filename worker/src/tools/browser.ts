@@ -285,11 +285,14 @@ export async function searchOperator(
     }
 
     // Agent Information is a real 3-column grid (Name/Title/Mailing Address),
-    // not label/value rows.
+    // not label/value rows. Scoped from the "Agent Information" section
+    // header specifically — an unscoped "Name:" match can land on the wrong
+    // row elsewhere on the page and silently return empty cells.
     let agentName = "", agentTitle = "", agentAddress = "";
-    const agentHeaderRow = page.locator('tr:has(th:text("Name:"))').first();
-    if (await agentHeaderRow.count()) {
-      const agentDataRow = agentHeaderRow.locator("xpath=following-sibling::tr[1]");
+    const agentDataRow = page.locator(
+      'xpath=//th[contains(text(),"Agent Information")]/ancestor::table[1]//th[normalize-space(text())="Name:"]/ancestor::tr[1]/following-sibling::tr[1]',
+    ).first();
+    if (await agentDataRow.count()) {
       const agentCells = await agentDataRow.locator("td").allTextContents();
       agentName = (agentCells[0] ?? "").trim();
       agentTitle = (agentCells[1] ?? "").trim();
