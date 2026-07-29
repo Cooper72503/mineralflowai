@@ -1,0 +1,902 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8;"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=5, IE=8, IE=9, IE=10" />
+    <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+
+    <script type="text/javascript">
+      var dojoConfig = {
+      parseOnLoad: true,
+      isDebug: false,
+
+      has: {
+      "dojo-debug-messages": false
+      },
+
+      packages:
+       [ { name:"rrcGisModules", location:location.pathname.replace(/\/[^/]+$/, '') + '/gis/javascript'} ]
+
+      };
+    </script>
+
+    <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.3compact"></script>
+    <script type="text/javascript"> 
+      require(["dojo/parser", "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dojo/query", 
+               "dojo/dom-construct", "dojo/NodeList-manipulate", "dojo/dom-attr", "dojo/dom",
+               "dojo/_base/connect", "dojo/_base/event"]);
+    </script>
+
+    <title>P-4 Gatherer/Purchaser Query</title>
+  </head>
+
+  <body>
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td>
+
+
+
+
+
+<script type="text/javascript">
+function openHelp(obj) {
+
+  var help = '/EWA/help/' + obj;
+  //alert(help+', '+obj);
+
+  hold = window.open(help, 'popupWindow',
+                     'resizable=yes,menubar=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');
+  hold.focus();
+  return false;
+}
+</script>
+
+<!-- System Header -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/rrc_online_header.gif"></td>
+    <td class="MainHeader" align="right" nowrap>&nbsp;</td>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+  </tr>
+  <tr><td colspan="3" style="height: 3px;" class="BorderLines"/></tr>
+</table>
+
+<!--Application Header-->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr> 
+    <td class="AppHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+    <td class="AppHeader">Oil & Gas Data Query</td>
+  </tr>
+</table>
+
+<!-- Top Nav Level 2 -->
+<!--Navigation Table Level 2 and 3 -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr><td colspan="2" style="height: 2px;" class="BorderLines"/></tr>
+  <!--Level 2 navigation row-->
+  <tr>
+    <td class="AppNavMain" width="1%"><img src="/EWA/commonuiImages/spacer.gif" height="1px"></td>
+    <td class="AppNavMain">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Main -->
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <td class="AppNavMainSelected">
+            <a href="/EWA/ewaMain.do">Query Menu</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help-->
+          <td class="AppNavMain">
+            
+            <a href="#" onclick="openHelp('P-4_TOC.html');">Help</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help END-->
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td colspan="2" style="height: 1px;" class="BorderLines"/></tr>
+</table>
+
+</td></tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr valign="top">
+        <td style="width: 100%;" class="ContentArea">
+          <span id="messageArea">
+
+
+
+
+
+<!-- /tiles/messages.jsp BEGIN -->
+
+
+
+
+<!-- /tiles/messages.jsp END -->
+</span>
+          
+
+
+
+
+
+
+
+
+
+
+
+
+<script type="text/javascript" src="/EWA/js/ewaPageUtils.js"></script>
+
+
+
+<script>
+  function clickedReturn() {
+    document.forms["gathererPurchaserQueryActionForm"].elements["methodToCall"].value = "returnToSearch";
+    document.forms["gathererPurchaserQueryActionForm"].submit();
+  }
+
+  function doSearch(){
+    document.forms["gathererPurchaserQueryActionForm"].elements["methodToCall"].value = "search";
+    document.forms["gathererPurchaserQueryActionForm"].submit();
+  }
+
+  function doSort(columnName, direction) {
+    ewaDoSort(document.forms["gathererPurchaserQueryActionForm"], "searchArgs", columnName, direction);
+  }
+  function generateP4GPReportCsv() {
+    document.forms["gathererPurchaserQueryActionForm"].methodToCall.value = 
+        "generateP4GPReportCsv";
+    document.forms["gathererPurchaserQueryActionForm"].submit();
+  }
+</script>
+
+<!--Content Area-->
+<form name="gathererPurchaserQueryActionForm" method="post" action="/EWA/gathererPurchaserQueryAction.do">
+
+  <input type="hidden" name="searchArgs.orderByColumnName" value="">
+  
+    <input type="hidden" name="searchArgs.gathererPurchaserTypeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.gathererPurchaserNumberArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.gathererProductArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.orderByHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.leaseTypeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.districtCodeArgHndlr.inputValue" value="08">
+    <input type="hidden" name="searchArgs.leaseNumberArgHndlr.inputValue" value="52210">
+    <input type="hidden" name="searchArgs.fieldNumbersArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.operatorNumbersArgHndlr.inputValue" value=""> 
+
+  
+    
+  
+
+
+
+
+
+
+
+
+  
+
+  
+    <input type="hidden" name="methodToCall" value="search">
+  
+
+  
+
+
+
+  <input type="hidden" name="actionManager.recordCountHndlr.inputValue" value="2">
+  <input type="hidden" name="actionManager.currentIndexHndlr.inputValue" value="1">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].actionDisplayNmHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[0].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionHndlr.inputValue" value="/gathererPurchaserQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionMethodHndlr.inputValue" value="returnToSearch">
+    <input type="hidden" name="actionManager.actionRcrd[0].pagerParameterKeyHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].argRcrdParameters(searchArgs.paramValue)" value="|102=08|103=52210">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].actionDisplayNmHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[1].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[1].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionHndlr.inputValue" value="/gathererPurchaserQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionMethodHndlr.inputValue" value="search">
+    <input type="hidden" name="actionManager.actionRcrd[1].pagerParameterKeyHndlr.inputValue" value="pager.paramValue">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[1].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(pager.paramValue)" value="|1=1|2=10|3=3|4=0|5=1|6=10">
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(searchArgs.paramValue)" value="|102=08|103=52210">
+
+
+
+ 
+  <table class="ewaPage">
+    <tr>
+      <td>
+        <h2 class="style5">P-4 Gatherer/Purchaser Query Results</h2>
+      </td>
+    </tr>
+
+    <tr>
+      <td valign="top">
+        <table class="TabBox2" cellspacing="0" cellpadding="4" border="0">
+          <tr>
+            <td>
+              <table style="white-space: nowrap; width:99%; margin: auto;">
+                <tr>
+                  <td>
+                    <p><b>Search Criteria:</b></p>
+                    <p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <strong>District:</strong>
+  08
+  <br>
+
+
+
+  <strong>Oil Lease No./Gas Well ID No:</strong>
+  52210
+  <br>
+  <strong>Lease Names:</strong>
+  BRADFORD TRUST A UNIT 2         
+  <br>
+
+
+
+
+
+
+
+
+
+
+
+</p>
+                  </td>
+                  <td valign="bottom">
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/gathererPurchaserQueryAction.do?methodToCall=returnToSearch&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAAG2OywqDMBBFv8YuQxIV3GQRSrvuQ9qFdDGNgwpqZJL0AX5803Tb3eXcO8NZBedKrIILxTdERhs_2PlkqG34TSX-xDssi5Ms1szjCxzr7CPLdVHkcSBVJve7q44x_8YOfI-EdAhkenBIx4D0_v1lrY2zQk3oe9vWdgvjGEGpCH2gubZnhHgVUfVHp3Gp1dQ5tgDBdIExYLKUildJoJRS8A9R2DnT1QAAAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr><td>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table style="white-space: normal; width:98%; text-align: center; margin: auto;" 
+       class="DataGrid" border="1" cellpadding="4" cellspacing="0" bordercolor="#666666">
+  <tr>
+    <td colspan="10" height="25" class="PagerBanner">
+      
+        
+      
+
+
+
+
+
+
+
+
+
+
+
+
+  <table style="width:100%; white-space: nowrap;">
+    <tr>
+      <td style="text-align: left; border-style:none; font-weight: bold">
+        3 results
+      </td>
+      <td style="text-align: center; border-style:none;">
+        
+          
+            Page: 1 of 1 <!-- Simple case, single page output -->
+          
+
+          
+        
+      </td>
+
+      <!-- Page size control -->  
+      <td style="text-align: right; border-style:none;">
+        <label>
+          Page Size:
+          <select name="pager.pageSize" onchange="doSearch()"><option value="-1">View All</option></select>
+        </label>
+      </td>
+
+    </tr>
+  </table>
+
+
+
+    </td>
+  </tr>
+  
+  <tr>
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('DISTRICT_CODE','ASC')">District</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('LEASE_NUMBER','ASC')">Lease No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('LEASE_NAME','ASC')">Lease Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('FIELD_NUMBER','ASC')">Field No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('FIELD_NAME','ASC')">Field Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('OPERATOR_NAME','ASC')">Operator Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('GATHERER_PURCHASER_NAME','ASC')">Gatherer/Purchaser Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('GATHERER_TYPE','ASC')">Type</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('OIL_OR_GAS_CODE','ASC')">Oil/Gas</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th style='text-align:center'>
+
+  <a href="Javascript:doSort('GATHERER_PRODUCT','ASC')">Product</a>
+
+  
+
+</th>
+
+
+  </tr>
+
+  
+  
+    
+      
+        <tr>
+          <td>08</td>
+          <td>
+            
+              
+
+                
+                
+                  
+                  
+                  
+                
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=8&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAAL2QQWvDMAyFf013NJadhFx0CGM9d1vpDqEHNRFJIa2D7Gwr-MfPzSiUtoeddhNP74nvKYLWaCJoQHgSaaom7N3xrZG21luc9S_e0Th6o9JaBf4mrzr3ubBVltlkMLgwy5ePKo32PHYUehaW1SRNT57ldWI5_d5VrUu2DA8ceteu3TMNQxJyFA6THNfunSmlklSivsOp_bytpPNqJKHDhoaJZ0qDupwBcmPgNgn_WMRfChQ4UsdyBfqwFWzrW9-ZFiEaBB0t2pihjnkSCnzQ7M8_-QG14pUS6QEAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAAL2QQWvDMAyFf013NJadhFx0CGM9d1vpDqEHNRFJIa2D7Gwr-MfPzSiUtoeddhNP74nvKYLWaCJoQHgSaaom7N3xrZG21luc9S_e0Th6o9JaBf4mrzr3ubBVltlkMLgwy5ePKo32PHYUehaW1SRNT57ldWI5_d5VrUu2DA8ceteu3TMNQxJyFA6THNfunSmlklSivsOp_bytpPNqJKHDhoaJZ0qDupwBcmPgNgn_WMRfChQ4UsdyBfqwFWzrW9-ZFiEaBB0t2pihjnkSCnzQ7M8_-QG14pUS6QEAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+              
+            
+          </td>
+          <td>BRADFORD TRUST A UNIT 2</td>
+          <td>85280300</td>
+          <td>SPRABERRY (TREND AREA)</td>
+          <td>XTO ENERGY INC.</td>
+          <td>ETP CRUDE LLC</td>
+          <td>Gatherer</td>
+          <td>
+            
+            
+            Oil
+          </td>
+          <td>Oil</td>
+        </tr>
+      
+        <tr>
+          <td>08</td>
+          <td>
+            
+              
+
+                
+                
+                  
+                  
+                  
+                
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=8&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAAL2QQWvDMAyFf013NJadhFx0CGM9d1vpDqEHNRFJIa2D7Gwr-MfPzSiUtoeddhNP74nvKYLWaCJoQHgSaaom7N3xrZG21luc9S_e0Th6o9JaBf4mrzr3ubBVltlkMLgwy5ePKo32PHYUehaW1SRNT57ldWI5_d5VrUu2DA8ceteu3TMNQxJyFA6THNfunSmlklSivsOp_bytpPNqJKHDhoaJZ0qDupwBcmPgNgn_WMRfChQ4UsdyBfqwFWzrW9-ZFiEaBB0t2pihjnkSCnzQ7M8_-QG14pUS6QEAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAAL2QQWvDMAyFf013NJadhFx0CGM9d1vpDqEHNRFJIa2D7Gwr-MfPzSiUtoeddhNP74nvKYLWaCJoQHgSaaom7N3xrZG21luc9S_e0Th6o9JaBf4mrzr3ubBVltlkMLgwy5ePKo32PHYUehaW1SRNT57ldWI5_d5VrUu2DA8ceteu3TMNQxJyFA6THNfunSmlklSivsOp_bytpPNqJKHDhoaJZ0qDupwBcmPgNgn_WMRfChQ4UsdyBfqwFWzrW9-ZFiEaBB0t2pihjnkSCnzQ7M8_-QG14pUS6QEAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+              
+            
+          </td>
+          <td>BRADFORD TRUST A UNIT 2</td>
+          <td>85280300</td>
+          <td>SPRABERRY (TREND AREA)</td>
+          <td>XTO ENERGY INC.</td>
+          <td>TARGA PL MID-CONT WESTTEX LLC</td>
+          <td>Gatherer</td>
+          <td>
+            
+            
+            Oil
+          </td>
+          <td>Casinghead Gas</td>
+        </tr>
+      
+        <tr>
+          <td>08</td>
+          <td>
+            
+              
+
+                
+                
+                  
+                  
+                  
+                
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=8&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAAL2QQWvDMAyFf013NJadhFx0CGM9d1vpDqEHNRFJIa2D7Gwr-MfPzSiUtoeddhNP74nvKYLWaCJoQHgSaaom7N3xrZG21luc9S_e0Th6o9JaBf4mrzr3ubBVltlkMLgwy5ePKo32PHYUehaW1SRNT57ldWI5_d5VrUu2DA8ceteu3TMNQxJyFA6THNfunSmlklSivsOp_bytpPNqJKHDhoaJZ0qDupwBcmPgNgn_WMRfChQ4UsdyBfqwFWzrW9-ZFiEaBB0t2pihjnkSCnzQ7M8_-QG14pUS6QEAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAAL2QQWvDMAyFf013NJadhFx0CGM9d1vpDqEHNRFJIa2D7Gwr-MfPzSiUtoeddhNP74nvKYLWaCJoQHgSaaom7N3xrZG21luc9S_e0Th6o9JaBf4mrzr3ubBVltlkMLgwy5ePKo32PHYUehaW1SRNT57ldWI5_d5VrUu2DA8ceteu3TMNQxJyFA6THNfunSmlklSivsOp_bytpPNqJKHDhoaJZ0qDupwBcmPgNgn_WMRfChQ4UsdyBfqwFWzrW9-ZFiEaBB0t2pihjnkSCnzQ7M8_-QG14pUS6QEAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+              
+            
+          </td>
+          <td>BRADFORD TRUST A UNIT 2</td>
+          <td>85280300</td>
+          <td>SPRABERRY (TREND AREA)</td>
+          <td>XTO ENERGY INC.</td>
+          <td>TARGA PL MID-CONT WESTTEX LLC</td>
+          <td>Purchaser</td>
+          <td>
+            
+            
+            Oil
+          </td>
+          <td>Casinghead Gas</td>
+        </tr>
+      
+    
+    
+  
+</table>
+</td></tr>
+
+          <tr>
+            <td>
+              <table style="white-space: nowrap; text-align: center; width:99%; margin: auto;">
+                <tr>
+                  <td align="left">
+                    <input type="button" name="unused" value="Download" onclick="generateP4GPReportCsv();">
+                  </td>
+                  <td align="right">
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/gathererPurchaserQueryAction.do?methodToCall=returnToSearch&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAAG2OywqDMBBFv8YuQxIV3GQRSrvuQ9qFdDGNgwpqZJL0AX5803Tb3eXcO8NZBedKrIILxTdERhs_2PlkqG34TSX-xDssi5Ms1szjCxzr7CPLdVHkcSBVJve7q44x_8YOfI-EdAhkenBIx4D0_v1lrY2zQk3oe9vWdgvjGEGpCH2gubZnhHgVUfVHp3Gp1dQ5tgDBdIExYLKUildJoJRS8A9R2DnT1QAAAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+
+    <tr><td>&nbsp;&nbsp;</td></tr>
+  </table>
+</form>
+
+
+        </td>
+      </tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td><table style="width: 100%" class="MainFooter">
+  <tr><td style="width: 100%;" class="BorderLines"></td></tr>
+  <tr>
+    <td style="width: 100%; height: 100%;" align="center" class="MainFooter">
+      <a target="_blank" href="http://www.rrc.texas.gov/site-policies/">Disclaimer</a> |
+      <a target="_blank" href="http://www.rrc.texas.gov">RRC Home</a> |
+      <a href="mailto:helpdesk@rrc.texas.gov?subject=Oil & Gas Queries">Contact</a>
+    </td>
+  </tr>
+</table>
+</td></tr>
+    </table>
+  </body>
+</html>
+
+

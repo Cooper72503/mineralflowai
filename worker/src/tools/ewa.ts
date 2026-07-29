@@ -126,9 +126,20 @@ export function extractTables(html: string): string[][][] {
     for (const rowEl of rowEls) {
       const $row = $(rowEl);
       const cellEls = $row.children("td, th").toArray();
-      const cells = cellEls.map(cellEl =>
-        $(cellEl).text().replace(/ /g, " ").replace(/\s+/g, " ").trim(),
-      );
+      const cells = cellEls.map(cellEl => {
+        // TRRC embeds "related links" <select> pickers (e.g. a lease's
+        // Images/Links dropdown) directly inside data cells alongside the
+        // real value. cheerio's .text() walks all descendants including
+        // <option> text, so a lease-number cell like
+        // "<a>52210</a> <select><option>Links</option><option>Images</option></select>"
+        // silently became "52210 Links Images" -- confirmed live 2026-07-29
+        // on gathererPurchaserQueryAction.do. Strip select/option before
+        // extracting text; this is a shared parser, so the fix applies to
+        // every findDataTable caller, not just gatherer/purchaser.
+        const $cell = $(cellEl).clone();
+        $cell.find("select, option").remove();
+        return $cell.text().replace(/ /g, " ").replace(/\s+/g, " ").trim();
+      });
       if (cells.some(c => c.length > 0)) rows.push(cells);
     }
     if (rows.length > 0) tables.push(rows);

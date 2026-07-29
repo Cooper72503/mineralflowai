@@ -33,6 +33,7 @@ const gisWellEmptyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-well
 const gisAlertAreasJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-alert-areas.json"), "utf8");
 const gisSurveyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-survey.json"), "utf8");
 const gathererPurchaserEmptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/gatherer-purchaser-empty.html"), "utf8");
+const gathererPurchaserPopulatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/gatherer-purchaser-populated.html"), "utf8");
 
 // ─── Direct unit tests of the extraction primitives ────────────────────────
 
@@ -48,6 +49,29 @@ describe("extractTables — nested-table handling", () => {
       t.some(row => row.some(cell => /api no\.?/i.test(cell)) && row.length >= 10),
     );
     expect(withFullHeader, "expected one extracted table to contain the full 10-column header row").toBeDefined();
+  });
+
+  it("strips embedded <select> 'related links' pickers instead of leaking their option text into cell values", () => {
+    // Real pattern confirmed live 2026-07-29 on gathererPurchaserQueryAction.do:
+    // a lease-number cell contains both the real value (as a link) and a
+    // Links/Images <select> dropdown in a nested table. Before the fix,
+    // cheerio's .text() walked the <option> text too, producing
+    // "52210 Links Images" instead of "52210".
+    const html = `<html><body><table>
+      <tr><th>Lease No.</th><th>Lease Name</th></tr>
+      <tr>
+        <td>
+          <table><tr>
+            <td><a href="#">52210</a></td>
+            <td><select name="propertyValue"><option value="" selected="selected">Links</option><option value="...">Images</option></select></td>
+          </tr></table>
+        </td>
+        <td>BRADFORD TRUST A UNIT 2</td>
+      </tr>
+    </table></body></html>`;
+    const table = findDataTable(html, 2);
+    expect(table).not.toBeNull();
+    expect(table!.rows[0]).toEqual(["52210", "BRADFORD TRUST A UNIT 2"]);
   });
 });
 
@@ -289,13 +313,19 @@ describe("getDrillingPermits — end to end against real fixtures", () => {
 // this codebase's prior "P-4 potential test" fetcher was pointed at a
 // nonexistent p4QueryAction.do URL — the real, live TRRC endpoint for Form
 // P-4 (gatherer/purchaser designation) is gathererPurchaserQueryAction.do,
-// a plain server-rendered page, no browser session needed. Every lease
-// tested this session (5 real leases across 2 districts) came back with no
-// gatherer/purchaser on file, so no populated fixture exists yet — this
-// test proves the confirmed-empty path only, same documented gap pattern
-// as the other findDataTable callers above.
+// a plain server-rendered page, no browser session needed.
+//
+// gatherer-purchaser-populated.html: a real response for district 08,
+// lease 52210 (API 42-329-43003), captured live via an actual completed
+// due-diligence run 2026-07-29. This fixture is also what caught a real,
+// general bug in extractTables(): TRRC embeds a "related links" <select>
+// (Images/Links dropdown) directly inside the lease-number cell, and
+// cheerio's .text() walked into its <option> text, turning "52210" into
+// "52210 Links Images" — silently corrupting every findDataTable caller
+// whenever a cell happens to contain one of these pickers, not just this
+// one. Fixed by stripping select/option before extracting cell text.
 
-describe("getGathererPurchaser — real fixture, confirmed-empty result", () => {
+describe("getGathererPurchaser — real fixtures, empty and populated", () => {
   const originalFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -309,6 +339,26 @@ describe("getGathererPurchaser — real fixture, confirmed-empty result", () => 
     expect(result.records).toEqual([]);
     expect(result.error).toBeUndefined();
     expect(result.message).toMatch(/no gatherer\/purchaser/i);
+  });
+
+  it("parses real gatherer/purchaser records with clean values, no related-links contamination", async () => {
+    mockFetchSequence(["<html></html>", gathererPurchaserPopulatedHtml]);
+    const result = await getGathererPurchaser("52210", "08");
+
+    expect(result.found, `expected found:true, got message: "${result.message}"`).toBe(true);
+    expect(result.records).toHaveLength(3);
+    expect(result.records[0]).toEqual({
+      district: "08",
+      lease_no: "52210",
+      lease_name: "BRADFORD TRUST A UNIT 2",
+      field_no: "85280300",
+      field_name: "SPRABERRY (TREND AREA)",
+      operator_name: "XTO ENERGY INC.",
+      gatherer_purchaser_name: "ETP CRUDE LLC",
+      type: "Gatherer",
+      oil_gas: "Oil",
+      product: "Oil",
+    });
   });
 
   it("requires lease number and district, same as severance/production", async () => {

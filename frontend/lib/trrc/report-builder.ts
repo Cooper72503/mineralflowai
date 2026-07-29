@@ -929,7 +929,8 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
         kv("Gatherer/Purchaser", str(r["gatherer_purchaser_name"] ?? r["name"])),
         kv("Type",               str(r["type"] ?? r["gatherer_purchaser_type"])),
         kv("Product",            str(r["product"])),
-        kv("Effective Date",     str(r["effective_date"] ?? r["date"])),
+        kv("Oil/Gas",            str(r["oil_gas"])),
+        kv("Field",              str(r["field_name"])),
       )),
     ) : React.createElement(Text, { style: S.noteText }, p4?.["found"] === false ? "No P-4 gatherer/purchaser on file — production cannot legally be sold or transported from this lease." : "P-4 gatherer/purchaser records not retrieved."),
 
