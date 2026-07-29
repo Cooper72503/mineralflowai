@@ -1450,9 +1450,17 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
     identity.operator ? `operated by ${identity.operator}` : "",
   ].filter(Boolean).join(" ");
 
+  // Same retrieval-failure-vs-confirmed-absence distinction as generateFlags
+  // — a hedged "was not retrieved or has no history" statement is dishonest
+  // when the evidence index already tells us definitively which one it was.
+  const productionAttemptForNarrative = getAttemptRaw(attempts, "fetch_production");
   const productionNarrative = analytics.months.length > 0
     ? `Production history covers ${analytics.months.length} months. The 12-month average is ${analytics.recent12AvgOil !== null ? `${analytics.recent12AvgOil.toFixed(0)} BBL/month (oil)` : "unavailable"} and ${analytics.recent12AvgGas !== null ? `${analytics.recent12AvgGas.toFixed(0)} MCF/month (gas)` : "gas data unavailable"}. ${analytics.yoyDeclineOil !== null ? `Year-over-year production has ${analytics.yoyDeclineOil > 0 ? `declined ${analytics.yoyDeclineOil.toFixed(1)}%` : `increased ${Math.abs(analytics.yoyDeclineOil).toFixed(1)}%`}.` : ""} ${analytics.zeroMonths > 0 ? `${analytics.zeroMonths} month(s) with zero reported production require follow-up.` : ""}`
-    : "Production data was not retrieved or the well has no production history on file.";
+    : productionAttemptForNarrative?.status === "success"
+    ? "TRRC confirms no production history on file for this lease."
+    : productionAttemptForNarrative
+    ? "Production data could not be retrieved (TRRC query failed) — this is not evidence of zero production. Re-run once the source is restored."
+    : "Production was not queried for this run.";
 
   const complianceNarrative = flags.critical.length > 0
     ? `${flags.critical.length} critical issue(s) were identified that require resolution before proceeding with any transaction. ${flags.important.length > 0 ? `Additionally, ${flags.important.length} important flag(s) warrant further due diligence.` : ""}`
