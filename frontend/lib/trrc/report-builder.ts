@@ -1,5 +1,5 @@
 /**
- * TRRC Due Diligence Report Builder — Manus Protocol
+ * TRRC Due Diligence Report Builder
  *
  * 11-section structured report:
  *   1. Executive Summary (well identity + critical/important flags)
@@ -626,7 +626,7 @@ function CoverPage({ run, id: identity, generatedAt }: {
     React.createElement(View, { style: { marginBottom: 40 } },
       React.createElement(Text, { style: { fontSize: 10, color: "#94A3B8", fontFamily: "Helvetica-Bold", letterSpacing: 2, marginBottom: 16 } }, "MINERAL FLOW AI"),
       React.createElement(Text, { style: { fontSize: 26, color: C.white, fontFamily: "Helvetica-Bold", lineHeight: 1.25, marginBottom: 6 } }, "TRRC DUE DILIGENCE REPORT"),
-      React.createElement(Text, { style: { fontSize: 11, color: "#94A3B8", fontFamily: "Helvetica" } }, "Veteran-Grade Well Research — Manus Protocol"),
+      React.createElement(Text, { style: { fontSize: 11, color: "#94A3B8", fontFamily: "Helvetica" } }, "Veteran-Grade Well Research"),
     ),
 
     React.createElement(View, { style: { marginBottom: 32, paddingVertical: 16, paddingHorizontal: 20, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" } },
