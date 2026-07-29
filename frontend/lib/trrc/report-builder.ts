@@ -503,9 +503,8 @@ export function generateFlags(
 
   // P-5 status
   const p5 = getAttempt(attempts, "search_by_operator");
-  const p5Records = Array.isArray(p5?.["records"]) ? (p5!["records"] as Record<string, unknown>[]) : [];
-  const p5First = p5Records[0] ?? {};
-  const p5Status = str(p5First["p5_status"] ?? p5?.["p5_status"]);
+  const p5Record = (p5?.["record"] ?? {}) as Record<string, unknown>;
+  const p5Status = str(p5?.["p5_status"] ?? p5Record["organization_status"]);
   if (p5Status && /inactive|revoked/i.test(p5Status)) {
     critical.push(`OPERATOR P-5 STATUS: ${p5Status.toUpperCase()} — operator may not be legally permitted to operate wells in Texas.`);
   }
@@ -524,7 +523,7 @@ export function generateFlags(
   }
 
   // Bond adequacy
-  const bondAmt = str(p5First["bond_amount"] ?? p5?.["bond_amount"]);
+  const bondAmt = str(p5?.["bond_amount"] ?? p5Record["bond_amount"]);
   if (bondAmt && bondAmt !== "—") {
     const bondNum = parseFloat(bondAmt.replace(/[^0-9.]/g, ""));
     if (!isNaN(bondNum) && bondNum < 25000) {
@@ -733,8 +732,7 @@ function OperatorStandingPage({ run, id: identity, attempts, flags, generatedAt 
   generatedAt: string;
 }) {
   const p5 = getAttempt(attempts, "search_by_operator");
-  const p5Records = Array.isArray(p5?.["records"]) ? (p5!["records"] as Record<string, unknown>[]) : [];
-  const p5First = p5Records[0] ?? (p5 ?? {});
+  const p5Record = (p5?.["record"] ?? {}) as Record<string, unknown>;
 
   const violations = getAttempt(attempts, "fetch_compliance_violations");
   const openCount = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : null;
@@ -755,12 +753,13 @@ function OperatorStandingPage({ run, id: identity, attempts, flags, generatedAt 
 
     React.createElement(Text, { style: S.subTitle }, "P-5 Operator Registration"),
     p5 ? React.createElement(View, { style: { marginBottom: 10 } },
-      kv("Operator Name",     str(p5First["operator_name"] ?? identity.operator)),
-      kv("Operator Number",   str(p5First["operator_no"] ?? identity.operatorNo)),
-      kv("P-5 Status",        str(p5First["p5_status"]), /inactive|revoked/i.test(str(p5First["p5_status"])) ? "red" : undefined),
-      kv("Bond Amount on File", str(p5First["bond_amount"])),
-      kv("Registered Agent",  str(p5First["agent_name"])),
-      kv("Mailing Address",   str(p5First["address"])),
+      kv("Operator Name",     str(p5Record["operator_name"] ?? identity.operator)),
+      kv("Operator Number",   str(p5Record["operator_number"] ?? identity.operatorNo)),
+      kv("P-5 Status",        str(p5?.["p5_status"] ?? p5Record["organization_status"]), /inactive|revoked/i.test(str(p5?.["p5_status"] ?? p5Record["organization_status"])) ? "red" : undefined),
+      kv("Organization Type", str(p5Record["organization_type"])),
+      kv("Bond Amount on File", str(p5?.["bond_amount"] ?? p5Record["bond_amount"])),
+      kv("Registered Agent",  str(p5Record["agent_name"])),
+      kv("Mailing Address",   str(p5Record["mailing_address"])),
       p5Url ? React.createElement(View, { style: S.kvRow },
         React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
         React.createElement(Link, { src: p5Url, style: S.trrcLink }, "View P-5 Record ↗"),

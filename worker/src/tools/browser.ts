@@ -148,6 +148,184 @@ export async function getComplianceViolations(
   }
 }
 
+// ─── S3 — P-5 Operator Registration ──────────────────────────────────────────
+//
+// organizationQueryAction.do's own "operator name/number" fields
+// (searchArgs.operatorNameArg / searchArgs.operatorNoArg, what ewa.ts's old
+// searchOperator() sent) do not exist anywhere on the real form — confirmed
+// live 2026-07-29. The actual operator name/number fields live on a
+// SEPARATE page (operatorQueryAction.do), reached only via the "Search for
+// Operator" button, and searching there is a dojo/JSF AJAX call
+// (methodToCall=searchByName / searchByNumber) that a plain POST can't
+// replicate — it returns a JSF partial-response XML error ("Please make a
+// valid selection") instead of a real page. Confirmed the old fetcher was
+// therefore never returning real P-5 data at all: it parsed the label text
+// of an unrelated malformed table into garbage records like
+// {"": "", "operator_s": "Organization Status:"}.
+//
+// Real flow (dual-listbox picker, same UI pattern TRRC uses elsewhere):
+//   1. organizationQueryAction.do -> click "Search for Operator"
+//   2. operatorQueryAction.do -> fill name or number, click ITS search
+//      button (there are two "Search" buttons on this page — index 0 is
+//      for operator number, index 1 is for operator name; picking the
+//      wrong one silently searches for an empty number and finds nothing)
+//   3. select the match in the "Search Result" listbox, click "Add" to
+//      move it into "Operator Selection", click "Submit"
+//   4. back on organizationQueryAction.do with the hidden
+//      searchArgs.operatorNumbersArg now populated -> click the form's own
+//      Submit to get the results list
+//   5. click the operator-number drill-down link for the full detail page
+//      (bond amount, agent, addresses) — the results list row only has
+//      number/name/status.
+//
+// The detail page itself is NOT a uniform grid table (which is why the old
+// generic findDataTable/rowsToObjects approach could never have worked even
+// with the right search): most of it is two-column label/value rows
+// ("Operator Number:" | "945936"), while Agent Information is a real
+// 3-column grid (Name/Title/Mailing Address). Parsed accordingly below.
+
+export interface P5OperatorRecord {
+  operator_number:    string;
+  operator_name:       string;
+  organization_status: string;
+  organization_type:   string;
+  renewal_month:        string;
+  location_address:    string;
+  mailing_address:     string;
+  bond_amount:          string;
+  bond_type:            string;
+  agent_name:           string;
+  agent_title:          string;
+  agent_address:        string;
+}
+
+export async function searchOperator(
+  operatorName: string | null,
+  operatorNumber: string | null,
+): Promise<{
+  found: boolean;
+  record: P5OperatorRecord | null;
+  p5_status: string | null;
+  bond_amount: string | null;
+  trrc_source_url: string | null;
+  message: string;
+  error?: string;
+}> {
+  if (!operatorName && !operatorNumber) {
+    return { found: false, record: null, p5_status: null, bond_amount: null, trrc_source_url: null, message: "No operator name or number provided", error: "No operator name or number provided" };
+  }
+
+  let context: BrowserContext | null = null;
+  try {
+    const browser = await getBrowser();
+    context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(20_000);
+
+    await page.goto("https://webapps2.rrc.texas.gov/EWA/organizationQueryAction.do", { waitUntil: "networkidle", timeout: 30_000 });
+    await page.click('input[value="Search for Operator"]');
+    await page.waitForLoadState("networkidle", { timeout: 20_000 });
+
+    if (operatorNumber) {
+      await page.fill('input[name="operatorNumber"]', operatorNumber);
+      await page.locator('input[value="Search"]').nth(0).click();
+    } else {
+      // TRRC truncates this field at 20 characters (confirmed on the live
+      // form) — long operator names must be trimmed or the search silently
+      // drops the tail.
+      await page.fill('input[name="operatorName"]', String(operatorName).slice(0, 20));
+      await page.locator('input[value="Search"]').nth(1).click();
+    }
+    await page.waitForTimeout(2_500);
+
+    const firstOption = await page.locator('select[name="resultSelection"] option').first();
+    const optionValue = await firstOption.getAttribute("value").catch(() => null);
+    if (!optionValue) {
+      return { found: false, record: null, p5_status: null, bond_amount: null, trrc_source_url: null, message: "Operator not found in P-5 registry" };
+    }
+
+    await page.selectOption('select[name="resultSelection"]', optionValue);
+    await page.locator('input[value="Add"]').click();
+    await page.waitForTimeout(1_000);
+    await page.locator('input[value="Submit"]').click();
+    await page.waitForLoadState("networkidle", { timeout: 20_000 });
+
+    // Back on organizationQueryAction.do with the operator now selected —
+    // submit the main form to get the results list.
+    await page.locator('input[type="submit"]').first().click();
+    await page.waitForLoadState("networkidle", { timeout: 20_000 });
+
+    const drillDownLink = page.locator('a[href*="organizationResultsDrillDownAction"]').first();
+    if (!(await drillDownLink.count())) {
+      return { found: false, record: null, p5_status: null, bond_amount: null, trrc_source_url: null, message: "No P-5 result row found after search" };
+    }
+    await drillDownLink.click();
+    await page.waitForLoadState("networkidle", { timeout: 20_000 });
+    const trrcSourceUrl = page.url();
+
+    // Label/value rows anywhere on the detail page (Organization Detail,
+    // Assurance/Bond sections all use this same two-<td> pattern).
+    const labelValuePairs = await page.locator("tr").evaluateAll((rows) =>
+      rows
+        .map((row) => {
+          const cells = row.querySelectorAll(":scope > td");
+          if (cells.length !== 2) return null;
+          const label = (cells[0].textContent ?? "").trim();
+          const value = (cells[1].textContent ?? "").replace(/\s+/g, " ").trim();
+          if (!label.endsWith(":")) return null;
+          return [label.slice(0, -1), value] as [string, string];
+        })
+        .filter((p): p is [string, string] => p !== null),
+    );
+    const lv: Record<string, string> = {};
+    for (const [label, value] of labelValuePairs) {
+      lv[label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, "")] = value;
+    }
+
+    // Agent Information is a real 3-column grid (Name/Title/Mailing Address),
+    // not label/value rows.
+    let agentName = "", agentTitle = "", agentAddress = "";
+    const agentHeaderRow = page.locator('tr:has(th:text("Name:"))').first();
+    if (await agentHeaderRow.count()) {
+      const agentDataRow = agentHeaderRow.locator("xpath=following-sibling::tr[1]");
+      const agentCells = await agentDataRow.locator("td").allTextContents();
+      agentName = (agentCells[0] ?? "").trim();
+      agentTitle = (agentCells[1] ?? "").trim();
+      agentAddress = (agentCells[2] ?? "").replace(/\s+/g, " ").trim();
+    }
+
+    const record: P5OperatorRecord = {
+      operator_number:     lv["operator_number"] || optionValue,
+      operator_name:        lv["operator_name"] || String(operatorName ?? ""),
+      organization_status: lv["organization_status"] || "",
+      organization_type:   lv["organization_type"] || "",
+      renewal_month:         lv["renewal_month"] || "",
+      location_address:    lv["location_address"] || "",
+      mailing_address:      lv["mailing_address"] || "",
+      bond_amount:           lv["amount"] || "",
+      bond_type:             lv["type"] || "",
+      agent_name:            agentName,
+      agent_title:           agentTitle,
+      agent_address:         agentAddress,
+    };
+
+    return {
+      found: true,
+      record,
+      p5_status:   record.organization_status || null,
+      bond_amount: record.bond_amount || null,
+      trrc_source_url: trrcSourceUrl,
+      message:     `P-5 record found for operator ${record.operator_number} — ${record.operator_name} (${record.organization_status || "status unknown"})`,
+    };
+  } catch (e) {
+    return { found: false, record: null, p5_status: null, bond_amount: null, trrc_source_url: null, message: `P-5 operator search failed: ${String(e).slice(0, 100)}`, error: String(e) };
+  } finally {
+    await context?.close();
+  }
+}
+
 // ─── S12 — CODA Imaged Documents ─────────────────────────────────────────────
 
 export interface CodaDocument {

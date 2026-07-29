@@ -115,12 +115,12 @@ async function dispatchTool(
     }
 
     case "search_operator": {
-      const r = await ewa.searchOperator(
+      const r = await browser.searchOperator(
         input.operator_name  ? String(input.operator_name)  : state.operatorName,
         input.operator_number ? String(input.operator_number) : state.operatorNumber,
       );
-      if (r.found && r.records[0]?.["operator_no"] && !state.operatorNumber) {
-        state.operatorNumber = r.records[0]["operator_no"];
+      if (r.found && r.record?.operator_number && !state.operatorNumber) {
+        state.operatorNumber = r.record.operator_number;
       }
       result = r;
       sourceName = "search_by_operator";

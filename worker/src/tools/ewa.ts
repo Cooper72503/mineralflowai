@@ -316,40 +316,11 @@ export async function searchLeaseWells(leaseNumber: string, district: string): P
 }
 
 // ─── S3 — Operator / P-5 ─────────────────────────────────────────────────────
-
-export async function searchOperator(operatorName: string | null, operatorNumber: string | null): Promise<{
-  found: boolean;
-  records: Record<string, string>[];
-  p5_status: string | null;
-  bond_amount: string | null;
-  message: string;
-  error?: string;
-}> {
-  const params: Record<string, string> = {};
-  if (operatorNumber) params["searchArgs.operatorNoArg"] = operatorNumber;
-  else if (operatorName) params["searchArgs.operatorNameArg"] = operatorName;
-  else return { found: false, records: [], p5_status: null, bond_amount: null, message: "No operator name or number provided", error: "No operator name or number provided" };
-
-  try {
-    const html = await ewaFetch("organizationQueryAction.do", params);
-    if (/no results found/i.test(html)) {
-      return { found: false, records: [], p5_status: null, bond_amount: null, message: "Operator not found in P-5 registry" };
-    }
-    const table = findDataTable(html, 2);
-    if (!table) return { found: false, records: [], p5_status: null, bond_amount: null, message: "Could not parse P-5 response", error: "Could not parse P-5 response" };
-    const records = rowsToObjects(table.header, table.rows.slice(0, 10));
-    const first = records[0] ?? {};
-    return {
-      found: true,
-      records,
-      p5_status:   first["p5_status"]   || first["status"]      || null,
-      bond_amount: first["bond_amount"]  || first["bond"]        || null,
-      message:     `Found ${records.length} P-5 record(s)`,
-    };
-  } catch (e) {
-    return { found: false, records: [], p5_status: null, bond_amount: null, message: `Error: ${String(e)}`, error: String(e) };
-  }
-}
+//
+// Moved to browser.ts's searchOperator() — the real TRRC search requires a
+// dojo/JSF AJAX-driven picker flow (organizationQueryAction.do has no
+// operatorNameArg/operatorNoArg fields at all) that a plain fetch cannot
+// replicate. See the doc comment there for the full investigation.
 
 // ─── S4 — Well Status ─────────────────────────────────────────────────────────
 
