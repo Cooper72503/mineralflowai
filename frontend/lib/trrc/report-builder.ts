@@ -575,13 +575,32 @@ export function generateFlags(
   // fully-resolved well with no production history on file renders as "no
   // critical or important flags identified," which is the opposite of the
   // truth: a mineral buyer has zero documented royalty income for the asset.
+  //
+  // This must NOT fire on a retrieval failure — confirmed live: TRRC's
+  // productionQueryAction.do outage makes analytics.months.length === 0
+  // for every well right now regardless of its real production history,
+  // and reporting that as "zero reported production" would be a false,
+  // materially misleading claim (the same retrieval-failure-vs-confirmed-
+  // absence distinction already applied to the identity check above and
+  // the P-4 gatherer/purchaser check below). Only fire when the production
+  // query itself actually completed successfully.
+  const productionAttempt = getAttemptRaw(attempts, "fetch_production");
   if (run.resolved_lease_number && run.resolved_district && analytics.months.length === 0) {
-    critical.push(
-      `ZERO REPORTED PRODUCTION — lease ${run.resolved_lease_number} (District ${run.resolved_district}) ` +
-      "returned no production rows over the queryable history, despite the lease/district resolving " +
-      "successfully. This means no royalty income stream is documented for this asset. Confirm whether " +
-      "the well is long-idle, produced out, or reporting under a different lease ID before assigning value.",
-    );
+    if (productionAttempt?.status === "success") {
+      critical.push(
+        `ZERO REPORTED PRODUCTION — lease ${run.resolved_lease_number} (District ${run.resolved_district}) ` +
+        "returned no production rows over the queryable history, despite the lease/district resolving " +
+        "successfully. This means no royalty income stream is documented for this asset. Confirm whether " +
+        "the well is long-idle, produced out, or reporting under a different lease ID before assigning value.",
+      );
+    } else if (productionAttempt && productionAttempt.status !== "success") {
+      critical.push(
+        `PRODUCTION HISTORY COULD NOT BE VERIFIED — lease ${run.resolved_lease_number} (District ${run.resolved_district}) ` +
+        `production query failed (${productionAttempt.error_message ?? "unknown error"}), likely a TRRC-side outage. ` +
+        "This is NOT evidence of zero production — it means production history is currently unverifiable. " +
+        "Re-run this research once the source is restored before assigning value based on production.",
+      );
+    }
   }
 
   // WOR rising

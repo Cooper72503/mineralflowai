@@ -256,6 +256,11 @@ export interface TrrcDueDiligenceRun {
   missing_items?: TrrcMissingItem[];
   scorecard?: AcquisitionScorecard | null;
   coverage?: SourceCoverageStatus[];
+  // Not persisted — computed live by GET /api/trrc/due-diligence/[runId]
+  // from generateFlags() (report-builder.ts), the same critical/important
+  // flag logic the PDF report uses. There is no trrc_findings table; this
+  // is the real source of truth for "findings" in this codebase.
+  flags?: { critical: string[]; important: string[] };
   source_attempts?: Array<{
     source_id: string;
     source_name: string;
