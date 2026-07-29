@@ -42,7 +42,7 @@ const SOURCE_META: Record<string, { label: string; portal: string; portal_url: s
   fetch_orphan_well:            { label: "S6 — Orphan Well Program",           portal: "TRRC EWA — Orphan Well Query",           portal_url: EWA_MENU_URL },
   fetch_severance_records:      { label: "S7 — Severance Tax Records",         portal: "TRRC EWA — Severance Query",             portal_url: EWA_MENU_URL },
   fetch_production:             { label: "S8 — Monthly Production",            portal: "TRRC EWA — Production Query",            portal_url: EWA_MENU_URL },
-  fetch_p4_records:             { label: "S9 — P-4 Production Tests",          portal: "TRRC EWA — P-4 Test Query",              portal_url: EWA_MENU_URL },
+  fetch_p4_records:             { label: "S9 — P-4 Gatherer/Purchaser",        portal: "TRRC EWA — P-4 Gatherer/Purchaser Query", portal_url: EWA_MENU_URL },
   fetch_completion_records:     { label: "S10 — W-2 Completion Record",        portal: "TRRC EWA — Completion Query",            portal_url: EWA_MENU_URL },
   fetch_plugging_records:       { label: "S11 — Plugging Records (W-3C)",      portal: "TRRC EWA — Plugging Query",              portal_url: EWA_MENU_URL },
   fetch_coda_records:           { label: "S12 — CODA Imaged Documents",        portal: "TRRC CODA — Imaged Records",             portal_url: "https://webapps2.rrc.texas.gov/EWA/cogisQueryAction.do" },

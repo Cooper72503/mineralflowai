@@ -546,30 +546,15 @@ export function generateFlags(
     }
   }
 
-  // P-4 decline from IP
+  // P-4 gatherer/purchaser — a lease with none on file cannot legally sell
+  // or transport its production. Only flag on a genuine confirmed-empty
+  // result (found:false, no error) — a retrieval failure or data_gap must
+  // not be reported as "none on file", since that's a materially different
+  // (and false) claim.
   const p4 = getAttempt(attempts, "fetch_p4_records");
   const p4Records = Array.isArray(p4?.["records"]) ? (p4!["records"] as Record<string, unknown>[]) : [];
-  if (p4Records.length >= 2) {
-    const newest = p4Records[0];
-    const oldest = p4Records[p4Records.length - 1];
-    const newestOil = parseFloat(str(newest["oil_rate_bbl_day"])) || 0;
-    const oldestOil = parseFloat(str(oldest["oil_rate_bbl_day"])) || 0;
-    if (oldestOil > 0 && newestOil / oldestOil < 0.1) {
-      important.push(`P-4 RATE DECLINE — current test rate (${newestOil} BBL/d) is less than 10% of original completion test rate (${oldestOil} BBL/d). Significant decline.`);
-    }
-  }
-
-  // No P-4 in 5+ years
-  if (p4Records.length > 0) {
-    const latestDate = str(p4Records[0]?.["test_date"] ?? p4Records[0]?.["date"]);
-    if (latestDate) {
-      const yearsSince = (Date.now() - new Date(latestDate).getTime()) / (1000 * 60 * 60 * 24 * 365);
-      if (yearsSince > 5) {
-        important.push(`NO P-4 TEST IN ${yearsSince.toFixed(0)} YEARS — last test was ${latestDate}. Productive capacity unverified.`);
-      }
-    }
-  } else if (p4?.["found"] === false) {
-    important.push("NO P-4 POTENTIAL TESTS ON FILE — productive capacity under controlled conditions unverified.");
+  if (p4Records.length === 0 && p4?.["found"] === false && !p4?.["error"]) {
+    important.push("NO P-4 GATHERER/PURCHASER ON FILE — production cannot legally be sold or transported from this lease without a registered gatherer/purchaser.");
   }
 
   // Open compliance violations
@@ -903,8 +888,6 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   const p4      = getAttempt(attempts, "fetch_p4_records");
   const permits = getAttempt(attempts, "fetch_drilling_permits");
   const p4Records = Array.isArray(p4?.["records"]) ? (p4!["records"] as Record<string, unknown>[]) : [];
-  const newest = p4Records[0];
-  const oldest = p4Records[p4Records.length - 1];
   const permitRecords = Array.isArray(permits?.["permits"]) ? (permits!["permits"] as Record<string, unknown>[]) : [];
   const latestPermit = permitRecords[permitRecords.length - 1];
   const compUrl  = typeof comp?.["trrc_source_url"] === "string"   ? comp["trrc_source_url"] as string   : null;
@@ -940,13 +923,15 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
 
     React.createElement(View, { style: S.divider }),
 
-    React.createElement(Text, { style: S.subTitle }, "P-4 Potential Test Records"),
+    React.createElement(Text, { style: S.subTitle }, "P-4 Gatherer/Purchaser (Certificate of Compliance)"),
     p4Records.length > 0 ? React.createElement(View, { style: { marginBottom: 10 } },
-      kv("Most Recent Test Date",  str(newest?.["test_date"] ?? newest?.["date"])),
-      kv("Most Recent Oil Rate",   str(newest?.["oil_rate_bbl_day"]) ? `${str(newest?.["oil_rate_bbl_day"])} BBL/d` : "—"),
-      kv("Most Recent Gas Rate",   str(newest?.["gas_rate_mcf_day"]) ? `${str(newest?.["gas_rate_mcf_day"])} MCF/d` : "—"),
-      oldest && oldest !== newest ? kv("Original Completion Test", `${str(oldest?.["date"] ?? oldest?.["test_date"])} — Oil: ${str(oldest?.["oil_rate_bbl_day"])} BBL/d`) : null,
-    ) : React.createElement(Text, { style: S.noteText }, p4?.["found"] === false ? "No P-4 potential test records on file." : "P-4 records not retrieved."),
+      ...p4Records.slice(0, 5).map((r, i) => React.createElement(View, { key: i, style: { marginBottom: 4 } },
+        kv("Gatherer/Purchaser", str(r["gatherer_purchaser_name"] ?? r["name"])),
+        kv("Type",               str(r["type"] ?? r["gatherer_purchaser_type"])),
+        kv("Product",            str(r["product"])),
+        kv("Effective Date",     str(r["effective_date"] ?? r["date"])),
+      )),
+    ) : React.createElement(Text, { style: S.noteText }, p4?.["found"] === false ? "No P-4 gatherer/purchaser on file — production cannot legally be sold or transported from this lease." : "P-4 gatherer/purchaser records not retrieved."),
 
     React.createElement(View, { style: S.divider }),
 
@@ -1170,7 +1155,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
     fetch_orphan_well:           "S6 — Orphan Well Program",
     fetch_severance_records:     "S7 — Severance Tax Records",
     fetch_production:            "S8 — Monthly Production",
-    fetch_p4_records:            "S9 — P-4 Production Tests",
+    fetch_p4_records:            "S9 — P-4 Gatherer/Purchaser",
     fetch_completion_records:    "S10 — W-2 Completion Record",
     fetch_plugging_records:      "S11 — Plugging Records (W-3C)",
     fetch_coda_records:          "S12 — CODA Imaged Documents",

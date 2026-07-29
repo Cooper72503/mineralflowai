@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +32,7 @@ const gisWellFoundJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-well
 const gisWellEmptyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-well-empty.json"), "utf8");
 const gisAlertAreasJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-alert-areas.json"), "utf8");
 const gisSurveyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-survey.json"), "utf8");
+const gathererPurchaserEmptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/gatherer-purchaser-empty.html"), "utf8");
 
 // ─── Direct unit tests of the extraction primitives ────────────────────────
 
@@ -278,6 +279,42 @@ describe("getDrillingPermits — end to end against real fixtures", () => {
     expect(result.found).toBe(false);
     expect(result.permits).toEqual([]);
     expect(result.error).toBeUndefined();
+  });
+});
+
+// ─── getGathererPurchaser — real endpoint, real empty-result fixture ──────
+//
+// gatherer-purchaser-empty.html: a real gathererPurchaserQueryAction.do
+// response (district 7C, lease 016582), captured live 2026-07-29. Confirms
+// this codebase's prior "P-4 potential test" fetcher was pointed at a
+// nonexistent p4QueryAction.do URL — the real, live TRRC endpoint for Form
+// P-4 (gatherer/purchaser designation) is gathererPurchaserQueryAction.do,
+// a plain server-rendered page, no browser session needed. Every lease
+// tested this session (5 real leases across 2 districts) came back with no
+// gatherer/purchaser on file, so no populated fixture exists yet — this
+// test proves the confirmed-empty path only, same documented gap pattern
+// as the other findDataTable callers above.
+
+describe("getGathererPurchaser — real fixture, confirmed-empty result", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns found:false with no fabricated records on a genuine empty result", async () => {
+    mockFetchSequence(["<html></html>", gathererPurchaserEmptyHtml]);
+    const result = await getGathererPurchaser("016582", "7C");
+
+    expect(result.found).toBe(false);
+    expect(result.records).toEqual([]);
+    expect(result.error).toBeUndefined();
+    expect(result.message).toMatch(/no gatherer\/purchaser/i);
+  });
+
+  it("requires lease number and district, same as severance/production", async () => {
+    const result = await getGathererPurchaser(null, "08");
+    expect(result.found).toBe(false);
+    expect(result.error).toBeDefined();
   });
 });
 

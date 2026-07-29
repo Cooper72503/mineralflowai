@@ -47,8 +47,7 @@ CRITICAL (deal-breakers):
 
 IMPORTANT (need follow-up):
 - Inactive well with plugging deadline within 12 months
-- P-4 rate less than 10% of original IP rate
-- No P-4 test in more than 5 years
+- No P-4 gatherer/purchaser on file for the lease — production cannot legally be sold/transported without one
 - Rising water-to-oil ratio
 - Zero production months (more than 3)
 - Bond amount below $25,000
@@ -157,9 +156,8 @@ async function dispatchTool(
       break;
     }
 
-    case "get_p4_tests":
-      result = await ewa.getP4Tests(
-        String(input.api_number ?? state.apiNumber ?? ""),
+    case "get_p4_gatherer_purchaser":
+      result = await ewa.getGathererPurchaser(
         input.lease_number ? String(input.lease_number) : state.leaseNumber,
         input.district     ? String(input.district)     : state.district,
       );

@@ -377,10 +377,11 @@ const FOLDER_SOURCES: Record<string, string[]> = {
   "01_Identity_and_Wellbore":            ["search_by_api", "search_by_lease"],
   "02_Drilling_Permits":                 ["fetch_drilling_permits"],
   "03_Completions_and_Cementing":        ["fetch_completion_records"],
-  "05_Well_Status_Tests":                ["fetch_well_status", "fetch_p4_records", "fetch_inactive_well_status"],
+  "05_Well_Status_Tests":                ["fetch_well_status", "fetch_inactive_well_status"],
   "06_Injection_and_MIT":                ["fetch_injection_records"],
   "07_Plugging_and_Inactive_Well":       ["fetch_plugging_records", "fetch_orphan_well"],
   "08_Operator_and_P5":                  ["search_by_operator"],
+  "09_P4_Gatherer_Purchaser":            ["fetch_p4_records"],
   "10_Inspections_Violations_Severance": ["fetch_compliance_violations", "fetch_severance_records"],
   "11_GIS_Maps_and_Plats":               ["fetch_gis_plat"],
   "12_Well_File_Correspondence":         ["fetch_coda_records"],
@@ -598,10 +599,7 @@ export async function buildTrrcZipArchive(
     ...buildCategoryEntries(`${rootDir}08_Operator_and_P5/`, FOLDER_SOURCES["08_Operator_and_P5"], sourceAttempts),
 
     // 09_P4_Gatherer_Purchaser
-    {
-      path: `${rootDir}09_P4_Gatherer_Purchaser/README.txt`,
-      content: PLACEHOLDER_README,
-    },
+    ...buildCategoryEntries(`${rootDir}09_P4_Gatherer_Purchaser/`, FOLDER_SOURCES["09_P4_Gatherer_Purchaser"], sourceAttempts),
 
     // 10_Inspections_Violations_Severance
     {

@@ -614,37 +614,46 @@ export async function getProduction(leaseNumber: string | null, district: string
   }
 }
 
-// ─── S9 — P-4 Production Tests ───────────────────────────────────────────────
+// ─── S9 — P-4 Gatherer/Purchaser Query ───────────────────────────────────────
+//
+// Form P-4 is TRRC's "Certificate of Compliance and Transportation
+// Authority" — it designates which gatherer/purchaser is authorized to take
+// production from a lease. It is NOT a productivity/potential test (that
+// was this codebase's prior, unverified assumption, and it pointed at a
+// nonexistent "p4QueryAction.do" URL that 500s). The real, live endpoint is
+// gathererPurchaserQueryAction.do (confirmed live 2026-07-29 — plain
+// server-rendered HTML, no browser/JS needed, unlike the manual-fallback
+// note in source-registry.ts's p4_gatherer_query entry which was written
+// without live-testing this specific per-lease search mode). Searched by
+// lease number + district, same shape as severance/production.
 
-export async function getP4Tests(apiNumber: string, leaseNumber?: string | null, district?: string | null): Promise<{
+export async function getGathererPurchaser(leaseNumber: string | null, district: string | null): Promise<{
   found: boolean;
   records: Record<string, string>[];
-  most_recent: Record<string, string> | null;
-  original_completion: Record<string, string> | null;
   message: string;
   error?: string;
 }> {
-  const split = splitApi(apiNumber);
-  if (!split) return { found: false, records: [], most_recent: null, original_completion: null, message: "Invalid API", error: "Invalid API" };
+  if (!leaseNumber || !district) return { found: false, records: [], message: "Need lease number and district for gatherer/purchaser lookup", error: "Need lease number and district for gatherer/purchaser lookup" };
 
   try {
-    const html = await ewaFetch("p4QueryAction.do", {
-      "searchArgs.apiNoPrefixArg": split.prefix,
-      "searchArgs.apiNoSuffixArg": split.suffix,
+    const html = await ewaFetch("gathererPurchaserQueryAction.do", {
+      methodToCall: "search",
+      "searchArgs.fieldNumbersArg": "",
+      "searchArgs.operatorNumbersArg": "",
+      "searchArgs.leaseTypeArg": "",
+      "searchArgs.districtCodeArg": district,
+      "searchArgs.leaseNumberArg": leaseNumber,
+      "searchArgs.gathererPurchaserTypeArg": "",
+      "searchArgs.gathererPurchaserNumberArg": "",
+      "searchArgs.gathererProductArg": "",
     });
-    if (/no results found/i.test(html)) return { found: false, records: [], most_recent: null, original_completion: null, message: "No P-4 production tests on file" };
-    const table = findDataTable(html, 3);
-    if (!table) return { found: false, records: [], most_recent: null, original_completion: null, message: "Could not parse P-4 response", error: "Could not parse P-4 response" };
+    if (/no results found/i.test(html)) return { found: false, records: [], message: "No gatherer/purchaser (P-4) record on file for this lease" };
+    const table = findDataTable(html, 2);
+    if (!table) return { found: false, records: [], message: "Could not parse gatherer/purchaser response", error: "Could not parse gatherer/purchaser response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 30));
-    return {
-      found: true,
-      records,
-      most_recent:         records[0] ?? null,
-      original_completion: records[records.length - 1] ?? null,
-      message:             `${records.length} P-4 test(s) on file`,
-    };
+    return { found: true, records, message: `${records.length} gatherer/purchaser (P-4) record(s) on file` };
   } catch (e) {
-    return { found: false, records: [], most_recent: null, original_completion: null, message: `Error: ${String(e)}`, error: String(e) };
+    return { found: false, records: [], message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 

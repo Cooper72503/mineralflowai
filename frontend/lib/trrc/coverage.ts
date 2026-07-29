@@ -32,7 +32,7 @@ export const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string
   fetch_orphan_well:          { category: "orphan_well",        label: "Orphan Well / P5 Insolvent Operator" },
   fetch_plugging_records:     { category: "plugging",           label: "Plugging Records (W-3C)" },
   fetch_compliance_violations:{ category: "compliance",         label: "Compliance Violations" },
-  fetch_p4_records:           { category: "p4_records",         label: "P-4 Production Test Records" },
+  fetch_p4_records:           { category: "p4_records",         label: "P-4 Gatherer/Purchaser Records" },
   fetch_proration:            { category: "proration",          label: "Proration Schedule / Daily Allowable" },
   fetch_injection_records:    { category: "injection",          label: "UIC / Injection Well Records" },
   fetch_severance_records:    { category: "severance",          label: "Wellbore Severance Records" },

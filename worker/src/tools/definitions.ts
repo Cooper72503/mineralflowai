@@ -67,16 +67,15 @@ export const TRRC_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "get_p4_tests",
-    description: "Get P-4 potential test records — measures actual well productive capacity under controlled conditions. Shows IP rate and decline over time. Critical for evaluating well health.",
+    name: "get_p4_gatherer_purchaser",
+    description: "Get the P-4 (Certificate of Compliance and Transportation Authority) gatherer/purchaser designation for a lease — the company authorized to take production from this lease. REQUIRES lease_number AND district. A lease with no gatherer/purchaser on file cannot legally sell or transport its production, which is a material finding.",
     input_schema: {
       type: "object" as const,
       properties: {
-        api_number:   { type: "string", description: "API number" },
-        lease_number: { type: "string", description: "Lease number (fallback)" },
-        district:     { type: "string", description: "District code (fallback)" },
+        lease_number: { type: "string", description: "TRRC oil/gas lease number — REQUIRED" },
+        district:     { type: "string", description: "TRRC district code — REQUIRED" },
       },
-      required: ["api_number"],
+      required: ["lease_number", "district"],
     },
   },
   {

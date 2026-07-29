@@ -1,0 +1,370 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8;"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=5, IE=8, IE=9, IE=10" />
+    <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+
+    <script type="text/javascript">
+      var dojoConfig = {
+      parseOnLoad: true,
+      isDebug: false,
+
+      has: {
+      "dojo-debug-messages": false
+      },
+
+      packages:
+       [ { name:"rrcGisModules", location:location.pathname.replace(/\/[^/]+$/, '') + '/gis/javascript'} ]
+
+      };
+    </script>
+
+    <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.3compact"></script>
+    <script type="text/javascript"> 
+      require(["dojo/parser", "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dojo/query", 
+               "dojo/dom-construct", "dojo/NodeList-manipulate", "dojo/dom-attr", "dojo/dom",
+               "dojo/_base/connect", "dojo/_base/event"]);
+    </script>
+
+    <title>P-4 Gatherer/Purchaser Query</title>
+  </head>
+
+  <body>
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td>
+
+
+
+
+
+<script type="text/javascript">
+function openHelp(obj) {
+
+  var help = '/EWA/help/' + obj;
+  //alert(help+', '+obj);
+
+  hold = window.open(help, 'popupWindow',
+                     'resizable=yes,menubar=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');
+  hold.focus();
+  return false;
+}
+</script>
+
+<!-- System Header -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/rrc_online_header.gif"></td>
+    <td class="MainHeader" align="right" nowrap>&nbsp;</td>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+  </tr>
+  <tr><td colspan="3" style="height: 3px;" class="BorderLines"/></tr>
+</table>
+
+<!--Application Header-->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr> 
+    <td class="AppHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+    <td class="AppHeader">Oil & Gas Data Query</td>
+  </tr>
+</table>
+
+<!-- Top Nav Level 2 -->
+<!--Navigation Table Level 2 and 3 -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr><td colspan="2" style="height: 2px;" class="BorderLines"/></tr>
+  <!--Level 2 navigation row-->
+  <tr>
+    <td class="AppNavMain" width="1%"><img src="/EWA/commonuiImages/spacer.gif" height="1px"></td>
+    <td class="AppNavMain">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Main -->
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <td class="AppNavMainSelected">
+            <a href="/EWA/ewaMain.do">Query Menu</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help-->
+          <td class="AppNavMain">
+            
+            <a href="#" onclick="openHelp('P-4_TOC.html');">Help</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help END-->
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td colspan="2" style="height: 1px;" class="BorderLines"/></tr>
+</table>
+
+</td></tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr valign="top">
+        <td style="width: 100%;" class="ContentArea">
+          <span id="messageArea">
+
+
+
+
+
+<!-- /tiles/messages.jsp BEGIN -->
+
+  
+
+
+
+  <tr><td>&nbsp;</td></tr>
+  <tr>
+    <td style="white-space: nowrap;">
+      <ul>
+        
+        
+          
+            <li><font color=red>Please correct the errors listed below.</font></li>
+          
+            <li><font color=red>(Ewa_117) No results found.</font></li>
+          
+        
+      </ul>
+    </td>
+  </tr>
+
+
+<!-- /tiles/messages.jsp END -->
+</span>
+          
+
+
+
+
+
+
+
+
+<script type="text/javascript" src="/EWA/js/ewaPageUtils.js"></script>
+
+
+<script>
+  function submitLeaseQuery() {
+    document.forms["gathererPurchaserQueryActionForm"].methodToCall.value = "toLeaseQuery";
+    document.forms["gathererPurchaserQueryActionForm"].submit();
+  }
+
+  function submitFieldQuery() {
+    document.forms["gathererPurchaserQueryActionForm"].methodToCall.value = "toFieldQuery";
+    document.forms["gathererPurchaserQueryActionForm"].submit();
+  }
+
+  function submitOperatorQuery() {
+    document.forms["gathererPurchaserQueryActionForm"].methodToCall.value = "toOperatorQuery";
+    document.forms["gathererPurchaserQueryActionForm"].submit();
+  }
+
+  function clearFieldSelection() {
+    document.forms['gathererPurchaserQueryActionForm'].fieldNumbers.options.length = 0;
+  }
+
+  function clearOperatorSelection() {
+    document.forms['gathererPurchaserQueryActionForm'].operatorNumbers.options.length = 0;
+  }
+
+  function resetForm() {
+    document.forms['gathererPurchaserQueryActionForm'].methodToCall.value = "resetForm";
+    document.forms['gathererPurchaserQueryActionForm'].submit();
+  }
+</script>
+
+<form name="gathererPurchaserQueryActionForm" method="post" action="/EWA/gathererPurchaserQueryAction.do">
+  <input type="hidden" name="methodToCall" value="search">
+  <input type="hidden" name="searchArgs.fieldNumbersArg" value="">
+  <input type="hidden" name="searchArgs.operatorNumbersArg" value="">
+
+  <table class="ewaPage">
+    <tr><td><h2 class="style5">P-4 Gatherer/Purchaser Query</h2></td></tr>
+    <tr>
+      <td valign="top" align="left">
+        <table class="TabBox2" cellspacing="0" cellpadding="8" border="0">
+          <tr><td>Enter your search criteria and click on Submit to view the results.</td></tr>
+          <tr>
+            <td>
+              <table class="GroupBox1" cellspacing="0" cellpadding="4" border="0" summary="foo">
+                <tr>
+                  <th colspan="3">Search Criteria</th>
+                </tr>
+
+                <!-- Lease type choice. -->
+                <tr>
+                  <td align="right">Choose One:</td>
+                  <td colspan="2">
+                    <label>
+                      <input type="radio" name="searchArgs.leaseTypeArg" value="O">
+                      Oil Wells
+                    </label>
+                    <label>
+                      <input type="radio" name="searchArgs.leaseTypeArg" value="G">
+                      Gas Wells
+                    </label>
+                    <label>
+                      <input type="radio" name="searchArgs.leaseTypeArg" value="" checked="checked">
+                      Both
+                    </label>
+                  </td>
+                </tr>
+
+                <!-- District dropdown. -->
+                <tr>
+                  <td align="right">District:</td>
+                  <td colspan="2">
+                    <select name="searchArgs.districtCodeArg"><option value="None Selected">None Selected</option>
+                      <option value="01">01</option>
+<option value="02">02</option>
+<option value="03">03</option>
+<option value="04">04</option>
+<option value="05">05</option>
+<option value="06">06</option>
+<option value="6E">6E</option>
+<option value="7B">7B</option>
+<option value="7C" selected="selected">7C</option>
+<option value="08">08</option>
+<option value="8A">8A</option>
+<option value="09">09</option>
+<option value="10">10</option></select>
+                  </td>
+                </tr>
+
+                <!-- Oil lease text input. -->
+                <tr>
+                  <td align="right">
+                    Oil Lease No./Gas Well ID No:
+                  </td>
+
+                  <td><input type="text" name="searchArgs.leaseNumberArg" maxlength="6" size="6" value="016582"></td>
+
+                  <!-- Search for Lease button. -->
+                  <td>
+                    <input type="button" name="unused" value="Search for Lease" onclick="submitLeaseQuery()">
+                  </td>
+                </tr>
+
+                <!-- Field selection and search. -->
+                <tr>
+                  <td align="right">
+                    Field(s):
+                  </td>
+                  <td>
+                    <select name="fieldNames" size="5" style="width: 300px;"></select>
+                  </td>
+
+                  <td>
+                    <input type="button" name="unused" value="Search for Field" onclick="submitFieldQuery()">
+                  </td>
+                </tr>
+
+                <!-- Operator selection and search. -->
+                <tr>
+                  <td align="right">Operator(s):</td>
+                  <td>
+                    <select name="operatorNames" size="5" style="width: 300px;"></select>
+                  </td>
+                  <td>
+                    <input type="button" name="unused" value="Search for Operator" onclick="submitOperatorQuery()">
+                  </td>
+                </tr>
+
+                <!-- Gatherer Purchaser Type -->
+                <tr>
+                  <td align="right">Gatherer/Purchaser:</td>
+                  <td colspan="2">
+                    <label>
+                      <input type="radio" name="searchArgs.gathererPurchaserTypeArg" value="Gatherer">
+                      Gatherer
+                    </label>
+                    <label>
+                      <input type="radio" name="searchArgs.gathererPurchaserTypeArg" value="Purchaser">
+                      Purchaser
+                    </label>
+                    <label>
+                      <input type="radio" name="searchArgs.gathererPurchaserTypeArg" value="" checked="checked">
+                      Both
+                    </label>
+                  </td>
+                </tr>
+
+                <!-- Gatherer Purchaser Number -->
+                <tr>
+                  <td align="right">Gatherer/Purchaser<br> (P-5) Number:</td>
+                  <td align="left" colspan="2">
+                    <input type="text" name="searchArgs.gathererPurchaserNumberArg" maxlength="6" size="6" value="">
+                  </td>
+                </tr>
+
+                <!-- Gatherer Purchaser Product -->
+                <tr>
+                  <td align="right">Gatherer Product:</td>
+                  <td colspan="2">
+                    <select name="searchArgs.gathererProductArg"><option value="None Selected">None Selected</option>
+                      <option value="Full Stream Well">Full Stream Well</option>
+<option value="Gas">Gas</option>
+<option value="Condensate">Condensate</option>
+<option value="Oil">Oil</option>
+<option value="Casinghead Gas">Casinghead Gas</option></select>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Submit and reset buttons. -->
+          <tr>
+            <td>
+              <input type="submit" value="Submit">
+              <input type="reset" value="Reset" onclick="resetForm()">
+              <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/ewaMain.do');" style="float: right;" title="Return Button">
+            </td>
+          </tr>
+      </td>
+    </tr>
+    </table>
+</td>
+</tr>
+<tr><td>&nbsp;&nbsp;</td></tr>
+</table>
+</form>
+
+        </td>
+      </tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td><table style="width: 100%" class="MainFooter">
+  <tr><td style="width: 100%;" class="BorderLines"></td></tr>
+  <tr>
+    <td style="width: 100%; height: 100%;" align="center" class="MainFooter">
+      <a target="_blank" href="http://www.rrc.texas.gov/site-policies/">Disclaimer</a> |
+      <a target="_blank" href="http://www.rrc.texas.gov">RRC Home</a> |
+      <a href="mailto:helpdesk@rrc.texas.gov?subject=Oil & Gas Queries">Contact</a>
+    </td>
+  </tr>
+</table>
+</td></tr>
+    </table>
+  </body>
+</html>
+
+
