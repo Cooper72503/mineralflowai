@@ -5,6 +5,10 @@ import type {
   TrrcDueDiligenceRun,
   TrrcIdentifierType,
   ResolvedEntity,
+  AcquisitionScorecard,
+  ScoreDimension,
+  TrrcDDProductionRow,
+  SourceCoverageStatus,
 } from "../../../lib/trrc/types";
 import { createClient } from "@/lib/supabase/client";
 // detectInputType unused — each field has an explicit type now
@@ -1034,7 +1038,7 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 function ResultsDashboard({
-  run, onReset, onDownload,
+  run, activeTab, setActiveTab, onReset, onDownload,
 }: {
   run: TrrcDueDiligenceRun;
   activeTab: TabKey;
@@ -1094,78 +1098,107 @@ function ResultsDashboard({
         </div>
       </div>
 
-      {/* Summary stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.6rem", marginBottom: "1rem" }}>
-        {[
-          { label: "Sources Found", value: found.length, color: COLORS.green },
-          { label: "Manual Required", value: manual.length, color: COLORS.yellow },
-          { label: "Not Found", value: notFound.length, color: COLORS.textMuted },
-          { label: "Failed", value: failed.length, color: failed.length > 0 ? COLORS.red : COLORS.textMuted },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
-            <div style={{ fontSize: "1.5rem", fontWeight: 700, color }}>{value}</div>
-            <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{label}</div>
-          </div>
+      {/* Tab bar */}
+      <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem", borderBottom: `1px solid ${COLORS.border}`, paddingBottom: "0.6rem" }}>
+        {([
+          { key: "summary" as const,    label: "Summary" },
+          { key: "scorecard" as const,  label: "Scorecard" },
+          { key: "production" as const, label: "Production" },
+          { key: "findings" as const,   label: "Findings" },
+          { key: "coverage" as const,   label: "Coverage" },
+        ]).map(({ key, label }) => (
+          <button key={key} onClick={() => setActiveTab(key)} style={{
+            background: activeTab === key ? COLORS.accentDim : "transparent",
+            border: `1px solid ${activeTab === key ? COLORS.accent : "transparent"}`,
+            borderRadius: 7, color: activeTab === key ? COLORS.accent : COLORS.textMuted,
+            fontSize: "0.8rem", fontWeight: 600, padding: "0.45rem 0.9rem", cursor: "pointer",
+          }}>
+            {label}
+          </button>
         ))}
       </div>
 
-      {/* Retrieved records */}
-      {found.length > 0 && (
-        <div style={{ marginBottom: "1rem" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.green, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
-            Records Retrieved ({found.length})
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
-            {found.map(a => <SourceCard key={a.source_id} attempt={a} />)}
-          </div>
-        </div>
-      )}
-
-      {/* Manual required */}
-      {manual.length > 0 && (
-        <div style={{ marginBottom: "1rem" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.yellow, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
-            Manual Retrieval Required ({manual.length})
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
-            {manual.map(a => <SourceCard key={a.source_id} attempt={a} />)}
-          </div>
-        </div>
-      )}
-
-      {/* Not found / No records */}
-      {notFound.length > 0 && (
-        <div style={{ marginBottom: "1rem" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
-            No Records ({notFound.length})
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "0.4rem" }}>
-            {notFound.map(a => (
-              <div key={a.source_id} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: "0.6rem 0.85rem", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: "0.7rem", color: COLORS.textFaint }}>○</span>
-                <span style={{ fontSize: "0.78rem", color: COLORS.textMuted }}>{SOURCE_LABELS[a.source_name] ?? a.source_name}</span>
+      {activeTab === "summary" && (
+        <>
+          {/* Summary stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.6rem", marginBottom: "1rem" }}>
+            {[
+              { label: "Sources Found", value: found.length, color: COLORS.green },
+              { label: "Manual Required", value: manual.length, color: COLORS.yellow },
+              { label: "Not Found", value: notFound.length, color: COLORS.textMuted },
+              { label: "Failed", value: failed.length, color: failed.length > 0 ? COLORS.red : COLORS.textMuted },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
+                <div style={{ fontSize: "1.5rem", fontWeight: 700, color }}>{value}</div>
+                <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{label}</div>
               </div>
             ))}
           </div>
-        </div>
+
+          {/* Retrieved records */}
+          {found.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.green, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+                Records Retrieved ({found.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
+                {found.map(a => <SourceCard key={a.source_id} attempt={a} />)}
+              </div>
+            </div>
+          )}
+
+          {/* Manual required */}
+          {manual.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.yellow, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+                Manual Retrieval Required ({manual.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
+                {manual.map(a => <SourceCard key={a.source_id} attempt={a} />)}
+              </div>
+            </div>
+          )}
+
+          {/* Not found / No records */}
+          {notFound.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+                No Records ({notFound.length})
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "0.4rem" }}>
+                {notFound.map(a => (
+                  <div key={a.source_id} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: "0.6rem 0.85rem", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: "0.7rem", color: COLORS.textFaint }}>○</span>
+                    <span style={{ fontSize: "0.78rem", color: COLORS.textMuted }}>{SOURCE_LABELS[a.source_name] ?? a.source_name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Failed */}
+          {failed.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.red, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+                Failed ({failed.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.4rem" }}>
+                {failed.map(a => (
+                  <div key={a.source_id} style={{ background: COLORS.surface, border: `1px solid ${COLORS.red}30`, borderRadius: 7, padding: "0.6rem 0.85rem" }}>
+                    <span style={{ fontSize: "0.78rem", color: COLORS.red }}>{SOURCE_LABELS[a.source_name] ?? a.source_name}</span>
+                    {a.error_message && <span style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginLeft: 8 }}>— {a.error_message.slice(0, 100)}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Failed */}
-      {failed.length > 0 && (
-        <div style={{ marginBottom: "1rem" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.red, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
-            Failed ({failed.length})
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.4rem" }}>
-            {failed.map(a => (
-              <div key={a.source_id} style={{ background: COLORS.surface, border: `1px solid ${COLORS.red}30`, borderRadius: 7, padding: "0.6rem 0.85rem" }}>
-                <span style={{ fontSize: "0.78rem", color: COLORS.red }}>{SOURCE_LABELS[a.source_name] ?? a.source_name}</span>
-                {a.error_message && <span style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginLeft: 8 }}>— {a.error_message.slice(0, 100)}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {activeTab === "scorecard" && <ScorecardTab scorecard={run.scorecard ?? null} />}
+      {activeTab === "production" && <ProductionTab production={run.production ?? []} />}
+      {activeTab === "findings" && <FindingsTab flags={run.flags ?? { critical: [], important: [] }} />}
+      {activeTab === "coverage" && <CoverageTab coverage={run.coverage ?? []} />}
 
       {/* Downloads */}
       <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.25rem 1.5rem", marginBottom: "1rem" }}>
@@ -1202,6 +1235,189 @@ function ResultsDashboard({
           New Search
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Scorecard tab ──────────────────────────────────────────────────────────────
+
+const RECOMMENDATION_COLOR: Record<string, string> = {
+  PURSUE: COLORS.green, REVIEW: COLORS.yellow, PASS: COLORS.textMuted, BLOCKED: COLORS.red,
+};
+
+function scoreColor(score: number): string {
+  if (score >= 70) return COLORS.green;
+  if (score >= 40) return COLORS.yellow;
+  return COLORS.red;
+}
+
+function ScorecardTab({ scorecard }: { scorecard: AcquisitionScorecard | null }) {
+  if (!scorecard) {
+    return <div style={{ color: COLORS.textMuted, fontSize: "0.85rem", padding: "1rem 0" }}>Scorecard not available for this run.</div>;
+  }
+  const recColor = RECOMMENDATION_COLOR[scorecard.recommendation] ?? COLORS.textMuted;
+
+  return (
+    <div style={{ marginBottom: "1rem" }}>
+      <div style={{ display: "flex", gap: "0.6rem", marginBottom: "1rem" }}>
+        <div style={{ background: `${recColor}18`, border: `1px solid ${recColor}`, borderRadius: 8, padding: "0.75rem 1.25rem", display: "flex", alignItems: "center" }}>
+          <span style={{ fontSize: "1.1rem", fontWeight: 800, color: recColor, letterSpacing: "0.05em" }}>{scorecard.recommendation}</span>
+        </div>
+        {[
+          { label: "Opportunity Score", value: scorecard.opportunity_score },
+          { label: "Risk Score", value: scorecard.risk_score },
+          { label: "Overall Confidence", value: scorecard.overall_confidence },
+        ].map(({ label, value }) => (
+          <div key={label} style={{ flex: 1, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
+            <div style={{ fontSize: "1.4rem", fontWeight: 700, color: scoreColor(value) }}>{value}</div>
+            <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {scorecard.gating_conditions.length > 0 && (
+        <div style={{ marginBottom: "1rem", background: COLORS.redDim, border: `1px solid ${COLORS.red}`, borderRadius: 8, padding: "0.85rem 1rem" }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.red, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.5rem" }}>
+            Gating Conditions
+          </div>
+          {scorecard.gating_conditions.map((g, i) => (
+            <div key={i} style={{ fontSize: "0.82rem", color: COLORS.text, marginBottom: 4 }}>• {g}</div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+        Scoring Dimensions
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "0.6rem", marginBottom: "1rem" }}>
+        {Object.entries(scorecard.dimensions).map(([key, d]: [string, ScoreDimension]) => (
+          <div key={key} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem 0.9rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: COLORS.text }}>{d.label}</span>
+              <span style={{ fontSize: "0.9rem", fontWeight: 700, color: scoreColor(d.score) }}>{d.score}</span>
+            </div>
+            <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, marginBottom: 4 }}>Weight {(d.weight * 100).toFixed(0)}%</div>
+            <div style={{ fontSize: "0.75rem", color: COLORS.textMuted }}>{d.rationale}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
+        <div>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.green, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.5rem" }}>
+            Reasons For
+          </div>
+          {scorecard.reasons_for.length > 0
+            ? scorecard.reasons_for.map((r, i) => <div key={i} style={{ fontSize: "0.8rem", color: COLORS.text, marginBottom: 4 }}>• {r}</div>)
+            : <div style={{ fontSize: "0.8rem", color: COLORS.textFaint }}>None identified.</div>}
+        </div>
+        <div>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.red, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.5rem" }}>
+            Reasons Against
+          </div>
+          {scorecard.reasons_against.length > 0
+            ? scorecard.reasons_against.map((r, i) => <div key={i} style={{ fontSize: "0.8rem", color: COLORS.text, marginBottom: 4 }}>• {r}</div>)
+            : <div style={{ fontSize: "0.8rem", color: COLORS.textFaint }}>None identified.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Production tab ─────────────────────────────────────────────────────────────
+
+function ProductionTab({ production }: { production: TrrcDDProductionRow[] }) {
+  if (production.length === 0) {
+    return <div style={{ color: COLORS.textMuted, fontSize: "0.85rem", padding: "1rem 0" }}>No production rows available for this run — see the Findings tab for why, if the query was attempted.</div>;
+  }
+  const rows = [...production].sort((a, b) => b.production_month.localeCompare(a.production_month));
+
+  return (
+    <div style={{ marginBottom: "1rem", overflowX: "auto" as const }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" as const, fontSize: "0.8rem" }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${COLORS.borderStrong}` }}>
+            {["Month", "Oil (BBL)", "Gas (MCF)", "Water (BBL)", "Condensate (BBL)"].map(h => (
+              <th key={h} style={{ textAlign: "left" as const, padding: "0.5rem 0.75rem", color: COLORS.textMuted, fontWeight: 600, fontSize: "0.68rem", textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+              <td style={{ padding: "0.45rem 0.75rem", color: COLORS.text }}>{r.production_month}</td>
+              <td style={{ padding: "0.45rem 0.75rem", color: COLORS.text }}>{r.oil_bbl ?? "—"}</td>
+              <td style={{ padding: "0.45rem 0.75rem", color: COLORS.text }}>{r.gas_mcf ?? "—"}</td>
+              <td style={{ padding: "0.45rem 0.75rem", color: COLORS.text }}>{r.water_bbl ?? "—"}</td>
+              <td style={{ padding: "0.45rem 0.75rem", color: COLORS.text }}>{r.condensate_bbl ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Findings tab ───────────────────────────────────────────────────────────────
+
+function FindingsTab({ flags }: { flags: { critical: string[]; important: string[] } }) {
+  if (flags.critical.length === 0 && flags.important.length === 0) {
+    return <div style={{ color: COLORS.textMuted, fontSize: "0.85rem", padding: "1rem 0" }}>No critical or important findings identified.</div>;
+  }
+  return (
+    <div style={{ marginBottom: "1rem", display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
+      {flags.critical.map((f, i) => (
+        <div key={`c${i}`} style={{ background: COLORS.redDim, border: `1px solid ${COLORS.red}`, borderRadius: 8, padding: "0.75rem 1rem" }}>
+          <span style={{ fontSize: "0.65rem", fontWeight: 700, color: COLORS.red, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Critical</span>
+          <div style={{ fontSize: "0.85rem", color: COLORS.text, marginTop: 4 }}>{f}</div>
+        </div>
+      ))}
+      {flags.important.map((f, i) => (
+        <div key={`i${i}`} style={{ background: COLORS.yellowDim, border: `1px solid ${COLORS.yellow}`, borderRadius: 8, padding: "0.75rem 1rem" }}>
+          <span style={{ fontSize: "0.65rem", fontWeight: 700, color: COLORS.yellow, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Important</span>
+          <div style={{ fontSize: "0.85rem", color: COLORS.text, marginTop: 4 }}>{f}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Coverage tab ───────────────────────────────────────────────────────────────
+
+const COVERAGE_STATUS_COLOR: Record<string, string> = {
+  complete: COLORS.green, partial: COLORS.green,
+  retrieval_failed: COLORS.red, manual_required: COLORS.yellow,
+  no_applicable_record: COLORS.textMuted, not_checked: COLORS.textFaint,
+};
+
+const COVERAGE_STATUS_LABEL: Record<string, string> = {
+  complete: "Complete", partial: "Partial", retrieval_failed: "Retrieval Failed",
+  manual_required: "Manual Required", no_applicable_record: "No Applicable Record", not_checked: "Not Checked",
+};
+
+function CoverageTab({ coverage }: { coverage: SourceCoverageStatus[] }) {
+  if (coverage.length === 0) {
+    return <div style={{ color: COLORS.textMuted, fontSize: "0.85rem", padding: "1rem 0" }}>No coverage data available for this run.</div>;
+  }
+  return (
+    <div style={{ marginBottom: "1rem", display: "flex", flexDirection: "column" as const, gap: "0.4rem" }}>
+      {coverage.map(c => {
+        const color = COVERAGE_STATUS_COLOR[c.status] ?? COLORS.textMuted;
+        return (
+          <div key={c.category} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderLeft: `3px solid ${color}`, borderRadius: 7, padding: "0.6rem 0.85rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: COLORS.text }}>{c.label}</span>
+              {c.notes && <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginTop: 2 }}>{c.notes}</div>}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+              {c.records_found > 0 && <span style={{ fontSize: "0.72rem", color: COLORS.textMuted }}>{c.records_found} record{c.records_found !== 1 ? "s" : ""}</span>}
+              <span style={{ fontSize: "0.65rem", fontWeight: 700, color, background: `${color}18`, padding: "0.15rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em", whiteSpace: "nowrap" as const }}>
+                {COVERAGE_STATUS_LABEL[c.status] ?? c.status}
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
