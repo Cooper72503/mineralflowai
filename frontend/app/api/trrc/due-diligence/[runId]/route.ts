@@ -84,17 +84,27 @@ export async function GET(
     (a, b) => SEVERITY_RANK[a.severity as FindingSeverity] - SEVERITY_RANK[b.severity as FindingSeverity],
   );
 
-  return NextResponse.json({
-    ok: true,
-    data: {
-      ...run,
-      entities: entitiesResult.data ?? [],
-      source_attempts: attemptsResult.data ?? [],
-      findings,
-      missing_items: [],
-      production: productionResult.data ?? [],
-      scorecard: run.scorecard_json ?? null,
-      coverage: run.coverage_json ?? [],
+  return NextResponse.json(
+    {
+      ok: true,
+      data: {
+        ...run,
+        entities: entitiesResult.data ?? [],
+        source_attempts: attemptsResult.data ?? [],
+        findings,
+        missing_items: [],
+        production: productionResult.data ?? [],
+        scorecard: run.scorecard_json ?? null,
+        coverage: run.coverage_json ?? [],
+      },
     },
-  });
+    // The frontend polls this route every 3s while a run is in progress —
+    // without an explicit no-store directive, a browser (or any proxy/CDN
+    // in front of production) can legitimately serve a stale cached body
+    // for this exact URL instead of re-fetching, since `force-dynamic` only
+    // controls server-side re-execution, not what the client is allowed to
+    // cache. Confirmed live: the poll returned an identical stale "running"
+    // body long after the run had actually completed in the database.
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

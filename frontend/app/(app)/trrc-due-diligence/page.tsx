@@ -196,7 +196,16 @@ export default function TrrcDueDiligencePage() {
       ...(init.headers as Record<string, string> ?? {}),
       ...(tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {}),
     };
-    return fetch(url, { ...init, credentials: "omit", headers });
+    // Without this, the browser's own HTTP cache can serve a stale GET
+    // response for the run-status poll indefinitely — confirmed live: the
+    // exact same "running"/5% body kept coming back from the identical
+    // polled URL long after the run had actually completed server-side
+    // (verified directly against the DB), because nothing here or in the
+    // route handler told the browser not to cache it. `force-dynamic` on
+    // the route only guarantees the server re-runs the query; it says
+    // nothing about whether the browser is allowed to reuse a prior
+    // response for the same URL instead of asking again.
+    return fetch(url, { ...init, credentials: "omit", headers, cache: init.cache ?? "no-store" });
   }, []);
 
   const [form, setForm] = useState<FormState>({
