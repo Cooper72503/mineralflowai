@@ -1,12 +1,20 @@
 /**
  * POST /api/trrc/due-diligence/[runId]/execute
  *
- * Thin trigger route — validates the run, marks it as "retrieving", then
- * fires-and-forgets a call to the Supabase Edge Function trrc-dd-execute
- * which runs the Fable-5 agent loop without any Vercel timeout constraint.
+ * Validates the run and re-confirms status "pending" so the DigitalOcean
+ * worker's own background poller (which independently claims any pending
+ * run every few seconds regardless of this call) picks it up sooner than
+ * waiting for its next poll cycle. Not the thing that actually starts the
+ * agent loop — that's entirely the worker's job.
  *
- * Returns HTTP 202 immediately. The frontend polls /api/trrc/due-diligence/[runId]
- * for status updates as the Edge Function runs.
+ * Since the worker polls unconditionally, this call can lose the race to
+ * the worker's own poller claiming the row first (real, observed on the
+ * local dev environment sharing the same Supabase project as the
+ * production worker) — a 409 here means "already started elsewhere," not
+ * a failure, and the frontend treats it that way.
+ *
+ * The frontend polls /api/trrc/due-diligence/[runId] for status updates as
+ * the worker runs.
  */
 
 import { NextRequest, NextResponse } from "next/server";

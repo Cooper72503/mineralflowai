@@ -314,9 +314,20 @@ export default function TrrcDueDiligencePage() {
       } else {
         setPhase("running");
         const execRes = await apiFetch(`/api/trrc/due-diligence/${id}/execute`, { method: "POST" });
-        const execData = await execRes.json();
-        if (!execRes.ok || !execData.ok) {
-          throw new Error(execData.error ?? "Failed to start execution");
+        // /execute is just a "start now instead of waiting for the next poll
+        // cycle" nudge — the DigitalOcean worker's own background poller
+        // claims any pending run within 5s regardless of whether this call
+        // ever succeeds. A 409 here means the worker already claimed the
+        // row before this request landed (confirmed live: real timing race
+        // between this call and the worker's poll loop against the same
+        // run), not that anything failed — the run is already proceeding.
+        // Only a genuine error (network failure, 401/404/500) should abort
+        // into the error screen.
+        if (execRes.status !== 409) {
+          const execData = await execRes.json();
+          if (!execRes.ok || !execData.ok) {
+            throw new Error(execData.error ?? "Failed to start execution");
+          }
         }
       }
     } catch (err: unknown) {
@@ -350,9 +361,13 @@ export default function TrrcDueDiligencePage() {
       }
       setPhase("running");
       const execRes = await apiFetch(`/api/trrc/due-diligence/${runId}/execute`, { method: "POST" });
-      const execData = await execRes.json();
-      if (!execRes.ok || !execData.ok) {
-        throw new Error(execData.error ?? "Failed to start execution after resolve");
+      // See handleSubmit — a 409 here just means the worker's own poller
+      // already claimed the run, which is not a failure.
+      if (execRes.status !== 409) {
+        const execData = await execRes.json();
+        if (!execRes.ok || !execData.ok) {
+          throw new Error(execData.error ?? "Failed to start execution after resolve");
+        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to resolve entity selection.");
@@ -759,7 +774,16 @@ function SearchForm({
 // ─── Progress UI ───────────────────────────────────────────────────────────────
 
 function ProgressUI({ run, onCancel }: { run: TrrcDueDiligenceRun; onCancel: () => void }) {
-  const attempts = run.source_attempts ?? [];
+  const rawAttempts = run.source_attempts ?? [];
+  // Same dedup as ResultsDashboard — the agent can retry a tool call while
+  // reasoning, which would otherwise double-count these live progress tiles.
+  const seenSources = new Set<string>();
+  const attempts = rawAttempts.filter(a => {
+    if (a.source_name === "submit_report") return false;
+    if (seenSources.has(a.source_name)) return false;
+    seenSources.add(a.source_name);
+    return true;
+  });
   const manualCount  = attempts.filter(a => a.status === "manual_required").length;
   const successCount = attempts.filter(a => a.status === "success").length;
   const recordCount  = attempts.reduce((s, a) => s + a.result_count, 0);
@@ -1006,6 +1030,7 @@ const SOURCE_LABELS: Record<string, string> = {
   fetch_coda_records:         "Imaged Document Packets",
   fetch_drilling_permits:     "Drilling Permit Records (W-1)",
   fetch_county_records:       "County Real Property Records",
+  fetch_gis_plat:             "RRC GIS / Plat Map",
 };
 
 function ResultsDashboard({
@@ -1017,7 +1042,18 @@ function ResultsDashboard({
   onReset: () => void;
   onDownload: (type: keyof typeof DOWNLOAD_PATHS) => void;
 }) {
-  const attempts = run.source_attempts ?? [];
+  const rawAttempts = run.source_attempts ?? [];
+  // The agent can call the same tool more than once while reasoning (e.g.
+  // retrying search_by_operator) — without this, a single source shows up
+  // as multiple duplicate cards below. Keep the first attempt per source,
+  // same convention used by the PDF/Evidence Index (report-builder.ts).
+  const seenSources = new Set<string>();
+  const attempts = rawAttempts.filter(a => {
+    if (a.source_name === "submit_report") return false;
+    if (seenSources.has(a.source_name)) return false;
+    seenSources.add(a.source_name);
+    return true;
+  });
   const found = attempts.filter(a => a.status === "success" && a.result_count > 0);
   const manual = attempts.filter(a => a.status === "manual_required");
   // "no_results" is a legitimate confirmed absence (query succeeded, nothing there) —
