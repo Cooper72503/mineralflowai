@@ -234,8 +234,17 @@ export async function searchOperator(
     } else {
       // TRRC truncates this field at 20 characters (confirmed on the live
       // form) — long operator names must be trimmed or the search silently
-      // drops the tail.
-      await page.fill('input[name="operatorName"]', String(operatorName).slice(0, 20));
+      // drops the tail. Critically, .trim() after slicing: TRRC's "Beginning
+      // with these characters" search is a literal prefix match, and slicing
+      // mid-word (e.g. "Southwest Royalties Inc" -> "Southwest Royalties ")
+      // leaves a trailing space that doesn't match the comma actually
+      // following the name in TRRC's registry ("SOUTHWEST ROYALTIES, INC.")
+      // — confirmed live: the untrimmed string deterministically returned
+      // zero results every time, while the same string trimmed found the
+      // operator on the first try, every time. This looked like AJAX
+      // flakiness (a retry with a shorter name coincidentally avoided the
+      // bad trailing space) but was actually 100% reproducible.
+      await page.fill('input[name="operatorName"]', String(operatorName).slice(0, 20).trim());
       await page.locator('input[value="Search"]').nth(1).click();
     }
     // The results <select> is populated by a dojo/AJAX call after the click
