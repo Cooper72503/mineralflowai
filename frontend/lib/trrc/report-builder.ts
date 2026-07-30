@@ -37,7 +37,7 @@ import type {
   SourceCoverageStatus,
 } from "./types";
 import type { TrrcManifest } from "./manifest-builder";
-import { buildEvidenceIndex } from "./evidence-index";
+import { buildEvidenceIndex, type EvidenceIndexEntry } from "./evidence-index";
 import { buildTimeline } from "./timeline-builder";
 import { fetchStaticMapImage } from "./maps-builder";
 import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
@@ -1183,46 +1183,14 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   attempts: LiteSourceAttempt[];
   generatedAt: string;
 }) {
-  const SOURCE_LABELS: Record<string, string> = {
-    search_by_api:               "S1 — Wellbore Identity",
-    search_by_lease:             "S2 — Lease Well Inventory",
-    search_by_operator:          "S3 — P-5 Operator Registration",
-    fetch_well_status:           "S4 — Well Status",
-    fetch_inactive_well_status:  "S5 — Inactive Well Designation",
-    fetch_orphan_well:           "S6 — Orphan Well Program",
-    fetch_severance_records:     "S7 — Severance Tax Records",
-    fetch_production:            "S8 — Monthly Production",
-    fetch_p4_records:            "S9 — P-4 Gatherer/Purchaser",
-    fetch_completion_records:    "S10 — W-2 Completion Record",
-    fetch_plugging_records:      "S11 — Plugging Records (W-3C)",
-    fetch_coda_records:          "S12 — CODA Imaged Documents",
-    fetch_compliance_violations: "S13 — Compliance Violations",
-    fetch_injection_records:     "S14 — UIC / Injection Permits",
-    fetch_glo_survey:            "S15 — Texas GLO Survey",
-    fetch_gis_plat:              "S16 — RRC GIS / Plat Map",
-    fetch_drilling_permits:      "S17 — Drilling Permit Records (W-1)",
-    fetch_county_records:        "S18 — County Real Property Records",
-  };
-
-  const seen = new Set<string>();
-  const gaps: Array<{ label: string; reason: string; severity: "red" | "yellow" | "none" }> = [];
-
-  for (const a of attempts) {
-    if (a.source_name === "submit_report") continue;
-    if (seen.has(a.source_name)) continue;
-    seen.add(a.source_name);
-
-    const d = a.result_data_json ?? {};
-    const label = SOURCE_LABELS[a.source_name] ?? a.source_name;
-
-    if (a.status !== "success") {
-      gaps.push({ label, reason: `Query failed — ${a.error_message ?? "transient error"}`, severity: "red" });
-    } else if (d["data_gap"] === true || d["endpoint_available"] === false) {
-      gaps.push({ label, reason: str(d["message"]) || "Manual retrieval required (site requires browser interaction)", severity: "yellow" });
-    } else if (d["found"] === false) {
-      gaps.push({ label, reason: str(d["note"] ?? d["message"]) || "No records found", severity: "none" });
-    }
-  }
+  // Reuses buildEvidenceIndex() (the same source used by Section 9) instead
+  // of the previous duplicated label map and ad-hoc gap detection — this is
+  // the section a reader hits first when something didn't come back, so it
+  // needs the same direct portal link + exact query criteria Section 9 has,
+  // not a bare error message with no path to look it up by hand.
+  const gaps = buildEvidenceIndex(attempts, run).filter(e => e.status !== "retrieved");
+  const severityFor = (status: EvidenceIndexEntry["status"]): "red" | "yellow" | "none" =>
+    status === "retrieval_failed" ? "red" : status === "manual_required" || status === "not_attempted" ? "yellow" : "none";
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -1234,16 +1202,21 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
 
     React.createElement(Text, { style: S.sectionTitle }, "SECTION 7 — MISSING DOCUMENTS AND GAPS"),
 
-    React.createElement(Text, { style: S.noteText }, "Every source that returned no records, failed, or requires manual retrieval is listed here. A gap that is not applicable for this well type is noted as such; gaps in critical sources are flagged."),
+    React.createElement(Text, { style: S.noteText }, "Every source that returned no records, failed, or requires manual retrieval is listed here, with a direct link to the TRRC portal and the exact criteria to re-run it by hand. A gap that is not applicable for this well type is noted as such; gaps in critical sources are flagged."),
 
     gaps.length === 0 ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.greenBg }] },
       React.createElement(Text, { style: [S.flagItem, { color: C.green }] }, "✓ All queried sources returned data successfully."),
     ) : React.createElement(View, {},
-      ...gaps.map((g, i) => React.createElement(
-        View, { key: String(i), style: { marginBottom: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: g.severity === "red" ? C.red : g.severity === "yellow" ? C.yellow : C.border } },
-        React.createElement(Text, { style: { fontSize: 8, fontFamily: "Helvetica-Bold", color: g.severity === "red" ? C.red : g.severity === "yellow" ? C.yellow : C.dark, marginBottom: 2 } }, g.label),
-        React.createElement(Text, { style: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica" } }, g.reason),
-      )),
+      ...gaps.map((g, i) => {
+        const severity = severityFor(g.status);
+        const color = severity === "red" ? C.red : severity === "yellow" ? C.yellow : C.border;
+        return React.createElement(
+          View, { key: String(i), style: { marginBottom: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: color } },
+          React.createElement(Link, { src: g.portal_url, style: [S.trrcLink, { fontSize: 8, fontFamily: "Helvetica-Bold", marginBottom: 2, color: severity === "none" ? C.dark : color }] }, `${g.label} ↗`),
+          React.createElement(Text, { style: { fontSize: 7.5, color: C.gray, fontFamily: "Helvetica" } }, g.status_note),
+          g.status !== "not_attempted" ? React.createElement(Text, { style: { fontSize: 7.5, color: C.dark, fontFamily: "Courier" } }, `Enter: ${g.query_criteria}`) : null,
+        );
+      }),
     ),
 
     React.createElement(Footer, { generatedAt, runId: run.id }),

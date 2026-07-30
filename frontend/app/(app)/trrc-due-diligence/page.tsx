@@ -11,6 +11,7 @@ import type {
   SourceCoverageStatus,
 } from "../../../lib/trrc/types";
 import { createClient } from "@/lib/supabase/client";
+import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
 // detectInputType unused — each field has an explicit type now
 
 // ─── Design tokens (matches UnderwritingPage.tsx exactly) ─────────────────────
@@ -1231,7 +1232,7 @@ function ResultsDashboard({
       {activeTab === "scorecard" && <ScorecardTab scorecard={run.scorecard ?? null} />}
       {activeTab === "production" && <ProductionTab production={run.production ?? []} />}
       {activeTab === "findings" && <FindingsTab flags={run.flags ?? { critical: [], important: [] }} />}
-      {activeTab === "coverage" && <CoverageTab coverage={run.coverage ?? []} />}
+      {activeTab === "coverage" && <CoverageTab coverage={run.coverage ?? []} run={run} />}
 
       {/* Downloads */}
       <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.25rem 1.5rem", marginBottom: "1rem" }}>
@@ -1443,26 +1444,47 @@ const COVERAGE_STATUS_LABEL: Record<string, string> = {
   manual_required: "Manual Required", no_applicable_record: "No Applicable Record", not_checked: "Not Checked",
 };
 
-function CoverageTab({ coverage }: { coverage: SourceCoverageStatus[] }) {
+function CoverageTab({ coverage, run }: { coverage: SourceCoverageStatus[]; run: TrrcDueDiligenceRun }) {
   if (coverage.length === 0) {
     return <div style={{ color: COLORS.textMuted, fontSize: "0.85rem", padding: "1rem 0" }}>No coverage data available for this run.</div>;
   }
+  // For anything not fully retrieved, surface a direct link to the TRRC
+  // portal and the exact criteria to re-run it by hand — the same
+  // buildEvidenceIndex() data the PDF's Missing Documents section and
+  // Evidence Index use, so a failed source is never a dead end here either.
+  const rawAttempts = (run.source_attempts ?? []) as unknown as import("@/lib/trrc/coverage").LiteSourceAttempt[];
+  const evidenceBySource = new Map(buildEvidenceIndex(rawAttempts, run).map(e => [e.source_name, e]));
+
   return (
     <div style={{ marginBottom: "1rem", display: "flex", flexDirection: "column" as const, gap: "0.4rem" }}>
       {coverage.map(c => {
         const color = COVERAGE_STATUS_COLOR[c.status] ?? COLORS.textMuted;
+        const needsFallback = c.status === "retrieval_failed" || c.status === "manual_required";
+        const fallbackEntries = needsFallback
+          ? c.sources_checked.map(s => evidenceBySource.get(s)).filter((e): e is NonNullable<typeof e> => !!e)
+          : [];
         return (
-          <div key={c.category} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderLeft: `3px solid ${color}`, borderRadius: 7, padding: "0.6rem 0.85rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: COLORS.text }}>{c.label}</span>
-              {c.notes && <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginTop: 2 }}>{c.notes}</div>}
+          <div key={c.category} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderLeft: `3px solid ${color}`, borderRadius: 7, padding: "0.6rem 0.85rem" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: COLORS.text }}>{c.label}</span>
+                {c.notes && <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginTop: 2 }}>{c.notes}</div>}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                {c.records_found > 0 && <span style={{ fontSize: "0.72rem", color: COLORS.textMuted }}>{c.records_found} record{c.records_found !== 1 ? "s" : ""}</span>}
+                <span style={{ fontSize: "0.65rem", fontWeight: 700, color, background: `${color}18`, padding: "0.15rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em", whiteSpace: "nowrap" as const }}>
+                  {COVERAGE_STATUS_LABEL[c.status] ?? c.status}
+                </span>
+              </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-              {c.records_found > 0 && <span style={{ fontSize: "0.72rem", color: COLORS.textMuted }}>{c.records_found} record{c.records_found !== 1 ? "s" : ""}</span>}
-              <span style={{ fontSize: "0.65rem", fontWeight: 700, color, background: `${color}18`, padding: "0.15rem 0.5rem", borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em", whiteSpace: "nowrap" as const }}>
-                {COVERAGE_STATUS_LABEL[c.status] ?? c.status}
-              </span>
-            </div>
+            {fallbackEntries.map(e => (
+              <div key={e.source_name} style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${COLORS.border}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+                <a href={e.portal_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.72rem", color: COLORS.accent, textDecoration: "none", fontWeight: 600 }}>
+                  {e.portal} ↗
+                </a>
+                <span style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>Enter: <span style={{ fontFamily: "monospace" }}>{e.query_criteria}</span></span>
+              </div>
+            ))}
           </div>
         );
       })}
