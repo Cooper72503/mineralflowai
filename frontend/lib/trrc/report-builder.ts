@@ -1088,8 +1088,15 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
   const gisLat    = gisLatNum !== null ? gisLatNum.toFixed(6) : null;
   const gisLng    = gisLngNum !== null ? gisLngNum.toFixed(6) : null;
   const alerts    = Array.isArray(gis?.["alert_areas"]) ? (gis!["alert_areas"] as string[]) : [];
-  const gisUrl    = typeof gis?.["trrc_source_url"] === "string" ? gis["trrc_source_url"] as string : null;
-  const gloUrl    = typeof glo?.["trrc_source_url"] === "string" ? glo["trrc_source_url"] as string : null;
+  // getGisLocation() (worker/src/tools/ewa.ts) returns {found, latitude,
+  // longitude, well_type, survey, alert_areas, message, error?} — no
+  // trrc_source_url, location_source, or location_reliability field, so
+  // those three always rendered blank/dead below. There is also no
+  // fetch_glo_survey fetcher anywhere in the worker (Texas GLO survey
+  // records, S15, is a documented gap, not an implemented source) — `glo`
+  // is therefore always null, and the old "Private (no GLO record found)"
+  // fallback falsely implied a GLO search had run and confirmed no record,
+  // when no GLO search has ever been attempted.
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -1108,11 +1115,7 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
       kv("Block Number",     str(survey["block_number"] ?? glo?.["block"])),
       kv("Section",          str(survey["section_name"] ?? glo?.["section"])),
       kv("County",           identity.county),
-      kv("Mineral Ownership", str(glo?.["mineral_ownership"]) || "Private (no GLO record found)"),
-      gloUrl ? React.createElement(View, { style: S.kvRow },
-        React.createElement(Text, { style: S.kvLabel }, "Texas GLO"),
-        React.createElement(Link, { src: gloUrl, style: S.trrcLink }, "View GLO Survey ↗"),
-      ) : null,
+      kv("Mineral Ownership", str(glo?.["mineral_ownership"]) || "Texas GLO survey records not retrieved (no automated connector yet)"),
     ),
 
     React.createElement(View, { style: S.divider }),
@@ -1121,13 +1124,7 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
     gis?.["found"] ? React.createElement(View, { style: { marginBottom: 10 } },
       kv("Coordinates (NAD83)", gisLat && gisLng ? `${gisLat}°N, ${gisLng}°W` : "—"),
       kv("Well Type",           str(gis?.["well_type"])),
-      kv("Location Source",     str(gis?.["location_source"])),
-      kv("Location Reliability",str(gis?.["location_reliability"])),
       alerts.length > 0 ? kv("Alert Areas", alerts.join("; "), "yellow") : null,
-      gisUrl ? React.createElement(View, { style: S.kvRow },
-        React.createElement(Text, { style: S.kvLabel }, "RRC GIS Viewer"),
-        React.createElement(Link, { src: gisUrl, style: S.trrcLink }, "View on GIS Map ↗"),
-      ) : null,
     ) : React.createElement(Text, { style: S.noteText }, gis?.["found"] === false ? "Well not found in RRC GIS database — manual GIS verification required." : "GIS data not retrieved."),
 
     mapImage ? React.createElement(View, { style: { marginTop: 10 } },
