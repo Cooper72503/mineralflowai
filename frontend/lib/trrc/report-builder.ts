@@ -1402,17 +1402,17 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
 
 // ─── Section 11 — Overall Assessment ─────────────────────────────────────────
 
-function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, generatedAt }: {
+function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, scorecard, generatedAt }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   attempts: LiteSourceAttempt[];
   flags: Flags;
   analytics: ProductionAnalytics;
+  scorecard: AcquisitionScorecard;
   generatedAt: string;
 }) {
   const seen = new Set<string>();
   let sourcesChecked = 0;
-  let sourcesWithData = 0;
   let sourcesManual = 0;
   let sourcesFailed = 0;
 
@@ -1424,14 +1424,23 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
     const d = a.result_data_json ?? {};
     if (a.status !== "success") { sourcesFailed++; }
     else if (d["data_gap"] === true || d["endpoint_available"] === false) { sourcesManual++; }
-    // result_count is the ground-truth signal computed centrally in the
-    // worker's dispatcher — some fetchers (orphan/inactive-well) never set a
-    // "found" key at all, and `d["found"] !== false` treated that absence as
-    // "has data" rather than "found nothing," overstating completeness.
-    else if (a.result_count > 0) { sourcesWithData++; }
   }
 
-  const dataCompleteness = sourcesChecked > 0 ? Math.round((sourcesWithData / sourcesChecked) * 100) : 0;
+  const completenessMatch = scorecard.dimensions.record_completeness.rationale.match(/^(\d+) of (\d+)/);
+  const completenessFraction = completenessMatch ? `${completenessMatch[1]} / ${completenessMatch[2]} sources` : "";
+
+  // Reuses the scorecard's own Record Completeness dimension (Section 10)
+  // instead of a separate local calculation — the two used to disagree:
+  // this page's old dataCompleteness only counted a source as "complete" if
+  // it returned a non-zero record_count, so a confirmed-clean answer (0
+  // violations, not an orphan well, no injection permits — genuinely
+  // complete, valuable information) counted the same as an outright
+  // retrieval failure. That understated completeness far more harshly than
+  // Section 10's dimension, which correctly treats confirmed-absence as a
+  // definitive answer and excludes not-applicable categories entirely —
+  // producing two different completeness numbers for the same run in the
+  // same PDF. Single source of truth now.
+  const dataCompleteness = Math.round(scorecard.dimensions.record_completeness.score);
 
   // Build narrative
   const wellDesc = [
@@ -1473,7 +1482,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(View, { style: S.summaryStatBox },
         React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "DATA COMPLETENESS"),
         React.createElement(Text, { style: { fontSize: 14, fontFamily: "Helvetica-Bold", color: dataCompleteness >= 70 ? C.green : C.yellow } }, `${dataCompleteness}%`),
-        React.createElement(Text, { style: { fontSize: 6.5, color: C.gray } }, `${sourcesWithData} / ${sourcesChecked} sources`),
+        React.createElement(Text, { style: { fontSize: 6.5, color: C.gray } }, completenessFraction),
       ),
       React.createElement(View, { style: S.summaryStatBox },
         React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "CRITICAL FLAGS"),
@@ -1506,7 +1515,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
 
     React.createElement(View, { style: { marginTop: 8 } },
       kv("Sources Checked",              String(sourcesChecked)),
-      kv("Sources Returning Data",        String(sourcesWithData)),
+      kv("Sources Definitive (Data or Confirmed Absence)", completenessMatch ? completenessMatch[1] : "—"),
       kv("Sources Requiring Manual Review",String(sourcesManual)),
       kv("Sources Failed",               String(sourcesFailed)),
       kv("Report Completed",             new Date(generatedAt).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short" })),
@@ -1591,7 +1600,7 @@ export async function buildTrrcPdfReport(
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
     React.createElement(AcquisitionScorecardPage, { run, id: identity, scorecard, generatedAt }),
-    React.createElement(OverallAssessmentPage,  { run, id: identity, attempts, flags, analytics, generatedAt }),
+    React.createElement(OverallAssessmentPage,  { run, id: identity, attempts, flags, analytics, scorecard, generatedAt }),
   );
 
   const buffer = await renderToBuffer(doc);
