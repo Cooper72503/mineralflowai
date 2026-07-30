@@ -20,11 +20,25 @@ export type LiteSourceAttempt = {
   result_data_json: Record<string, unknown> | null;
 };
 
+// Every key here must be a source_name the worker actually writes (see the
+// `sourceName = "..."` assignments in worker/src/agent.ts's dispatchTool) —
+// confirmed live: "legal_description" was previously keyed to
+// search_by_legal_description, a source name nothing in the worker ever
+// writes, while fetch_gis_plat (the real GIS/survey fetcher, which succeeds
+// on most runs and is what Section 6 of the PDF actually renders) wasn't in
+// this map at all. Every run's real, successfully-retrieved GIS data was
+// therefore invisible to coverage/completeness scoring — this dragged down
+// the "Record Completeness" scorecard dimension on every single run,
+// regardless of what was actually retrieved. A "fetch_proration" entry with
+// the same problem (no such fetcher exists anywhere in the worker — no
+// automated Proration data source has been built) was removed rather than
+// pointed at a real source, since there isn't one; it's an unimplemented
+// feature, not an operational gap.
 export const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string }> = {
   search_by_api:              { category: "wellbore_identity",  label: "Well Identity (API Lookup)" },
   search_by_lease:            { category: "lease_inventory",    label: "Lease Inventory" },
   search_by_operator:         { category: "operator_p5",        label: "Operator / P5 Organization" },
-  search_by_legal_description:{ category: "legal_description",  label: "Legal Description (GIS)" },
+  fetch_gis_plat:              { category: "legal_description",  label: "Legal Description (GIS)" },
   fetch_production:           { category: "production",         label: "Production History (Proration Proxy)" },
   fetch_completion_records:   { category: "completion",         label: "Completion Records (W-2)" },
   fetch_well_status:          { category: "well_status",        label: "Well Status (Active/Inactive/Plugged)" },
@@ -33,7 +47,6 @@ export const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string
   fetch_plugging_records:     { category: "plugging",           label: "Plugging Records (W-3C)" },
   fetch_compliance_violations:{ category: "compliance",         label: "Compliance Violations" },
   fetch_p4_records:           { category: "p4_records",         label: "P-4 Gatherer/Purchaser Records" },
-  fetch_proration:            { category: "proration",          label: "Proration Schedule / Daily Allowable" },
   fetch_injection_records:    { category: "injection",          label: "UIC / Injection Well Records" },
   fetch_severance_records:    { category: "severance",          label: "Wellbore Severance Records" },
   fetch_coda_records:         { category: "imaged_records",     label: "Imaged Document Packets (CODA)" },
