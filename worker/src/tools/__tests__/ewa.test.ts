@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser, normalizeDistrictForQuery } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -365,6 +365,41 @@ describe("getGathererPurchaser — real fixtures, empty and populated", () => {
     const result = await getGathererPurchaser(null, "08");
     expect(result.found).toBe(false);
     expect(result.error).toBeDefined();
+  });
+});
+
+// ─── normalizeDistrictForQuery — leading-zero regression guard ────────────
+//
+// Confirmed live 2026-07-30: searchArgs.districtCodeArg's <select> on both
+// severanceQueryAction.do and gathererPurchaserQueryAction.do uses "7C"/"7B"/
+// "8A" (no leading zero), not the "07C"/"07B"/"08A" convention used
+// elsewhere in this codebase (the frontend's own district dropdown,
+// extractDistrictFromApi). Submitting the leading-zero form matched no real
+// <option>, so the select silently reset to "None Selected" and the search
+// never executed — TRRC returned HTTP 200 with the same blank criteria form
+// (no "No Results Found" text either), which findDataTable() then mistook
+// for a real, populated results table full of the form's own field labels.
+// Real lease 016582/district 7C has 3 genuine P-4 records; before this fix,
+// every caller passing "07C" (the normal, correctly-formatted value from
+// state.district) got back 7 fabricated "records" like {"choose_one":
+// "District:", ...} and a false "success" status instead.
+describe("normalizeDistrictForQuery — leading-zero districts", () => {
+  it("strips a leading zero when a letter suffix is present", () => {
+    expect(normalizeDistrictForQuery("07C")).toBe("7C");
+    expect(normalizeDistrictForQuery("07B")).toBe("7B");
+    expect(normalizeDistrictForQuery("08A")).toBe("8A");
+    expect(normalizeDistrictForQuery("06E")).toBe("6E");
+  });
+
+  it("leaves purely-numeric districts unchanged", () => {
+    expect(normalizeDistrictForQuery("08")).toBe("08");
+    expect(normalizeDistrictForQuery("01")).toBe("01");
+    expect(normalizeDistrictForQuery("10")).toBe("10");
+  });
+
+  it("leaves already-correct district codes unchanged", () => {
+    expect(normalizeDistrictForQuery("7C")).toBe("7C");
+    expect(normalizeDistrictForQuery("C1")).toBe("C1");
   });
 });
 

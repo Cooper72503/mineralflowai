@@ -20,6 +20,25 @@ function formBody(params: Record<string, string>): string {
     .join("&");
 }
 
+// The district codes surfaced elsewhere in this codebase (the frontend's own
+// dropdown, extractDistrictFromApi, etc.) use a leading zero for single-digit
+// districts even when they carry a letter suffix — "07B", "07C", "08A". The
+// searchArgs.districtCodeArg <select> on these plain server-rendered EWA
+// query pages does not: confirmed live against both severanceQueryAction.do
+// and gathererPurchaserQueryAction.do, their district <option> values are
+// "7B"/"7C"/"8A", not "07B"/"07C"/"08A". Submitting "07C" matches no real
+// option, so the select silently resets to "None Selected" and the search
+// never actually executes — TRRC re-renders the same blank criteria form
+// (HTTP 200, no "No Results Found" text either) instead of erroring, which
+// looked exactly like a successful, populated result until inspected: this
+// codebase's generic findDataTable() picked up the form's own layout table
+// and fabricated "records" out of field labels like "District:"/"Choose
+// One:". Purely-numeric districts ("08") do keep the leading zero on both
+// sides, so only strip it when a letter suffix is present.
+export function normalizeDistrictForQuery(district: string): string {
+  return district.replace(/^0([1-9][A-Za-z])$/, "$1");
+}
+
 // TRRC's EWA app sometimes fails with its own internal error page instead of
 // a raw HTTP error status — confirmed live: productionQueryAction.do returned
 // HTTP 200 with <title>Expanded Web Access(EWA) - General Exception</title>
@@ -286,7 +305,7 @@ export async function searchLeaseWells(leaseNumber: string, district: string): P
   const tryLeaseType = async (lt: string): Promise<LeaseTypeResult> => {
     const html = await ewaFetch("leaseWellQueryAction.do", {
       "searchArgs.leaseNumberArg":  leaseNumber,
-      "searchArgs.districtCodeArg": district,
+      "searchArgs.districtCodeArg": normalizeDistrictForQuery(district),
       "searchArgs.leaseTypeArg":    lt,
     });
     if (/no results found/i.test(html)) return { status: "not_found" };
@@ -367,7 +386,7 @@ export async function getWellStatus(apiNumber: string, leaseNumber?: string | nu
       for (const lt of ["O", "G"]) {
         const result = await tryQuery({
           "searchArgs.leaseNumberArg":  leaseNumber,
-          "searchArgs.districtCodeArg": district,
+          "searchArgs.districtCodeArg": normalizeDistrictForQuery(district),
           "searchArgs.leaseTypeArg":    lt,
         });
         if (result.status === "found") {
@@ -454,7 +473,7 @@ export async function getSeveranceRecords(leaseNumber: string | null, district: 
   try {
     const html = await ewaFetch("severanceQueryAction.do", {
       "searchArgs.leaseNumberArg":  leaseNumber,
-      "searchArgs.districtCodeArg": district,
+      "searchArgs.districtCodeArg": normalizeDistrictForQuery(district),
     });
     if (/no results found/i.test(html)) return { found: false, records: [], message: "No severance records" };
     const table = findDataTable(html, 2);
@@ -532,7 +551,7 @@ export async function getProduction(leaseNumber: string | null, district: string
       },
       body: formBody({
         "searchArgs.leaseNumberArg":  leaseNumber!,
-        "searchArgs.districtCodeArg": district!,
+        "searchArgs.districtCodeArg": normalizeDistrictForQuery(district!),
         "searchArgs.leaseTypeArg":    lt,
         "searchArgs.reportRange":     "ALL",
         "javax.faces.ViewState":      viewState,
@@ -623,7 +642,7 @@ export async function getGathererPurchaser(leaseNumber: string | null, district:
       "searchArgs.fieldNumbersArg": "",
       "searchArgs.operatorNumbersArg": "",
       "searchArgs.leaseTypeArg": "",
-      "searchArgs.districtCodeArg": district,
+      "searchArgs.districtCodeArg": normalizeDistrictForQuery(district),
       "searchArgs.leaseNumberArg": leaseNumber,
       "searchArgs.gathererPurchaserTypeArg": "",
       "searchArgs.gathererPurchaserNumberArg": "",
