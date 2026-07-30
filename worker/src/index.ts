@@ -118,9 +118,38 @@ async function poll(): Promise<void> {
   }
 }
 
+// This process is the only writer to "running" rows (single fork-mode
+// instance — see deploy.sh). On a fresh boot, activeRuns is empty, so any
+// row still marked "running" cannot belong to in-flight work in this
+// process; it can only be orphaned by a previous crash, deploy, or restart
+// that killed the process mid-run (SIGTERM/SIGINT below don't actually
+// drain in-flight runs before exiting). Confirmed live: a `pm2 restart`
+// during an active run left it stuck at status="running" forever, with no
+// recovery path — the retry endpoint's allowlist doesn't even include
+// "running". Reset those rows back to "pending" so the poll loop below
+// picks them up again instead of leaving the user staring at a progress
+// bar that will never move.
+async function recoverStaleRuns(): Promise<void> {
+  const { data: recovered, error } = await supabase
+    .from("trrc_due_diligence_runs")
+    .update({ status: "pending", progress_percent: 0, updated_at: new Date().toISOString() })
+    .eq("status", "running")
+    .select("id");
+
+  if (error) {
+    console.error("[worker] failed to recover stale running runs:", error.message);
+    return;
+  }
+  if (recovered && recovered.length > 0) {
+    console.log(`[worker] recovered ${recovered.length} run(s) stuck in "running" from a previous process: ${recovered.map(r => r["id"]).join(", ")}`);
+  }
+}
+
 async function main() {
   console.log(`[worker] MineralFlow TRRC Worker starting — max ${MAX_CONCURRENT} concurrent runs`);
   console.log(`[worker] polling every ${POLL_INTERVAL_MS}ms`);
+
+  await recoverStaleRuns();
 
   // Graceful shutdown
   process.on("SIGTERM", async () => {
