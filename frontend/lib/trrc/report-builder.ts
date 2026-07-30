@@ -908,7 +908,20 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   const p4Records = Array.isArray(p4?.["records"]) ? (p4!["records"] as Record<string, unknown>[]) : [];
   const permitRecords = Array.isArray(permits?.["permits"]) ? (permits!["permits"] as Record<string, unknown>[]) : [];
   const latestPermit = permitRecords[permitRecords.length - 1];
-  const compUrl  = typeof comp?.["trrc_source_url"] === "string"   ? comp["trrc_source_url"] as string   : null;
+  // getCompletionRecords() (worker/src/tools/ewa.ts) returns {found, records:
+  // [...], message} — completionQueryAction.do's own table.header, dynamically
+  // key-cased. This report previously read completion_date/producing_formation/
+  // etc. straight off the top-level `comp` object (which only ever has found/
+  // records/message), the same class of bug fixed on the Severance section
+  // above: every field here rendered blank regardless of what was retrieved.
+  // completionQueryAction.do has been down (HTTP 500) for this session's
+  // entire duration, so the exact real column names below are carried over
+  // unverified from the pre-existing guess, not confirmed against a live
+  // response — re-check against real data once TRRC's endpoint recovers.
+  // There is also no trrc_source_url in that return shape, so the "View W-2
+  // Record" link (which never had real data to point to) is removed rather
+  // than kept pointing at a field that was never populated.
+  const compRecord = Array.isArray(comp?.["records"]) ? (comp!["records"] as Record<string, unknown>[])[0] : undefined;
   const imagedUrl = typeof imaged?.["coda_search_url"] === "string" ? imaged["coda_search_url"] as string : null;
 
   return React.createElement(
@@ -922,22 +935,20 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
     React.createElement(Text, { style: S.sectionTitle }, "SECTION 4 — WELL CONSTRUCTION"),
 
     React.createElement(Text, { style: S.subTitle }, "W-2 Completion Record (EWA Structured Data)"),
-    comp ? React.createElement(View, { style: { marginBottom: 10 } },
-      kv("Completion Date",        str(comp["completion_date"])),
-      kv("Producing Formation",    str(comp["producing_formation"])),
-      kv("Producing Interval",     str(comp["producing_interval"] ?? comp["depth_interval"])),
-      kv("Perforation Intervals",  str(comp["perforations"] ?? comp["perforation_intervals"])),
-      kv("Stimulation Method",     str(comp["stimulation_method"])),
-      kv("Fracture Fluid Volume",  str(comp["fracture_fluid_volume"])),
-      kv("Proppant Type",          str(comp["proppant_type"])),
-      kv("Surface Casing",         str(comp["surface_casing"])),
-      kv("Production Casing",      str(comp["production_casing"])),
-      kv("Tubing",                 str(comp["tubing"])),
-      compUrl ? React.createElement(View, { style: S.kvRow },
-        React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
-        React.createElement(Link, { src: compUrl, style: S.trrcLink }, "View W-2 Record ↗"),
-      ) : null,
-    ) : React.createElement(Text, { style: S.noteText }, "W-2 completion record not retrieved — manual lookup required."),
+    compRecord ? React.createElement(View, { style: { marginBottom: 10 } },
+      kv("Completion Date",        str(compRecord["completion_date"])),
+      kv("Producing Formation",    str(compRecord["producing_formation"])),
+      kv("Producing Interval",     str(compRecord["producing_interval"] ?? compRecord["depth_interval"])),
+      kv("Perforation Intervals",  str(compRecord["perforations"] ?? compRecord["perforation_intervals"])),
+      kv("Stimulation Method",     str(compRecord["stimulation_method"])),
+      kv("Fracture Fluid Volume",  str(compRecord["fracture_fluid_volume"])),
+      kv("Proppant Type",          str(compRecord["proppant_type"])),
+      kv("Surface Casing",         str(compRecord["surface_casing"])),
+      kv("Production Casing",      str(compRecord["production_casing"])),
+      kv("Tubing",                 str(compRecord["tubing"])),
+    ) : comp?.["found"] === false
+      ? React.createElement(Text, { style: S.noteText }, "No W-2 completion record on file.")
+      : React.createElement(Text, { style: S.noteText }, "W-2 completion record not retrieved — manual lookup required."),
 
     React.createElement(View, { style: S.divider }),
 
@@ -995,8 +1006,12 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   const injection  = getAttempt(attempts, "fetch_injection_records");
   const severance  = getAttempt(attempts, "fetch_severance_records");
 
-  const inactiveRecords = Array.isArray(inactive?.["records"]) ? (inactive!["records"] as Record<string, unknown>[]) : [];
-  const plugRecords     = Array.isArray(plugging?.["records"]) ? (plugging!["records"] as Record<string, unknown>[]) : [];
+  const inactiveRecords  = Array.isArray(inactive?.["records"])  ? (inactive!["records"]  as Record<string, unknown>[]) : [];
+  const plugRecords      = Array.isArray(plugging?.["records"])  ? (plugging!["records"]  as Record<string, unknown>[]) : [];
+  // getInjectionRecords() (worker/src/tools/ewa.ts) returns {found, records:
+  // [...], message} — no count or trrc_source_url field, unlike what this
+  // section previously assumed.
+  const injectionRecords = Array.isArray(injection?.["records"]) ? (injection!["records"] as Record<string, unknown>[]) : [];
 
   const statusStr  = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]);
   const isOrphan   = orphan?.["is_orphan"] === true;
@@ -1014,7 +1029,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
     kv("Well Status (Official RRC)", statusStr || "—", /shut.in|inactive|plugged/i.test(statusStr) ? "yellow" : undefined),
     kv("Inactive Well Designation",  inactive?.["found"] ? "Yes" : inactive?.["found"] === false ? "No" : "—"),
     inactiveRecords.length > 0 ? kv("Plugging Deadline", str(inactiveRecords[0]?.["plugging_deadline_date"] ?? inactiveRecords[0]?.["deadline"]), "yellow") : null,
-    kv("Orphan Well Program",        isOrphan ? "YES — CRITICAL" : orphan?.["found"] === false ? "No" : "—", isOrphan ? "red" : undefined),
+    kv("Orphan Well Program",        isOrphan ? "YES — CRITICAL" : orphan !== null ? "No" : "—", isOrphan ? "red" : undefined),
     kv("Plugging Records (W-3C)",    plugging?.["found"] === true ? "Filed" : plugging?.["found"] === false ? "Not Filed" : "—"),
 
     plugRecords.length > 0 ? React.createElement(View, { style: { marginTop: 4, marginBottom: 6 } },
@@ -1028,11 +1043,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
     React.createElement(Text, { style: S.subTitle }, "Injection / UIC Permits"),
     injection ? React.createElement(View, { style: { marginBottom: 8 } },
       kv("UIC Records Found",  injection["found"] === true ? "Yes" : "No"),
-      kv("Active UIC Permits", str(injection["count"])),
-      typeof injection["trrc_source_url"] === "string" ? React.createElement(View, { style: S.kvRow },
-        React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
-        React.createElement(Link, { src: injection["trrc_source_url"] as string, style: S.trrcLink }, "View UIC Records ↗"),
-      ) : null,
+      kv("Active UIC Permits", String(injectionRecords.length)),
     ) : React.createElement(Text, { style: S.noteText }, "UIC/Injection records not retrieved."),
 
     React.createElement(View, { style: S.divider }),
