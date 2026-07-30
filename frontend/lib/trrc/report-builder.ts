@@ -1037,11 +1037,21 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
 
     React.createElement(View, { style: S.divider }),
 
-    React.createElement(Text, { style: S.subTitle }, "Severance Tax Records"),
-    severance ? React.createElement(View, { style: { marginBottom: 8 } },
-      kv("Exemption Type",    str(severance["exemption_type"])),
-      kv("Expiration Date",   str(severance["expiration_date"])),
-    ) : React.createElement(Text, { style: S.noteText }, "Severance tax records not retrieved."),
+    React.createElement(Text, { style: S.subTitle }, "Severance/Seal Records"),
+    (() => {
+      const severanceRecords = Array.isArray(severance?.["records"]) ? (severance!["records"] as Record<string, unknown>[]) : [];
+      if (severance?.["found"] === true && severanceRecords.length > 0) {
+        const onSchedule = str(severanceRecords[0]?.["on_schedule"]);
+        return React.createElement(View, { style: { marginBottom: 8 } },
+          kv("On Reporting Schedule", onSchedule === "Y" ? "Yes" : onSchedule === "N" ? "No — outstanding issue" : onSchedule || "—", onSchedule === "N" ? "yellow" : undefined),
+          kv("Field",    str(severanceRecords[0]?.["field_name"])),
+        );
+      }
+      if (severance?.["found"] === false) {
+        return React.createElement(Text, { style: S.noteText }, "No severance/seal records on file.");
+      }
+      return React.createElement(Text, { style: S.noteText }, "Severance/seal records not retrieved.");
+    })(),
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
   );
