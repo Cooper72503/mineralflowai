@@ -156,8 +156,14 @@ const LEGAL_KEYWORDS: Array<{ pattern: RegExp; label: string; weight: number }> 
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Must be a real UUID: this id is inserted as the primary key of
+// trrc_resolved_entities (a uuid column) — see POST /api/trrc/due-diligence.
+// Confirmed live: the old Math.random()-based id let the client and DB
+// disagree on every entity's id (DB generated its own via a UUID default),
+// so selecting a candidate in an ambiguous-match run always 404'd with
+// "Entity not found or does not belong to this run."
 function makeId(): string {
-  return Math.random().toString(36).slice(2, 10);
+  return crypto.randomUUID();
 }
 
 function inferDistrictFromCounty(county: string | null): string | null {

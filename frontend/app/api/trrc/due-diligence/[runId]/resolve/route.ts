@@ -83,7 +83,7 @@ export async function POST(
   // 4. Mark entity as user-selected
   const { error: entityUpdateError } = await supabase
     .from("trrc_resolved_entities")
-    .update({ is_user_selected: true, updated_at: new Date().toISOString() })
+    .update({ is_user_selected: true })
     .eq("id", body.entity_id)
     .eq("run_id", runId);
 

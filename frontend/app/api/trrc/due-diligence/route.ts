@@ -149,6 +149,7 @@ export async function POST(request: NextRequest) {
   // 7. Insert resolved entities
   if (resolution.entities.length > 0) {
     const entityRows = resolution.entities.map((e) => ({
+      id: e.id,
       run_id,
       entity_type: e.entity_type,
       canonical_identifier: e.canonical_identifier,
