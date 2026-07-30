@@ -736,10 +736,14 @@ function OperatorStandingPage({ run, id: identity, attempts, flags, generatedAt 
 
   const violations = getAttempt(attempts, "fetch_compliance_violations");
   const openCount = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : null;
-  const totalCount = typeof violations?.["violation_count"] === "number" ? violations["violation_count"] as number : null;
+  // getComplianceViolations() (worker/src/tools/browser.ts) returns
+  // total_count, not violation_count — the old key here always missed,
+  // so "Total Violations" showed "—" even when the count was known. There
+  // is also no trrc_source_url on that return shape (only p5's does), so
+  // the "View ICE Portal" link never had anywhere real to point.
+  const totalCount = typeof violations?.["total_count"] === "number" ? violations["total_count"] as number : null;
   const violList = Array.isArray(violations?.["violations"]) ? (violations!["violations"] as Record<string, string>[]) : [];
   const p5Url = typeof p5?.["trrc_source_url"] === "string" ? p5["trrc_source_url"] as string : null;
-  const vUrl  = typeof violations?.["trrc_source_url"] === "string" ? violations["trrc_source_url"] as string : null;
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -773,10 +777,6 @@ function OperatorStandingPage({ run, id: identity, attempts, flags, generatedAt 
       kv("Total Violations",  totalCount !== null ? String(totalCount) : "—"),
       kv("Open (Unresolved)", openCount !== null ? String(openCount) : "—", openCount && openCount > 0 ? "red" : undefined),
       kv("Searched By",       violations["searched_by"] === "operator_number" ? "Operator Number" : violations["searched_by"] === "api_number" ? "API Number" : "—"),
-      vUrl ? React.createElement(View, { style: S.kvRow },
-        React.createElement(Text, { style: S.kvLabel }, "TRRC Source"),
-        React.createElement(Link, { src: vUrl, style: S.trrcLink }, "View ICE Portal ↗"),
-      ) : null,
     ) : React.createElement(Text, { style: S.noteText }, "Compliance violation data not retrieved."),
 
     // Violation table (first 10)
