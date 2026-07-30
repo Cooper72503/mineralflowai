@@ -238,7 +238,14 @@ export async function searchOperator(
       await page.fill('input[name="operatorName"]', String(operatorName).slice(0, 20));
       await page.locator('input[value="Search"]').nth(1).click();
     }
-    await page.waitForTimeout(2_500);
+    // The results <select> is populated by a dojo/AJAX call after the click
+    // above, not a full navigation — waitForLoadState/networkidle doesn't
+    // reliably cover it. A fixed waitForTimeout here raced the AJAX response
+    // under load: confirmed live, the identical search returned "Operator
+    // not found in P-5 registry" on one attempt and the correct record
+    // moments later on an immediate retry. Wait for the option to actually
+    // exist instead of guessing how long the AJAX call takes.
+    await page.waitForSelector('select[name="resultSelection"] option', { timeout: 10_000 }).catch(() => null);
 
     const firstOption = await page.locator('select[name="resultSelection"] option').first();
     const optionValue = await firstOption.getAttribute("value").catch(() => null);
