@@ -180,12 +180,21 @@ export default function TrrcDueDiligencePage() {
   const [activeTab, setActiveTab]   = useState<TabKey>("summary");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError]           = useState<string | null>(null);
+  // Separate from `error` (the fatal run-failure banner, which only shows
+  // in phase "error" and offers "Start Over"). A failed download while
+  // viewing a perfectly good completed report — e.g. no county records for
+  // this well's county — must not look like the whole run failed, and must
+  // not offer to discard the results. Confirmed live: before this, every
+  // failed download (any export type, on any run) set `error` with nothing
+  // rendering it, so the download button just silently did nothing.
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Keep a fresh Bearer token in a ref so all fetches can use it without cookies.
   // Bypassing cookies eliminates the ByteString error caused by non-ASCII cookie values.
   const tokenRef = useRef<string>("");
+  const supabaseRef = useRef(createClient());
   useEffect(() => {
-    const supabase = createClient();
+    const supabase = supabaseRef.current;
     supabase.auth.getSession().then(({ data }) => {
       tokenRef.current = data.session?.access_token ?? "";
     });
@@ -195,21 +204,39 @@ export default function TrrcDueDiligencePage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const apiFetch = useCallback((url: string, init: RequestInit = {}) => {
-    const headers: Record<string, string> = {
-      ...(init.headers as Record<string, string> ?? {}),
-      ...(tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {}),
+  const apiFetch = useCallback(async (url: string, init: RequestInit = {}) => {
+    const doFetch = (token: string) => {
+      const headers: Record<string, string> = {
+        ...(init.headers as Record<string, string> ?? {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+      // Without this, the browser's own HTTP cache can serve a stale GET
+      // response for the run-status poll indefinitely — confirmed live: the
+      // exact same "running"/5% body kept coming back from the identical
+      // polled URL long after the run had actually completed server-side
+      // (verified directly against the DB), because nothing here or in the
+      // route handler told the browser not to cache it. `force-dynamic` on
+      // the route only guarantees the server re-runs the query; it says
+      // nothing about whether the browser is allowed to reuse a prior
+      // response for the same URL instead of asking again.
+      return fetch(url, { ...init, credentials: "omit", headers, cache: init.cache ?? "no-store" });
     };
-    // Without this, the browser's own HTTP cache can serve a stale GET
-    // response for the run-status poll indefinitely — confirmed live: the
-    // exact same "running"/5% body kept coming back from the identical
-    // polled URL long after the run had actually completed server-side
-    // (verified directly against the DB), because nothing here or in the
-    // route handler told the browser not to cache it. `force-dynamic` on
-    // the route only guarantees the server re-runs the query; it says
-    // nothing about whether the browser is allowed to reuse a prior
-    // response for the same URL instead of asking again.
-    return fetch(url, { ...init, credentials: "omit", headers, cache: init.cache ?? "no-store" });
+
+    const res = await doFetch(tokenRef.current);
+    if (res.status !== 401) return res;
+
+    // Confirmed live: on a long-idle tab (e.g. a user reviewing a completed
+    // report for over an hour before clicking a download), the access token
+    // can genuinely expire — 2026-07-30T00:10:01Z expiry vs
+    // 2026-07-30T00:12:41Z actual request, 160s stale — without
+    // onAuthStateChange ever firing a refresh. A real refresh_token is still
+    // present in the session cookie the whole time, so a single explicit
+    // refresh-and-retry recovers transparently instead of surfacing a
+    // confusing "Not authenticated" to a user who is, in fact, logged in.
+    const { data, error: refreshError } = await supabaseRef.current.auth.refreshSession();
+    if (refreshError || !data.session?.access_token) return res;
+    tokenRef.current = data.session.access_token;
+    return doFetch(tokenRef.current);
   }, []);
 
   const [form, setForm] = useState<FormState>({
@@ -384,15 +411,17 @@ export default function TrrcDueDiligencePage() {
     setRunId(null);
     setRun(null);
     setError(null);
+    setDownloadError(null);
     setActiveTab("summary");
   }, []);
 
   const handleDownload = useCallback(async (type: keyof typeof DOWNLOAD_PATHS) => {
     if (!runId) return;
+    setDownloadError(null);
     const res = await apiFetch(DOWNLOAD_PATHS[type](runId));
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Download failed" }));
-      setError((err as { error?: string }).error ?? "Download failed");
+      setDownloadError((err as { error?: string }).error ?? "Download failed");
       return;
     }
     const blob = await res.blob();
@@ -528,6 +557,8 @@ export default function TrrcDueDiligencePage() {
             setActiveTab={setActiveTab}
             onReset={handleReset}
             onDownload={handleDownload}
+            downloadError={downloadError}
+            onDismissDownloadError={() => setDownloadError(null)}
           />
         )}
         {/* unused tab state kept to avoid breaking form-phase logic */}
@@ -1038,13 +1069,15 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 function ResultsDashboard({
-  run, activeTab, setActiveTab, onReset, onDownload,
+  run, activeTab, setActiveTab, onReset, onDownload, downloadError, onDismissDownloadError,
 }: {
   run: TrrcDueDiligenceRun;
   activeTab: TabKey;
   setActiveTab: (t: TabKey) => void;
   onReset: () => void;
   onDownload: (type: keyof typeof DOWNLOAD_PATHS) => void;
+  downloadError: string | null;
+  onDismissDownloadError: () => void;
 }) {
   const rawAttempts = run.source_attempts ?? [];
   // The agent can call the same tool more than once while reasoning (e.g.
@@ -1205,6 +1238,21 @@ function ResultsDashboard({
         <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.85rem" }}>
           Downloads
         </div>
+        {downloadError && (
+          <div style={{
+            background: COLORS.redDim, border: `1px solid ${COLORS.red}40`, borderRadius: 7,
+            padding: "0.6rem 0.85rem", marginBottom: "0.85rem",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+          }}>
+            <span style={{ fontSize: "0.8rem", color: COLORS.red }}>⚠ {downloadError}</span>
+            <button onClick={onDismissDownloadError} style={{
+              background: "transparent", border: "none", color: COLORS.red,
+              fontSize: "0.8rem", cursor: "pointer", padding: "0 0.25rem",
+            }}>
+              ✕
+            </button>
+          </div>
+        )}
         <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" as const }}>
           {([
             { type: "report" as const,             label: "PDF Report" },

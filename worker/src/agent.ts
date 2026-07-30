@@ -236,7 +236,8 @@ async function dispatchTool(
 
     case "submit_report":
       result = { submitted: true };
-      break;
+      await logStep(supabase, runId, name, "done", "report submitted");
+      return result;
 
     default:
       result = { error: `Unknown tool: ${name}` };
@@ -253,7 +254,7 @@ async function dispatchTool(
     Array.isArray(resultData?.["permits"])    ? (resultData["permits"]    as unknown[]).length :
     resultData?.["found"] === true ? 1 : 0;
 
-  const isOk = resultData?.["error"] == null && name !== "submit_report";
+  const isOk = resultData?.["error"] == null;
 
   await supabase.from("trrc_source_attempts").upsert({
     run_id:           runId,
@@ -263,7 +264,7 @@ async function dispatchTool(
     result_count:     count,
     error_message:    isOk ? null : String(resultData?.["error"] ?? resultData?.["message"] ?? ""),
     attempted_at:     new Date().toISOString(),
-    result_data_json: name === "submit_report" ? input : result,
+    result_data_json: result,
   }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).then(null, () => {});
 
   await logStep(supabase, runId, name, isOk ? "done" : "failed", String(
