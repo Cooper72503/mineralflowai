@@ -1,18 +1,19 @@
 /**
  * TRRC Due Diligence Report Builder
  *
- * 11-section structured report:
+ * 12-section structured report:
  *   1. Executive Summary (well identity + critical/important flags)
  *   2. Operator Standing (P-5 registration, bond, compliance)
  *   3. Production History (monthly table + computed analytics + charts)
- *   4. Well Construction (W-2 completion data + W-1 permits + imaged docs)
- *   5. Compliance and Legal Status (violations, orphan, plugging)
- *   6. Legal Description and Location (GLO + GIS + Maps + offset wells + lateral path)
- *   7. Missing Documents and Gaps
- *   8. Timeline (dated regulatory events, chronological)
- *   9. Evidence Index (per-source query ledger)
- *  10. Acquisition Scorecard (transparent rule-based screening aid)
- *  11. Overall Assessment (data completeness, narrative)
+ *   4. Engineering Analysis (Arps decline-curve fit, EUR, remaining reserves)
+ *   5. Well Construction (W-2 completion data + W-1 permits + imaged docs)
+ *   6. Compliance and Legal Status (violations, orphan, plugging)
+ *   7. Legal Description and Location (GLO + GIS + Maps + offset wells + lateral path)
+ *   8. Missing Documents and Gaps
+ *   9. Timeline (dated regulatory events, chronological)
+ *  10. Evidence Index (per-source query ledger)
+ *  11. Acquisition Scorecard (transparent rule-based screening aid)
+ *  12. Overall Assessment (data completeness, narrative)
  */
 
 import React from "react";
@@ -43,6 +44,7 @@ import { fetchStaticMapImage } from "./maps-builder";
 import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
 import { fetchLateralPath, type LateralPath } from "./lateral-path";
 import { buildAcquisitionScorecard } from "./scorecard-builder";
+import { fitArpsDecline, estimateEur } from "./decline-curve";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -893,7 +895,96 @@ function ProductionPage({ run, id: identity, analytics, generatedAt }: {
   );
 }
 
-// ─── Section 4 — Well Construction ───────────────────────────────────────────
+// ─── Section 4 — Engineering Analysis ────────────────────────────────────────
+//
+// Real Arps decline-curve analysis (see decline-curve.ts) fitted to the
+// actual monthly production already retrieved in Section 3 — not another
+// heuristic score. This is the one part of the report that constitutes
+// genuine petroleum-engineering analysis rather than reorganized TRRC
+// filings; everything else in this document is public-record data plus a
+// transparent rule-based screening scorecard. Deliberately does NOT claim
+// SEC/SPE "Proved" reserves categorization — that requires a certified
+// reservoir engineer's evaluation, which this screening tool is not.
+
+function EngineeringAnalysisPage({ run, id: identity, analytics, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  analytics: ProductionAnalytics;
+  generatedAt: string;
+}) {
+  const oilSeries = analytics.months.map(m => m.oil_bbl ?? 0);
+  const fit = fitArpsDecline(oilSeries);
+  const eur = fit ? estimateEur(fit, analytics.cumulativeOil ?? 0) : null;
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 4 — ENGINEERING ANALYSIS"),
+
+    React.createElement(Text, { style: S.noteText },
+      "Arps decline-curve analysis fitted to the monthly production history in Section 3 — a hyperbolic-to-exponential model (industry-standard for unconventional wells) is regressed against actual reported volumes to estimate EUR and remaining reserves. Production here is LEASE-level, not certified single-well data; treat this as a screening-grade estimate, not a reserves report prepared under SEC/SPE definitions. A reservoir engineer should verify before any transaction relies on it.",
+    ),
+
+    !fit || !eur ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
+        "Insufficient production history to fit a decline curve — at least 6 months of non-zero reported production are required. See Section 3 for whatever production history was retrieved.",
+      ),
+    ) : React.createElement(View, {},
+      React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, "Decline Curve Fit"),
+      React.createElement(View, { style: { flexDirection: "row", marginBottom: 10 } },
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "DECLINE TYPE"),
+          React.createElement(Text, { style: { fontSize: 9.5, fontFamily: "Helvetica-Bold", color: C.navy } }, fit.classification),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "EFFECTIVE ANNUAL DECLINE"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, `${fit.diAnnualPct.toFixed(1)}%`),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "B-FACTOR"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fit.b.toFixed(2)),
+        ),
+        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "FIT QUALITY (R²)"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: fit.rSquared >= 0.85 ? C.green : fit.rSquared >= 0.6 ? C.yellow : C.red } }, fit.rSquared.toFixed(3)),
+        ),
+      ),
+      React.createElement(View, { style: { marginBottom: 12 } },
+        kv("Fitted Initial Rate (qi)", `${fit.qi.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL/mo`),
+        kv("Fitted Initial Decline Rate (Di)", `${(fit.di * 100).toFixed(2)}%/mo (nominal)`),
+        kv("Months of History Used in Fit", String(fit.monthsOfHistory)),
+      ),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "Estimated Ultimate Recovery (EUR)"),
+      React.createElement(View, { style: { marginTop: 6, marginBottom: 10 } },
+        kv("Cumulative Oil Produced to Date", `${eur.cumulativeToDate.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL`),
+        kv("Forecast Remaining (Oil)", `${eur.forecastRemaining.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL`),
+        kv("Estimated Ultimate Recovery (EUR)", `${eur.eur.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL`, "yellow"),
+        kv("Remaining Reserves (Oil)", `${eur.remainingReserves.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL`),
+        kv("Estimated Remaining Economic Life", `${eur.economicLifeYears.toFixed(1)} years (to ${eur.terminalRateBblPerMonth} BBL/mo terminal rate)`),
+        kv("Recovery to Date (% of EUR)", eur.eur > 0 ? `${((eur.cumulativeToDate / eur.eur) * 100).toFixed(1)}%` : "—"),
+      ),
+
+      React.createElement(Text, { style: [S.bodyText, { color: C.gray }] },
+        `This lease has produced ${((eur.cumulativeToDate / (eur.eur || 1)) * 100).toFixed(0)}% of its estimated ultimate recovery to date, with an estimated ` +
+        `${eur.economicLifeYears.toFixed(0)}-year remaining economic life at the current decline trend (${fit.classification.toLowerCase()}, ` +
+        `${fit.diAnnualPct.toFixed(0)}% effective annual decline). ` +
+        `${fit.rSquared < 0.6 ? "Fit quality is low (R² below 0.6) — production history is volatile or too short for a reliable decline forecast; treat the EUR figure above as indicative only." : "Fit quality is reasonable and the forecast reflects the reported production trend."}`,
+      ),
+    ),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 5 — Well Construction ───────────────────────────────────────────
 
 function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -932,7 +1023,7 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 4 — WELL CONSTRUCTION"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 5 — WELL CONSTRUCTION"),
 
     React.createElement(Text, { style: S.subTitle }, "W-2 Completion Record (EWA Structured Data)"),
     compRecord ? React.createElement(View, { style: { marginBottom: 10 } },
@@ -991,7 +1082,7 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 5 — Compliance and Legal Status ─────────────────────────────────
+// ─── Section 6 — Compliance and Legal Status ─────────────────────────────────
 
 function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1024,7 +1115,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 5 — COMPLIANCE AND LEGAL STATUS"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 6 — COMPLIANCE AND LEGAL STATUS"),
 
     kv("Well Status (Official RRC)", statusStr || "—", /shut.in|inactive|plugged/i.test(statusStr) ? "yellow" : undefined),
     kv("Inactive Well Designation",  inactive?.["found"] ? "Yes" : inactive?.["found"] === false ? "No" : "—"),
@@ -1068,7 +1159,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 6 — Legal Description and Location ───────────────────────────────
+// ─── Section 7 — Legal Description and Location ───────────────────────────────
 
 function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1106,7 +1197,7 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 6 — LEGAL DESCRIPTION AND LOCATION"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 7 — LEGAL DESCRIPTION AND LOCATION"),
 
     React.createElement(Text, { style: S.subTitle }, "Survey Data"),
     React.createElement(View, { style: { marginBottom: 10 } },
@@ -1175,7 +1266,7 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
   );
 }
 
-// ─── Section 7 — Missing Documents and Gaps ──────────────────────────────────
+// ─── Section 8 — Missing Documents and Gaps ──────────────────────────────────
 
 function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1200,7 +1291,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 7 — MISSING DOCUMENTS AND GAPS"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — MISSING DOCUMENTS AND GAPS"),
 
     React.createElement(Text, { style: S.noteText }, "Every source that returned no records, failed, or requires manual retrieval is listed here, with a direct link to the TRRC portal and the exact criteria to re-run it by hand. A gap that is not applicable for this well type is noted as such; gaps in critical sources are flagged."),
 
@@ -1223,7 +1314,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 8 — Timeline ─────────────────────────────────────────────────────
+// ─── Section 9 — Timeline ─────────────────────────────────────────────────────
 
 const EVIDENCE_STATUS_LABEL: Record<string, string> = {
   retrieved: "Retrieved",
@@ -1259,7 +1350,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — TIMELINE"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — TIMELINE"),
 
     React.createElement(Text, { style: S.noteText }, "Dated regulatory events assembled from sources already retrieved elsewhere in this report — permits, completion, plugging, compliance, and production. An event only appears here if a date could be confidently parsed from the underlying TRRC record; nothing is estimated."),
 
@@ -1278,7 +1369,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
   );
 }
 
-// ─── Section 9 — Evidence Index ──────────────────────────────────────────────
+// ─── Section 10 — Evidence Index ──────────────────────────────────────────────
 
 function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1296,7 +1387,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — EVIDENCE INDEX"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — EVIDENCE INDEX"),
 
     React.createElement(Text, { style: S.noteText }, "Every TRRC source this pipeline supports, what was queried, and what came back. TRRC's own query portals are inconsistent about honoring pre-filled links for an unauthenticated visitor, so links here point to the portal itself — re-enter the criteria listed to independently reproduce a result."),
 
@@ -1320,7 +1411,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 10 — Overall Assessment ─────────────────────────────────────────
+// ─── Section 11 — Acquisition Scorecard ──────────────────────────────────────
 
 const RECOMMENDATION_COLOR: Record<string, string> = {
   PURSUE: C.green, REVIEW: C.yellow, PASS: C.gray, BLOCKED: C.red,
@@ -1331,8 +1422,6 @@ function scoreColor(score: number): string {
   if (score >= 40) return C.yellow;
   return C.red;
 }
-
-// ─── Section 10 — Acquisition Scorecard ──────────────────────────────────────
 
 function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1350,7 +1439,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — ACQUISITION SCORECARD"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — ACQUISITION SCORECARD"),
 
     React.createElement(Text, { style: S.noteText },
       "A transparent, rule-based screening aid computed only from the TRRC records retrieved in this report — not a black-box model, not investment advice, and not a substitute for the buyer's own underwriting. Every score below states exactly which retrieved facts produced it. Missing data always scores low, never neutral-good.",
@@ -1400,7 +1489,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
   );
 }
 
-// ─── Section 11 — Overall Assessment ─────────────────────────────────────────
+// ─── Section 12 — Overall Assessment ─────────────────────────────────────────
 
 function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, scorecard, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1475,7 +1564,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — OVERALL ASSESSMENT"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 12 — OVERALL ASSESSMENT"),
 
     // Stats row
     React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
@@ -1593,6 +1682,7 @@ export async function buildTrrcPdfReport(
     React.createElement(ExecutiveSummaryPage,   { run, id: identity, flags, wellStatus, generatedAt }),
     React.createElement(OperatorStandingPage,   { run, id: identity, attempts, flags, generatedAt }),
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
+    React.createElement(EngineeringAnalysisPage,{ run, id: identity, analytics, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),
