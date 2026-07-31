@@ -422,13 +422,23 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
         water_bbl:          r.water_bbl,
       }));
 
-    // Conflict key excludes api_number because it may be NULL;
-    // PostgreSQL NULL != NULL in unique indexes so upsert would insert
-    // duplicates instead of deduplicating.
-    await supabase.from("trrc_production_monthly").upsert(prodRows, {
-      onConflict: "run_id,entity_type,district,lease_number,production_month",
+    // Must match the real unique constraint in migration 019
+    // (run_id, entity_type, api_number, lease_number, production_month) —
+    // it previously said "district" instead of "api_number", which doesn't
+    // match any constraint on the table (Postgres error 42P10, "no unique or
+    // exclusion constraint matching the ON CONFLICT specification"). The
+    // swallowed error below meant every upsert to this table failed
+    // silently: fetch_production could succeed with real months and the run
+    // would still show zero production history, indistinguishable from a
+    // genuine empty result. Confirmed live 2026-07-31 against a real run
+    // (49 months fetched, 0 rows persisted) before this fix.
+    const { error: prodUpsertError } = await supabase.from("trrc_production_monthly").upsert(prodRows, {
+      onConflict: "run_id,entity_type,api_number,lease_number,production_month",
       ignoreDuplicates: true,
-    }).then(null, () => {});
+    });
+    if (prodUpsertError) {
+      console.error(`[${runId}] production upsert failed:`, prodUpsertError.message);
+    }
   }
 
   // Build coverage from attempts
