@@ -45,6 +45,7 @@ import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
 import { fetchLateralPath, type LateralPath } from "./lateral-path";
 import { buildAcquisitionScorecard } from "./scorecard-builder";
 import { fitArpsDecline, estimateEur } from "./decline-curve";
+import { compareToAnalogs, type AnalogWell } from "./type-curve-comparison";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -906,15 +907,17 @@ function ProductionPage({ run, id: identity, analytics, generatedAt }: {
 // SEC/SPE "Proved" reserves categorization — that requires a certified
 // reservoir engineer's evaluation, which this screening tool is not.
 
-function EngineeringAnalysisPage({ run, id: identity, analytics, generatedAt }: {
+function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, generatedAt }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   analytics: ProductionAnalytics;
+  analogWells: AnalogWell[];
   generatedAt: string;
 }) {
   const oilSeries = analytics.months.map(m => m.oil_bbl ?? 0);
   const fit = fitArpsDecline(oilSeries);
   const eur = fit ? estimateEur(fit, analytics.cumulativeOil ?? 0) : null;
+  const comparison = eur ? compareToAnalogs(eur.eur, analogWells) : null;
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -978,6 +981,55 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, generatedAt }: 
         `${fit.diAnnualPct.toFixed(0)}% effective annual decline). ` +
         `${fit.rSquared < 0.6 ? "Fit quality is low (R² below 0.6) — production history is volatile or too short for a reliable decline forecast; treat the EUR figure above as indicative only." : "Fit quality is reasonable and the forecast reflects the reported production trend."}`,
       ),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "Type Curve / Analog Well Benchmarking"),
+      !comparison || comparison.assessment === "Insufficient analog data"
+        ? React.createElement(Text, { style: S.noteText },
+            "Offset-well production history is not available for this run — TRRC's offset-well GIS lookup (Section 7) returns location and status only, not production, since fetching each analog well's own history would mean many additional TRRC queries per report. Analog benchmarking requires that data to be separately retrieved.",
+          )
+        : React.createElement(View, {},
+            React.createElement(Text, { style: S.noteText },
+              `Same Arps decline-curve method applied to ${comparison.analogsWithUsableFit} nearby offset well(s) with sufficient production history, to check whether this well is performing in line with its immediate analogs — the way a geologist sizing up a lease compares a candidate well against its neighbors, not in isolation.`,
+            ),
+            React.createElement(View, { style: { flexDirection: "row", marginTop: 8, marginBottom: 10 } },
+              React.createElement(View, { style: S.summaryStatBox },
+                React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "ASSESSMENT"),
+                React.createElement(Text, { style: { fontSize: 9.5, fontFamily: "Helvetica-Bold", color: comparison.assessment === "Outperforming analogs" ? C.green : comparison.assessment === "Underperforming analogs" ? C.red : C.navy } }, comparison.assessment),
+              ),
+              React.createElement(View, { style: S.summaryStatBox },
+                React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "SUBJECT PERCENTILE"),
+                React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, comparison.subjectPercentile !== null ? `${comparison.subjectPercentile.toFixed(0)}th` : "—"),
+              ),
+              React.createElement(View, { style: S.summaryStatBox },
+                React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "AVG ANALOG EUR"),
+                React.createElement(Text, { style: { fontSize: 10, fontFamily: "Helvetica-Bold", color: C.navy } }, comparison.avgAnalogEur !== null ? `${comparison.avgAnalogEur.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL` : "—"),
+              ),
+              React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+                React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "MEDIAN ANALOG EUR"),
+                React.createElement(Text, { style: { fontSize: 10, fontFamily: "Helvetica-Bold", color: C.navy } }, comparison.medianAnalogEur !== null ? `${comparison.medianAnalogEur.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL` : "—"),
+              ),
+            ),
+
+            React.createElement(View, { style: S.tableHeader },
+              React.createElement(Text, { style: [S.tableHeaderCell, { width: "18%" }] }, "API"),
+              React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%" }] }, "Well No."),
+              React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%", textAlign: "right" }] }, "Distance (mi)"),
+              React.createElement(Text, { style: [S.tableHeaderCell, { width: "18%", textAlign: "right" }] }, "Decline Type"),
+              React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "b-factor"),
+              React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Analog EUR (BBL)"),
+            ),
+            ...comparison.analogs.map((a, i) => React.createElement(
+              View, { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+              React.createElement(Text, { style: [S.tableCellMono, { width: "18%" }] }, a.api),
+              React.createElement(Text, { style: [S.tableCell, { width: "14%" }] }, a.wellNumber),
+              React.createElement(Text, { style: [S.tableCellMono, { width: "16%", textAlign: "right" }] }, a.distanceMiles.toFixed(2)),
+              React.createElement(Text, { style: [S.tableCell, { width: "18%", textAlign: "right" }] }, a.fit ? a.fit.classification.split(" (")[0] : "Insufficient data"),
+              React.createElement(Text, { style: [S.tableCellMono, { width: "17%", textAlign: "right" }] }, a.fit ? a.fit.b.toFixed(2) : "—"),
+              React.createElement(Text, { style: [S.tableCellMono, { width: "17%", textAlign: "right" }] }, a.eur ? a.eur.eur.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"),
+            )),
+          ),
     ),
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
@@ -1624,6 +1676,14 @@ export async function buildTrrcPdfReport(
   production: TrrcDDProductionRow[],
   coverage: SourceCoverageStatus[],
   sourceAttempts: LiteSourceAttempt[] = [],
+  // Offset wells' OWN production history, for type-curve/analog benchmarking
+  // in the Engineering Analysis section. Deliberately separate from the
+  // offsetWells this function already computes below (offset-wells.ts's
+  // fetchOffsetWells() intentionally does not fetch production — see its
+  // own doc comment — so real callers have nothing to pass here yet and
+  // the section renders "not available" rather than fabricating a
+  // comparison). Populated today only by the sample-report generator.
+  analogWells: AnalogWell[] = [],
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
 
@@ -1682,7 +1742,7 @@ export async function buildTrrcPdfReport(
     React.createElement(ExecutiveSummaryPage,   { run, id: identity, flags, wellStatus, generatedAt }),
     React.createElement(OperatorStandingPage,   { run, id: identity, attempts, flags, generatedAt }),
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
-    React.createElement(EngineeringAnalysisPage,{ run, id: identity, analytics, generatedAt }),
+    React.createElement(EngineeringAnalysisPage,{ run, id: identity, analytics, analogWells, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),
