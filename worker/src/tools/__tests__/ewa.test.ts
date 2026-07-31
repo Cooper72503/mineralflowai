@@ -403,46 +403,66 @@ describe("normalizeDistrictForQuery — leading-zero districts", () => {
   });
 });
 
-// ─── getProduction — header-key trailing-underscore regression guard ──────
+// ─── getProduction — real specificLeaseQueryAction.do structure ───────────
 //
-// No real fixture is available here — productionQueryAction.do is hit by
-// TRRC's own live outage as of 2026-07-27 (confirmed live: it returns the
-// "Application Error" page for every request). This is a reconstructed
-// table shaped to match the established convention used throughout this
-// codebase for TRRC column headers (a unit suffix in parens, e.g. the PDF
-// report's own "BBL/mo" / "MCF/mo" labels) — its purpose is narrowly to
-// prove the specific mechanical bug: getProduction's own header-to-key
-// transform was missing the trailing-underscore strip that the shared
-// rowsToObjects() helper has, so a header like "Oil (BBL)" became key
-// "oil_bbl_" (trailing underscore) instead of "oil_bbl" and silently
-// missed the value lookup — while "Year"/"Month" have no parens to strip
-// and matched fine regardless, which is exactly the split symptom actually
-// observed in trrc_production_monthly: correct production_month values,
-// but null oil_bbl/gas_mcf on every stored row. This test does not confirm
-// TRRC's exact real header text — only that this specific failure mode,
-// once it exists, is now fixed.
+// productionQueryAction.do (the old target) was never the right endpoint —
+// confirmed live 2026-07-31: it's a broad/statewide multi-lease search form
+// with no single-lease field at all, so submitting a lease number to it
+// always produced TRRC's "General Exception" page. That had been
+// misdiagnosed all along as a TRRC-side outage; it was our own code hitting
+// a URL that was never valid for this query shape.
+//
+// The real per-lease production history lives on specificLeaseQueryAction.do
+// (linked directly off productionQueryAction.do: "For information about a
+// specific lease, use the Specific Lease Query"), and its real results table
+// (class="DataGrid") uses a two-row colspan header confirmed live against
+// API 42-151-01734 / lease 01973 / district 7B: "OIL (BBL)" spans
+// [Production, Disposition], "Casinghead (MCF)" spans [Production,
+// Disposition]. This fixture reproduces that exact structure — not a guess.
 
-const productionHtml = `<html><body><table>
-  <tr><th>Year</th><th>Month</th><th>Oil (BBL)</th><th>Gas (MCF)</th><th>Water (BBL)</th></tr>
-  <tr><td>2024</td><td>4</td><td>1,200</td><td>3,000</td><td>200</td></tr>
-  <tr><td>2024</td><td>5</td><td>871</td><td>2,456</td><td>220</td></tr>
-</table></body></html>`;
+const specificLeaseProductionHtml = `<html><body>
+<table class="DataGrid">
+  <tr><td colspan="9">2 results Page: 1 of 1</td></tr>
+  <tr>
+    <th rowspan="2">Date</th>
+    <th colspan="2">OIL (BBL)</th>
+    <th colspan="2">Casinghead (MCF)</th>
+    <th rowspan="2">Operator Name</th>
+    <th rowspan="2">Operator No.</th>
+    <th rowspan="2">Field Name</th>
+    <th rowspan="2">Field No.</th>
+  </tr>
+  <tr><th>Production</th><th>Disposition</th><th>Production</th><th>Disposition</th></tr>
+  <tr><td>Apr 2024</td><td>1,200</td><td>1,150</td><td>300</td><td>0</td><td>AMERICAN ENERGY TEXAS INC</td><td>102055</td><td>ROYSTON</td><td>78819001</td></tr>
+  <tr><td>May 2024</td><td>871</td><td>800</td><td>256</td><td>0</td><td></td><td></td><td></td><td></td></tr>
+  <tr><td>Jun 2024</td><td>NO RPT</td><td>NO RPT</td><td>NO RPT</td><td>NO RPT</td><td></td><td></td><td></td><td></td></tr>
+  <tr><td>Total</td><td>2,071</td><td>1,950</td><td>556</td><td>0</td><td></td><td></td><td></td><td></td></tr>
+</table>
+</body></html>`;
 
-describe("getProduction — header-key trailing-underscore regression guard", () => {
+describe("getProduction — real specificLeaseQueryAction.do table structure", () => {
   const originalFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  it("parses real oil/gas/water values instead of nulling them out on a unit-suffixed header", async () => {
-    mockFetchSequence(["<html></html>", productionHtml]);
-    const result = await getProduction("60509", "08");
+  it("parses the real colspan-nested DataGrid table, using the Production sub-column not Disposition", async () => {
+    mockFetchSequence(["<html></html>", specificLeaseProductionHtml]);
+    const result = await getProduction("01973", "7B");
 
     expect(result.found, `expected found:true, got message: "${result.message}"`).toBe(true);
     expect(result.rows).toEqual([
-      { production_month: "2024-04", oil_bbl: 1200, gas_mcf: 3000, casinghead_gas_mcf: null, condensate_bbl: null, water_bbl: 200 },
-      { production_month: "2024-05", oil_bbl: 871,  gas_mcf: 2456, casinghead_gas_mcf: null, condensate_bbl: null, water_bbl: 220 },
+      { production_month: "2024-04", oil_bbl: 1200, gas_mcf: null, casinghead_gas_mcf: 300, condensate_bbl: null, water_bbl: null },
+      { production_month: "2024-05", oil_bbl: 871,  gas_mcf: null, casinghead_gas_mcf: 256, condensate_bbl: null, water_bbl: null },
+      { production_month: "2024-06", oil_bbl: null, gas_mcf: null, casinghead_gas_mcf: null, condensate_bbl: null, water_bbl: null },
     ]);
+  });
+
+  it("skips the Total row and any non-date rows", async () => {
+    mockFetchSequence(["<html></html>", specificLeaseProductionHtml]);
+    const result = await getProduction("01973", "7B");
+    expect(result.rows.some(r => r.production_month === undefined)).toBe(false);
+    expect(result.rows).toHaveLength(3);
   });
 });
 

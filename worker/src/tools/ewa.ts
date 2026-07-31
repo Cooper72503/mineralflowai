@@ -526,23 +526,42 @@ export async function getProduction(leaseNumber: string | null, district: string
     | { status: "not_found" }
     | { status: "parse_failed" };
 
+  const MONTH_NUM: Record<string, string> = {
+    Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+    Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+  };
+
+  // Confirmed live 2026-07-31: productionQueryAction.do is a broad/statewide
+  // multi-lease search (date range + district/county/field/operator, no
+  // single-lease field at all) — submitting a lease number against it has
+  // never been valid, which is why it always came back as a TRRC "General
+  // Exception" page. The real per-lease production history lives on a
+  // completely different action, specificLeaseQueryAction.do (linked from
+  // productionQueryAction.do itself: "For information about a specific
+  // lease, use the Specific Lease Query"), which takes searchArgs.leaseNumberArg
+  // + searchArgs.districtCodeArg + an explicit date range, plus the full set
+  // of hidden actionManager.* bean fields the JSF backend requires to bind
+  // without throwing. pager.pageSize=-1 requests all months in one response
+  // instead of paginating 10 at a time.
   const tryType = async (lt: string): Promise<ProductionTypeResult> => {
-    // Step 1: get session
-    const sessionRes = await fetch(`${EWA_BASE}/productionQueryAction.do`, {
+    const url = `${EWA_BASE}/specificLeaseQueryAction.do`;
+    const sessionRes = await fetch(url, {
       headers: { ...BROWSER_HEADERS },
       signal: AbortSignal.timeout(20_000),
     });
-    const sessionHtml = await sessionRes.text();
+    if (!sessionRes.ok) throw new Error(`EWA specificLeaseQueryAction.do session GET returned HTTP ${sessionRes.status}`);
     const jSessionMatch = sessionRes.headers.get("set-cookie")?.match(/JSESSIONID=([^;]+)/);
     const jSession = jSessionMatch?.[1] ?? null;
-    const viewStateMatch = sessionHtml.match(/id="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
-    const viewState = viewStateMatch?.[1] ?? "";
+    const postUrl = jSession ? `${url};jsessionid=${jSession}` : url;
 
-    const sessionUrl = jSession
-      ? `${EWA_BASE}/productionQueryAction.do;jsessionid=${jSession}`
-      : `${EWA_BASE}/productionQueryAction.do`;
+    const now = new Date();
+    const endYear = String(now.getUTCFullYear());
+    const endMonth = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const startDate = new Date(Date.UTC(now.getUTCFullYear() - 4, now.getUTCMonth(), 1));
+    const startYear = String(startDate.getUTCFullYear());
+    const startMonth = String(startDate.getUTCMonth() + 1).padStart(2, "0");
 
-    const html = await fetch(sessionUrl, {
+    const html = await fetch(postUrl, {
       method: "POST",
       headers: {
         ...BROWSER_HEADERS,
@@ -550,53 +569,73 @@ export async function getProduction(leaseNumber: string | null, district: string
         ...(jSession ? { Cookie: `JSESSIONID=${jSession}` } : {}),
       },
       body: formBody({
+        viewType: "init",
+        searchType: "specificLease",
+        "searchArgs.searchType": "specificLease",
+        "searchArgs.activeTabsFlagwordHndlr.inputValue": "0",
+        "searchArgs.orderByHndlr.inputValue": "",
+        methodToCall: "search",
+        "actionManager.recordCountHndlr.inputValue": "1",
+        "actionManager.currentIndexHndlr.inputValue": "0",
+        "actionManager.actionRcrd[0].actionDisplayNmHndlr.inputValue": "Search Criteria",
+        "actionManager.actionRcrd[0].hostHndlr.inputValue": "webapps2.rrc.texas.gov:443",
+        "actionManager.actionRcrd[0].contextPathHndlr.inputValue": "/EWA",
+        "actionManager.actionRcrd[0].actionHndlr.inputValue": "/specificLeaseQueryAction.do",
+        "actionManager.actionRcrd[0].actionParameterHndlr.inputValue": "methodToCall",
+        "actionManager.actionRcrd[0].actionMethodHndlr.inputValue": "unspecified",
+        "actionManager.actionRcrd[0].pagerParameterKeyHndlr.inputValue": "",
+        "actionManager.actionRcrd[0].actionParametersHndlr.inputValue": "",
+        "actionManager.actionRcrd[0].returnIndexHndlr.inputValue": "0",
+        "actionManager.actionRcrd[0].argRcrdParameters(searchArgs.paramValue)": `|3=${endYear}|5=${endYear}|10=0`,
+        "searchArgs.oilOrGasArg":     lt,
         "searchArgs.leaseNumberArg":  leaseNumber!,
         "searchArgs.districtCodeArg": normalizeDistrictForQuery(district!),
-        "searchArgs.leaseTypeArg":    lt,
-        "searchArgs.reportRange":     "ALL",
-        "javax.faces.ViewState":      viewState,
-        "methodToCall":               "search",
+        "searchArgs.startMonthArg":   startMonth,
+        "searchArgs.startYearArg":    startYear,
+        "searchArgs.endMonthArg":     endMonth,
+        "searchArgs.endYearArg":      endYear,
+        "pager.pageSize":             "-1",
       }),
       signal: AbortSignal.timeout(30_000),
     }).then(r => r.text());
 
-    // getProduction has its own inline fetch (not routed through ewaFetch),
-    // so it needs its own Application Error check — see isTrrcApplicationError.
-    assertNotTrrcApplicationError(html, "productionQueryAction.do");
+    assertNotTrrcApplicationError(html, "specificLeaseQueryAction.do");
 
-    if (/no results found|no production/i.test(html)) return { status: "not_found" };
+    if (/no results found/i.test(html)) return { status: "not_found" };
 
-    const table = findDataTable(html, 4);
-    if (!table) return { status: "parse_failed" };
+    // Real table (class="DataGrid") has a two-row header via colspan: "OIL
+    // (BBL)" spans [Production, Disposition], "Casinghead (MCF)" spans
+    // [Production, Disposition] — confirmed live against the real DOM, not
+    // the generic findDataTable/rowsToObjects helper, which assumes a flat
+    // single-row header and would misalign every column here.
+    const $ = cheerio.load(html);
+    const table = $("table.DataGrid").first();
+    if (!table.length) return { status: "parse_failed" };
 
-    const rows = table.rows.slice(0, 120).map(row => {
-      const obj: Record<string, string> = {};
-      // Must match rowsToObjects's key transform exactly (including the
-      // trailing-underscore strip) — a unit-suffixed header like "Oil (BBL)"
-      // otherwise becomes key "oil_bbl_" instead of "oil_bbl" and silently
-      // misses every lookup below, while a plain header like "Year" has no
-      // parens to strip and matches fine either way. That divergence between
-      // this inline duplicate and the shared helper is consistent with what
-      // production data actually shows: correct production_month values but
-      // null oil_bbl/gas_mcf/etc. on every row ever stored.
-      table.header.forEach((h, i) => { obj[h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/g, "")] = row[i] ?? ""; });
-      const year  = obj["year"]  || obj["prod_yr"]   || "";
-      const month = obj["month"] || obj["prod_month"] || "";
-      if (!year || !month) return null;
-      return {
-        production_month:   `${year}-${String(parseInt(month)).padStart(2, "0")}`,
-        oil_bbl:            parseNum(obj["oil_bbl"]        || obj["oil"]),
-        gas_mcf:            parseNum(obj["gas_mcf"]        || obj["gas"]),
-        casinghead_gas_mcf: parseNum(obj["casinghead_mcf"] || obj["casinghead"]),
-        condensate_bbl:     parseNum(obj["condensate_bbl"] || obj["condensate"]),
-        water_bbl:          parseNum(obj["water_bbl"]      || obj["water"]),
-      } as ProductionRow;
-    }).filter((r): r is ProductionRow => r !== null);
+    const rows: ProductionRow[] = [];
+    table.find("tr").each((_, tr) => {
+      const cells = $(tr).find("td").map((__, td) => $(td).text().trim()).get();
+      if (cells.length < 5) return;
+      const dateMatch = cells[0].match(/^([A-Za-z]{3})\s+(\d{4})$/);
+      if (!dateMatch) return; // skips header/total/pagination rows
+      const monthNum = MONTH_NUM[dateMatch[1]];
+      if (!monthNum) return;
+      rows.push({
+        production_month:   `${dateMatch[2]}-${monthNum}`,
+        oil_bbl:            parseNum(cells[1]),
+        gas_mcf:            null,
+        casinghead_gas_mcf: parseNum(cells[3]),
+        condensate_bbl:     null,
+        water_bbl:          null,
+      });
+    });
+
+    if (rows.length === 0) return { status: "parse_failed" };
     return { status: "found", rows };
   };
 
   try {
-    const types = leaseType ? [leaseType] : ["O", "G", "C"];
+    const types = leaseType ? [leaseType] : ["O", "G"];
     let anyParseFailed = false;
     for (const lt of types) {
       const result = await tryType(lt);
