@@ -615,15 +615,22 @@ export function generateFlags(
 
 // ─── Cover Page ───────────────────────────────────────────────────────────────
 
-function CoverPage({ run, id: identity, generatedAt }: {
+function CoverPage({ run, id: identity, generatedAt, isSampleReport }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   generatedAt: string;
+  isSampleReport?: boolean;
 }) {
   const date = new Date(generatedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   return React.createElement(
     Page, { size: "LETTER", style: S.coverPage },
+
+    isSampleReport ? React.createElement(View, {
+      style: { position: "absolute", top: 28, right: 50, paddingVertical: 5, paddingHorizontal: 12, backgroundColor: "rgba(234,179,8,0.15)", borderWidth: 1, borderColor: "#EAB308", borderRadius: 4 },
+    },
+      React.createElement(Text, { style: { fontSize: 8, color: "#EAB308", fontFamily: "Helvetica-Bold", letterSpacing: 1.2 } }, "SAMPLE REPORT — ILLUSTRATIVE DATA"),
+    ) : null,
 
     React.createElement(View, { style: { marginBottom: 40 } },
       React.createElement(Text, { style: { fontSize: 10, color: "#94A3B8", fontFamily: "Helvetica-Bold", letterSpacing: 2, marginBottom: 16 } }, "MINERAL FLOW AI"),
@@ -662,6 +669,9 @@ function CoverPage({ run, id: identity, generatedAt }: {
     ),
 
     React.createElement(View, { style: { position: "absolute", bottom: 32, left: 50, right: 50 } },
+      isSampleReport ? React.createElement(Text, { style: { fontSize: 6.5, color: "#EAB308", fontFamily: "Helvetica-Bold", textAlign: "center", lineHeight: 1.6, marginBottom: 4 } },
+        "This is a sample report built from illustrative data for demonstration purposes. It does not describe a real well, lease, or operator.",
+      ) : null,
       React.createElement(Text, { style: { fontSize: 6.5, color: "#475569", fontFamily: "Helvetica", textAlign: "center", lineHeight: 1.6 } },
         "This report compiles publicly available TRRC records for preliminary screening only. It is not a title opinion, reserve report, or legal due diligence. Records may be incomplete, delayed, or unavailable online.",
       ),
@@ -1684,6 +1694,11 @@ export async function buildTrrcPdfReport(
   // the section renders "not available" rather than fabricating a
   // comparison). Populated today only by the sample-report generator.
   analogWells: AnalogWell[] = [],
+  // Renders a single, clean "SAMPLE REPORT" disclosure on the cover page
+  // instead of repeating illustrative-data caveats inline in every field.
+  // Real report generation (the /report route) never sets this; only the
+  // sample-report generator does.
+  isSampleReport = false,
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
 
@@ -1738,7 +1753,7 @@ export async function buildTrrcPdfReport(
       subject: "TRRC Public Records Due Diligence",
       creator: "Mineral Flow AI",
     },
-    React.createElement(CoverPage,              { run, id: identity, generatedAt }),
+    React.createElement(CoverPage,              { run, id: identity, generatedAt, isSampleReport }),
     React.createElement(ExecutiveSummaryPage,   { run, id: identity, flags, wellStatus, generatedAt }),
     React.createElement(OperatorStandingPage,   { run, id: identity, attempts, flags, generatedAt }),
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
