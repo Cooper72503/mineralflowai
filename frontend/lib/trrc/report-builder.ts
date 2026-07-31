@@ -928,6 +928,20 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
   const fit = fitArpsDecline(oilSeries);
   const eur = fit ? estimateEur(fit, analytics.cumulativeOil ?? 0) : null;
   const comparison = eur ? compareToAnalogs(eur.eur, analogWells) : null;
+  // fitArpsDecline can return null for two genuinely different reasons: too
+  // few non-zero months to attempt a fit at all, or enough months but no
+  // candidate b produced a valid (positive, finite) decline rate — e.g. a
+  // low-volume well whose real production is too flat/irregular for any
+  // Arps curve to describe, which is a legitimate outcome, not a data gap.
+  // Confirmed live against API 42-151-01734 (40 non-zero months, genuinely
+  // no valid fit — every candidate's regressed decline rate came out
+  // negative) — the old single message claimed "at least 6 months...
+  // required" here, which was simply false for that well and would have
+  // misled a reader into thinking the retrieval was incomplete.
+  const nonZeroMonthCount = oilSeries.filter(v => v > 0).length;
+  const noFitReason = nonZeroMonthCount < 6
+    ? `Insufficient production history to fit a decline curve — only ${nonZeroMonthCount} month(s) of non-zero reported production on file; at least 6 are required. See Section 3 for whatever production history was retrieved.`
+    : `${nonZeroMonthCount} months of non-zero production are on file, but none produced a valid decline-curve fit — this well's reported production does not follow a consistent declining trend (common for low-volume or irregularly-reported wells), so no Arps model reliably applies. See Section 3 for the raw monthly history.`;
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -944,9 +958,7 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
     ),
 
     !fit || !eur ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
-      React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
-        "Insufficient production history to fit a decline curve — at least 6 months of non-zero reported production are required. See Section 3 for whatever production history was retrieved.",
-      ),
+      React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, noFitReason),
     ) : React.createElement(View, {},
       React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, "Decline Curve Fit"),
       React.createElement(View, { style: { flexDirection: "row", marginBottom: 10 } },
