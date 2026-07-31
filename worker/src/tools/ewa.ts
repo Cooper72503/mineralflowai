@@ -699,21 +699,59 @@ export async function getGathererPurchaser(leaseNumber: string | null, district:
 
 // ─── S10 — Completion Records (W-2) ──────────────────────────────────────────
 
+// Completion records are NOT on the EWA app at all — confirmed live
+// 2026-07-31: completionQueryAction.do under /EWA/ returns a raw servlet
+// 500 (never existed / long retired), which had been misdiagnosed all
+// session as a TRRC outage. The real Completions app lives on a completely
+// different host and path, webapps.rrc.texas.gov/CMPL/ewaSearchAction.do,
+// and is only reachable via a signed rrcActionMan session-continuation
+// token minted fresh per search — hitting it cold (no token) also produces
+// a "General Exception" page, which is why a naive guess at the URL alone
+// still wouldn't have worked. The token is embedded in wellboreQueryAction.do's
+// own results row (the "Completion" entry in its Links/Images/GIS
+// Viewer/Completion action dropdown), so getting there means searching
+// wellbore PDQ first and following that exact link. Confirmed live against
+// API 42-151-01734: real "0 results" (a genuine confirmed-absence page,
+// not an error) came back through this exact path.
+async function findCompletionLinkFromWellbore(apiNumber: string): Promise<string | null> {
+  const split = splitApi(apiNumber);
+  if (!split) return null;
+  const html = await ewaFetch("wellboreQueryAction.do", {
+    "searchArgs.apiNoPrefixArg": split.prefix,
+    "searchArgs.apiNoSuffixArg": split.suffix,
+    "searchArgs.scheduleTypeArg": "Both",
+  });
+  const idx = html.indexOf(">Completion<");
+  if (idx === -1) return null;
+  const chunk = html.slice(Math.max(0, idx - 700), idx);
+  const urlMatch = chunk.match(/value="\{&quot;url&quot;: &quot;([^&]+(?:&amp;[^&]+)*)&quot;/);
+  if (!urlMatch) return null;
+  return urlMatch[1].replace(/&amp;/g, "&");
+}
+
 export async function getCompletionRecords(apiNumber: string): Promise<{
   found: boolean;
   records: Record<string, string>[];
   message: string;
   error?: string;
 }> {
-  const split = splitApi(apiNumber);
-  if (!split) return { found: false, records: [], message: "Invalid API", error: "Invalid API" };
-
   try {
-    const html = await ewaFetch("completionQueryAction.do", {
-      "searchArgs.apiNoPrefixArg": split.prefix,
-      "searchArgs.apiNoSuffixArg": split.suffix,
+    const completionUrl = await findCompletionLinkFromWellbore(apiNumber);
+    if (!completionUrl) {
+      return { found: false, records: [], message: "Could not locate completion record link for this API — wellbore not found or no Completion action available", error: "No completion link found" };
+    }
+
+    const res = await fetch(completionUrl, {
+      headers: { ...BROWSER_HEADERS },
+      signal: AbortSignal.timeout(30_000),
     });
-    if (/no results found/i.test(html)) return { found: false, records: [], message: "No completion records on file" };
+    if (!res.ok) throw new Error(`CMPL completion search returned HTTP ${res.status}`);
+    const html = await res.text();
+    assertNotTrrcApplicationError(html, "CMPL ewaSearchAction.do");
+
+    if (/no .{0,20}records found|0 results/i.test(html)) {
+      return { found: false, records: [], message: "No completion (W-2) records on file for this API" };
+    }
     const table = findDataTable(html, 2);
     if (!table) return { found: false, records: [], message: "Could not parse completion response", error: "Could not parse completion response" };
     const records = rowsToObjects(table.header, table.rows.slice(0, 20));

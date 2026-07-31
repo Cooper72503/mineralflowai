@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser, normalizeDistrictForQuery } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser, getCompletionRecords, normalizeDistrictForQuery } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -559,5 +559,49 @@ describe("getGisLocation — real ArcGIS schema regression guard", () => {
     expect(result.latitude).toBeNull();
     expect(result.longitude).toBeNull();
     expect(result.error).toBeUndefined();
+  });
+});
+
+// ─── getCompletionRecords — real cross-app CMPL flow ───────────────────────
+//
+// completionQueryAction.do under /EWA/ never existed for this purpose —
+// confirmed live 2026-07-31: a cold GET returns a raw servlet 500, and
+// TRRC's real Completions app lives entirely on a different host/path,
+// webapps.rrc.texas.gov/CMPL/ewaSearchAction.do, reachable only via a
+// signed rrcActionMan token minted on wellboreQueryAction.do's own results
+// row (its "Completion" action-link option). The wellbore-search snippet
+// below reproduces that option's real structure (verified live against API
+// 42-151-01734); completion-cmpl-empty.html is the actual captured "0
+// results" response from following that exact link for the same well.
+
+const wellboreWithCompletionLinkHtml = `<html><body>
+<select><option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=15101734&amp;relatedLink=Y&amp;rrcActionMan=FAKE_TOKEN_FOR_TEST&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+</body></html>`;
+
+describe("getCompletionRecords — real cross-app CMPL flow", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("finds the real Completion drill-down link and follows it to a genuine confirmed-absence result", async () => {
+    const cmplEmptyHtml = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "completion-cmpl-empty.html"),
+      "utf8",
+    );
+    mockFetchSequence(["<html></html>", wellboreWithCompletionLinkHtml, cmplEmptyHtml]);
+    const result = await getCompletionRecords("4215101734");
+
+    expect(result.found).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(result.message).toMatch(/no completion/i);
+  });
+
+  it("reports a real missing-link condition distinctly from a confirmed-absence result", async () => {
+    mockFetchSequence(["<html></html>", "<html><body>no Completion link here</body></html>"]);
+    const result = await getCompletionRecords("4215101734");
+
+    expect(result.found).toBe(false);
+    expect(result.error).toBeDefined();
   });
 });
