@@ -111,5 +111,65 @@ export function deriveCoverageFromAttempts(attempts: LiteSourceAttempt[]): Sourc
     }
   }
 
+  // wellStatusQueryAction.do (fetch_well_status) has no real replacement on
+  // TRRC's current EWA — confirmed live, it isn't linked anywhere on the
+  // real menu and no equivalent standalone query exists in the modern app.
+  // But TRRC's own public GIS well-locations layer (already queried
+  // successfully by fetch_gis_plat on nearly every run) encodes real,
+  // TRRC-sourced status in its map-symbol field — GIS_SYMBOL_DESCRIPTION
+  // returns values like "Oil Well", "Plugged Oil Well", "Permitted
+  // Location" (confirmed live against real offset wells, which already
+  // surface this exact field for nearby wells on the Section 7 map). This
+  // is genuine retrieved data, not an inference from absence, so when the
+  // dedicated well-status query fails but GIS succeeded with a real value,
+  // credit the well_status category from that instead of leaving it
+  // permanently "retrieval_failed" for a source that can never succeed.
+  const wellStatusIdx = coverage.findIndex(c => c.category === "well_status");
+  const gisAttempt = attempts.find(a => a.source_name === "fetch_gis_plat" && a.status === "success");
+  const gisWellType = typeof gisAttempt?.result_data_json?.["well_type"] === "string"
+    ? (gisAttempt.result_data_json["well_type"] as string).trim()
+    : "";
+  if (wellStatusIdx !== -1 && coverage[wellStatusIdx].status !== "complete" && gisWellType) {
+    coverage[wellStatusIdx] = {
+      category: "well_status",
+      label: "Well Status (Active/Inactive/Plugged)",
+      status: "complete",
+      records_found: 1,
+      data_current_through: new Date().toISOString().slice(0, 10),
+      sources_checked: ["fetch_gis_plat"],
+      notes: `Derived from RRC GIS map symbol: "${gisWellType}". wellStatusQueryAction.do has no working replacement on TRRC's current EWA.`,
+    };
+  }
+
+  // pluggingQueryAction.do is dead the same way (confirmed live, including
+  // via a real established browser session — genuine server error, not a
+  // request-format issue) with no working replacement found. But the same
+  // GIS map symbol lets us answer the one thing that actually matters here
+  // honestly: when GIS shows the well is NOT plugged, a W-3C plugging
+  // certificate genuinely would not exist to find — that's a real,
+  // TRRC-sourced confirmed-absence, not a guess. When GIS DOES show a
+  // plugged symbol, this stays retrieval_failed rather than fabricating
+  // plugging-certificate details (date, depths, cement volumes) we have no
+  // way to actually retrieve — that gap is real and stays flagged.
+  const pluggingIdx = coverage.findIndex(c => c.category === "plugging");
+  if (pluggingIdx !== -1 && coverage[pluggingIdx].status === "retrieval_failed" && gisWellType) {
+    if (!/plugged/i.test(gisWellType)) {
+      coverage[pluggingIdx] = {
+        category: "plugging",
+        label: "Plugging Records (W-3C)",
+        status: "no_applicable_record",
+        records_found: 0,
+        data_current_through: new Date().toISOString().slice(0, 10),
+        sources_checked: ["fetch_gis_plat"],
+        notes: `RRC GIS shows this well as "${gisWellType}", not plugged — no W-3C record expected. pluggingQueryAction.do has no working replacement on TRRC's current EWA to independently confirm.`,
+      };
+    } else {
+      coverage[pluggingIdx] = {
+        ...coverage[pluggingIdx],
+        notes: `RRC GIS shows this well as "${gisWellType}" — a W-3C plugging certificate likely exists but pluggingQueryAction.do (the only source for its actual filing details) has no working replacement. Manual verification required.`,
+      };
+    }
+  }
+
   return coverage;
 }

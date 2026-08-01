@@ -512,9 +512,13 @@ export function generateFlags(
     critical.push(`OPERATOR P-5 STATUS: ${p5Status.toUpperCase()} — operator may not be legally permitted to operate wells in Texas.`);
   }
 
-  // Plugged well with no W-3C
+  // Plugged well with no W-3C — wellStatusQueryAction.do has no working
+  // replacement, so fall back to RRC's own GIS map-symbol status (see
+  // CompliancePage for the full explanation) rather than never firing this
+  // check at all.
   const wellStatus = getAttempt(attempts, "fetch_well_status");
-  const statusStr = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]);
+  const gisForFlags = getAttempt(attempts, "fetch_gis_plat");
+  const statusStr = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]) || str(gisForFlags?.["well_type"]);
   const plugging = getAttempt(attempts, "fetch_plugging_records");
   if (/plugged/i.test(statusStr) && plugging?.["found"] === false) {
     critical.push("WELL SHOWS PLUGGED STATUS but no W-3C plugging certificate found — possible abandonment without proper documentation.");
@@ -1170,6 +1174,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   const plugging   = getAttempt(attempts, "fetch_plugging_records");
   const injection  = getAttempt(attempts, "fetch_injection_records");
   const severance  = getAttempt(attempts, "fetch_severance_records");
+  const gis        = getAttempt(attempts, "fetch_gis_plat");
 
   const inactiveRecords  = Array.isArray(inactive?.["records"])  ? (inactive!["records"]  as Record<string, unknown>[]) : [];
   const plugRecords      = Array.isArray(plugging?.["records"])  ? (plugging!["records"]  as Record<string, unknown>[]) : [];
@@ -1178,8 +1183,28 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   // section previously assumed.
   const injectionRecords = Array.isArray(injection?.["records"]) ? (injection!["records"] as Record<string, unknown>[]) : [];
 
-  const statusStr  = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]);
+  // wellStatusQueryAction.do has no working replacement on TRRC's current
+  // EWA (confirmed live — not linked anywhere on the real menu). RRC's own
+  // public GIS well-locations layer encodes real status in its map-symbol
+  // field ("Oil Well", "Plugged Oil Well", "Permitted Location", etc.,
+  // confirmed live against real offset wells shown on the Section 7 map) —
+  // fall back to it rather than showing a permanent blank for a source that
+  // can never succeed.
+  const directStatus = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]);
+  const gisStatus = str(gis?.["well_type"]);
+  const statusStr = directStatus || gisStatus;
+  const statusIsGisDerived = !directStatus && !!gisStatus;
   const isOrphan   = orphan?.["is_orphan"] === true;
+
+  // Same GIS-derivation fallback as well status, applied to plugging: when
+  // the direct W-3C query failed but GIS confirms the well isn't plugged,
+  // that's a real confirmed-absence, not a guess (see coverage.ts for the
+  // full reasoning). When GIS shows a plugged symbol, this stays an honest
+  // "—" — we can't fabricate the actual W-3C filing details.
+  const pluggingDirectKnown = plugging?.["found"] === true || plugging?.["found"] === false;
+  const pluggingStr = pluggingDirectKnown
+    ? (plugging?.["found"] === true ? "Filed" : "Not Filed")
+    : (gisStatus && !/plugged/i.test(gisStatus) ? "Not Filed (inferred — RRC GIS shows well as not plugged)" : "—");
 
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -1191,11 +1216,11 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
 
     React.createElement(Text, { style: S.sectionTitle }, "SECTION 6 — COMPLIANCE AND LEGAL STATUS"),
 
-    kv("Well Status (Official RRC)", statusStr || "—", /shut.in|inactive|plugged/i.test(statusStr) ? "yellow" : undefined),
+    kv(statusIsGisDerived ? "Well Status (RRC GIS Map Symbol)" : "Well Status (Official RRC)", statusStr || "—", /shut.in|inactive|plugged/i.test(statusStr) ? "yellow" : undefined),
     kv("Inactive Well Designation",  inactive?.["found"] ? "Yes" : inactive?.["found"] === false ? "No" : "—"),
     inactiveRecords.length > 0 ? kv("Plugging Deadline", str(inactiveRecords[0]?.["plugging_deadline_date"] ?? inactiveRecords[0]?.["deadline"]), "yellow") : null,
     kv("Orphan Well Program",        isOrphan ? "YES — CRITICAL" : orphan !== null ? "No" : "—", isOrphan ? "red" : undefined),
-    kv("Plugging Records (W-3C)",    plugging?.["found"] === true ? "Filed" : plugging?.["found"] === false ? "Not Filed" : "—"),
+    kv("Plugging Records (W-3C)",    pluggingStr),
 
     plugRecords.length > 0 ? React.createElement(View, { style: { marginTop: 4, marginBottom: 6 } },
       kv("Plug Date",        str(plugRecords[0]?.["plug_date"] ?? plugRecords[0]?.["date"])),
@@ -1755,7 +1780,10 @@ export async function buildTrrcPdfReport(
   });
 
   const wellStatusAttempt = getAttempt(attempts, "fetch_well_status");
-  const wellStatus = str(wellStatusAttempt?.["status"] ?? wellStatusAttempt?.["well_status"]);
+  // wellStatusQueryAction.do has no working replacement on TRRC's current
+  // EWA — fall back to RRC's own GIS map-symbol status (see CompliancePage
+  // for the full explanation) rather than leaving this permanently blank.
+  const wellStatus = str(wellStatusAttempt?.["status"] ?? wellStatusAttempt?.["well_status"]) || str(gisForMap?.["well_type"]);
 
   const doc = React.createElement(
     Document,
