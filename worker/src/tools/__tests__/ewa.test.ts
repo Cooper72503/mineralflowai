@@ -217,6 +217,21 @@ describe("no-results vs parse-failure disambiguation", () => {
     expect(result.error).toBeUndefined();
   });
 
+  it("searchLeaseWells: real wellboreQueryAction.do lease search returns all wells on the lease", async () => {
+    // leaseWellQueryAction.do never existed for this — confirmed live
+    // 2026-07-31, a cold GET returns a raw servlet 500 and it's not linked
+    // anywhere on TRRC's real EWA menu. This fixture is the real, captured
+    // wellboreQueryAction.do response for lease 01973 district 7B (the same
+    // action already used for API-based lookups), which correctly lists all
+    // 6 real wells on the lease.
+    const leaseHtml = fs.readFileSync(path.join(__dirname, "fixtures/wellbore-by-lease-populated.html"), "utf8");
+    mockFetchSequence(["<html></html>", leaseHtml]);
+    const result = await searchLeaseWells("01973", "7B");
+    expect(result.found).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.wells.length).toBe(6);
+  });
+
   it("searchLeaseWells: an unparsable response now surfaces as a real error, not a confirmed absence", async () => {
     mockFetchSequence(["<html></html>", unparsableHtml]);
     const result = await searchLeaseWells("01973", "7B");

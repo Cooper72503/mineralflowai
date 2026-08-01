@@ -296,6 +296,14 @@ type LeaseTypeResult =
   | { status: "not_found" }
   | { status: "parse_failed" };
 
+// leaseWellQueryAction.do never existed for this — confirmed live 2026-07-31,
+// a cold GET returns a raw servlet 500 and it isn't linked anywhere on
+// TRRC's real EWA menu. wellboreQueryAction.do (already used by
+// searchWellbore for API-based lookups) also accepts
+// searchArgs.leaseNumberArg + searchArgs.districtCodeArg directly — same
+// action, same real per-well columns (API No./District/Lease No./Lease
+// Name/Well No./Field Name/Operator Name/County/On Schedule/API Depth).
+// Confirmed live against lease 01973 district 7B: 6 real wells returned.
 export async function searchLeaseWells(leaseNumber: string, district: string): Promise<{
   found: boolean;
   wells: Record<string, string>[];
@@ -303,10 +311,11 @@ export async function searchLeaseWells(leaseNumber: string, district: string): P
   error?: string;
 }> {
   const tryLeaseType = async (lt: string): Promise<LeaseTypeResult> => {
-    const html = await ewaFetch("leaseWellQueryAction.do", {
+    const html = await ewaFetch("wellboreQueryAction.do", {
       "searchArgs.leaseNumberArg":  leaseNumber,
       "searchArgs.districtCodeArg": normalizeDistrictForQuery(district),
       "searchArgs.leaseTypeArg":    lt,
+      "searchArgs.scheduleTypeArg": "Both",
     });
     if (/no results found/i.test(html)) return { status: "not_found" };
     const table = findDataTable(html, 2);
