@@ -175,7 +175,7 @@ async function dispatchTool(
       break;
 
     case "get_inactive_well_status":
-      result = await ewa.getInactiveWellStatus(
+      result = await browser.getInactiveWellStatus(
         String(input.api_number ?? state.apiNumber ?? ""),
         input.operator_number ? String(input.operator_number) : state.operatorNumber,
       );

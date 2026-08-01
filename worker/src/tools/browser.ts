@@ -6,6 +6,7 @@
  */
 
 import { chromium, type Browser, type BrowserContext } from "playwright";
+import * as cheerio from "cheerio";
 
 let _browser: Browser | null = null;
 
@@ -143,6 +144,142 @@ export async function getComplianceViolations(
     };
   } catch (e) {
     return { found: false, violations: [], open_count: 0, total_count: 0, searched_by: "", message: `ICE portal error: ${String(e)}`, error: String(e) };
+  } finally {
+    await context?.close();
+  }
+}
+
+// ─── S5 — Inactive Well Status ────────────────────────────────────────────────
+//
+// The old ewa.ts getInactiveWellStatus() called inactiveWellQueryAction.do —
+// confirmed live 2026-08-01, that URL is actually titled "P-5 Renewal Status
+// Query" on TRRC's own page, not inactive-well data at all. It never errored
+// (valid 200, parseable response), so this had been silently returning
+// wrong-but-plausible-looking "not inactive" results for every run without
+// anyone noticing — a worse failure mode than a crash, since nothing ever
+// flagged it as broken.
+//
+// The real Inactive Well Query is inactiveWellAllQueryAction.do, and it
+// requires an operator to be selected via the same "Search for Operator"
+// dojo picker widget searchOperator() above already uses (confirmed live:
+// submitting only an API number returns validation error "(Ewa_1028)
+// Operator(s) required."). Confirmed live end-to-end against API
+// 42-151-01734 / operator 102055: correctly returns "No results found" (a
+// genuine confirmed absence — this well isn't on the inactive list) while
+// the SAME operator's broader inactive-well list (searched without the API
+// filter) correctly shows 6 other real inactive wells with real fields.
+export async function getInactiveWellStatus(
+  apiNumber: string,
+  operatorNumber: string | null,
+): Promise<{
+  is_inactive: boolean;
+  records: Record<string, string>[];
+  plugging_deadline: string | null;
+  message: string;
+  error?: string;
+}> {
+  const digits = apiNumber.replace(/\D/g, "");
+  if (digits.length < 10) return { is_inactive: false, records: [], plugging_deadline: null, message: "Invalid API", error: "Invalid API" };
+  const prefix = digits.slice(2, 5);
+  const suffix = digits.slice(5, 10);
+
+  if (!operatorNumber) {
+    return { is_inactive: false, records: [], plugging_deadline: null, message: "Operator number required for inactive well lookup — not resolved yet", error: "Operator number required for inactive well lookup — not resolved yet" };
+  }
+
+  let context: BrowserContext | null = null;
+  try {
+    const browser = await getBrowser();
+    context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(20_000);
+
+    await page.goto("https://webapps2.rrc.texas.gov/EWA/inactiveWellAllQueryAction.do", { waitUntil: "networkidle", timeout: 30_000 });
+    await page.click('input[value="Search for Operator"]');
+    await page.waitForLoadState("networkidle", { timeout: 20_000 });
+
+    await page.fill('input[name="operatorNumber"]', operatorNumber);
+    await page.locator('input[value="Search"]').nth(0).click();
+    await page.waitForSelector('select[name="resultSelection"] option', { timeout: 10_000 }).catch(() => null);
+
+    const firstOption = page.locator('select[name="resultSelection"] option').first();
+    const optionValue = await firstOption.getAttribute("value").catch(() => null);
+    if (!optionValue) {
+      return { is_inactive: false, records: [], plugging_deadline: null, message: `Operator ${operatorNumber} not found for inactive well lookup`, error: `Operator ${operatorNumber} not found for inactive well lookup` };
+    }
+    await page.selectOption('select[name="resultSelection"]', optionValue);
+    await page.locator('input[value="Add"]').click();
+    await page.waitForTimeout(1_000);
+    await page.locator('input[value="Submit"]').click();
+    await page.waitForLoadState("networkidle", { timeout: 20_000 });
+
+    // Back on inactiveWellAllQueryAction.do with the operator now selected —
+    // add the API number filter and submit the real search.
+    await page.fill('input[name="searchArgs.apiNoPrefixArg"]', prefix);
+    await page.fill('input[name="searchArgs.apiNoSuffixArg"]', suffix);
+    await page.locator('input[type="submit"], input[value="Submit"]').first().click();
+    await page.waitForLoadState("networkidle", { timeout: 20_000 });
+
+    const bodyText = await page.innerText("body");
+    if (/no results found/i.test(bodyText)) {
+      return { is_inactive: false, records: [], plugging_deadline: null, message: "Not in inactive well report" };
+    }
+    if (/Operator\(s\) required|correct the errors/i.test(bodyText)) {
+      return { is_inactive: false, records: [], plugging_deadline: null, message: "Inactive well query rejected the search criteria", error: "Inactive well query rejected the search criteria" };
+    }
+
+    // Real results table is table.DataGrid (confirmed live) — a Playwright
+    // page.locator("table").all() scan instead matches TRRC's outer layout
+    // wrapper first (its "header" row is the entire page's text jammed into
+    // one cell). The real header row within DataGrid is row index 2 (rows 0
+    // and 1 are pagination-summary rows), and the API No./Lease No. columns
+    // wrap their value in a nested per-cell table alongside an action-link
+    // dropdown (same quirk as wellbore PDQ elsewhere in this codebase) — use
+    // ":scope > td" (direct children only) so those nested sub-table cells
+    // don't get pulled in as extra top-level columns.
+    const html = await page.content();
+    const $ = cheerio.load(html);
+    const dataGrids = $("table.DataGrid");
+    let header: string[] = [];
+    const dataRows: string[][] = [];
+    dataGrids.each((_, table) => {
+      const rows = $(table).find("tr").toArray();
+      const headerRowIdx = rows.findIndex(tr => {
+        const cells = $(tr).find(":scope > td, :scope > th").map((__, c) => $(c).text().trim()).get();
+        return cells.some(c => /^API No\.?$/i.test(c)) && cells.some(c => /Shut-in Date/i.test(c));
+      });
+      if (headerRowIdx === -1) return;
+      header = $(rows[headerRowIdx]).find(":scope > td, :scope > th").map((__, c) => $(c).text().trim()).get();
+      for (const tr of rows.slice(headerRowIdx + 1)) {
+        const cells = $(tr).find(":scope > td").map((__, c) => $(c).text().replace(/\s+/g, " ").trim()).get();
+        if (cells.length >= header.length - 2) dataRows.push(cells);
+      }
+    });
+
+    // The API No./Lease No. cells' nested per-cell dropdown ("Links Images
+    // GIS Viewer Completion") has its option labels serialized as plain text
+    // even though ":scope > td" already excludes the nested <table> cells —
+    // cheerio's .text() still walks into the <select> inside that same <td>.
+    // The real value is always the leading token.
+    const keys = header.map(h => h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, ""));
+    const records: Record<string, string>[] = dataRows.map(cells => {
+      const obj: Record<string, string> = {};
+      keys.forEach((k, i) => {
+        const raw = cells[i] ?? "";
+        obj[k] = (k === "api_no" || k === "lease_no") ? (raw.split(/\s+/)[0] ?? raw) : raw;
+      });
+      return obj;
+    });
+
+    if (records.length === 0) {
+      return { is_inactive: false, records: [], plugging_deadline: null, message: "No inactive well data", error: "Response received but no matching results table could be parsed" };
+    }
+    const deadline = records[0]?.["shut_in_date"] || null;
+    return { is_inactive: true, records, plugging_deadline: deadline, message: `INACTIVE — ${records.length} record(s)${deadline ? `, shut-in ${deadline}` : ""}` };
+  } catch (e) {
+    return { is_inactive: false, records: [], plugging_deadline: null, message: `Error: ${String(e)}`, error: String(e) };
   } finally {
     await context?.close();
   }

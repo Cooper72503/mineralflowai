@@ -418,34 +418,14 @@ export async function getWellStatus(apiNumber: string, leaseNumber?: string | nu
 }
 
 // ─── S5 — Inactive Well (IWAR) ────────────────────────────────────────────────
-
-export async function getInactiveWellStatus(apiNumber: string, operatorNumber?: string | null): Promise<{
-  is_inactive: boolean;
-  records: Record<string, string>[];
-  plugging_deadline: string | null;
-  message: string;
-  error?: string;
-}> {
-  const split = splitApi(apiNumber);
-  if (!split) return { is_inactive: false, records: [], plugging_deadline: null, message: "Invalid API", error: "Invalid API" };
-
-  try {
-    const html = await ewaFetch("inactiveWellQueryAction.do", {
-      "searchArgs.apiNoPrefixArg": split.prefix,
-      "searchArgs.apiNoSuffixArg": split.suffix,
-    });
-    if (/no results found/i.test(html)) {
-      return { is_inactive: false, records: [], plugging_deadline: null, message: "Not in inactive well report" };
-    }
-    const table = findDataTable(html, 2);
-    if (!table) return { is_inactive: false, records: [], plugging_deadline: null, message: "No inactive well data", error: "No inactive well data — response received but table could not be parsed" };
-    const records = rowsToObjects(table.header, table.rows.slice(0, 10));
-    const deadline = records[0]?.["plugging_deadline_date"] || records[0]?.["deadline"] || null;
-    return { is_inactive: true, records, plugging_deadline: deadline, message: `INACTIVE — ${records.length} record(s)${deadline ? `, deadline ${deadline}` : ""}` };
-  } catch (e) {
-    return { is_inactive: false, records: [], plugging_deadline: null, message: `Error: ${String(e)}`, error: String(e) };
-  }
-}
+//
+// Moved to browser.ts's getInactiveWellStatus() — inactiveWellQueryAction.do
+// (the URL this used to call) is actually titled "P-5 Renewal Status Query"
+// on TRRC's own page, not inactive-well data. The real Inactive Well Query
+// (inactiveWellAllQueryAction.do) requires an operator selected via the same
+// dojo/JSF "Search for Operator" picker widget the P-5 lookup already needs,
+// which a plain fetch can't replicate. See browser.ts for the full
+// investigation and the live-confirmed flow.
 
 // ─── S6 — Orphan Well ────────────────────────────────────────────────────────
 
