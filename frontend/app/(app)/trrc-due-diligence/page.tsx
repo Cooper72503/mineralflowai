@@ -253,9 +253,21 @@ export default function TrrcDueDiligencePage() {
 
   // Polling
   const terminalReachedRef = useRef(false);
+  // A poll that returns HTTP-ok-but-{ok:false} (401 from an expired/invalid
+  // token that apiFetch's own refresh-and-retry couldn't recover, a 404 from
+  // a race with the run being deleted, etc.) previously did NOTHING — no
+  // error, no retry escalation, no state change. The interval kept firing
+  // forever, every 3s, silently no-op'ing, while the run kept progressing
+  // server-side — exactly what "frozen at 2%, no error, nothing in the
+  // console" looks like from the user's side. Track consecutive failures and
+  // surface a real error after a few in a row, instead of polling into the
+  // void forever.
+  const consecutiveFailuresRef = useRef(0);
+  const MAX_CONSECUTIVE_POLL_FAILURES = 4; // ~12s at the 3s interval
   useEffect(() => {
     if (!runId || phase !== "running") return;
     terminalReachedRef.current = false;
+    consecutiveFailuresRef.current = 0;
     const interval = setInterval(async () => {
       try {
         const res = await apiFetch(`/api/trrc/due-diligence/${runId}`);
@@ -268,6 +280,7 @@ export default function TrrcDueDiligencePage() {
         // any poll has reached a terminal state, ignore every later response.
         if (terminalReachedRef.current) return;
         if (data.ok) {
+          consecutiveFailuresRef.current = 0;
           if (data.data.status === "complete") {
             terminalReachedRef.current = true;
             setRun({ ...data.data, progress_percent: 100 });
@@ -290,9 +303,30 @@ export default function TrrcDueDiligencePage() {
             // duration of a run, making a working run look permanently stuck.
             setRun(data.data);
           }
+        } else {
+          consecutiveFailuresRef.current += 1;
+          if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_POLL_FAILURES) {
+            terminalReachedRef.current = true;
+            setError(
+              `Lost contact with the server while checking progress (${res.status}: ${data.error ?? "unknown error"}). ` +
+              `The run itself may still be in progress — reload the page to check its current status.`,
+            );
+            setPhase("error");
+            clearInterval(interval);
+          }
         }
       } catch {
-        // network hiccup — keep polling
+        // Network-level failure (fetch threw) — same escalation as an
+        // {ok:false} response, so a total connectivity loss doesn't spin
+        // forever either.
+        if (terminalReachedRef.current) return;
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          terminalReachedRef.current = true;
+          setError("Lost network connection while checking progress. The run itself may still be in progress — reload the page to check its current status.");
+          setPhase("error");
+          clearInterval(interval);
+        }
       }
     }, 3000);
     return () => clearInterval(interval);
