@@ -220,7 +220,15 @@ export default function TrrcDueDiligencePage() {
       // the route only guarantees the server re-runs the query; it says
       // nothing about whether the browser is allowed to reuse a prior
       // response for the same URL instead of asking again.
-      return fetch(url, { ...init, credentials: "omit", headers, cache: init.cache ?? "no-store" });
+      //
+      // credentials was "omit" — no real reason found for it, and it meant
+      // session cookies never went out on these requests at all, only the
+      // bearer header. Confirmed live: bearer-token auth was silently
+      // failing against the deployed site (see from-route-request.ts) while
+      // cookies would have worked, and this line was the reason cookies
+      // were never even offered as a fallback. "include" sends both, so the
+      // server can fall back to cookie auth when the bearer path fails.
+      return fetch(url, { ...init, credentials: "include", headers, cache: init.cache ?? "no-store" });
     };
 
     const res = await doFetch(tokenRef.current);
