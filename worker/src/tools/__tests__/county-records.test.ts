@@ -30,6 +30,8 @@ describe("getAutomatedCounties", () => {
       "Medina", "Midland", "Milam", "Montgomery", "Nacogdoches", "Nueces", "Potter",
       "Reagan", "Reeves", "Refugio", "San Patricio", "Smith", "Starr", "Tarrant",
       "Walker", "Williamson", "Wilson", "Young", "Zapata",
+      // Harris — its own dedicated provider (cclerk.hctx.net), not GovOS.
+      "Harris",
     ];
     expect(getAutomatedCounties().sort()).toEqual(expected.sort());
   });
@@ -61,7 +63,15 @@ describe("findProvider — case-insensitive county matching (pure, no network)",
 
   it("returns null for an unsupported county rather than a false match", () => {
     expect(findProvider("Karnes")).toBeNull();
-    expect(findProvider("Harris")).toBeNull();
+  });
+
+  it("resolves Harris County to its own dedicated provider, not the GovOS platform", () => {
+    // Harris runs its own standalone ASP.NET portal (cclerk.hctx.net), not
+    // publicsearch.us — confirmed live 2026-08-02 with a real "CHEVRON"
+    // grantee search returning genuine deed/easement records.
+    const match = findProvider("Harris");
+    expect(match?.displayName).toBe("Harris");
+    expect(match?.provider.id).toBe("harris_cclerk");
   });
 
   it("resolves the correct provider-specific slug", () => {

@@ -3,24 +3,43 @@
  * releases, liens. This is county clerk data, not TRRC data — a
  * fundamentally different source with no statewide unification.
  *
- * Confirmed live (2026-07-28): Texas county clerk record systems are NOT
- * unified. Each county contracts its own vendor independently, or has none
- * at all with free public access. Checked ~20 major oil & gas counties
- * directly — Midland, Reeves, Reagan, and Live Oak share the same vendor
- * platform (publicsearch.us, by Neumo) with a real, free, scrapable
- * results table (grantor, grantee, doc type, recorded date, doc number,
- * book/volume/page, legal description — no login required for search).
- * Ector County uses a completely different vendor (Tyler Technologies).
- * Several others (Loving, Winkler, Ward, Pecos, Upton, Howard, Martin,
- * Andrews, Crane, Karnes, La Salle) have no free automated portal found at
- * all — only paid third-party aggregators.
+ * Texas county clerk record systems are NOT unified — each county contracts
+ * its own vendor independently, or has none at all with free public access.
+ * As of 2026-08-02, real automated coverage: 49 of 254 counties.
+ *   - 48 counties on GovOS/Kofile's Cloud Search platform (publicsearch.us),
+ *     confirmed against the vendor's own published Texas site directory and
+ *     independently verified by hitting every county's subdomain directly —
+ *     includes several of the state's largest (Bexar, Dallas, Tarrant,
+ *     Hidalgo, Cameron) alongside the original 4 (Midland, Reeves, Reagan,
+ *     Live Oak).
+ *   - Harris (the single largest county) on its own standalone ASP.NET
+ *     portal, cclerk.hctx.net — not GovOS, not Tyler, its own thing.
+ *
+ * Known but not yet built: Tyler Technologies (tylerhost.net) serves a real
+ * set of Texas counties (Ector, Howard, Calhoun, Taylor, Liberty, Upshur,
+ * Burnet, Brazoria, and likely more — county-name-based subdomain pattern,
+ * not yet enumerated) with a genuinely free, no-login search, but the
+ * portal itself is slow and unreliable enough in practice (repeated
+ * timeouts just reaching the disclaimer page) that it needs more resilient
+ * retry/timeout handling before it's worth shipping as a connector — not a
+ * data-access problem, an infrastructure-reliability one.
+ * countygovernmentrecords.com (also Tyler Technologies, a different tier)
+ * requires account registration even for search — not pursued.
+ * countyrecords.com claims 220+ TX counties but is a paid commercial
+ * product (explicit pricing, landman/oil-and-gas marketing) — not a free
+ * public resource, and not something to build against without a business
+ * decision on paying for it.
+ * Everything else — including Loving, Winkler, Ward, Pecos, Upton, Martin,
+ * Andrews, Crane, Karnes, La Salle from the original research pass — has no
+ * free automated portal found at all, only paid third-party aggregators.
  *
  * This is a provider-abstraction framework specifically because of that
- * fragmentation: each vendor gets its own isolated connector implementing
- * the same interface, and a county with no connector yet gets an honest
- * manual_required result with a real, verified-working search URL
- * (TexasFile, which has consistent per-county coverage across Texas)
- * rather than being silently omitted from the report.
+ * fragmentation: each vendor (or, for Harris, each standalone county site)
+ * gets its own isolated connector implementing the same interface, and a
+ * county with no connector yet gets an honest manual_required result with a
+ * real, verified-working search URL (TexasFile, which has consistent
+ * per-county coverage across Texas) rather than being silently omitted
+ * from the report.
  */
 
 import { getBrowser } from "./browser.js";
@@ -210,7 +229,122 @@ const publicSearchUsProvider: CountyRecordsProvider = {
   },
 };
 
-const PROVIDERS: CountyRecordsProvider[] = [publicSearchUsProvider];
+// ─── Provider: Harris County Clerk's own portal (cclerk.hctx.net) ───────────
+//
+// Harris is Texas's largest county by population and runs its own
+// standalone ASP.NET WebForms search — not GovOS, not Tyler, its own thing.
+// Confirmed live 2026-08-02: the search itself is free with no login (login
+// is only for purchasing document images, same "free index, paid image"
+// split as every other connector here) and returns a real, structured
+// results table. Driven by Playwright rather than a direct URL like
+// publicsearch.us — ASP.NET WebForms postback needs a real browser POST
+// (viewstate etc.), not a hand-built query string. DOM structure confirmed
+// directly: each real record is a direct-child <tr> of
+// #itemPlaceholderContainer with 8 <td>s — file no., file date, instrument
+// type (+ vol/page), a nested Grantor/Grantee/Trustee table, a nested legal
+// description table, page count, and film code — verified against a real
+// "CHEVRON" grantee search returning genuine deed-of-trust/easement records
+// back to 2006.
+const harrisCountyProvider: CountyRecordsProvider = {
+  id: "harris_cclerk",
+  name: "Harris County Clerk (cclerk.hctx.net)",
+  counties: {
+    "Harris": "harris",
+  },
+  async search(_identifier, countyDisplayName, searchValue) {
+    const searchUrl = "https://www.cclerk.hctx.net/Applications/WebSearch/RP.aspx";
+    let context: BrowserContext | null = null;
+    try {
+      const browser = await getBrowser();
+      context = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      });
+      const page = await context.newPage();
+      page.setDefaultTimeout(30_000);
+
+      await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 30_000 });
+      // Grantee field — searching this way (rather than Grantor) matches
+      // what a buyer actually wants: who has this party conveyed to.
+      await page.fill("#ctl00_ContentPlaceHolder1_txtEE", searchValue);
+      await page.click("#ctl00_ContentPlaceHolder1_btnSearch");
+      await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => null);
+      await page.waitForTimeout(1_500);
+
+      const bodyText = await page.innerText("body").catch(() => "");
+      if (/no records? (were )?found|no results/i.test(bodyText)) {
+        return {
+          found: false, status: "automated", county: countyDisplayName, provider: "harris_cclerk",
+          records: [], total_count: 0, search_url: searchUrl,
+          message: `No records found for "${searchValue}" in ${countyDisplayName} County.`,
+        };
+      }
+
+      const rawRecords = await page.evaluate(() => {
+        const table = document.getElementById("itemPlaceholderContainer");
+        if (!table) return [];
+        const rows = Array.from(table.querySelectorAll(":scope > tbody > tr, :scope > tr"));
+        return rows.map((row) => {
+          const cells = row.querySelectorAll(":scope > td");
+          if (cells.length < 8) return null;
+          const doc_number = cells[1]?.querySelector("span")?.textContent?.trim() ?? "";
+          const recorded_date = cells[2]?.querySelector("span")?.textContent?.trim() ?? "";
+          const doc_type = cells[3]?.querySelector("a")?.textContent?.trim() ?? "";
+          const volSpans = Array.from(cells[3]?.querySelectorAll("span") ?? []).map(s => s.textContent?.trim() ?? "").filter(Boolean);
+          const book_volume_page = volSpans.join("/");
+
+          const namesRows = Array.from(cells[4]?.querySelectorAll("tr") ?? []);
+          const byLabel: Record<string, string[]> = {};
+          for (const nr of namesRows) {
+            const tds = nr.querySelectorAll("td");
+            if (tds.length < 2) continue;
+            const label = (tds[0]?.textContent ?? "").replace(/[^A-Za-z]/g, "").trim();
+            const value = (tds[1]?.textContent ?? "").trim();
+            if (!label || !value) continue;
+            (byLabel[label] ??= []).push(value);
+          }
+          const grantor = (byLabel["Grantor"] ?? []).join("; ");
+          const grantee = (byLabel["Grantee"] ?? []).join("; ");
+
+          const legalRows = Array.from(cells[5]?.querySelectorAll("tr") ?? []);
+          const legalParts: string[] = [];
+          for (const lr of legalRows) {
+            const tds = lr.querySelectorAll("td");
+            if (tds.length < 2) continue;
+            const label = (tds[0]?.textContent ?? "").replace(/[^A-Za-z]/g, "").trim();
+            const value = (tds[1]?.textContent ?? "").trim();
+            if (label && value) legalParts.push(`${label}: ${value}`);
+          }
+
+          return { doc_number, recorded_date, doc_type, book_volume_page, grantor, grantee, legal_description: legalParts.join(", ") };
+        }).filter((r): r is NonNullable<typeof r> => r !== null && (!!r.grantor || !!r.grantee));
+      });
+
+      const records: CountyRecordEntry[] = rawRecords.slice(0, 100);
+      return {
+        found: records.length > 0,
+        status: "automated",
+        county: countyDisplayName,
+        provider: "harris_cclerk",
+        records,
+        total_count: rawRecords.length,
+        search_url: searchUrl,
+        message: records.length > 0
+          ? `${records.length} record(s) found for "${searchValue}" in ${countyDisplayName} County.`
+          : `No records found for "${searchValue}" in ${countyDisplayName} County.`,
+      };
+    } catch (e) {
+      return {
+        found: false, status: "automated", county: countyDisplayName, provider: "harris_cclerk",
+        records: [], total_count: 0, search_url: searchUrl,
+        message: `County records search failed: ${String(e).slice(0, 100)}`, error: String(e),
+      };
+    } finally {
+      await context?.close();
+    }
+  },
+};
+
+const PROVIDERS: CountyRecordsProvider[] = [publicSearchUsProvider, harrisCountyProvider];
 
 export function findProvider(countyName: string): { provider: CountyRecordsProvider; identifier: string; displayName: string } | null {
   const normalized = countyName.trim().toLowerCase();
