@@ -17,7 +17,21 @@ import { getCountyRecords, getAutomatedCounties, findProvider } from "../county-
 
 describe("getAutomatedCounties", () => {
   it("lists exactly the counties confirmed live on the publicsearch.us platform", () => {
-    expect(getAutomatedCounties().sort()).toEqual(["Live Oak", "Midland", "Reagan", "Reeves"].sort());
+    // Confirmed live 2026-08-02 against GovOS/Kofile's own published Texas
+    // "Cloud Search Active Sites" directory, then independently verified by
+    // hitting every one of these <slug>.tx.publicsearch.us subdomains
+    // directly (all returned a real, working results page — no login wall)
+    // and checking Bexar end-to-end with an actual search.
+    const expected = [
+      "Anderson", "Bee", "Bell", "Bexar", "Blanco", "Brazos", "Brewster", "Burleson",
+      "Cameron", "Chambers", "Coleman", "Collin", "Dallas", "Denton", "Freestone",
+      "Gillespie", "Goliad", "Grayson", "Grimes", "Hidalgo", "Hockley", "Jim Hogg",
+      "Jim Wells", "Jefferson", "Johnson", "Kendall", "Leon", "Live Oak", "Matagorda",
+      "Medina", "Midland", "Milam", "Montgomery", "Nacogdoches", "Nueces", "Potter",
+      "Reagan", "Reeves", "Refugio", "San Patricio", "Smith", "Starr", "Tarrant",
+      "Walker", "Williamson", "Wilson", "Young", "Zapata",
+    ];
+    expect(getAutomatedCounties().sort()).toEqual(expected.sort());
   });
 });
 
