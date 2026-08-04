@@ -34,6 +34,7 @@ const gisAlertAreasJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-ale
 const gisSurveyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-survey.json"), "utf8");
 const gathererPurchaserEmptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/gatherer-purchaser-empty.html"), "utf8");
 const gathererPurchaserPopulatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/gatherer-purchaser-populated.html"), "utf8");
+const gasLeaseProductionHtml = fs.readFileSync(path.join(__dirname, "fixtures/production-gas-lease-populated.html"), "utf8");
 
 // ─── Direct unit tests of the extraction primitives ────────────────────────
 
@@ -478,6 +479,31 @@ describe("getProduction — real specificLeaseQueryAction.do table structure", (
     const result = await getProduction("01973", "7B");
     expect(result.rows.some(r => r.production_month === undefined)).toBe(false);
     expect(result.rows).toHaveLength(3);
+  });
+
+  // Regression test for a real, previously-shipping bug: a gas-type ("G")
+  // lease query returns DIFFERENT columns than an oil-type ("O") query —
+  // "GW Gas (MCF)" + "Condensate (BBL)", not "OIL (BBL)" + "Casinghead
+  // (MCF)" — but the code unconditionally read cells[1]->oil_bbl and
+  // cells[3]->casinghead_gas_mcf regardless of which type was queried. That
+  // silently mislabeled every gas-type lease's real gas volume as oil_bbl.
+  // Fixture is a real, live-captured response (2026-08-04) for lease 253905,
+  // district 09 — a genuine Barnett Shale gas well (API 42-439-34308,
+  // GIS-confirmed "Gas Well" symbol, operator EAGLERIDGE OPERATING LLC).
+  it("maps gas-type ('G') lease columns to gas_mcf/condensate_bbl, not oil_bbl/casinghead_gas_mcf", async () => {
+    mockFetchSequence(["<html></html>", gasLeaseProductionHtml]);
+    const result = await getProduction("253905", "09", "G");
+
+    expect(result.found, `expected found:true, got message: "${result.message}"`).toBe(true);
+    expect(result.rows.length).toBeGreaterThan(0);
+    expect(result.rows[0]).toEqual({
+      production_month: "2022-08", oil_bbl: null, gas_mcf: 6263, casinghead_gas_mcf: null, condensate_bbl: 0, water_bbl: null,
+    });
+    expect(result.rows[1]).toEqual({
+      production_month: "2022-09", oil_bbl: null, gas_mcf: 7094, casinghead_gas_mcf: null, condensate_bbl: 0, water_bbl: null,
+    });
+    // Every row must be gas-labeled, never oil-labeled — the core regression guard.
+    expect(result.rows.every(r => r.oil_bbl === null && r.casinghead_gas_mcf === null)).toBe(true);
   });
 });
 

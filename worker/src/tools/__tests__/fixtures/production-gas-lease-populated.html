@@ -1,0 +1,2136 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8;"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=5, IE=8, IE=9, IE=10" />
+    <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+
+    <script type="text/javascript">
+      var dojoConfig = {
+      parseOnLoad: true,
+      isDebug: false,
+
+      has: {
+      "dojo-debug-messages": false
+      },
+
+      packages:
+       [ { name:"rrcGisModules", location:location.pathname.replace(/\/[^/]+$/, '') + '/gis/javascript'} ]
+
+      };
+    </script>
+
+    <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.3compact"></script>
+    <script type="text/javascript"> 
+      require(["dojo/parser", "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dojo/query", 
+               "dojo/dom-construct", "dojo/NodeList-manipulate", "dojo/dom-attr", "dojo/dom",
+               "dojo/_base/connect", "dojo/_base/event"]);
+    </script>
+
+    <title>Specific Lease Query Criteria</title>
+  </head>
+
+  <body>
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td>
+
+
+
+
+
+<script type="text/javascript">
+function openHelp(obj) {
+
+  var help = '/EWA/help/' + obj;
+  //alert(help+', '+obj);
+
+  hold = window.open(help, 'popupWindow',
+                     'resizable=yes,menubar=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');
+  hold.focus();
+  return false;
+}
+</script>
+
+<!-- System Header -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/rrc_online_header.gif"></td>
+    <td class="MainHeader" align="right" nowrap>&nbsp;</td>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+  </tr>
+  <tr><td colspan="3" style="height: 3px;" class="BorderLines"/></tr>
+</table>
+
+<!--Application Header-->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr> 
+    <td class="AppHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+    <td class="AppHeader">Oil & Gas Data Query</td>
+  </tr>
+</table>
+
+<!-- Top Nav Level 2 -->
+<!--Navigation Table Level 2 and 3 -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr><td colspan="2" style="height: 2px;" class="BorderLines"/></tr>
+  <!--Level 2 navigation row-->
+  <tr>
+    <td class="AppNavMain" width="1%"><img src="/EWA/commonuiImages/spacer.gif" height="1px"></td>
+    <td class="AppNavMain">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Main -->
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <td class="AppNavMainSelected">
+            <a href="/EWA/ewaMain.do">Query Menu</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help-->
+          <td class="AppNavMain">
+            
+            <a href="#" onclick="openHelp('PDQ_TOC.html');">Help</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help END-->
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td colspan="2" style="height: 1px;" class="BorderLines"/></tr>
+</table>
+
+</td></tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr valign="top">
+        <td style="width: 100%;" class="ContentArea">
+          <span id="messageArea">
+
+
+
+
+
+<!-- /tiles/messages.jsp BEGIN -->
+
+
+
+
+<!-- /tiles/messages.jsp END -->
+</span>
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script type="text/javascript" src="/EWA/js/ewaPageUtils.js"></script>
+
+
+
+<script type="text/javascript">
+
+  function doSearch(){
+    var methodToCall = document.forms["specificLeaseQueryActionForm"].elements["methodToCall"].value;
+    document.forms["specificLeaseQueryActionForm"].elements["methodToCall"].value = methodToCall;
+    document.forms["specificLeaseQueryActionForm"].submit();
+  }
+
+  function doSort(columnName, direction) {
+    ewaDoSort(document.forms["specificLeaseQueryActionForm"], "searchArgs", columnName, direction);
+  }
+
+  function generateSpecificLeaseCSVReport() {
+    document.forms["specificLeaseQueryActionForm"].methodToCall.value = 
+        "generateSpecificLeaseCSVReport";
+    document.forms["specificLeaseQueryActionForm"].submit();
+  }
+</script>
+
+<!--Content Area-->
+<form name="specificLeaseQueryActionForm" method="post" action="/EWA/specificLeaseQueryAction.do">
+  
+  <!-- can get here from production query and lease query -->
+  <input type="hidden" name="searchArgs.orderByColumnName" value="">
+
+  
+    <input type="hidden" name="searchArgs.initialViewArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.startMonthArgHndlr.inputValue" value="08">
+    <input type="hidden" name="searchArgs.startYearArgHndlr.inputValue" value="2022">
+    <input type="hidden" name="searchArgs.endMonthArgHndlr.inputValue" value="08">
+    <input type="hidden" name="searchArgs.endYearArgHndlr.inputValue" value="2026">
+    <input type="hidden" name="searchArgs.oilOrGasArgHndlr.inputValue" value="G">
+    <input type="hidden" name="searchArgs.gasWellNoHndlr.inputValue" value="10H">
+    <input type="hidden" name="searchArgs.searchTypeHndlr.inputValue" value="specificLease">
+    <input type="hidden" name="searchArgs.viewTypeHndlr.inputValue" value="prodAndTotalDisp">
+    <input type="hidden" name="searchArgs.activeTabsFlagwordHndlr.inputValue" value="0">
+    <input type="hidden" name="searchArgs.orderByHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.leaseTypeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.districtCodeArgHndlr.inputValue" value="09">
+    <input type="hidden" name="searchArgs.leaseNumberArgHndlr.inputValue" value="253905">
+    <input type="hidden" name="searchArgs.fieldNumbersArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.fieldNamesHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.operatorNumbersArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.operatorNamesHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.onShoreCountyCodeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.offShoreCountyCodeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.leaseNameArgHndlr.inputValue" value="WHIZ-Q EAST  UNIT">
+    <input type="hidden" name="searchArgs.geoRegionOptionHndlr.inputValue" value="district">
+    <input type="hidden" name="searchArgs.statewideFlagHndlr.inputValue" value="">
+  
+    
+  
+
+
+
+
+
+
+
+
+  
+
+  
+    <input type="hidden" name="methodToCall" value="search">
+  
+
+  
+
+
+
+  <input type="hidden" name="actionManager.recordCountHndlr.inputValue" value="2">
+  <input type="hidden" name="actionManager.currentIndexHndlr.inputValue" value="1">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].actionDisplayNmHndlr.inputValue" value="Search Criteria">
+    <input type="hidden" name="actionManager.actionRcrd[0].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[0].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionHndlr.inputValue" value="/specificLeaseQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionMethodHndlr.inputValue" value="unspecified">
+    <input type="hidden" name="actionManager.actionRcrd[0].pagerParameterKeyHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].argRcrdParameters(searchArgs.paramValue)" value="|2=08|3=2022|4=08|5=2026|6=G|8=specificLease|9=prodAndTotalDisp|10=0|102=09|103=253905|204=district">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].actionDisplayNmHndlr.inputValue" value="District: 09">
+    <input type="hidden" name="actionManager.actionRcrd[1].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[1].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionHndlr.inputValue" value="/specificLeaseQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionMethodHndlr.inputValue" value="search">
+    <input type="hidden" name="actionManager.actionRcrd[1].pagerParameterKeyHndlr.inputValue" value="slPager.paramValue">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[1].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(searchArgs.paramValue)" value="|2=08|3=2022|4=08|5=2026|6=G|7=10H|8=specificLease|9=prodAndTotalDisp|10=0|102=09|103=253905|203=WHIZ-Q+EAST++UNIT|204=district">
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(slPager.paramValue)" value="|1=1|2=-1|3=49|4=0|5=0|6=10">
+
+
+
+
+  <table width="100%" border="0" align="left" cellpadding="8" cellspacing="0">
+    <tr>
+      <td colspan="2"><h2 class="style5">Specific Lease Query Results</h2></td>
+    </tr>
+    <tr>
+      <td width="75%">
+        
+          
+	  
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script type="text/javascript">
+
+  /* submit button below is supposed to resubmit the form for a new search,
+   * but the last methodToCall is remembered and used in the form submission. 
+   * If the last methodToCall was for the download action, then the download 
+   * action method would be called if this javascript function did not reset 
+   * the methodToCall back to "search".
+   */
+  function search(){
+	document.forms["specificLeaseQueryActionForm"].methodToCall.value = "search";
+  }
+</script>
+
+
+
+<table class="GroupBox1" border="0" align="left" cellpadding="4" cellspacing="0">
+  <tr>
+    <td nowrap align="right"><strong>Query Path:</strong></td>
+    <td>
+      
+
+        
+          
+
+          
+            
+            <a href="/EWA/specificLeaseQueryAction.do?rrcActionMan=H4sIAAAAAAAAAG2PO2_DMAyEf026FBBkyQ7sgYOQPpYufaAdgg6sxCQCHEug5D4A_fjKbpcC3Y7kHe5jaaSEpjSyAXnBbI3NPkwPlt1evkJZro-EbE-XO_aZ2OPq_aA3jDEpUSMi0ycmcQzvG23aVleDgo26uX4xVepFpkjWH7y9I0x0PxN__fQIF6qlhTPlU3BPYYfjWBcdzNNvhFyd-3_Y9mnFMnxMIiLj-RnHmSqyAtkXDUoqVdpFd4veli3clh7-kJQBIgdnplqdcbzyKdY2kOsHcljpVacH2RVVKZ1Pmb3N3_vfx_s0AQAA&methodToCall=unspecified&searchArgs.paramValue=|2=08|3=2022|4=08|5=2026|6=G|8=specificLease|9=prodAndTotalDisp|10=0|102=09|103=253905|204=district">Search Criteria</a>
+            >
+          
+        
+      
+
+        
+          
+            District: 09
+          
+
+          
+        
+      
+    </td>
+  </tr>
+
+  <!-- Date Range -->
+  <tr>
+    <td nowrap align="left"><strong>Date Range:</strong></td>
+    <td align="left">
+      <select name="searchArgs.startMonthArg"><option value="01">Jan</option>
+<option value="02">Feb</option>
+<option value="03">Mar</option>
+<option value="04">Apr</option>
+<option value="05">May</option>
+<option value="06">Jun</option>
+<option value="07">Jul</option>
+<option value="08" selected="selected">Aug</option>
+<option value="09">Sep</option>
+<option value="10">Oct</option>
+<option value="11">Nov</option>
+<option value="12">Dec</option></select>
+      <select name="searchArgs.startYearArg"><option value="1993">1993</option>
+<option value="1994">1994</option>
+<option value="1995">1995</option>
+<option value="1996">1996</option>
+<option value="1997">1997</option>
+<option value="1998">1998</option>
+<option value="1999">1999</option>
+<option value="2000">2000</option>
+<option value="2001">2001</option>
+<option value="2002">2002</option>
+<option value="2003">2003</option>
+<option value="2004">2004</option>
+<option value="2005">2005</option>
+<option value="2006">2006</option>
+<option value="2007">2007</option>
+<option value="2008">2008</option>
+<option value="2009">2009</option>
+<option value="2010">2010</option>
+<option value="2011">2011</option>
+<option value="2012">2012</option>
+<option value="2013">2013</option>
+<option value="2014">2014</option>
+<option value="2015">2015</option>
+<option value="2016">2016</option>
+<option value="2017">2017</option>
+<option value="2018">2018</option>
+<option value="2019">2019</option>
+<option value="2020">2020</option>
+<option value="2021">2021</option>
+<option value="2022" selected="selected">2022</option>
+<option value="2023">2023</option>
+<option value="2024">2024</option>
+<option value="2025">2025</option>
+<option value="2026">2026</option></select>
+      <strong>to</strong>
+      <select name="searchArgs.endMonthArg"><option value="01">Jan</option>
+<option value="02">Feb</option>
+<option value="03">Mar</option>
+<option value="04">Apr</option>
+<option value="05">May</option>
+<option value="06">Jun</option>
+<option value="07">Jul</option>
+<option value="08" selected="selected">Aug</option>
+<option value="09">Sep</option>
+<option value="10">Oct</option>
+<option value="11">Nov</option>
+<option value="12">Dec</option></select>
+      <select name="searchArgs.endYearArg"><option value="1993">1993</option>
+<option value="1994">1994</option>
+<option value="1995">1995</option>
+<option value="1996">1996</option>
+<option value="1997">1997</option>
+<option value="1998">1998</option>
+<option value="1999">1999</option>
+<option value="2000">2000</option>
+<option value="2001">2001</option>
+<option value="2002">2002</option>
+<option value="2003">2003</option>
+<option value="2004">2004</option>
+<option value="2005">2005</option>
+<option value="2006">2006</option>
+<option value="2007">2007</option>
+<option value="2008">2008</option>
+<option value="2009">2009</option>
+<option value="2010">2010</option>
+<option value="2011">2011</option>
+<option value="2012">2012</option>
+<option value="2013">2013</option>
+<option value="2014">2014</option>
+<option value="2015">2015</option>
+<option value="2016">2016</option>
+<option value="2017">2017</option>
+<option value="2018">2018</option>
+<option value="2019">2019</option>
+<option value="2020">2020</option>
+<option value="2021">2021</option>
+<option value="2022">2022</option>
+<option value="2023">2023</option>
+<option value="2024">2024</option>
+<option value="2025">2025</option>
+<option value="2026" selected="selected">2026</option></select>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      <input type="submit" name="submitHeader" value="Submit" onclick="search();">
+    </td>
+  </tr>
+</table>
+
+
+      </td>
+      <td width="25%" align="left" valign="top">
+        <table align="left" border="0" cellpadding="0" cellspacing="0">
+          <tr>
+            <th><div align="center"><strong>Related Links</strong></div></th>
+          </tr>
+          <tr>
+            <td nowrap><!-- ewa-20 - update url link -->
+              <a href="#" onclick="hold=window.open('https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/operator-information/oil-gas-directory-operator-contact/', 'popupWindow','menubar=yes,resizable=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');hold.focus();return false;">O&amp;G Directory</a></td>
+          </tr>
+          <tr>
+            <td nowrap><!-- ewa-20 - update url link -->
+              <a href="#" onclick="hold=window.open('https://www.rrc.texas.gov/oil-and-gas/research-and-statistics/proration-schedules/', 'popupWindow','menubar=yes,resizable=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');hold.focus();return false;">O&amp;G Proration Schedule</a></td>
+          </tr>
+	  <tr>
+            <td nowrap>
+              <a target="_blank" href="http://www.rrc.texas.gov/media/gembj3er/cty_coast_offshore.pdf">
+                Offshore County Map
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" valign="top">
+        
+          
+            
+              
+            
+            
+            
+            
+          
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<HEAD>
+  <title>Specific Lease Tabs Page</title>
+  <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+</HEAD>
+
+<TABLE border=0 cellpadding=0 cellspacing=0 >
+  <TR valign="top">
+    <td nowrap><bean:message key="Pdq.view.by.text"/>&nbsp;&nbsp;</td>
+    <td nowrap class="TabSelected">
+      
+      <a href="specificLeaseQueryAction.do?tab=init&viewType=prodAndTotalDisp&methodToCall=search&pdqSearchArgs.paramValue=%7c2%3d08%7c3%3d2022%7c4%3d08%7c5%3d2026%7c6%3dG%7c8%3dspecificLease%7c9%3dprodAndTotalDisp%7c10%3d0%7c102%3d09%7c103%3d253905%7c204%3ddistrict&rrcActionMan=H4sIAAAAAAAAALWQTU8CMRCGfw1eNmym3Q_Zwxw2gEJijAhIIvFQuxWaLLubtviR9Mc7u3BQMR403t52ZjLPPJ4BIPcMGLIzY2Quna6rW2mKNTygb6tzJYzcBkOjnTJadL0v6lE0jeUhjYROvQobburnXpTHcUQNHHv8YrzKKUZttI2S-knLKyWsmu2VeTvsCYuaWmLcKbeti0U9FGVJHwnuq-OIKug9QDhhW9sOKzcbGzbCiN2dKPeKkDnCwEfIgXMftzlpc-pTvPQD_ETiM2xMXeQVrXaiHGnb0DaE7gLIOnqeRBkknhNloa0zWrovLOzoaXQsk4WgG_5_TQcHFFO05Y3YKPPBxbfi2O_EnSODyZ_0RbiaTO_7s2CczxdBsLyeLn6Wuj69qBWNjED7jEDjrMUkSiBEBu_jbz7uygIAAA">Production and Total Disposition&nbsp;</a>
+    </td>
+    <td class="BorderLines"><img src="/EWA/images/spacer.gif" height="1" width="1" alt=""></td>
+
+    <td nowrap class="Tab">
+      
+      <a href="specificLeaseQueryAction.do?tab=init&viewType=dispDetails&methodToCall=search&pdqSearchArgs.paramValue=%7c2%3d08%7c3%3d2022%7c4%3d08%7c5%3d2026%7c6%3dG%7c8%3dspecificLease%7c9%3dprodAndTotalDisp%7c10%3d0%7c102%3d09%7c103%3d253905%7c204%3ddistrict&rrcActionMan=H4sIAAAAAAAAALWQTU8CMRCGfw1eNmym3Q_Zwxw2gEJijAhIIvFQuxWaLLubtviR9Mc7u3BQMR403t52ZjLPPJ4BIPcMGLIzY2Quna6rW2mKNTygb6tzJYzcBkOjnTJadL0v6lE0jeUhjYROvQobburnXpTHcUQNHHv8YrzKKUZttI2S-knLKyWsmu2VeTvsCYuaWmLcKbeti0U9FGVJHwnuq-OIKug9QDhhW9sOKzcbGzbCiN2dKPeKkDnCwEfIgXMftzlpc-pTvPQD_ETiM2xMXeQVrXaiHGnb0DaE7gLIOnqeRBkknhNloa0zWrovLOzoaXQsk4WgG_5_TQcHFFO05Y3YKPPBxbfi2O_EnSODyZ_0RbiaTO_7s2CczxdBsLyeLn6Wuj69qBWNjED7jEDjrMUkSiBEBu_jbz7uygIAAA">&nbsp;Disposition Details&nbsp;</a>
+    </td>
+    <td class="BorderLines"><img src="/EWA/images/spacer.gif" height="1" width="1" alt=""></td>
+
+    <td nowrap class="Tab">
+      
+      <a href="specificLeaseQueryAction.do?tab=init&viewType=countyProd&methodToCall=search&pdqSearchArgs.paramValue=%7c2%3d08%7c3%3d2022%7c4%3d08%7c5%3d2026%7c6%3dG%7c8%3dspecificLease%7c9%3dprodAndTotalDisp%7c10%3d0%7c102%3d09%7c103%3d253905%7c204%3ddistrict&rrcActionMan=H4sIAAAAAAAAALWQTU8CMRCGfw1eNmym3Q_Zwxw2gEJijAhIIvFQuxWaLLubtviR9Mc7u3BQMR403t52ZjLPPJ4BIPcMGLIzY2Quna6rW2mKNTygb6tzJYzcBkOjnTJadL0v6lE0jeUhjYROvQobburnXpTHcUQNHHv8YrzKKUZttI2S-knLKyWsmu2VeTvsCYuaWmLcKbeti0U9FGVJHwnuq-OIKug9QDhhW9sOKzcbGzbCiN2dKPeKkDnCwEfIgXMftzlpc-pTvPQD_ETiM2xMXeQVrXaiHGnb0DaE7gLIOnqeRBkknhNloa0zWrovLOzoaXQsk4WgG_5_TQcHFFO05Y3YKPPBxbfi2O_EnSODyZ_0RbiaTO_7s2CczxdBsLyeLn6Wuj69qBWNjED7jEDjrMUkSiBEBu_jbz7uygIAAA">&nbsp;County Production&nbsp;</a>
+    </td>
+    <td class="BorderLines"><img src="/EWA/images/spacer.gif" height="1" width="1" alt=""></td>
+    <td width="10">&nbsp;</td>
+  </TR>
+</TABLE>
+
+        <table width="100%" class="TabBox2" cellspacing="0" cellpadding="4" border="0">
+          <tr>
+            <td><b>Search Criteria:</b></td>
+            <td align="right">
+              
+            </td>
+          </tr>
+	  <tr><td >
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <strong>
+    
+      Lease Name:&nbsp;WHIZ-Q EAST  UNIT
+    
+
+    
+
+    , Lease No.:&nbsp;253905
+
+    
+      , Well No.:&nbsp;10H
+    
+  </strong>
+  <br>
+
+
+
+  <strong>Well Type:</strong>
+  
+    
+    Gas
+  
+  <br>
+
+
+
+
+
+
+
+    
+    
+      
+    
+
+
+
+    
+    
+      
+    
+
+
+
+  <strong>District:</strong>
+  
+    
+    09
+  
+  <br>
+
+
+
+  
+    <strong>Lease Production and Disposition</strong>
+    <br>
+  
+  
+  
+
+
+
+  <strong>Date Range: </strong>
+  
+  
+  Aug
+
+
+  2022
+
+
+  <strong> - </strong>
+  
+  
+  Aug
+
+
+  2026
+<br>
+
+</td>
+	    <td valign="bottom">
+              <table style="width:100%; margin: auto;">
+                <tr>
+                  <td valign="bottom">
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/specificLeaseQueryAction.do?methodToCall=unspecified&searchArgs.paramValue=|2=08|3=2022|4=08|5=2026|6=G|8=specificLease|9=prodAndTotalDisp|10=0|102=09|103=253905|204=district&rrcActionMan=H4sIAAAAAAAAAG2PO2_DMAyEf026FBBkyQ7sgYOQPpYufaAdgg6sxCQCHEug5D4A_fjKbpcC3Y7kHe5jaaSEpjSyAXnBbI3NPkwPlt1evkJZro-EbE-XO_aZ2OPq_aA3jDEpUSMi0ycmcQzvG23aVleDgo26uX4xVepFpkjWH7y9I0x0PxN__fQIF6qlhTPlU3BPYYfjWBcdzNNvhFyd-3_Y9mnFMnxMIiLj-RnHmSqyAtkXDUoqVdpFd4veli3clh7-kJQBIgdnplqdcbzyKdY2kOsHcljpVacH2RVVKZ1Pmb3N3_vfx_s0AQAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+	    </td>
+	  </tr>
+          <tr>
+            <td colspan="2">
+              
+                
+                  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- lease type should be 'O', 'G' or 'Both' -->
+
+
+
+
+
+
+
+
+<table width="100%" class="DataGrid" border="1" cellpadding="2" cellspacing="0" bordercolor="#666666" summary="foo">
+  <tr>
+    <td colspan="9" height="15" class="PagerBanner">
+      
+        
+      
+
+
+
+
+
+
+
+
+
+
+
+
+  <table style="width:100%; white-space: nowrap;">
+    <tr>
+      <td style="text-align: left; border-style:none; font-weight: bold">
+        49 results
+      </td>
+      <td style="text-align: center; border-style:none;">
+        
+          
+            Page: 1 of 1 <!-- Simple case, single page output -->
+          
+
+          
+        
+      </td>
+
+      <!-- Page size control -->  
+      <td style="text-align: right; border-style:none;">
+        <label>
+          Page Size:
+          <select name="pager.pageSize" onchange="doSearch()"><option value="-1" selected="selected">View All</option>
+<option value="5">5</option>
+<option value="10">10</option>
+<option value="20">20</option>
+<option value="25">25</option></select>
+        </label>
+      </td>
+
+    </tr>
+  </table>
+
+
+
+    </td>
+  </tr>
+  <strong>
+    <tr>
+      
+        
+          
+            
+            
+            
+            
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2'>
+
+  <a href="Javascript:doSort('CYCLE_MONTH','ASC')">Date</a>
+
+  
+
+</th>
+
+
+        
+        
+      
+      
+      
+        <th colspan="2">GW Gas (MCF)</th>
+        <th colspan="2">Condensate (BBL)</th>
+      
+
+      <th rowspan="2">Operator Name</th>
+      <th rowspan="2">Operator No.</th>
+      <th rowspan="2">Field Name</th>
+      <th rowspan="2">Field No.</th>
+    </tr>
+  </strong>
+
+  <strong>
+    <tr>
+      
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th>
+
+  <a href="Javascript:doSort('GAS_PROD_VOL','ASC')">Production</a>
+
+  
+
+</th>
+
+
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th>
+
+  <a href="Javascript:doSort('GAS_TOT_DISP','ASC')">Disposition</a>
+
+  
+
+</th>
+
+
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th>
+
+  <a href="Javascript:doSort('COND_PROD_VOL','ASC')">Production</a>
+
+  
+
+</th>
+
+
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th>
+
+  <a href="Javascript:doSort('COND_TOT_DISP','ASC')">Disposition</a>
+
+  
+
+</th>
+
+
+          
+        
+        
+      
+    </tr>
+  </strong>
+
+  
+    
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Aug
+          2022
+        </td>
+        
+        
+          <td nowrap align="right">6,263</td>
+          <td nowrap align="right">6,263</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td nowrap>DIVERSIFIED PRODUCTION LLC</td>
+        <td nowrap align="right">220903</td>
+        <td nowrap>NEWARK, EAST (BARNETT SHALE)</td>
+        <td nowrap>65280200</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Sep
+          2022
+        </td>
+        
+        
+          <td nowrap align="right">7,094</td>
+          <td nowrap align="right">7,094</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Oct
+          2022
+        </td>
+        
+        
+          <td nowrap align="right">7,003</td>
+          <td nowrap align="right">7,003</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Nov
+          2022
+        </td>
+        
+        
+          <td nowrap align="right">6,416</td>
+          <td nowrap align="right">6,416</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Dec
+          2022
+        </td>
+        
+        
+          <td nowrap align="right">6,562</td>
+          <td nowrap align="right">6,562</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jan
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">6,277</td>
+          <td nowrap align="right">6,277</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Feb
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">6,489</td>
+          <td nowrap align="right">6,489</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Mar
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">6,904</td>
+          <td nowrap align="right">6,904</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Apr
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">6,358</td>
+          <td nowrap align="right">6,358</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          May
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">5,787</td>
+          <td nowrap align="right">5,787</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jun
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">6,516</td>
+          <td nowrap align="right">6,516</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jul
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">1,584</td>
+          <td nowrap align="right">1,584</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Aug
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">70</td>
+          <td nowrap align="right">70</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Sep
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">45</td>
+          <td nowrap align="right">45</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Oct
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">301</td>
+          <td nowrap align="right">301</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Nov
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">3,016</td>
+          <td nowrap align="right">3,016</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Dec
+          2023
+        </td>
+        
+        
+          <td nowrap align="right">1,220</td>
+          <td nowrap align="right">1,220</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jan
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">1,142</td>
+          <td nowrap align="right">1,142</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Feb
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">696</td>
+          <td nowrap align="right">696</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Mar
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">274</td>
+          <td nowrap align="right">274</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Apr
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          May
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jun
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jul
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Aug
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Sep
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Oct
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">1</td>
+          <td nowrap align="right">1</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Nov
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Dec
+          2024
+        </td>
+        
+        
+          <td nowrap align="right">1</td>
+          <td nowrap align="right">1</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jan
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">3</td>
+          <td nowrap align="right">3</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Feb
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Mar
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">35</td>
+          <td nowrap align="right">35</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Apr
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">1</td>
+          <td nowrap align="right">1</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          May
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">19</td>
+          <td nowrap align="right">19</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jun
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">33</td>
+          <td nowrap align="right">33</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jul
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Aug
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Sep
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Oct
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Nov
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Dec
+          2025
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jan
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Feb
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Mar
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Apr
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          May
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+          <td nowrap align="right">0</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jun
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Jul
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+        
+        
+        <td nowrap>EAGLERIDGE OPERATING, LLC</td>
+        <td nowrap align="right">238462</td>
+        <td nowrap>NEWARK, EAST (BARNETT SHALE)</td>
+        <td nowrap>65280200</td>
+        
+      </tr>
+      
+    
+      
+      <tr>
+        <td nowrap align="right">
+          
+          
+          Aug
+          2026
+        </td>
+        
+        
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+          <td nowrap align="right">NO RPT</td>
+        
+        
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        <td>&nbsp;</td>
+        
+      </tr>
+      
+    
+
+    
+    
+      
+        <tr>
+          <td nowrap><strong>Total</strong></td>
+          
+          
+            <td nowrap align="right">80,110</td>
+            <td nowrap align="right">80,110</td>
+            <td nowrap align="right">0</td>
+            <td nowrap align="right">0</td>
+          
+          <td>&nbsp;</td>
+          <td>&nbsp;</td>
+          <td>&nbsp;</td>
+          <td>&nbsp;</td>
+        </tr>
+      
+    
+  
+</table>
+
+
+                
+                
+                
+              
+            </td>
+          </tr>
+
+          <tr>
+            <td colspan="2">
+              <table style="width:100%; margin: auto;">
+                <tr>
+                  <td align="left">
+                    
+		    
+                    
+                    
+		    <input type="button" name="unused" value="Download" onclick="generateSpecificLeaseCSVReport();">
+                  </td>
+                  <td>
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/specificLeaseQueryAction.do?methodToCall=unspecified&searchArgs.paramValue=|2=08|3=2022|4=08|5=2026|6=G|8=specificLease|9=prodAndTotalDisp|10=0|102=09|103=253905|204=district&rrcActionMan=H4sIAAAAAAAAAG2PO2_DMAyEf026FBBkyQ7sgYOQPpYufaAdgg6sxCQCHEug5D4A_fjKbpcC3Y7kHe5jaaSEpjSyAXnBbI3NPkwPlt1evkJZro-EbE-XO_aZ2OPq_aA3jDEpUSMi0ycmcQzvG23aVleDgo26uX4xVepFpkjWH7y9I0x0PxN__fQIF6qlhTPlU3BPYYfjWBcdzNNvhFyd-3_Y9mnFMnxMIiLj-RnHmSqyAtkXDUoqVdpFd4veli3clh7-kJQBIgdnplqdcbzyKdY2kOsHcljpVacH2RVVKZ1Pmb3N3_vfx_s0AQAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</form>
+
+
+        </td>
+      </tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td><table style="width: 100%" class="MainFooter">
+  <tr><td style="width: 100%;" class="BorderLines"></td></tr>
+  <tr>
+    <td style="width: 100%; height: 100%;" align="center" class="MainFooter">
+      <a target="_blank" href="http://www.rrc.texas.gov/site-policies/">Disclaimer</a> |
+      <a target="_blank" href="http://www.rrc.texas.gov">RRC Home</a> |
+      <a href="mailto:helpdesk@rrc.texas.gov?subject=Oil & Gas Queries">Contact</a>
+    </td>
+  </tr>
+</table>
+</td></tr>
+    </table>
+  </body>
+</html>
+

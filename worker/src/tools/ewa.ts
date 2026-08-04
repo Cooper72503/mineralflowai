@@ -592,11 +592,24 @@ export async function getProduction(leaseNumber: string | null, district: string
 
     if (/no results found/i.test(html)) return { status: "not_found" };
 
-    // Real table (class="DataGrid") has a two-row header via colspan: "OIL
-    // (BBL)" spans [Production, Disposition], "Casinghead (MCF)" spans
-    // [Production, Disposition] — confirmed live against the real DOM, not
-    // the generic findDataTable/rowsToObjects helper, which assumes a flat
-    // single-row header and would misalign every column here.
+    // Real table (class="DataGrid") has a two-row header via colspan, and
+    // the columns DIFFER by which lease type (lt) was queried — confirmed
+    // live against the real DOM for both:
+    //   lt="O": "OIL (BBL)" spans [Production, Disposition] (cells 1-2),
+    //           "Casinghead (MCF)" spans [Production, Disposition] (cells 3-4).
+    //   lt="G": "GW Gas (MCF)" spans [Production, Disposition] (cells 1-2),
+    //           "Condensate (BBL)" spans [Production, Disposition] (cells 3-4).
+    // Previously this always read cells[1]->oil_bbl and cells[3]->casinghead_gas_mcf
+    // regardless of lt, which silently mislabeled every gas-type lease's real
+    // gas volume (MCF) as oil_bbl and its condensate (BBL) as casinghead gas —
+    // confirmed live against lease 253905/district 09 (a real Barnett Shale
+    // gas well, GIS-confirmed "Gas Well" symbol, API 42-439-34308): the "G"
+    // query returned real production (e.g. 6,263 in cell[1]) that the old
+    // code recorded as oil_bbl on a well that produces no oil at all. Neither
+    // query carries a water column, so water_bbl stays null (honest gap, not
+    // a fabricated field) for both types — not the generic findDataTable/
+    // rowsToObjects helper either way, since that assumes a flat single-row
+    // header and would misalign every column here.
     const $ = cheerio.load(html);
     const table = $("table.DataGrid").first();
     if (!table.length) return { status: "parse_failed" };
@@ -609,7 +622,14 @@ export async function getProduction(leaseNumber: string | null, district: string
       if (!dateMatch) return; // skips header/total/pagination rows
       const monthNum = MONTH_NUM[dateMatch[1]];
       if (!monthNum) return;
-      rows.push({
+      rows.push(lt === "G" ? {
+        production_month:   `${dateMatch[2]}-${monthNum}`,
+        oil_bbl:            null,
+        gas_mcf:            parseNum(cells[1]),
+        casinghead_gas_mcf: null,
+        condensate_bbl:     parseNum(cells[3]),
+        water_bbl:          null,
+      } : {
         production_month:   `${dateMatch[2]}-${monthNum}`,
         oil_bbl:            parseNum(cells[1]),
         gas_mcf:            null,
