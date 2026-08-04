@@ -170,6 +170,18 @@ export const TRRC_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_oil_proration",
+    description: "Get TRRC's Oil Proration Query records for a lease — per-well status (PRODUCING/SHUT IN), tested potential (BBL), gas/oil ratio, acreage, and daily allowable. The daily_allowable field reads 'FORMS LACKING' instead of a number when the operator has NOT filed the required potential/allowable test paperwork for that wellbore — a real regulatory-compliance gap worth flagging, distinct from a normal shut-in well. Do not compare the allowable value itself against actual production as a compliance check — Texas has not enforced binding market-demand allowables since the 1970s, so for a normally producing well this figure is set non-restrictively and would not indicate anything meaningful.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        lease_number: { type: "string", description: "Lease number" },
+        district:     { type: "string", description: "District code" },
+      },
+      required: ["lease_number", "district"],
+    },
+  },
+  {
     name: "get_county_records",
     description: "Search county clerk real property records (deeds, mineral deeds, leases, assignments, releases, liens) by grantor/grantee name — typically the operator name or a mineral owner name. This is COUNTY data, not TRRC data, and is only automated for a small set of counties so far (Midland, Reeves, Reagan, Live Oak) — for any other county this returns a manual-search link instead of records, which is expected and should be reported as such, not treated as a failure. Use the well's resolved county and the operator name as the search value.",
     input_schema: {

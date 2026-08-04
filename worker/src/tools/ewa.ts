@@ -706,6 +706,89 @@ export async function getGathererPurchaser(leaseNumber: string | null, district:
   }
 }
 
+// ─── S9b — Oil Proration Query ───────────────────────────────────────────────
+//
+// Investigated in response to a user question about "oil purchase/sale
+// tickets" — TRRC does not publish those (they're private commercial
+// documents between operator and purchaser, never filed with the
+// Commission; confirmed live 2026-08-04 against the full 12-item EWA query
+// menu, none of which is a sale/purchase-ticket query). This is a
+// different, genuinely useful thing found while checking: Oil Proration
+// Query returns a real per-well status (PRODUCING/SHUT IN, a third,
+// TRRC-sourced status signal alongside GIS-symbol status and the retired
+// wellStatusQueryAction.do) plus a "Daily Allowable" column that reads
+// "FORMS LACKING" instead of a number when the operator hasn't filed the
+// required potential/allowable test paperwork for that wellbore — a real
+// regulatory-compliance gap, not fabricated. The allowable VALUE itself
+// (when present) is deliberately not compared against actual production
+// here: Texas stopped enforcing binding market-demand allowables in the
+// 1970s, so for a normally producing well the allowable is set
+// non-restrictively and an actual-vs-allowable check would essentially
+// never fire — the "FORMS LACKING" flag is the part of this data that's
+// actually informative.
+//
+// Confirmed live against lease 52210 district 08 (XTO Sprabery unit, 11
+// real wellbores): 3 of 6 checked wells were SHUT IN with FORMS LACKING,
+// the rest PRODUCING with a real allowable value like "166# / 5676".
+// Queried by lease + district like severance/gatherer-purchaser — the
+// plain ewaFetch POST pattern works here with no actionManager
+// bean-binding boilerplate (unlike specificLeaseQueryAction.do).
+
+export interface OilProrationWell {
+  api_no: string;
+  well_no: string;
+  field_name: string;
+  operator_name: string;
+  potential_bbl: string;
+  gas_oil_ratio: string;
+  acres: string;
+  daily_allowable: string;
+  status: string;         // PRODUCING / SHUT IN / etc — TRRC's own column header calls this "Unit or Well Type" but the values are status text
+  forms_lacking: boolean; // true when daily_allowable reads "FORMS LACKING" — missing required potential/allowable test filing
+}
+
+export async function getOilProration(leaseNumber: string | null, district: string | null): Promise<{
+  found: boolean;
+  wells: OilProrationWell[];
+  message: string;
+  error?: string;
+}> {
+  if (!leaseNumber || !district) return { found: false, wells: [], message: "Need lease number and district for oil proration lookup", error: "Need lease number and district for oil proration lookup" };
+
+  try {
+    const html = await ewaFetch("oilProQueryAction.do", {
+      "searchArgs.leaseNumberArg":  leaseNumber,
+      "searchArgs.districtCodeArg": normalizeDistrictForQuery(district),
+    });
+    if (/no results found/i.test(html)) return { found: false, wells: [], message: `No oil proration record on file for lease ${leaseNumber} district ${district}` };
+
+    const table = findDataTable(html, 14);
+    if (!table) return { found: false, wells: [], message: "Could not parse oil proration response", error: "Could not parse oil proration response" };
+
+    const wells: OilProrationWell[] = table.rows
+      .filter(r => /^\d+$/.test(r[0] ?? ""))
+      .map(r => {
+        const daily_allowable = (r[14] ?? "").trim();
+        return {
+          api_no: r[0] ?? "",
+          well_no: r[4] ?? "",
+          field_name: r[6] ?? "",
+          operator_name: r[9] ?? "",
+          potential_bbl: r[11] ?? "",
+          gas_oil_ratio: r[12] ?? "",
+          acres: r[13] ?? "",
+          daily_allowable,
+          status: (r[15] ?? "").trim(),
+          forms_lacking: daily_allowable.toUpperCase() === "FORMS LACKING",
+        };
+      });
+
+    return { found: wells.length > 0, wells, message: `${wells.length} well(s) on lease ${leaseNumber} in Oil Proration Query` };
+  } catch (e) {
+    return { found: false, wells: [], message: `Error: ${String(e)}`, error: String(e) };
+  }
+}
+
 // ─── S10 — Completion Records (W-2) ──────────────────────────────────────────
 
 // Completion records are NOT on the EWA app at all — confirmed live

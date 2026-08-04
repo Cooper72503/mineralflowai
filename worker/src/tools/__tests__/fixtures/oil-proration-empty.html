@@ -1,0 +1,658 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8;"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=5, IE=8, IE=9, IE=10" />
+    <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+
+    <script type="text/javascript">
+      var dojoConfig = {
+      parseOnLoad: true,
+      isDebug: false,
+
+      has: {
+      "dojo-debug-messages": false
+      },
+
+      packages:
+       [ { name:"rrcGisModules", location:location.pathname.replace(/\/[^/]+$/, '') + '/gis/javascript'} ]
+
+      };
+    </script>
+
+    <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.3compact"></script>
+    <script type="text/javascript"> 
+      require(["dojo/parser", "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dojo/query", 
+               "dojo/dom-construct", "dojo/NodeList-manipulate", "dojo/dom-attr", "dojo/dom",
+               "dojo/_base/connect", "dojo/_base/event"]);
+    </script>
+
+    <title>Oil Proration Query</title>
+  </head>
+
+  <body>
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td>
+
+
+
+
+
+<script type="text/javascript">
+function openHelp(obj) {
+
+  var help = '/EWA/help/' + obj;
+  //alert(help+', '+obj);
+
+  hold = window.open(help, 'popupWindow',
+                     'resizable=yes,menubar=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');
+  hold.focus();
+  return false;
+}
+</script>
+
+<!-- System Header -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/rrc_online_header.gif"></td>
+    <td class="MainHeader" align="right" nowrap>&nbsp;</td>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+  </tr>
+  <tr><td colspan="3" style="height: 3px;" class="BorderLines"/></tr>
+</table>
+
+<!--Application Header-->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr> 
+    <td class="AppHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+    <td class="AppHeader">Oil & Gas Data Query</td>
+  </tr>
+</table>
+
+<!-- Top Nav Level 2 -->
+<!--Navigation Table Level 2 and 3 -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr><td colspan="2" style="height: 2px;" class="BorderLines"/></tr>
+  <!--Level 2 navigation row-->
+  <tr>
+    <td class="AppNavMain" width="1%"><img src="/EWA/commonuiImages/spacer.gif" height="1px"></td>
+    <td class="AppNavMain">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Main -->
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <td class="AppNavMainSelected">
+            <a href="/EWA/ewaMain.do">Query Menu</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help-->
+          <td class="AppNavMain">
+            
+            <a href="#" onclick="openHelp('Oil_Proration_TOC.html');">Help</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help END-->
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td colspan="2" style="height: 1px;" class="BorderLines"/></tr>
+</table>
+
+</td></tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr valign="top">
+        <td style="width: 100%;" class="ContentArea">
+          <span id="messageArea">
+
+
+
+
+
+<!-- /tiles/messages.jsp BEGIN -->
+
+  
+
+
+
+  <tr><td>&nbsp;</td></tr>
+  <tr>
+    <td style="white-space: nowrap;">
+      <ul>
+        
+        
+          
+            <li><font color=red>Please correct the errors listed below.</font></li>
+          
+            <li><font color=red>(Ewa_117) No results found.</font></li>
+          
+        
+      </ul>
+    </td>
+  </tr>
+
+
+<!-- /tiles/messages.jsp END -->
+</span>
+          
+
+
+
+
+
+
+
+
+
+<script type="text/javascript" src="/EWA/js/ewaPageUtils.js"></script>
+
+
+<script>
+  function submitLeaseQuery() {
+    document.forms["oilProQueryActionForm"].methodToCall.value = "toLeaseQuery";
+    document.forms["oilProQueryActionForm"].submit();
+  }
+
+  function submitFieldQuery() {
+    document.forms["oilProQueryActionForm"].methodToCall.value = "toFieldQuery";
+    document.forms["oilProQueryActionForm"].submit();
+  }
+
+  function submitOperatorQuery() {
+    document.forms["oilProQueryActionForm"].methodToCall.value = "toOperatorQuery";
+    document.forms["oilProQueryActionForm"].submit();
+  }
+
+  function resetForm() {
+    document.forms["oilProQueryActionForm"].methodToCall.value = "resetForm";
+    document.forms["oilProQueryActionForm"].submit();
+  }
+
+  function autoTab(obj) {
+    var field_length = 0;
+    var len = 3;
+    if (obj.value.length != field_length) {
+      field_length = obj.value.length;
+      if (field_length == len) {
+        document.forms['oilProQueryActionForm'].apiSuffixArg.focus();
+      }
+    }
+  }
+</script>
+
+<!--Content Area-->
+<!--Anchor for Accessibility Skip Navigation Link-->
+<a name="contentstart"></a>
+
+<form name="oilProQueryActionForm" method="post" action="/EWA/oilProQueryAction.do">
+  <input type="hidden" name="methodToCall" value="search">
+  <input type="hidden" name="searchArgs.fieldNumbersArg" value="">
+  <input type="hidden" name="searchArgs.operatorNumbersArg" value="">
+
+  <table class="ewaPage">
+    <tr>
+      <td>
+        <h2 class="style5">
+          Oil Proration Schedule Query Criteria for
+          August 2026
+        </h2>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" align="left">
+        <table class="TabBox2" cellspacing="0" cellpadding="8" border="0">
+          <tr><td>Enter your search criteria and click on Submit to view the results.</td></tr>
+          <tr>
+            <td>
+              <table class="GroupBox1" cellspacing="0" cellpadding="4" border="0" summary="foo">
+                <tr>
+                  <th colspan="3">Search Criteria</th>
+                </tr>
+
+                <!-- District dropdown. -->
+                <tr>
+                  <td align="right">
+                    District:
+                  </td>
+                  <td colspan="2">
+                    <select name="searchArgs.districtCodeArg"><option value="None Selected">None Selected</option>
+                      <option value="01">01</option>
+<option value="02">02</option>
+<option value="03">03</option>
+<option value="04">04</option>
+<option value="05">05</option>
+<option value="06">06</option>
+<option value="6E">6E</option>
+<option value="7B">7B</option>
+<option value="7C">7C</option>
+<option value="08" selected="selected">08</option>
+<option value="8A">8A</option>
+<option value="09">09</option>
+<option value="10">10</option></select>
+                  </td>
+                </tr>
+                <!-- API Unique No. -->
+                <tr>
+                  <td align="right">
+                    API Unique No.:
+                  </td>
+                  <td colspan="2">
+                    42 -
+                    <input type="text" name="searchArgs.apiPrefixArg" maxlength="3" size="3" value="" onkeyup="autoTab(this)">
+                    - <input type="text" name="searchArgs.apiSuffixArg" maxlength="5" size="5" value="" id="apiSuffixArg">
+                  </td>
+                </tr>
+                <!-- Oil lease text input. -->
+                <tr>
+                  <td align="right">
+                    Oil Lease No./Gas Well ID No:
+                  </td>
+                  <td>
+                    <input type="text" name="searchArgs.leaseNumberArg" maxlength="5" size="5" value="00001">
+                  </td>
+                  <td>
+                    <input type="button" name="unused" value="Search for Lease" onclick="submitLeaseQuery()">
+                  </td>
+                </tr>
+                <!-- Type Well dropdown. -->
+                <tr>
+                  <td align="right">
+                    Type Well:
+                  </td>
+                  <td colspan="2">
+                    <select name="searchArgs.oilWellTypeArg"><option value="None Selected">None Selected</option>
+                      <option value="AB">ABANDONED</option>
+<option value="BM">BRINE MINING</option>
+<option value="GJ">GAS STRG-INJECTION</option>
+<option value="GL">GAS STRG-SALT FORMATION</option>
+<option value="GT">GEOTHERMAL WELL</option>
+<option value="IN">INJECTION</option>
+<option value="LP">LPG STORAGE</option>
+<option value="NP">NO PRODUCTION</option>
+<option value="OB">OBSERVATION</option>
+<option value="OS">OTHER TYPE SERVICE</option>
+<option value="PP">PARTIAL PLUG</option>
+<option value="PR">PRODUCING</option>
+<option value="SH">SHUT IN</option>
+<option value="SM">SHUT IN-MULTI-COMPL</option>
+<option value="TA">TEMP ABANDONED</option>
+<option value="WS">WATER SUPPLY</option></select>
+                  </td>
+                </tr>
+                <!-- Field type dropdown. -->
+                <tr>
+                  <td align="right">
+                    Field Type:
+                  </td>
+                  <td colspan="2">
+                    <select name="searchArgs.oilFieldTypeCodeArg"><option value="None Selected">None Selected</option>
+                      <option value="1">Regular</option>
+<option value="2">New Pooled Discovery Exempt</option>
+<option value="3">Reservoir MER</option>
+<option value="5">Salt Dome</option>
+<option value="6">County Regular</option></select>
+                  </td>
+                </tr>
+                <!-- County dropdown. -->
+                <tr>
+                  <td align="right">
+                    County:
+                  </td>
+                  <td colspan="2">
+                    <select name="searchArgs.countyCodeArg"><option value="None Selected">None Selected</option>
+                      <option value="001">ANDERSON</option>
+<option value="003">ANDREWS</option>
+<option value="005">ANGELINA</option>
+<option value="007">ARANSAS</option>
+<option value="009">ARCHER</option>
+<option value="011">ARMSTRONG</option>
+<option value="013">ATASCOSA</option>
+<option value="015">AUSTIN</option>
+<option value="017">BAILEY</option>
+<option value="019">BANDERA</option>
+<option value="021">BASTROP</option>
+<option value="023">BAYLOR</option>
+<option value="025">BEE</option>
+<option value="027">BELL</option>
+<option value="029">BEXAR</option>
+<option value="031">BLANCO</option>
+<option value="033">BORDEN</option>
+<option value="035">BOSQUE</option>
+<option value="037">BOWIE</option>
+<option value="039">BRAZORIA</option>
+<option value="041">BRAZOS</option>
+<option value="043">BREWSTER</option>
+<option value="045">BRISCOE</option>
+<option value="047">BROOKS</option>
+<option value="049">BROWN</option>
+<option value="051">BURLESON</option>
+<option value="053">BURNET</option>
+<option value="055">CALDWELL</option>
+<option value="057">CALHOUN</option>
+<option value="059">CALLAHAN</option>
+<option value="061">CAMERON</option>
+<option value="063">CAMP</option>
+<option value="065">CARSON</option>
+<option value="067">CASS</option>
+<option value="069">CASTRO</option>
+<option value="071">CHAMBERS</option>
+<option value="073">CHEROKEE</option>
+<option value="075">CHILDRESS</option>
+<option value="077">CLAY</option>
+<option value="079">COCHRAN</option>
+<option value="081">COKE</option>
+<option value="083">COLEMAN</option>
+<option value="085">COLLIN</option>
+<option value="087">COLLINGSWORTH</option>
+<option value="089">COLORADO</option>
+<option value="091">COMAL</option>
+<option value="093">COMANCHE</option>
+<option value="095">CONCHO</option>
+<option value="097">COOKE</option>
+<option value="099">CORYELL</option>
+<option value="101">COTTLE</option>
+<option value="103">CRANE</option>
+<option value="105">CROCKETT</option>
+<option value="107">CROSBY</option>
+<option value="109">CULBERSON</option>
+<option value="111">DALLAM</option>
+<option value="113">DALLAS</option>
+<option value="115">DAWSON</option>
+<option value="117">DEAF SMITH</option>
+<option value="119">DELTA</option>
+<option value="121">DENTON</option>
+<option value="123">DE WITT</option>
+<option value="125">DICKENS</option>
+<option value="127">DIMMIT</option>
+<option value="129">DONLEY</option>
+<option value="131">DUVAL</option>
+<option value="133">EASTLAND</option>
+<option value="135">ECTOR</option>
+<option value="137">EDWARDS</option>
+<option value="139">ELLIS</option>
+<option value="141">EL PASO</option>
+<option value="143">ERATH</option>
+<option value="145">FALLS</option>
+<option value="147">FANNIN</option>
+<option value="149">FAYETTE</option>
+<option value="151">FISHER</option>
+<option value="153">FLOYD</option>
+<option value="155">FOARD</option>
+<option value="157">FORT BEND</option>
+<option value="159">FRANKLIN</option>
+<option value="161">FREESTONE</option>
+<option value="163">FRIO</option>
+<option value="165">GAINES</option>
+<option value="167">GALVESTON</option>
+<option value="169">GARZA</option>
+<option value="171">GILLESPIE</option>
+<option value="173">GLASSCOCK</option>
+<option value="175">GOLIAD</option>
+<option value="177">GONZALES</option>
+<option value="179">GRAY</option>
+<option value="181">GRAYSON</option>
+<option value="183">GREGG</option>
+<option value="185">GRIMES</option>
+<option value="187">GUADALUPE</option>
+<option value="189">HALE</option>
+<option value="191">HALL</option>
+<option value="193">HAMILTON</option>
+<option value="195">HANSFORD</option>
+<option value="197">HARDEMAN</option>
+<option value="199">HARDIN</option>
+<option value="201">HARRIS</option>
+<option value="203">HARRISON</option>
+<option value="205">HARTLEY</option>
+<option value="207">HASKELL</option>
+<option value="209">HAYS</option>
+<option value="211">HEMPHILL</option>
+<option value="213">HENDERSON</option>
+<option value="215">HIDALGO</option>
+<option value="217">HILL</option>
+<option value="219">HOCKLEY</option>
+<option value="221">HOOD</option>
+<option value="223">HOPKINS</option>
+<option value="225">HOUSTON</option>
+<option value="227">HOWARD</option>
+<option value="229">HUDSPETH</option>
+<option value="231">HUNT</option>
+<option value="233">HUTCHINSON</option>
+<option value="235">IRION</option>
+<option value="237">JACK</option>
+<option value="239">JACKSON</option>
+<option value="241">JASPER</option>
+<option value="243">JEFF DAVIS</option>
+<option value="245">JEFFERSON</option>
+<option value="247">JIM HOGG</option>
+<option value="249">JIM WELLS</option>
+<option value="251">JOHNSON</option>
+<option value="253">JONES</option>
+<option value="255">KARNES</option>
+<option value="257">KAUFMAN</option>
+<option value="259">KENDALL</option>
+<option value="261">KENEDY</option>
+<option value="263">KENT</option>
+<option value="265">KERR</option>
+<option value="267">KIMBLE</option>
+<option value="269">KING</option>
+<option value="271">KINNEY</option>
+<option value="273">KLEBERG</option>
+<option value="275">KNOX</option>
+<option value="277">LAMAR</option>
+<option value="279">LAMB</option>
+<option value="281">LAMPASAS</option>
+<option value="283">LA SALLE</option>
+<option value="285">LAVACA</option>
+<option value="287">LEE</option>
+<option value="289">LEON</option>
+<option value="291">LIBERTY</option>
+<option value="293">LIMESTONE</option>
+<option value="295">LIPSCOMB</option>
+<option value="297">LIVE OAK</option>
+<option value="299">LLANO</option>
+<option value="301">LOVING</option>
+<option value="303">LUBBOCK</option>
+<option value="305">LYNN</option>
+<option value="307">MCCULLOCH</option>
+<option value="309">MCLENNAN</option>
+<option value="311">MCMULLEN</option>
+<option value="313">MADISON</option>
+<option value="315">MARION</option>
+<option value="317">MARTIN</option>
+<option value="319">MASON</option>
+<option value="321">MATAGORDA</option>
+<option value="323">MAVERICK</option>
+<option value="325">MEDINA</option>
+<option value="327">MENARD</option>
+<option value="329">MIDLAND</option>
+<option value="331">MILAM</option>
+<option value="333">MILLS</option>
+<option value="335">MITCHELL</option>
+<option value="337">MONTAGUE</option>
+<option value="339">MONTGOMERY</option>
+<option value="341">MOORE</option>
+<option value="343">MORRIS</option>
+<option value="345">MOTLEY</option>
+<option value="347">NACOGDOCHES</option>
+<option value="349">NAVARRO</option>
+<option value="351">NEWTON</option>
+<option value="353">NOLAN</option>
+<option value="355">NUECES</option>
+<option value="357">OCHILTREE</option>
+<option value="359">OLDHAM</option>
+<option value="361">ORANGE</option>
+<option value="363">PALO PINTO</option>
+<option value="365">PANOLA</option>
+<option value="367">PARKER</option>
+<option value="369">PARMER</option>
+<option value="371">PECOS</option>
+<option value="373">POLK</option>
+<option value="375">POTTER</option>
+<option value="377">PRESIDIO</option>
+<option value="379">RAINS</option>
+<option value="381">RANDALL</option>
+<option value="383">REAGAN</option>
+<option value="385">REAL</option>
+<option value="387">RED RIVER</option>
+<option value="389">REEVES</option>
+<option value="391">REFUGIO</option>
+<option value="393">ROBERTS</option>
+<option value="395">ROBERTSON</option>
+<option value="397">ROCKWALL</option>
+<option value="399">RUNNELS</option>
+<option value="401">RUSK</option>
+<option value="403">SABINE</option>
+<option value="405">SAN AUGUSTINE</option>
+<option value="407">SAN JACINTO</option>
+<option value="409">SAN PATRICIO</option>
+<option value="411">SAN SABA</option>
+<option value="413">SCHLEICHER</option>
+<option value="415">SCURRY</option>
+<option value="417">SHACKELFORD</option>
+<option value="419">SHELBY</option>
+<option value="421">SHERMAN</option>
+<option value="423">SMITH</option>
+<option value="425">SOMERVELL</option>
+<option value="427">STARR</option>
+<option value="429">STEPHENS</option>
+<option value="431">STERLING</option>
+<option value="433">STONEWALL</option>
+<option value="435">SUTTON</option>
+<option value="437">SWISHER</option>
+<option value="439">TARRANT</option>
+<option value="441">TAYLOR</option>
+<option value="443">TERRELL</option>
+<option value="445">TERRY</option>
+<option value="447">THROCKMORTON</option>
+<option value="449">TITUS</option>
+<option value="451">TOM GREEN</option>
+<option value="453">TRAVIS</option>
+<option value="455">TRINITY</option>
+<option value="457">TYLER</option>
+<option value="459">UPSHUR</option>
+<option value="461">UPTON</option>
+<option value="463">UVALDE</option>
+<option value="465">VAL VERDE</option>
+<option value="467">VAN ZANDT</option>
+<option value="469">VICTORIA</option>
+<option value="471">WALKER</option>
+<option value="473">WALLER</option>
+<option value="475">WARD</option>
+<option value="477">WASHINGTON</option>
+<option value="479">WEBB</option>
+<option value="481">WHARTON</option>
+<option value="483">WHEELER</option>
+<option value="485">WICHITA</option>
+<option value="487">WILBARGER</option>
+<option value="489">WILLACY</option>
+<option value="491">WILLIAMSON</option>
+<option value="493">WILSON</option>
+<option value="495">WINKLER</option>
+<option value="497">WISE</option>
+<option value="499">WOOD</option>
+<option value="501">YOAKUM</option>
+<option value="503">YOUNG</option>
+<option value="505">ZAPATA</option>
+<option value="507">ZAVALA</option>
+<option value="600">S PADRE IS-SB</option>
+<option value="601">N PADRE IS-SB</option>
+<option value="602">MUSTANG IS-SB</option>
+<option value="603">MATGRDA IS-SB</option>
+<option value="604">BRAZOS-SB</option>
+<option value="605">GALVESTON-SB</option>
+<option value="606">HIGH IS-SB</option>
+<option value="700">S PADRE IS-LB</option>
+<option value="701">N PADRE IS-LB</option>
+<option value="702">MUSTANG IS-LB</option>
+<option value="703">MATGRDA IS-LB</option>
+<option value="704">BRAZOS-LB</option>
+<option value="705">BRAZOS-S</option>
+<option value="706">GALVESTON-LB</option>
+<option value="707">GALVESTON-S</option>
+<option value="708">HIGH IS-LB</option>
+<option value="709">HIGH IS-S</option>
+<option value="710">HIGH IS-E</option>
+<option value="711">&quot;HIGH IS-E,S&quot;</option>
+<option value="712">MUSTANG IS-E</option>
+<option value="713">N PADRE IS-E</option>
+<option value="714">S PADRE IS-E</option>
+<option value="715">SABINE PASS</option></select>
+                  </td>
+                </tr>
+                <!-- Field selection and search. -->
+                <tr>
+                  <td align="right">
+                    Field(s):
+                  </td>
+                  <td>
+                    <select name="fieldNames" size="5" style="width: 300px;"></select>
+                  </td>
+                  <td>
+                    <input type="button" name="unused" value="Search for Field" onclick="submitFieldQuery()">
+                  </td>
+                </tr>
+                <!-- Operator selection and search. -->
+                <tr>
+                  <td align="right">
+                    Operator(s):
+                  </td>
+                  <td>
+                    <select name="operatorNames" size="5" style="width: 300px;"></select>
+                  </td>
+                  <td>
+                    <input type="button" name="unused" value="Search for Operator" onclick="submitOperatorQuery()">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Submit and reset buttons. -->
+          <tr>
+            <td>
+              <input type="submit" value="Submit">
+              <input type="reset" value="Reset" onclick="resetForm()">
+              <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/ewaMain.do');" style="float: right;" title="Return Button">
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <tr><td>&nbsp;</td></tr>
+  </table>
+</form>
+
+
+        </td>
+      </tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td><table style="width: 100%" class="MainFooter">
+  <tr><td style="width: 100%;" class="BorderLines"></td></tr>
+  <tr>
+    <td style="width: 100%; height: 100%;" align="center" class="MainFooter">
+      <a target="_blank" href="http://www.rrc.texas.gov/site-policies/">Disclaimer</a> |
+      <a target="_blank" href="http://www.rrc.texas.gov">RRC Home</a> |
+      <a href="mailto:helpdesk@rrc.texas.gov?subject=Oil & Gas Queries">Contact</a>
+    </td>
+  </tr>
+</table>
+</td></tr>
+    </table>
+  </body>
+</html>
+

@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser, getCompletionRecords, normalizeDistrictForQuery } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser, getCompletionRecords, getOilProration, normalizeDistrictForQuery } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +35,8 @@ const gisSurveyJson = fs.readFileSync(path.join(__dirname, "fixtures/gis-survey.
 const gathererPurchaserEmptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/gatherer-purchaser-empty.html"), "utf8");
 const gathererPurchaserPopulatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/gatherer-purchaser-populated.html"), "utf8");
 const gasLeaseProductionHtml = fs.readFileSync(path.join(__dirname, "fixtures/production-gas-lease-populated.html"), "utf8");
+const oilProrationPopulatedHtml = fs.readFileSync(path.join(__dirname, "fixtures/oil-proration-populated.html"), "utf8");
+const oilProrationEmptyHtml = fs.readFileSync(path.join(__dirname, "fixtures/oil-proration-empty.html"), "utf8");
 
 // ─── Direct unit tests of the extraction primitives ────────────────────────
 
@@ -642,6 +644,68 @@ describe("getCompletionRecords — real cross-app CMPL flow", () => {
     mockFetchSequence(["<html></html>", "<html><body>no Completion link here</body></html>"]);
     const result = await getCompletionRecords("4215101734");
 
+    expect(result.found).toBe(false);
+    expect(result.error).toBeDefined();
+  });
+});
+
+// ─── getOilProration — real oilProQueryAction.do structure ─────────────────
+//
+// Fixture captured live 2026-08-04 against lease 52210 district 08 (a real
+// XTO Sprabery-trend unit, 11 wellbores). Ground truth read directly from
+// the response: well 0307BH shows daily_allowable "FORMS LACKING" and
+// status "SHUT IN" — a real, TRRC-sourced missing-filing condition, not a
+// parsing artifact (confirmed against 3 of 6 checked wells on this lease).
+
+describe("getOilProration — real oilProQueryAction.do table structure", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("parses real wells including API, status, and daily allowable", async () => {
+    mockFetchSequence(["<html></html>", oilProrationPopulatedHtml]);
+    const result = await getOilProration("52210", "08");
+
+    expect(result.found, `expected found:true, got message: "${result.message}"`).toBe(true);
+    expect(result.wells.length).toBeGreaterThan(0);
+
+    const producing = result.wells.find(w => w.api_no === "32943074");
+    expect(producing).toEqual({
+      api_no: "32943074", well_no: "0305BH", field_name: "SPRABERRY (TREND AREA)",
+      operator_name: "XTO ENERGY INC.", potential_bbl: "165.5", gas_oil_ratio: "1401",
+      acres: "120.26", daily_allowable: "166# / 5676", status: "PRODUCING", forms_lacking: false,
+    });
+  });
+
+  it("flags forms_lacking:true when daily_allowable reads 'FORMS LACKING', not just a missing/zero value", async () => {
+    mockFetchSequence(["<html></html>", oilProrationPopulatedHtml]);
+    const result = await getOilProration("52210", "08");
+
+    const shutIn = result.wells.find(w => w.api_no === "32943065");
+    expect(shutIn).toEqual({
+      api_no: "32943065", well_no: "0307BH", field_name: "SPRABERRY (TREND AREA)",
+      operator_name: "XTO ENERGY INC.", potential_bbl: "0.0", gas_oil_ratio: "0",
+      acres: "0.0", daily_allowable: "FORMS LACKING", status: "SHUT IN", forms_lacking: true,
+    });
+  });
+
+  it("never returns the leaked sub-header row ('Oil / Gas') as a well", async () => {
+    mockFetchSequence(["<html></html>", oilProrationPopulatedHtml]);
+    const result = await getOilProration("52210", "08");
+    expect(result.wells.every(w => /^\d+$/.test(w.api_no))).toBe(true);
+  });
+
+  it("genuine 'no results found' reports found:false with no error", async () => {
+    mockFetchSequence(["<html></html>", oilProrationEmptyHtml]);
+    const result = await getOilProration("00001", "08");
+    expect(result.found).toBe(false);
+    expect(result.wells).toEqual([]);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("requires lease number and district before attempting a lookup", async () => {
+    const result = await getOilProration(null, "08");
     expect(result.found).toBe(false);
     expect(result.error).toBeDefined();
   });

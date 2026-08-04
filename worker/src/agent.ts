@@ -216,6 +216,14 @@ async function dispatchTool(
       sourceName = "fetch_drilling_permits";
       break;
 
+    case "get_oil_proration":
+      result = await ewa.getOilProration(
+        input.lease_number ? String(input.lease_number) : state.leaseNumber,
+        input.district     ? String(input.district)     : state.district,
+      );
+      sourceName = "fetch_oil_proration";
+      break;
+
     case "get_coda_documents":
       result = await browser.getCodaDocuments(String(input.api_number ?? state.apiNumber ?? ""));
       sourceName = "fetch_coda_records";

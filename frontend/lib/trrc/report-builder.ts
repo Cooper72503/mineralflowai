@@ -568,6 +568,21 @@ export function generateFlags(
     important.push("NO P-4 GATHERER/PURCHASER ON FILE — production cannot legally be sold or transported from this lease without a registered gatherer/purchaser.");
   }
 
+  // Oil Proration Query "FORMS LACKING" — the operator has not filed the
+  // required potential/allowable test paperwork for one or more wellbores
+  // on this lease. A real TRRC-sourced regulatory-filing gap, not the same
+  // thing as a normal shut-in well (which still carries a real allowable).
+  const oilProration = getAttempt(attempts, "fetch_oil_proration");
+  const oilProrationWells = Array.isArray(oilProration?.["wells"]) ? (oilProration!["wells"] as Record<string, unknown>[]) : [];
+  const formsLackingWells = oilProrationWells.filter(w => w["forms_lacking"] === true);
+  if (formsLackingWells.length > 0) {
+    important.push(
+      `${formsLackingWells.length} WELL(S) WITH "FORMS LACKING" ON TRRC OIL PRORATION QUERY — required potential/allowable test ` +
+      `paperwork has not been filed for ${formsLackingWells.map(w => str(w["well_no"])).filter(Boolean).join(", ") || "one or more wellbores"}. ` +
+      `A real outstanding regulatory-filing gap, separate from a normal shut-in well.`,
+    );
+  }
+
   // Open compliance violations
   const violations = getAttempt(attempts, "fetch_compliance_violations");
   const openCount = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : 0;
@@ -1018,7 +1033,7 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
       React.createElement(Text, { style: S.subTitle }, "Type Curve / Analog Well Benchmarking"),
       !comparison || comparison.assessment === "Insufficient analog data"
         ? React.createElement(Text, { style: S.noteText },
-            "Offset-well production history is not available for this run — TRRC's offset-well GIS lookup (Section 7) returns location and status only, not production, since fetching each analog well's own history would mean many additional TRRC queries per report. Analog benchmarking requires that data to be separately retrieved.",
+            "Offset-well production history is not available for this run — TRRC's offset-well GIS lookup (Section 8) returns location and status only, not production, since fetching each analog well's own history would mean many additional TRRC queries per report. Analog benchmarking requires that data to be separately retrieved.",
           )
         : React.createElement(View, {},
             React.createElement(Text, { style: S.noteText },
@@ -1163,7 +1178,7 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
   );
 }
 
-// ─── Section 5 — Well Construction ───────────────────────────────────────────
+// ─── Section 6 — Well Construction ───────────────────────────────────────────
 
 function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1202,7 +1217,7 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 5 — WELL CONSTRUCTION"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 6 — WELL CONSTRUCTION"),
 
     React.createElement(Text, { style: S.subTitle }, "W-2 Completion Record (EWA Structured Data)"),
     compRecord ? React.createElement(View, { style: { marginBottom: 10 } },
@@ -1261,7 +1276,7 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 6 — Compliance and Legal Status ─────────────────────────────────
+// ─── Section 7 — Compliance and Legal Status ─────────────────────────────────
 
 function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1276,6 +1291,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   const injection  = getAttempt(attempts, "fetch_injection_records");
   const severance  = getAttempt(attempts, "fetch_severance_records");
   const gis        = getAttempt(attempts, "fetch_gis_plat");
+  const oilProration = getAttempt(attempts, "fetch_oil_proration");
 
   const inactiveRecords  = Array.isArray(inactive?.["records"])  ? (inactive!["records"]  as Record<string, unknown>[]) : [];
   const plugRecords      = Array.isArray(plugging?.["records"])  ? (plugging!["records"]  as Record<string, unknown>[]) : [];
@@ -1288,7 +1304,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   // EWA (confirmed live — not linked anywhere on the real menu). RRC's own
   // public GIS well-locations layer encodes real status in its map-symbol
   // field ("Oil Well", "Plugged Oil Well", "Permitted Location", etc.,
-  // confirmed live against real offset wells shown on the Section 7 map) —
+  // confirmed live against real offset wells shown on the Section 8 map) —
   // fall back to it rather than showing a permanent blank for a source that
   // can never succeed.
   const directStatus = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]);
@@ -1315,7 +1331,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 6 — COMPLIANCE AND LEGAL STATUS"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 7 — COMPLIANCE AND LEGAL STATUS"),
 
     kv(statusIsGisDerived ? "Well Status (RRC GIS Map Symbol)" : "Well Status (Official RRC)", statusStr || "—", /shut.in|inactive|plugged/i.test(statusStr) ? "yellow" : undefined),
     kv("Inactive Well Designation",  inactive?.["found"] ? "Yes" : inactive?.["found"] === false ? "No" : "—"),
@@ -1355,11 +1371,49 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
       return React.createElement(Text, { style: S.noteText }, "Severance/seal records not retrieved.");
     })(),
 
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Oil Proration Query — Per-Well Status & Filing"),
+    (() => {
+      const wells = Array.isArray(oilProration?.["wells"]) ? (oilProration!["wells"] as Record<string, unknown>[]) : [];
+      if (oilProration?.["found"] !== true || wells.length === 0) {
+        return React.createElement(Text, { style: S.noteText },
+          oilProration?.["found"] === false ? "No Oil Proration Query record on file for this lease." : "Oil Proration Query not retrieved.",
+        );
+      }
+      const formsLacking = wells.filter(w => w["forms_lacking"] === true);
+      return React.createElement(View, {},
+        formsLacking.length > 0 ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginBottom: 8 }] },
+          React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
+            `${formsLacking.length} of ${wells.length} wellbore(s) on this lease show "FORMS LACKING" — the required potential/allowable test has not been filed. Distinct from a routine shut-in: this is an outstanding regulatory filing gap.`,
+          ),
+        ) : React.createElement(Text, { style: S.noteText }, `${wells.length} wellbore(s) on this lease, all with a current allowable/potential filing on record.`),
+        React.createElement(View, { style: S.tableHeader },
+          React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "Well No."),
+          React.createElement(Text, { style: [S.tableHeaderCell, { width: "18%" }] }, "Status"),
+          React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%", textAlign: "right" }] }, "Potential (BBL)"),
+          React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%", textAlign: "right" }] }, "GOR"),
+          React.createElement(Text, { style: [S.tableHeaderCell, { width: "34%", textAlign: "right" }] }, "Daily Allowable"),
+        ),
+        ...wells.slice(0, 30).map((w, i) => React.createElement(
+          View, { key: String(i), style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+          React.createElement(Text, { style: [S.tableCellMono, { width: "16%" }] }, str(w["well_no"]) || "—"),
+          React.createElement(Text, { style: [S.tableCell, { width: "18%" }] }, str(w["status"]) || "—"),
+          React.createElement(Text, { style: [S.tableCellMono, { width: "16%", textAlign: "right" }] }, str(w["potential_bbl"]) || "—"),
+          React.createElement(Text, { style: [S.tableCellMono, { width: "16%", textAlign: "right" }] }, str(w["gas_oil_ratio"]) || "—"),
+          React.createElement(Text, { style: [S.tableCellMono, { width: "34%", textAlign: "right" }], }, w["forms_lacking"] === true
+            ? React.createElement(Text, { style: { color: C.yellow, fontFamily: "Helvetica-Bold" } }, "FORMS LACKING")
+            : (str(w["daily_allowable"]) || "—"),
+          ),
+        )),
+      );
+    })(),
+
     React.createElement(Footer, { generatedAt, runId: run.id }),
   );
 }
 
-// ─── Section 7 — Legal Description and Location ───────────────────────────────
+// ─── Section 8 — Legal Description and Location ───────────────────────────────
 
 function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1397,7 +1451,7 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 7 — LEGAL DESCRIPTION AND LOCATION"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — LEGAL DESCRIPTION AND LOCATION"),
 
     React.createElement(Text, { style: S.subTitle }, "Survey Data"),
     React.createElement(View, { style: { marginBottom: 10 } },
@@ -1466,7 +1520,7 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
   );
 }
 
-// ─── Section 8 — Missing Documents and Gaps ──────────────────────────────────
+// ─── Section 9 — Missing Documents and Gaps ──────────────────────────────────
 
 function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1474,10 +1528,10 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   attempts: LiteSourceAttempt[];
   generatedAt: string;
 }) {
-  // Reuses buildEvidenceIndex() (the same source used by Section 9) instead
+  // Reuses buildEvidenceIndex() (the same source used by Section 11) instead
   // of the previous duplicated label map and ad-hoc gap detection — this is
   // the section a reader hits first when something didn't come back, so it
-  // needs the same direct portal link + exact query criteria Section 9 has,
+  // needs the same direct portal link + exact query criteria Section 11 has,
   // not a bare error message with no path to look it up by hand.
   const gaps = buildEvidenceIndex(attempts, run).filter(e => e.status !== "retrieved");
   const severityFor = (status: EvidenceIndexEntry["status"]): "red" | "yellow" | "none" =>
@@ -1491,7 +1545,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 — MISSING DOCUMENTS AND GAPS"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — MISSING DOCUMENTS AND GAPS"),
 
     React.createElement(Text, { style: S.noteText }, "Every source that returned no records, failed, or requires manual retrieval is listed here, with a direct link to the TRRC portal and the exact criteria to re-run it by hand. A gap that is not applicable for this well type is noted as such; gaps in critical sources are flagged."),
 
@@ -1514,7 +1568,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 9 — Timeline ─────────────────────────────────────────────────────
+// ─── Section 10 — Timeline ─────────────────────────────────────────────────────
 
 const EVIDENCE_STATUS_LABEL: Record<string, string> = {
   retrieved: "Retrieved",
@@ -1550,7 +1604,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — TIMELINE"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — TIMELINE"),
 
     React.createElement(Text, { style: S.noteText }, "Dated regulatory events assembled from sources already retrieved elsewhere in this report — permits, completion, plugging, compliance, and production. An event only appears here if a date could be confidently parsed from the underlying TRRC record; nothing is estimated."),
 
@@ -1569,7 +1623,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
   );
 }
 
-// ─── Section 10 — Evidence Index ──────────────────────────────────────────────
+// ─── Section 11 — Evidence Index ──────────────────────────────────────────────
 
 function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1587,7 +1641,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — EVIDENCE INDEX"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — EVIDENCE INDEX"),
 
     React.createElement(Text, { style: S.noteText }, "Every TRRC source this pipeline supports, what was queried, and what came back. TRRC's own query portals are inconsistent about honoring pre-filled links for an unauthenticated visitor, so links here point to the portal itself — re-enter the criteria listed to independently reproduce a result."),
 
@@ -1611,7 +1665,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 11 — Acquisition Scorecard ──────────────────────────────────────
+// ─── Section 12 — Acquisition Scorecard ──────────────────────────────────────
 
 const RECOMMENDATION_COLOR: Record<string, string> = {
   PURSUE: C.green, REVIEW: C.yellow, PASS: C.gray, BLOCKED: C.red,
@@ -1639,7 +1693,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — ACQUISITION SCORECARD"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 12 — ACQUISITION SCORECARD"),
 
     React.createElement(Text, { style: S.noteText },
       "A transparent, rule-based screening aid computed only from the TRRC records retrieved in this report — not a black-box model, not investment advice, and not a substitute for the buyer's own underwriting. Every score below states exactly which retrieved facts produced it. Missing data always scores low, never neutral-good.",
@@ -1689,7 +1743,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
   );
 }
 
-// ─── Section 12 — Overall Assessment ─────────────────────────────────────────
+// ─── Section 13 — Overall Assessment ─────────────────────────────────────────
 
 function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, scorecard, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1718,14 +1772,14 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
   const completenessMatch = scorecard.dimensions.record_completeness.rationale.match(/^(\d+) of (\d+)/);
   const completenessFraction = completenessMatch ? `${completenessMatch[1]} / ${completenessMatch[2]} sources` : "";
 
-  // Reuses the scorecard's own Record Completeness dimension (Section 10)
+  // Reuses the scorecard's own Record Completeness dimension (Section 12)
   // instead of a separate local calculation — the two used to disagree:
   // this page's old dataCompleteness only counted a source as "complete" if
   // it returned a non-zero record_count, so a confirmed-clean answer (0
   // violations, not an orphan well, no injection permits — genuinely
   // complete, valuable information) counted the same as an outright
   // retrieval failure. That understated completeness far more harshly than
-  // Section 10's dimension, which correctly treats confirmed-absence as a
+  // Section 12's dimension, which correctly treats confirmed-absence as a
   // definitive answer and excludes not-applicable categories entirely —
   // producing two different completeness numbers for the same run in the
   // same PDF. Single source of truth now.
@@ -1764,7 +1818,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 12 — OVERALL ASSESSMENT"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 13 — OVERALL ASSESSMENT"),
 
     // Stats row
     React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },

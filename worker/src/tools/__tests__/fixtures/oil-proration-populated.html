@@ -1,0 +1,2131 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8;"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=5, IE=8, IE=9, IE=10" />
+    <link rel="stylesheet" type="text/css" href="/EWA/styles/ogm_style3.css">
+
+    <script type="text/javascript">
+      var dojoConfig = {
+      parseOnLoad: true,
+      isDebug: false,
+
+      has: {
+      "dojo-debug-messages": false
+      },
+
+      packages:
+       [ { name:"rrcGisModules", location:location.pathname.replace(/\/[^/]+$/, '') + '/gis/javascript'} ]
+
+      };
+    </script>
+
+    <script type="text/javascript" src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.3compact"></script>
+    <script type="text/javascript"> 
+      require(["dojo/parser", "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dojo/query", 
+               "dojo/dom-construct", "dojo/NodeList-manipulate", "dojo/dom-attr", "dojo/dom",
+               "dojo/_base/connect", "dojo/_base/event"]);
+    </script>
+
+    <title>Oil Proration Query</title>
+  </head>
+
+  <body>
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td>
+
+
+
+
+
+<script type="text/javascript">
+function openHelp(obj) {
+
+  var help = '/EWA/help/' + obj;
+  //alert(help+', '+obj);
+
+  hold = window.open(help, 'popupWindow',
+                     'resizable=yes,menubar=yes,scrollbars=yes,width=500,height=400,x=1,y=1,screenx=1,screeny=1');
+  hold.focus();
+  return false;
+}
+</script>
+
+<!-- System Header -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/rrc_online_header.gif"></td>
+    <td class="MainHeader" align="right" nowrap>&nbsp;</td>
+    <td class="MainHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+  </tr>
+  <tr><td colspan="3" style="height: 3px;" class="BorderLines"/></tr>
+</table>
+
+<!--Application Header-->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr> 
+    <td class="AppHeader"><img src="/EWA/commonuiImages/spacer.gif"></td>
+    <td class="AppHeader">Oil & Gas Data Query</td>
+  </tr>
+</table>
+
+<!-- Top Nav Level 2 -->
+<!--Navigation Table Level 2 and 3 -->
+<table style="width: 100%;" border="0" cellspacing="0" cellpadding="0">
+  <tr><td colspan="2" style="height: 2px;" class="BorderLines"/></tr>
+  <!--Level 2 navigation row-->
+  <tr>
+    <td class="AppNavMain" width="1%"><img src="/EWA/commonuiImages/spacer.gif" height="1px"></td>
+    <td class="AppNavMain">
+      <table border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <!-- Main -->
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <td class="AppNavMainSelected">
+            <a href="/EWA/ewaMain.do">Query Menu</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help-->
+          <td class="AppNavMain">
+            
+            <a href="#" onclick="openHelp('Oil_Proration_TOC.html');">Help</a>
+          </td>
+          <td class="BorderLines"><img src="/EWA/commonuiImages/spacer.gif"></td>
+          <!--Help END-->
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td colspan="2" style="height: 1px;" class="BorderLines"/></tr>
+</table>
+
+</td></tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr valign="top">
+        <td style="width: 100%;" class="ContentArea">
+          <span id="messageArea">
+
+
+
+
+
+<!-- /tiles/messages.jsp BEGIN -->
+
+
+
+
+<!-- /tiles/messages.jsp END -->
+</span>
+          
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- Related Links: required code. -->
+<script type="text/javascript" src="/EWA/js/ewaPageUtils.js"></script>
+
+<script>
+
+  function returnToQuery() {
+    document.forms["oilProQueryActionForm"].methodToCall.value = "unspecified";
+    document.forms["oilProQueryActionForm"].submit();
+  }
+
+  function doSearch(){
+    document.forms["oilProQueryActionForm"].elements["methodToCall"].value = "search";
+    document.forms["oilProQueryActionForm"].submit();
+  }
+
+  function doSort(columnName, direction) {
+    ewaDoSort(document.forms["oilProQueryActionForm"], "searchArgs", columnName, direction);
+  }
+
+  function generateOilProrationReportCsv() {
+    document.forms["oilProQueryActionForm"].methodToCall.value = 
+        "generateOilProrationReportCsv";
+    document.forms["oilProQueryActionForm"].submit();
+  }
+</script>
+
+
+
+<!--Content Area-->
+<form name="oilProQueryActionForm" method="post" action="/EWA/oilProQueryAction.do">
+
+  <input type="hidden" name="searchArgs.orderByColumnName" value="">
+  
+    <input type="hidden" name="searchArgs.fieldTypeCodeHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.oilFieldTypeCodeHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.oilUnitNumberHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.oilWellNumberHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.apiPrefixHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.apiSuffixHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.gasWellTypeHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.oilWellTypeHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.countyCodeHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.orderByHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.leaseTypeArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.districtCodeArgHndlr.inputValue" value="08">
+    <input type="hidden" name="searchArgs.leaseNumberArgHndlr.inputValue" value="52210">
+    <input type="hidden" name="searchArgs.fieldNumbersArgHndlr.inputValue" value="">
+    <input type="hidden" name="searchArgs.operatorNumbersArgHndlr.inputValue" value="">
+
+  
+    
+    
+  
+
+
+
+
+
+
+
+
+  
+
+  
+
+  
+    <input type="hidden" name="methodToCall" value="search">
+  
+
+
+
+  <input type="hidden" name="actionManager.recordCountHndlr.inputValue" value="2">
+  <input type="hidden" name="actionManager.currentIndexHndlr.inputValue" value="1">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].actionDisplayNmHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[0].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionHndlr.inputValue" value="/oilProQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionMethodHndlr.inputValue" value="returnToSearch">
+    <input type="hidden" name="actionManager.actionRcrd[0].pagerParameterKeyHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[0].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[0].argRcrdParameters(searchArgs.paramValue)" value="|102=08|103=52210">
+
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].actionDisplayNmHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[1].hostHndlr.inputValue" value="webapps2.rrc.texas.gov:443">
+    <input type="hidden" name="actionManager.actionRcrd[1].contextPathHndlr.inputValue" value="/EWA">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionHndlr.inputValue" value="/oilProQueryAction.do">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParameterHndlr.inputValue" value="methodToCall">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionMethodHndlr.inputValue" value="search">
+    <input type="hidden" name="actionManager.actionRcrd[1].pagerParameterKeyHndlr.inputValue" value="pager.paramValue">
+    <input type="hidden" name="actionManager.actionRcrd[1].actionParametersHndlr.inputValue" value="">
+    <input type="hidden" name="actionManager.actionRcrd[1].returnIndexHndlr.inputValue" value="0">
+  
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(pager.paramValue)" value="|1=1|2=10|3=11|4=0|5=2|6=10">
+    <input type="hidden" name="actionManager.actionRcrd[1].argRcrdParameters(searchArgs.paramValue)" value="|102=08|103=52210">
+
+
+
+
+  <input type="hidden" name="searchArgs.fieldNumbersArg" value="">
+  <input type="hidden" name="searchArgs.operatorNumbersArg" value="">
+
+  <table class="ewaPage">
+    <tr>
+      <td>
+        <h2 class="style5">
+          Oil Proration Query Results for
+          August 2026
+        </h2>
+      </td>
+    </tr>
+
+    <tr>
+      <td valign="top">
+        <table class="TabBox2" cellspacing="0" cellpadding="4" border="0">
+          <tr>
+            <td>
+              <table style="white-space: nowrap; width:99%; margin: auto;">
+                <tr>
+                  <td>
+                    <p><b>Search Criteria:</b></p>
+                    <p>
+                      
+                        
+                      
+
+
+
+
+
+
+
+
+
+
+
+<!-- Lease Type -->
+
+
+<!-- District -->
+
+  <strong>District:</strong>
+  08
+  <br>
+
+
+<!-- API number -->
+
+
+<!-- Lease No. -->
+
+  <strong>Oil Lease No./Gas Well ID No:</strong>
+  52210
+  <br>
+  <strong>Lease Name(s):</strong>
+  BRADFORD TRUST A UNIT 2
+  <br>
+
+
+<!-- Gas Well Type -->
+
+
+<!-- Oil Well Type -->
+
+
+<!-- Gas Field Type -->
+
+
+<!-- Oil Field Type -->
+
+
+<!-- County -->
+
+
+<!-- Field Names -->
+
+
+<!-- Operator Names -->
+
+
+
+
+                    </p>
+                  </td>
+                  <td valign="bottom">
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/oilProQueryAction.do?methodToCall=returnToSearch&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAAG2OywqDMBBFv8YuQxIV3MwilHbdh7QL6SKNQYXoyCT2AX5803Tb3eWcy8xdBecgVsEF8A2RUSYMOJ0MtQ2_QeJPe9fz7CWLmgX70p51-MhyVRR5LEjI5H53VTHm34iDOxAeF0vv3zHWYnQFjDb02Na41c5FUALZsNBU49lqMn1E1Z8NjU9WUefZrEmPF-0Wm6ZJ4FX6Wkop-AeVVozwygAAAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr><td>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table style="white-space: normal; width:98%; text-align: center; margin: auto;" 
+       class="DataGrid" border="1" cellpadding="4" cellspacing="0" bordercolor="#666666">
+  <tr>
+    <td colspan="16" height="25" class="PagerBanner">
+      
+        
+      
+
+
+
+
+
+
+
+
+
+
+
+
+  <table style="width:100%; white-space: nowrap;">
+    <tr>
+      <td style="text-align: left; border-style:none; font-weight: bold">
+        1 - 10 of 11 results
+      </td>
+      <td style="text-align: center; border-style:none;">
+        
+          
+
+            
+            <!-- Add pager control links -->  
+            
+              
+                [&lt;&lt;First][&lt;Previous]
+              
+              
+            
+            
+              
+              
+                <!-- Next page link -->  
+                <a href="/EWA/oilProQueryAction.do?pager.pageSize=10&pager.offset=10&methodToCall=search&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">[Next&gt]</a>
+
+                <!-- Last page link -->  
+                <a href="/EWA/oilProQueryAction.do?pager.pageSize=10&pager.offset=10&methodToCall=search&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">[Last&gt;&gt;]</a>
+              
+            
+
+            &nbsp; | &nbsp; Page: &nbsp;
+
+            <!-- Page index links -->  
+            
+              
+                
+                  <b>1</b>
+                
+                
+              
+            
+              
+                
+                
+                  <a href="/EWA/oilProQueryAction.do?pager.pageSize=10&pager.offset=10&methodToCall=search&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">2</a>
+                
+              
+            
+
+            &nbsp; of &nbsp;
+
+            
+              
+              
+                <a href="/EWA/oilProQueryAction.do?pager.pageSize=10&pager.offset=10&methodToCall=search&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">2</a>
+              
+            
+
+          
+        
+      </td>
+
+      <!-- Page size control -->  
+      <td style="text-align: right; border-style:none;">
+        <label>
+          Page Size:
+          <select name="pager.pageSize" onchange="doSearch()"><option value="-1">View All</option>
+<option value="5">5</option>
+<option value="10" selected="selected">10</option></select>
+        </label>
+      </td>
+
+    </tr>
+  </table>
+
+
+
+    </td>
+  </tr>
+
+  <tr>
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('API_NO','ASC')">API No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('DISTRICT_CODE','ASC')">District</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('LEASE_NUMBER','ASC')">Lease No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('LEASE_NAME','ASC')">Lease Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('WELL_NO','ASC')">Well No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('FIELD_NUMBER','ASC')">Field No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('FIELD_NAME','ASC')">Field Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('FIELD_TYPE_CODE','ASC')">Field Type</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('OPERATOR_NUMBER','ASC')">Operator No.</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('OPERATOR_NAME','ASC')">Operator Name</a>
+
+  
+
+</th>
+
+
+    
+      
+      
+      
+      
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<th rowspan='2' style='text-align:center'>
+
+  <a href="Javascript:doSort('UNIT_NUMBER','ASC')">Unit No.</a>
+
+  
+
+</th>
+
+
+    <th rowspan="2" style="text-align:center"><strong>Potential (BBL)</strong></th>
+    <th rowspan="2" style="text-align:center"><strong>Gas/Oil Ratio</strong></th>
+    <th rowspan="2" style="text-align:center"><strong>Acres</strong></th>
+    <th style="text-align:center"><strong>Daily Allowable</strong></th>
+    <th rowspan="2" style="text-align:center"><strong>Unit or Well Type</strong></th>
+  </tr>
+  <tr>
+    <th>Oil / Gas</th>
+  </tr>
+
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943074&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943074">32943074</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943074"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943074&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943074&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943074&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0305BH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0305BH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>165.5</td>
+      <td>1401</td>
+      <td>120.26</td>
+      <td>    166# / 5676</td>
+      <td>
+        
+        
+          PRODUCING
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943065&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943065">32943065</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943065"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943065&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943065&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943065&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0307BH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0307BH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>0.0</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>FORMS LACKING</td>
+      <td>
+        
+        
+          SHUT IN
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943056&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943056">32943056</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943056"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943056&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943056&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943056&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0308BH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0308BH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>0.0</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>FORMS LACKING</td>
+      <td>
+        
+        
+          SHUT IN
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943004&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943004">32943004</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943004"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943004&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943004&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943004&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0316AH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0316AH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>80.0</td>
+      <td>8550</td>
+      <td>102.26</td>
+      <td>     80# / 4980</td>
+      <td>
+        
+        
+          PRODUCING
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943059&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943059">32943059</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943059"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943059&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943059&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943059&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0317AH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0317AH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>197.9</td>
+      <td>11061</td>
+      <td>120.27</td>
+      <td>    198# / 5676</td>
+      <td>
+        
+        
+          PRODUCING
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943055&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943055">32943055</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943055"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943055&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943055&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943055&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0318AH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0318AH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>0.0</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>FORMS LACKING</td>
+      <td>
+        
+        
+          SHUT IN
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943075&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943075">32943075</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943075"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943075&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943075&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943075&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0325SH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0325SH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>0.0</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>FORMS LACKING</td>
+      <td>
+        
+        
+          SHUT IN
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943062&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943062">32943062</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943062"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943062&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943062&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943062&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0327SH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0327SH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>0.0</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>FORMS LACKING</td>
+      <td>
+        
+        
+          SHUT IN
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943003&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943003">32943003</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943003"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943003&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943003&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943003&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0328SH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0328SH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>293.6</td>
+      <td>11791</td>
+      <td>120.27</td>
+      <td>    294# / 5676</td>
+      <td>
+        
+        
+          PRODUCING
+        
+      </td>
+    </tr>
+  
+    <tr>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=apiNo&selTab=16&apiNo=32943068&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for API number 32943068">32943068</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="apiRelatedLinks:32943068"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;api_no=32943068&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option>
+<option value="{&quot;url&quot;: &quot;https://gis.rrc.texas.gov/GISViewer/index.html?api=32943068&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">GIS Viewer</option>
+<option value="{&quot;url&quot;: &quot;https://webapps.rrc.texas.gov/CMPL/ewaSearchAction.do?methodToCall=searchByApiNo&amp;apiNo=32943068&amp;relatedLink=Y&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: false}">Completion</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>08</td>
+      <td>
+        
+          
+
+          
+            
+              
+              
+              
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <table>
+    <tr>
+      <td width="50%">
+        
+
+        <a href="leaseDetailAction.do?searchType=distLease&selTab=16&distCode=08&leaseNo=52210&methodToCall=displayLeaseDetail&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA" title="Lease detail for district 08 and lease number 52210">52210</a>
+      </td>
+
+      <td>
+        <select name="propertyValue" onchange="gotoRelatedLink(this.value)" id="distLeaseRelatedLinks:_"><option value="" selected="selected">Links</option>
+          <option value="{&quot;url&quot;: &quot;https://rrcsearch3.neubus.com/esd3-rrc/api.php?function=GetImage&amp;district=08&amp;lease_id=52210&amp;rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA&quot;, &quot;newWindow&quot;: true}">Images</option></select>
+      </td>
+    </tr>
+  </table>
+
+
+
+          
+        
+      </td>
+      <td>BRADFORD TRUST A UNIT 2</td>
+      <td nowrap>
+        
+          
+
+          <a href="oilProQueryAction.do?methodToCall=searchWell&district=08&lease=52210&well=0346SH&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">0346SH</a>
+        
+      </td>
+      <td>
+        
+
+        <a href="oilProQueryAction.do?methodToCall=searchField&field=85280300&rrcActionMan=H4sIAAAAAAAAALWRuQ7CMAyGnwbGKE4PdfFQIZg5KhgqhtBGBamQyEk5pDw8aRESAgYWNuv_fXy2PXCOwgMHhDFRlVfuoE_LiuqSb3HQL2onjbGCBZs5dZWWNfo8ivI4jkKCwJGYTTd5CKM-1Id2TnrRKbo9mrFaBy_Go3J7XRd6Its2CAmSch2dCr1Skqp9kDLkHwylHdycGsuMJHlcy7ZTA5pAng1TEyHgvRL-TW-f1Cka2Sh6ofu6CmzL97weEcELBO4jBPAxcp-Ed6T4ZZ-fL3EHo4ZSStQBAAA">85280300</a>
+      </td>
+      <td>SPRABERRY (TREND AREA)</td>
+      <td>REGULAR</td>
+      <td>945936</td>
+      <td>XTO ENERGY INC.</td>
+      <td>
+        
+      </td>
+      <td>0.0</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>FORMS LACKING</td>
+      <td>
+        
+        
+          SHUT IN
+        
+      </td>
+    </tr>
+  
+
+</table>
+</td></tr>
+
+          <tr>
+            <td>
+              <table style="white-space: nowrap; text-align: center; width:99%; margin: auto;">
+                <tr>
+                  <td align="left">
+                    <input type="button" name="unused" value="Download" onclick="generateOilProrationReportCsv();">
+                  </td>
+                  <td align="right">
+                    <input type="button" name="unused" value="Return" onclick="returnToCaller('/EWA/oilProQueryAction.do?methodToCall=returnToSearch&searchArgs.paramValue=|102=08|103=52210&rrcActionMan=H4sIAAAAAAAAAG2OywqDMBBFv8YuQxIV3MwilHbdh7QL6SKNQYXoyCT2AX5803Tb3eWcy8xdBecgVsEF8A2RUSYMOJ0MtQ2_QeJPe9fz7CWLmgX70p51-MhyVRR5LEjI5H53VTHm34iDOxAeF0vv3zHWYnQFjDb02Na41c5FUALZsNBU49lqMn1E1Z8NjU9WUefZrEmPF-0Wm6ZJ4FX6Wkop-AeVVozwygAAAA');" style="float: right;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+    <tr><td>&nbsp;</td></tr>
+  </table>
+</form>
+
+        </td>
+      </tr>
+    </table>
+
+    <table style="width: 100%; table-layout:fixed;" border="0" cellspacing="0" cellpadding="0">
+      <tr><td><table style="width: 100%" class="MainFooter">
+  <tr><td style="width: 100%;" class="BorderLines"></td></tr>
+  <tr>
+    <td style="width: 100%; height: 100%;" align="center" class="MainFooter">
+      <a target="_blank" href="http://www.rrc.texas.gov/site-policies/">Disclaimer</a> |
+      <a target="_blank" href="http://www.rrc.texas.gov">RRC Home</a> |
+      <a href="mailto:helpdesk@rrc.texas.gov?subject=Oil & Gas Queries">Contact</a>
+    </td>
+  </tr>
+</table>
+</td></tr>
+    </table>
+  </body>
+</html>
+
