@@ -1,19 +1,22 @@
 /**
  * TRRC Due Diligence Report Builder
  *
- * 12-section structured report:
+ * 13-section structured report:
  *   1. Executive Summary (well identity + critical/important flags)
  *   2. Operator Standing (P-5 registration, bond, compliance)
  *   3. Production History (monthly table + computed analytics + charts)
  *   4. Engineering Analysis (Arps decline-curve fit, EUR, remaining reserves)
- *   5. Well Construction (W-2 completion data + W-1 permits + imaged docs)
- *   6. Compliance and Legal Status (violations, orphan, plugging)
- *   7. Legal Description and Location (GLO + GIS + Maps + offset wells + lateral path)
- *   8. Missing Documents and Gaps
- *   9. Timeline (dated regulatory events, chronological)
- *  10. Evidence Index (per-source query ledger)
- *  11. Acquisition Scorecard (transparent rule-based screening aid)
- *  12. Overall Assessment (data completeness, narrative)
+ *   5. Economic Evaluation (PV-10/PV-15 under Stress/Base/Strip/Upside price
+ *      decks, offer range — see economics.ts; deliberately does not compute
+ *      IRR/payout, which need a purchase price this report doesn't collect)
+ *   6. Well Construction (W-2 completion data + W-1 permits + imaged docs)
+ *   7. Compliance and Legal Status (violations, orphan, plugging)
+ *   8. Legal Description and Location (GLO + GIS + Maps + offset wells + lateral path)
+ *   9. Missing Documents and Gaps
+ *  10. Timeline (dated regulatory events, chronological)
+ *  11. Evidence Index (per-source query ledger)
+ *  12. Acquisition Scorecard (transparent rule-based screening aid)
+ *  13. Overall Assessment (data completeness, narrative)
  */
 
 import React from "react";
@@ -46,6 +49,8 @@ import { fetchLateralPath, type LateralPath } from "./lateral-path";
 import { buildAcquisitionScorecard } from "./scorecard-builder";
 import { fitArpsDecline, estimateEur } from "./decline-curve";
 import { compareToAnalogs, type AnalogWell } from "./type-curve-comparison";
+import { getPriceDeck } from "./eia-pricing";
+import { computeEconomics, type EconomicEvaluation } from "./economics";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1062,6 +1067,102 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
   );
 }
 
+// ─── Section 5 — Economic Evaluation ─────────────────────────────────────────
+//
+// PV-10/PV-15 and offer range under Stress/Base/Strip/Upside price
+// scenarios, built on the same Arps decline-curve fits as Section 4 (see
+// economics.ts). "Strip" is a trailing-12-month EIA average, not a NYMEX
+// futures curve — EIA's free API doesn't expose futures data, and this is
+// disclosed here rather than overclaiming. Deliberately does NOT compute
+// IRR or payout months: both require a proposed purchase price, which this
+// report does not currently collect — shown as an explicit "not computed"
+// note rather than a fabricated number.
+
+function fmtUsd(v: number): string {
+  return `$${Math.round(v).toLocaleString("en-US")}`;
+}
+
+const SCENARIO_LABELS: Record<string, string> = {
+  stress: "Stress", base: "Base", strip: "Strip (trailing 12-mo avg)", upside: "Upside",
+};
+
+function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  econ: EconomicEvaluation;
+  generatedAt: string;
+}) {
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 5 — ECONOMIC EVALUATION"),
+
+    React.createElement(Text, { style: S.noteText },
+      "Discounted cash flow (PV-10, PV-15) computed from the Arps decline-curve forecasts in Section 4, under four price scenarios. Screening-grade analysis from public regulatory data and generic cost assumptions — not a certified reserves report. A reservoir engineer and landman should verify before any transaction relies on it.",
+    ),
+
+    !econ.sufficientData ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
+        "No economic evaluation computed — neither the oil nor gas production history had enough non-zero months to fit a decline curve (see Section 4 for detail). See Section 3 for whatever raw production history was retrieved.",
+      ),
+    ) : React.createElement(View, {},
+      React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, "Offer Range"),
+      React.createElement(View, { style: { flexDirection: "row", marginBottom: 10 } },
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "LOW (STRESS PV-10)"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeLow)),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "MID (BASE PV-10)"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeMid)),
+        ),
+        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "HIGH (UPSIDE PV-10)"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeHigh)),
+        ),
+      ),
+
+      React.createElement(Text, { style: S.noteText },
+        `Price basis: ${econ.priceDeck.source === "eia_live" ? "live EIA data" : "static placeholder — not a live quote"}, as of ${econ.priceDeck.asOf}. ` +
+        `WTI spot $${econ.priceDeck.wtiSpotUsdBbl.toFixed(2)}/BBL, Henry Hub spot $${econ.priceDeck.henryHubUsdMcf.toFixed(2)}/MCF.`,
+      ),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "Price Scenarios"),
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "22%" }] }, "Scenario"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%", textAlign: "right" }] }, "Net Cash Flow"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "PV-10"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "PV-15"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Severance Tax"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "LOE"),
+      ),
+      ...econ.scenarios.map((s, i) => React.createElement(
+        View, { key: s.scenario, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCell, { width: "22%" }] }, SCENARIO_LABELS[s.scenario] ?? s.scenario),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "16%", textAlign: "right" }] }, fmtUsd(s.netCashFlow)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsd(s.pv10)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsd(s.pv15)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "17%", textAlign: "right" }] }, fmtUsd(s.severanceTax)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "17%", textAlign: "right" }] }, fmtUsd(s.loe)),
+      )),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: [S.bodyText, { color: C.gray, marginTop: 6 } ] }, econ.costAssumptionNote),
+      React.createElement(Text, { style: [S.bodyText, { color: C.gray, marginTop: 6 }] }, econ.irrPayoutNote),
+    ),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
 // ─── Section 5 — Well Construction ───────────────────────────────────────────
 
 function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
@@ -1763,6 +1864,12 @@ export async function buildTrrcPdfReport(
     ? await fetchLateralPath(identity.apiNumber, mapLat, mapLng)
     : null;
   const analytics = computeProductionAnalytics(production);
+  const priceDeck = await getPriceDeck();
+  const econ = computeEconomics(
+    analytics.months.map(m => m.oil_bbl ?? 0),
+    analytics.months.map(m => m.gas_mcf ?? 0),
+    priceDeck,
+  );
   const flags     = generateFlags(attempts, analytics, run);
   const scorecard = buildAcquisitionScorecard({
     attempts, production, coverage,
@@ -1798,6 +1905,7 @@ export async function buildTrrcPdfReport(
     React.createElement(OperatorStandingPage,   { run, id: identity, attempts, flags, generatedAt }),
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
     React.createElement(EngineeringAnalysisPage,{ run, id: identity, analytics, analogWells, generatedAt }),
+    React.createElement(EconomicEvaluationPage, { run, id: identity, econ, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),

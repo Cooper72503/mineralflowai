@@ -134,12 +134,19 @@ export function fitArpsDecline(monthlyOilBbl: number[]): DeclineCurveFit | null 
   };
 }
 
+export interface MonthlyForecastPoint {
+  monthIndex: number;   // months since the start of the fitted history (lastMonth+1, +2, ...)
+  rate: number;         // forecast volume for that month, same units as the series fitArpsDecline was fit on
+}
+
 /**
- * Integrates the fitted decline curve forward (numerically, monthly steps)
- * from the last real data point to a terminal economic rate, to estimate
- * EUR and remaining reserves.
+ * Forecasts the fitted decline curve forward, monthly, from the last real
+ * data point to a terminal economic rate. Shared by estimateEur (which
+ * integrates this into a single EUR/remaining-reserves number) and the
+ * economics module (which needs the actual month-by-month volumes to
+ * compute monthly cash flow, not just the total).
  */
-export function estimateEur(fit: DeclineCurveFit, cumulativeToDateBbl: number): EurEstimate {
+export function forecastToTerminalRate(fit: DeclineCurveFit, terminalRatePerMonth = TERMINAL_RATE_BBL_PER_MONTH): MonthlyForecastPoint[] {
   const { qi, di, b } = fit;
   const lastMonth = fit.monthsOfHistory - 1;
   const rateAt = (t: number) => b === 0 ? qi * Math.exp(-di * t) : qi * Math.pow(1 + b * di * t, -1 / b);
@@ -152,13 +159,13 @@ export function estimateEur(fit: DeclineCurveFit, cumulativeToDateBbl: number): 
   // the hyperbolic curve indefinitely.
   const instantaneousDeclineAt = (t: number) => b === 0 ? di : di / (1 + b * di * t);
 
-  let forecastRemaining = 0;
+  const points: MonthlyForecastPoint[] = [];
   let t = lastMonth;
-  let monthsToTerminal = 0;
+  let monthsElapsed = 0;
   let rate = rateAt(t);
   let switchedToExponential = false;
 
-  while (rate > TERMINAL_RATE_BBL_PER_MONTH && monthsToTerminal < MAX_FORECAST_MONTHS) {
+  while (rate > terminalRatePerMonth && monthsElapsed < MAX_FORECAST_MONTHS) {
     t += 1;
     let nextRate: number;
     if (switchedToExponential) {
@@ -169,10 +176,30 @@ export function estimateEur(fit: DeclineCurveFit, cumulativeToDateBbl: number): 
     } else {
       nextRate = rateAt(t);
     }
-    forecastRemaining += (rate + nextRate) / 2; // trapezoidal integration, monthly steps
+    points.push({ monthIndex: t, rate: nextRate });
     rate = nextRate;
-    monthsToTerminal += 1;
+    monthsElapsed += 1;
   }
+
+  return points;
+}
+
+/**
+ * Integrates the fitted decline curve forward (numerically, monthly steps)
+ * from the last real data point to a terminal economic rate, to estimate
+ * EUR and remaining reserves.
+ */
+export function estimateEur(fit: DeclineCurveFit, cumulativeToDateBbl: number): EurEstimate {
+  const lastMonth = fit.monthsOfHistory - 1;
+  const points = forecastToTerminalRate(fit, TERMINAL_RATE_BBL_PER_MONTH);
+
+  let forecastRemaining = 0;
+  let priorRate = (fit.b === 0 ? fit.qi * Math.exp(-fit.di * lastMonth) : fit.qi * Math.pow(1 + fit.b * fit.di * lastMonth, -1 / fit.b));
+  for (const p of points) {
+    forecastRemaining += (priorRate + p.rate) / 2; // trapezoidal integration, monthly steps
+    priorRate = p.rate;
+  }
+  const monthsToTerminal = points.length;
 
   const eur = cumulativeToDateBbl + forecastRemaining;
   return {
