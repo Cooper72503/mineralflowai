@@ -50,7 +50,7 @@ import { buildAcquisitionScorecard } from "./scorecard-builder";
 import { fitArpsDecline, estimateEur } from "./decline-curve";
 import { compareToAnalogs, type AnalogWell } from "./type-curve-comparison";
 import { getPriceDeck } from "./eia-pricing";
-import { computeEconomics, type EconomicEvaluation } from "./economics";
+import { computeEconomics, WORKOVER_RESERVE_USD_PER_BOE, SWD_DISPOSAL_USD_PER_BBL_WATER, type EconomicEvaluation } from "./economics";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1126,7 +1126,39 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
         "No economic evaluation computed — neither the oil nor gas production history had enough non-zero months to fit a decline curve (see Section 4 for detail). See Section 3 for whatever raw production history was retrieved.",
       ),
     ) : React.createElement(View, {},
-      React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, "Offer Range"),
+      React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, "Production Rate & Basin"),
+      React.createElement(View, { style: { flexDirection: "row", marginBottom: 8 } },
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "STABILIZED OIL RATE"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } },
+            econ.stabilizedOilRateBblPerMonth !== null ? `${econ.stabilizedOilRateBblPerMonth.toLocaleString("en-US", { maximumFractionDigits: 0 })} BBL/mo` : "—"),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "CURRENT DECLINE (vs. INITIAL)"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } },
+            econ.oilFit ? `${econ.oilFit.currentAnnualDeclinePct.toFixed(1)}% (vs ${econ.oilFit.diAnnualPct.toFixed(1)}%)` : "—"),
+        ),
+        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "BASIN"),
+          React.createElement(Text, { style: { fontSize: 9.5, fontFamily: "Helvetica-Bold", color: C.navy } }, econ.basin?.name ?? "Unclassified"),
+        ),
+      ),
+      React.createElement(Text, { style: S.noteText },
+        econ.oilFit
+          ? "\"Current decline\" is the effective annual decline measured from the well's LAST reported month forward, not the historical initial rate — for a mature hyperbolic well this is meaningfully lower than the initial rate and is the more relevant figure for forecasting from today."
+          : "No oil decline fit available (see Section 4).",
+      ),
+      econ.declineSanityCheck ? React.createElement(View, { style: [S.flagBox, { backgroundColor: econ.declineSanityCheck.inRange ? undefined : C.yellowBg, marginTop: 6, marginBottom: 4 }] },
+        React.createElement(Text, { style: [S.flagItem, { color: econ.declineSanityCheck.inRange ? C.green : C.yellow }] },
+          econ.declineSanityCheck.inRange
+            ? `Decline rate is within the typical range for ${econ.basin?.name} (${econ.declineSanityCheck.typicalAnnualRangePct[0].toFixed(0)}–${econ.declineSanityCheck.typicalAnnualRangePct[1].toFixed(0)}% annual effective).`
+            : `Decline rate falls OUTSIDE the typical range for ${econ.basin?.name} (${econ.declineSanityCheck.typicalAnnualRangePct[0].toFixed(0)}–${econ.declineSanityCheck.typicalAnnualRangePct[1].toFixed(0)}% annual effective, industry-typical reference range) — worth a closer look before relying on this forecast.`,
+        ),
+      ) : null,
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "Offer Range & Breakeven"),
       React.createElement(View, { style: { flexDirection: "row", marginBottom: 10 } },
         React.createElement(View, { style: S.summaryStatBox },
           React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "LOW (STRESS PV-10)"),
@@ -1136,37 +1168,51 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
           React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "MID (BASE PV-10)"),
           React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeMid)),
         ),
-        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+        React.createElement(View, { style: S.summaryStatBox },
           React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "HIGH (UPSIDE PV-10)"),
           React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeHigh)),
+        ),
+        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "BREAKEVEN OIL PRICE"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } },
+            econ.breakevenOilPriceUsdBbl !== null ? `$${econ.breakevenOilPriceUsdBbl.toFixed(2)}/BBL` : "—"),
         ),
       ),
 
       React.createElement(Text, { style: S.noteText },
         `Price basis: ${econ.priceDeck.source === "eia_live" ? "live EIA data" : "static placeholder — not a live quote"}, as of ${econ.priceDeck.asOf}. ` +
-        `WTI spot $${econ.priceDeck.wtiSpotUsdBbl.toFixed(2)}/BBL, Henry Hub spot $${econ.priceDeck.henryHubUsdMcf.toFixed(2)}/MCF.`,
+        `WTI spot $${econ.priceDeck.wtiSpotUsdBbl.toFixed(2)}/BBL, Henry Hub spot $${econ.priceDeck.henryHubUsdMcf.toFixed(2)}/MCF. ` +
+        `Breakeven price holds the base scenario's gas price and all cost assumptions fixed and solves for the flat oil price at which cumulative (undiscounted) net cash flow is zero.`,
       ),
 
       React.createElement(View, { style: S.divider }),
 
       React.createElement(Text, { style: S.subTitle }, "Price Scenarios"),
       React.createElement(View, { style: S.tableHeader },
-        React.createElement(Text, { style: [S.tableHeaderCell, { width: "22%" }] }, "Scenario"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "20%" }] }, "Scenario"),
         React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%", textAlign: "right" }] }, "Net Cash Flow"),
-        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "PV-10"),
-        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "PV-15"),
-        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "Severance Tax"),
-        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%", textAlign: "right" }] }, "LOE"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "13%", textAlign: "right" }] }, "PV-10"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "13%", textAlign: "right" }] }, "PV-15"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "12%", textAlign: "right" }] }, "Severance"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "10%", textAlign: "right" }] }, "Ad Val."),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%", textAlign: "right" }] }, "LOE + Workover"),
       ),
       ...econ.scenarios.map((s, i) => React.createElement(
         View, { key: s.scenario, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
-        React.createElement(Text, { style: [S.tableCell, { width: "22%" }] }, SCENARIO_LABELS[s.scenario] ?? s.scenario),
+        React.createElement(Text, { style: [S.tableCell, { width: "20%" }] }, SCENARIO_LABELS[s.scenario] ?? s.scenario),
         React.createElement(Text, { style: [S.tableCellMono, { width: "16%", textAlign: "right" }] }, fmtUsd(s.netCashFlow)),
-        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsd(s.pv10)),
-        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsd(s.pv15)),
-        React.createElement(Text, { style: [S.tableCellMono, { width: "17%", textAlign: "right" }] }, fmtUsd(s.severanceTax)),
-        React.createElement(Text, { style: [S.tableCellMono, { width: "17%", textAlign: "right" }] }, fmtUsd(s.loe)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "13%", textAlign: "right" }] }, fmtUsd(s.pv10)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "13%", textAlign: "right" }] }, fmtUsd(s.pv15)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "12%", textAlign: "right" }] }, fmtUsd(s.severanceTax)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "10%", textAlign: "right" }] }, fmtUsd(s.adValorem)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "16%", textAlign: "right" }] }, fmtUsd(s.loe + s.workoverReserve)),
       )),
+
+      React.createElement(View, { style: { marginTop: 8 } },
+        kv("LOE Used", `$${econ.loeUsdPerBoe.toFixed(2)}/BOE${econ.basin ? ` (${econ.basin.name} reference)` : " (generic default)"}`),
+        kv("Workover Reserve", `$${WORKOVER_RESERVE_USD_PER_BOE}/BOE`),
+        kv("Saltwater Disposal", econ.swdModeled ? `$${SWD_DISPOSAL_USD_PER_BBL_WATER.toFixed(2)}/BBL water (base scenario: ${fmtUsd(econ.scenarios.find(s => s.scenario === "base")?.swdDisposal ?? 0)})` : "Not modeled — water production unknown for this well/lease"),
+      ),
 
       React.createElement(View, { style: S.divider }),
 
@@ -1923,6 +1969,9 @@ export async function buildTrrcPdfReport(
     analytics.months.map(m => m.oil_bbl ?? 0),
     analytics.months.map(m => m.gas_mcf ?? 0),
     priceDeck,
+    identity.field || null,
+    identity.county || null,
+    analytics.months.map(m => m.water_bbl),
   );
   const flags     = generateFlags(attempts, analytics, run);
   const scorecard = buildAcquisitionScorecard({

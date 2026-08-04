@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeEconomics, TX_SEVERANCE_TAX_OIL, TX_SEVERANCE_TAX_GAS, DEFAULT_LOE_USD_PER_BOE } from "../economics";
+import { computeEconomics, TX_SEVERANCE_TAX_OIL, TX_SEVERANCE_TAX_GAS, DEFAULT_LOE_USD_PER_BOE, AD_VALOREM_PCT_OF_REVENUE, WORKOVER_RESERVE_USD_PER_BOE, SWD_DISPOSAL_USD_PER_BBL_WATER } from "../economics";
 import type { PriceDeck } from "../eia-pricing";
 
 // Same synthetic-curve generator as decline-curve.test.ts, so the fit these
@@ -59,10 +59,37 @@ describe("computeEconomics — a real oil-only decline", () => {
     }
   });
 
-  it("gross revenue minus severance tax minus LOE equals net cash flow, for every scenario", () => {
+  it("gross revenue minus every disclosed cost line equals net cash flow, for every scenario", () => {
     for (const s of result.scenarios) {
-      expect(s.netCashFlow).toBeCloseTo(s.grossRevenue - s.severanceTax - s.loe, 4);
+      expect(s.netCashFlow).toBeCloseTo(s.grossRevenue - s.severanceTax - s.adValorem - s.loe - s.workoverReserve - s.swdDisposal, 4);
     }
+  });
+
+  it("ad valorem on the base scenario matches the disclosed flat rate of gross revenue", () => {
+    const base = result.scenarios.find(s => s.scenario === "base")!;
+    expect(base.adValorem).toBeCloseTo(base.grossRevenue * AD_VALOREM_PCT_OF_REVENUE, 4);
+  });
+
+  it("swdDisposal is zero and swdModeled is false when no water production data is supplied (the common TRRC case)", () => {
+    expect(result.swdModeled).toBe(false);
+    for (const s of result.scenarios) expect(s.swdDisposal).toBe(0);
+  });
+
+  it("computes a positive, plausible breakeven oil price below the base price for a profitable well", () => {
+    expect(result.breakevenOilPriceUsdBbl).not.toBeNull();
+    expect(result.breakevenOilPriceUsdBbl!).toBeGreaterThan(0);
+    expect(result.breakevenOilPriceUsdBbl!).toBeLessThan(flatPriceDeck.scenarios.base.oilUsdBbl);
+  });
+
+  it("reports a stabilized oil rate close to the tail of the production series", () => {
+    expect(result.stabilizedOilRateBblPerMonth).not.toBeNull();
+    expect(result.stabilizedOilRateBblPerMonth!).toBeCloseTo(oilSeries.slice(-3).reduce((a, b) => a + b, 0) / 3, 4);
+  });
+
+  it("uses the generic LOE default and skips the decline sanity check when the basin can't be classified", () => {
+    expect(result.basin).toBeNull();
+    expect(result.loeUsdPerBoe).toBe(DEFAULT_LOE_USD_PER_BOE);
+    expect(result.declineSanityCheck).toBeNull();
   });
 
   it("severance tax on the base scenario is a plausible fraction of gross revenue, bounded by the statutory oil rate", () => {
@@ -77,11 +104,51 @@ describe("computeEconomics — a real oil-only decline", () => {
     expect(result.irrPayoutNote).toMatch(/purchase price/i);
   });
 
-  it("discloses both the severance tax rates and the ad-valorem exclusion in the cost note", () => {
+  it("discloses every cost assumption in the cost note: severance rates, ad valorem, workover, LOE, and SWD status", () => {
     expect(result.costAssumptionNote).toContain(`${(TX_SEVERANCE_TAX_OIL * 100).toFixed(1)}%`);
     expect(result.costAssumptionNote).toContain(`${(TX_SEVERANCE_TAX_GAS * 100).toFixed(1)}%`);
     expect(result.costAssumptionNote).toContain(`$${DEFAULT_LOE_USD_PER_BOE}`);
-    expect(result.costAssumptionNote).toMatch(/ad valorem.*not included/i);
+    expect(result.costAssumptionNote).toContain(`${(AD_VALOREM_PCT_OF_REVENUE * 100).toFixed(1)}%`);
+    expect(result.costAssumptionNote).toContain(`$${WORKOVER_RESERVE_USD_PER_BOE}`);
+    expect(result.costAssumptionNote).toMatch(/saltwater disposal.*not modeled/i);
+  });
+});
+
+describe("computeEconomics — basin classification wires a basin-typical LOE and a decline sanity check", () => {
+  it("classifies a Wolfcamp (Permian) field name, uses the basin's LOE midpoint, and evaluates the decline sanity check", () => {
+    const oilSeries = generateCurve(3000, 0.05, 0.9, 36);
+    const result = computeEconomics(oilSeries, [], flatPriceDeck, "WOLFCAMP (WOLFCAMP)", "MIDLAND");
+    expect(result.basin).not.toBeNull();
+    expect(result.basin!.id).toBe("permian_basin");
+    expect(result.loeUsdPerBoe).toBeCloseTo((7.5 + 20) / 2, 4);
+    expect(result.declineSanityCheck).not.toBeNull();
+  });
+
+  it("classifies a real Sprabery field name (confirmed live this session, lease 52210) as West Texas Conventional, not Permian", () => {
+    const oilSeries = generateCurve(3000, 0.05, 0.9, 36);
+    const result = computeEconomics(oilSeries, [], flatPriceDeck, "SPRABERRY (TREND AREA)", "MIDLAND");
+    expect(result.basin?.id).toBe("west_tx_conventional");
+  });
+
+  it("falls back to county-based classification when the field name doesn't match any basin", () => {
+    const oilSeries = generateCurve(3000, 0.05, 0.9, 36);
+    const result = computeEconomics(oilSeries, [], flatPriceDeck, "SOME UNRELATED FIELD NAME", "MIDLAND");
+    expect(result.basin?.id).toBe("permian_basin");
+  });
+});
+
+describe("computeEconomics — SWD disposal cost, when water production is known", () => {
+  it("models a nonzero SWD cost proportional to the known average water rate", () => {
+    const oilSeries = generateCurve(3000, 0.05, 0.9, 36);
+    const water = new Array(36).fill(50); // 50 BBL/mo water, constant
+    const result = computeEconomics(oilSeries, [], flatPriceDeck, null, null, water);
+    expect(result.swdModeled).toBe(true);
+    const base = result.scenarios.find(s => s.scenario === "base")!;
+    // Exact horizon length is an internal forecast detail; just confirm the
+    // per-month rate (50 BBL * $1/BBL = $50/mo) scales sanely into the total
+    // rather than pinning to a specific forecast-length number.
+    expect(base.swdDisposal).toBeGreaterThan(50 * SWD_DISPOSAL_USD_PER_BBL_WATER);
+    expect(base.swdDisposal).toBeLessThan(50 * SWD_DISPOSAL_USD_PER_BBL_WATER * 500);
   });
 });
 

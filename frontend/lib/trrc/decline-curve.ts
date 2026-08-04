@@ -23,7 +23,13 @@ export interface DeclineCurveFit {
   qi: number;              // fitted initial rate, BBL/month
   di: number;               // fitted nominal decline rate, fraction/month
   b: number;                // hyperbolic exponent, 0 (exponential) to 2
-  diAnnualPct: number;      // di expressed as an annual effective decline %, for readability
+  diAnnualPct: number;      // di expressed as an annual effective decline %, for readability — this is the INITIAL (t=0) rate
+  // Effective annual decline measured from the LAST real data point forward
+  // 12 months, i.e. D(t) = Di/(1+b*Di*t) evaluated at today, not t=0. For a
+  // hyperbolic well (b>0) several years into its life this is meaningfully
+  // lower than diAnnualPct — using the t=0 rate for a mature well
+  // overstates how fast it will keep declining from here.
+  currentAnnualDeclinePct: number;
   rSquared: number;         // goodness of fit, 0-1
   monthsOfHistory: number;
   classification: "Steep early-life (unconventional horizontal)" | "Moderate" | "Flattening / late-life" | "Insufficient data";
@@ -122,6 +128,16 @@ export function fitArpsDecline(monthlyOilBbl: number[]): DeclineCurveFit | null 
     ? (1 - Math.exp(-best.di * 12)) * 100
     : (1 - Math.pow(1 + best.b * best.di * 12, -1 / best.b)) * 100;
 
+  // Effective annual decline starting from the LAST real month, not t=0 —
+  // q(t+12)/q(t) rather than the initial-rate formula above. For b=0
+  // (exponential) these are identical, since nominal decline is constant;
+  // for b>0 the curve has already flattened by the last data point, so
+  // this is meaningfully lower for a mature well.
+  const lastMonthIdx = cleaned.length - 1;
+  const qAt = (t: number) => best.b === 0 ? best.qi * Math.exp(-best.di * t) : best.qi * Math.pow(1 + best.b * best.di * t, -1 / best.b);
+  const qNow = qAt(lastMonthIdx);
+  const currentAnnualDeclinePct = qNow > 0 ? (1 - qAt(lastMonthIdx + 12) / qNow) * 100 : diAnnualPct;
+
   const classification: DeclineCurveFit["classification"] =
     cleaned.length < 6 ? "Insufficient data"
     : diAnnualPct > 55 ? "Steep early-life (unconventional horizontal)"
@@ -129,9 +145,24 @@ export function fitArpsDecline(monthlyOilBbl: number[]): DeclineCurveFit | null 
     : "Flattening / late-life";
 
   return {
-    qi: best.qi, di: best.di, b: best.b, diAnnualPct, rSquared,
+    qi: best.qi, di: best.di, b: best.b, diAnnualPct, currentAnnualDeclinePct, rSquared,
     monthsOfHistory: cleaned.length, classification,
   };
+}
+
+/**
+ * Trailing average of active (non-zero) months only — excludes downtime,
+ * restart transition, and incomplete/zero TRRC reports, unlike a flat
+ * trailing-N average that would be dragged down by those months. Distinct
+ * from the fitted Arps qi (which is the curve's initial rate, not a
+ * literal recent average) and from report-builder.ts's recent12AvgOil
+ * (which does NOT exclude zero months).
+ */
+export function stabilizedRate(monthlySeries: number[], trailingActiveMonths = 3): number | null {
+  const active = monthlySeries.filter(v => v > 0);
+  if (active.length === 0) return null;
+  const window = active.slice(-trailingActiveMonths);
+  return window.reduce((a, b) => a + b, 0) / window.length;
 }
 
 export interface MonthlyForecastPoint {
