@@ -5,7 +5,7 @@
  *
  * Texas county clerk record systems are NOT unified — each county contracts
  * its own vendor independently, or has none at all with free public access.
- * As of 2026-08-02, real automated coverage: 49 of 254 counties.
+ * As of 2026-08-02, real automated coverage: 54 of 254 counties.
  *   - 48 counties on GovOS/Kofile's Cloud Search platform (publicsearch.us),
  *     confirmed against the vendor's own published Texas site directory and
  *     independently verified by hitting every county's subdomain directly —
@@ -14,15 +14,15 @@
  *     Live Oak).
  *   - Harris (the single largest county) on its own standalone ASP.NET
  *     portal, cclerk.hctx.net — not GovOS, not Tyler, its own thing.
- *
- * Known but not yet built: Tyler Technologies (tylerhost.net) serves a real
- * set of Texas counties (Ector, Howard, Calhoun, Taylor, Liberty, Upshur,
- * Burnet, Brazoria, and likely more — county-name-based subdomain pattern,
- * not yet enumerated) with a genuinely free, no-login search, but the
- * portal itself is slow and unreliable enough in practice (repeated
- * timeouts just reaching the disclaimer page) that it needs more resilient
- * retry/timeout handling before it's worth shipping as a connector — not a
- * data-access problem, an infrastructure-reliability one.
+ *   - 5 counties (Ector, Howard, Calhoun, Taylor, Upshur, Burnet) on Tyler
+ *     Technologies' tylerhost.net platform. The apparent "unreliability"
+ *     flagged in earlier research was misdiagnosed — it was Playwright's
+ *     `networkidle` hanging on a persistent background connection the site
+ *     holds open, not real site flakiness; switching to `domcontentloaded`
+ *     fixed it, at the cost of the platform genuinely being slow (~70-90s
+ *     per search). Other tylerhost.net counties exist (e.g. Liberty,
+ *     Brazoria) but return 403 on this subdomain/path convention and were
+ *     left out rather than guessed at.
  * countygovernmentrecords.com (also Tyler Technologies, a different tier)
  * requires account registration even for search — not pursued.
  * countyrecords.com claims 220+ TX counties but is a paid commercial
@@ -344,7 +344,194 @@ const harrisCountyProvider: CountyRecordsProvider = {
   },
 };
 
-const PROVIDERS: CountyRecordsProvider[] = [publicSearchUsProvider, harrisCountyProvider];
+// ─── Provider: Tyler Technologies (tylerhost.net) ────────────────────────────
+//
+// A different platform from GovOS/Kofile entirely — jQuery Mobile UI over
+// ASP.NET-style postback navigation, county-name-based subdomain
+// (<countyname>tx-web.tylerhost.net). No login required for search.
+//
+// The apparent "unreliability" found in earlier research was misdiagnosed:
+// it isn't the site being flaky, it's Playwright's `networkidle` waiting
+// forever because the site holds a persistent background connection open.
+// Switching to `domcontentloaded` + explicit waits for real page landmarks
+// fixed it — 3/3 clean loads under 1s for the disclaimer page, and a full
+// disclaimer-to-search-form navigation lands reliably in ~70s (slow, but
+// consistent, not flaky).
+//
+// Navigation discovers the two tile links by their visible text rather than
+// hardcoding their href (e.g. /web/action/ACTIONGROUP8S1), because those
+// action/search IDs are per-county configuration, not a platform constant —
+// hardcoding Ector's IDs would silently break on every other county.
+//
+// Confirmed end-to-end live 2026-08-02 for Ector County only: disclaimer ->
+// accept -> "Official Public Record Search and Copy Request" tile -> same
+// link on the resulting page -> Both Names field -> #searchButton -> real
+// results for "PIONEER" (971 Deed of Trust records, 249 Assignment of Deed
+// of Trust, etc. — consistent with genuine Pioneer Natural Resources
+// activity). Result-row DOM confirmed directly: each record is a
+// `li.ss-search-row`, with an `<h1>` containing "docNumber • book/vol/page
+// • instrument type" (bullet-separated, book/vol/page segment sometimes
+// absent) and a `.searchResultFourColumn` with four
+// `ul.selfServiceSearchResultColumn` lists whose first `<li>` is a label
+// ("Recording Date", "Grantor", "Grantee" or "Grantee (N)", "Legal
+// Description") followed by one-or-more value `<li>`s.
+//
+// Other candidate counties are known to run on tylerhost.net (per the
+// vendor's own county list), but not all use this same subdomain/path
+// convention — a live probe found Liberty and Brazoria return 403 on
+// `-web.tylerhost.net/web/` (likely a different pattern, e.g. Liberty's is
+// `-kiosk.tylerhost.net/kiosk/`, not verified further), so they're left out
+// rather than guessed at. Howard, Calhoun, Taylor, Upshur, and Burnet were
+// each confirmed live 2026-08-02 to return HTTP 200 with the same
+// "Self-Service" platform title on this exact pattern, and share Ector's
+// nav/DOM structure (same tile-discovery-by-text approach, same jQuery
+// Mobile UI) — listed below on that basis, though only Ector has had a full
+// end-to-end search run against real results.
+const TYLER_SESSION_PROMPT_NO_BUTTON = 'button:has-text("No - Start Over"), a:has-text("No - Start Over")';
+
+async function dismissTylerSessionPrompt(page: import("playwright").Page): Promise<void> {
+  const noButton = page.locator(TYLER_SESSION_PROMPT_NO_BUTTON).first();
+  if (await noButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await noButton.click().catch(() => null);
+    await page.waitForTimeout(500);
+  }
+}
+
+function tylerCountySearch(subdomain: string): CountyRecordsProvider["search"] {
+  return async (_identifier, countyDisplayName, searchValue) => {
+    const baseUrl = `https://${subdomain}.tylerhost.net/web/`;
+    let context: BrowserContext | null = null;
+    try {
+      const browser = await getBrowser();
+      context = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      });
+      const page = await context.newPage();
+      page.setDefaultTimeout(30_000);
+
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await dismissTylerSessionPrompt(page);
+
+      // Disclaimer page, if present.
+      const disclaimerAccept = page.locator("#submitDisclaimerAccept, a:has-text(\"Accept\"), button:has-text(\"Accept\")").first();
+      if (await disclaimerAccept.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await disclaimerAccept.click();
+        await page.waitForLoadState("domcontentloaded").catch(() => null);
+        await dismissTylerSessionPrompt(page);
+      }
+
+      // First tile: "Official Public Record Search and Copy Request" —
+      // discovered by visible text, not a hardcoded href, since the
+      // underlying action-group ID is per-county configuration.
+      const searchTile = page.locator('a:has-text("Official Public Record Search")').first();
+      await searchTile.waitFor({ state: "visible", timeout: 30_000 });
+      await searchTile.click();
+      await page.waitForLoadState("domcontentloaded").catch(() => null);
+      await dismissTylerSessionPrompt(page);
+
+      // Same tile pattern repeats on the landing page that follows.
+      const searchLink = page.locator('a:has-text("Official Public Record Search")').first();
+      if (await searchLink.isVisible({ timeout: 10_000 }).catch(() => false)) {
+        await searchLink.click();
+        await page.waitForLoadState("domcontentloaded").catch(() => null);
+        await dismissTylerSessionPrompt(page);
+      }
+
+      await page.waitForSelector("#field_BothNamesID", { state: "visible", timeout: 30_000 });
+      await page.fill("#field_BothNamesID", searchValue);
+      await dismissTylerSessionPrompt(page);
+      await page.click("#searchButton");
+      await page.waitForLoadState("domcontentloaded").catch(() => null);
+      await dismissTylerSessionPrompt(page);
+
+      await Promise.race([
+        page.waitForSelector("li.ss-search-row", { timeout: 20_000 }).catch(() => null),
+        page.waitForTimeout(8_000),
+      ]);
+
+      const rawRows = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll("li.ss-search-row"));
+        return rows.map((row) => {
+          const headerText = (row.querySelector("h1")?.textContent ?? "")
+            .split("•")
+            .map(s => s.replace(/\s+/g, " ").trim())
+            .filter(Boolean);
+
+          const columns: Record<string, string[]> = {};
+          const lists = Array.from(row.querySelectorAll(".searchResultFourColumn ul.selfServiceSearchResultColumn"));
+          for (const list of lists) {
+            const items = Array.from(list.querySelectorAll("li")).map(li => (li.textContent ?? "").trim()).filter(Boolean);
+            if (items.length === 0) continue;
+            const label = items[0].replace(/\s*\(\d+\)\s*$/, "");
+            columns[label] = items.slice(1);
+          }
+
+          return { headerText, columns };
+        });
+      });
+
+      const records: CountyRecordEntry[] = rawRows.map((r) => {
+        const doc_number = r.headerText[0] ?? "";
+        const instrument = r.headerText[r.headerText.length - 1] ?? "";
+        const bookVolPage = r.headerText.length > 2 ? r.headerText.slice(1, -1).join(" ") : "";
+        return {
+          grantor: (r.columns["Grantor"] ?? []).join("; "),
+          grantee: (r.columns["Grantee"] ?? []).join("; "),
+          doc_type: r.headerText.length > 1 ? instrument : "",
+          recorded_date: (r.columns["Recording Date"] ?? [])[0] ?? "",
+          doc_number,
+          book_volume_page: bookVolPage,
+          legal_description: (r.columns["Legal Description"] ?? [])[0] ?? "",
+        };
+      }).filter(r => r.grantor || r.grantee);
+
+      return {
+        found: records.length > 0,
+        status: "automated",
+        county: countyDisplayName,
+        provider: "tylerhost.net",
+        records: records.slice(0, 100),
+        total_count: records.length,
+        search_url: baseUrl,
+        message: records.length > 0
+          ? `${records.length} record(s) found for "${searchValue}" in ${countyDisplayName} County.`
+          : `No records found for "${searchValue}" in ${countyDisplayName} County.`,
+      };
+    } catch (e) {
+      return {
+        found: false,
+        status: "automated",
+        county: countyDisplayName,
+        provider: "tylerhost.net",
+        records: [],
+        total_count: 0,
+        search_url: baseUrl,
+        message: `County records search failed: ${String(e).slice(0, 100)}`,
+        error: String(e),
+      };
+    } finally {
+      await context?.close();
+    }
+  };
+}
+
+const tylerTechnologiesProvider: CountyRecordsProvider = {
+  id: "tyler_technologies",
+  name: "Tyler Technologies (tylerhost.net)",
+  counties: {
+    "Ector": "ectorcountytx-web",
+    "Howard": "howardcountytx-web",
+    "Calhoun": "calhouncountytx-web",
+    "Taylor": "taylorcountytx-web",
+    "Upshur": "upshurcountytx-web",
+    "Burnet": "burnetcountytx-web",
+  },
+  search(identifier, countyDisplayName, searchValue) {
+    return tylerCountySearch(identifier)(identifier, countyDisplayName, searchValue);
+  },
+};
+
+const PROVIDERS: CountyRecordsProvider[] = [publicSearchUsProvider, harrisCountyProvider, tylerTechnologiesProvider];
 
 export function findProvider(countyName: string): { provider: CountyRecordsProvider; identifier: string; displayName: string } | null {
   const normalized = countyName.trim().toLowerCase();

@@ -32,6 +32,8 @@ describe("getAutomatedCounties", () => {
       "Walker", "Williamson", "Wilson", "Young", "Zapata",
       // Harris — its own dedicated provider (cclerk.hctx.net), not GovOS.
       "Harris",
+      // Tyler Technologies (tylerhost.net) — a third, separate platform.
+      "Ector", "Howard", "Calhoun", "Taylor", "Upshur", "Burnet",
     ];
     expect(getAutomatedCounties().sort()).toEqual(expected.sort());
   });
@@ -77,5 +79,16 @@ describe("findProvider — case-insensitive county matching (pure, no network)",
   it("resolves the correct provider-specific slug", () => {
     expect(findProvider("Live Oak")?.identifier).toBe("liveoak");
     expect(findProvider("Reeves")?.identifier).toBe("reeves");
+  });
+
+  it("resolves a Tyler Technologies county to its own provider, distinct from GovOS and Harris", () => {
+    // Confirmed live 2026-08-02: a real "PIONEER" grantee search against
+    // Ector County returned 100 genuine records (deeds of trust,
+    // mechanic's liens, releases) with correctly parsed grantor/grantee/
+    // doc-type/date/book-volume-page/legal-description fields.
+    const match = findProvider("Ector");
+    expect(match?.displayName).toBe("Ector");
+    expect(match?.provider.id).toBe("tyler_technologies");
+    expect(match?.identifier).toBe("ectorcountytx-web");
   });
 });
