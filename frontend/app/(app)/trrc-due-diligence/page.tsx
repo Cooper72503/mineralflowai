@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   TrrcDueDiligenceRun,
   TrrcIdentifierType,
@@ -188,6 +189,8 @@ const DOWNLOAD_PATHS = {
 // ─── Main page component ───────────────────────────────────────────────────────
 
 export default function TrrcDueDiligencePage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [phase, setPhase]           = useState<Phase>("form");
   const [runId, setRunId]           = useState<string | null>(null);
   const [run, setRun]               = useState<TrrcDueDiligenceRun | null>(null);
@@ -259,6 +262,53 @@ export default function TrrcDueDiligencePage() {
     if (refreshError || !data.session?.access_token) return res;
     tokenRef.current = data.session.access_token;
     return doFetch(tokenRef.current);
+  }, []);
+
+  // Resume a run from the URL on load — confirmed live: with runId only
+  // ever held in React state, ANY reload (a stale/backgrounded tab that
+  // needed a refresh, exiting Safari Reader View, a closed and reopened
+  // tab, a shared link) dropped the user straight back to the blank form
+  // with no path back to a run that had already completed successfully
+  // server-side. The report was never lost — the browser just had no
+  // address for it. `run=<id>` in the URL is that address; a reload
+  // re-fetches the real current state instead of assuming "form".
+  const resumeRun = useCallback(async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/trrc/due-diligence/${id}`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        // Run doesn't exist or isn't this user's — drop the stale
+        // reference rather than getting stuck retrying it forever.
+        router.replace("/trrc-due-diligence");
+        return;
+      }
+      setRunId(id);
+      setRun(data.data);
+      if (data.data.status === "complete") {
+        setPhase("complete");
+      } else if (data.data.status === "awaiting_selection") {
+        setPhase("selecting");
+      } else if (data.data.status === "failed" || data.data.status === "cancelled") {
+        setError(data.data.error_summary ?? "The run failed or was cancelled.");
+        setPhase("error");
+      } else {
+        // pending/running/resolving/retrieving/analyzing/generating — the
+        // existing poll effect (keyed on runId + phase==="running") takes
+        // over from here and keeps refreshing until a terminal state.
+        setPhase("running");
+      }
+    } catch {
+      router.replace("/trrc-due-diligence");
+    }
+  }, [apiFetch, router]);
+
+  useEffect(() => {
+    const runParam = searchParams.get("run");
+    if (runParam) resumeRun(runParam);
+    // Mount-only: resuming is a one-time reconciliation against whatever
+    // the URL says right now, not something that should re-fire on every
+    // searchParams identity change (e.g. the replace() calls below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [form, setForm] = useState<FormState>({
@@ -426,6 +476,7 @@ export default function TrrcDueDiligencePage() {
       const id: string = data.data.id;
       setRunId(id);
       setRun(data.data);
+      router.replace(`/trrc-due-diligence?run=${id}`, { scroll: false });
       if (data.data.needs_user_selection) {
         setPhase("selecting");
       } else {
@@ -452,7 +503,7 @@ export default function TrrcDueDiligencePage() {
       setError(msg);
       setPhase("error");
     }
-  }, [form, apiFetch]);
+  }, [form, apiFetch, router]);
 
   const handleCancel = useCallback(async () => {
     if (runId) {
@@ -462,7 +513,8 @@ export default function TrrcDueDiligencePage() {
     setRun(null);
     setPhase("form");
     setError(null);
-  }, [runId, apiFetch]);
+    router.replace("/trrc-due-diligence", { scroll: false });
+  }, [runId, apiFetch, router]);
 
   const handleResolve = useCallback(async (entityId: string) => {
     if (!runId) return;
@@ -499,7 +551,8 @@ export default function TrrcDueDiligencePage() {
     setError(null);
     setDownloadError(null);
     setActiveTab("summary");
-  }, []);
+    router.replace("/trrc-due-diligence", { scroll: false });
+  }, [router]);
 
   const handleDownload = useCallback(async (type: keyof typeof DOWNLOAD_PATHS) => {
     if (!runId) return;
