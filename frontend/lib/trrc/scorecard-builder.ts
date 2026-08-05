@@ -55,13 +55,24 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
   const { attempts, coverage, criticalFlags, importantFlags } = inputs;
 
   // ── record_completeness ──────────────────────────────────────────────
+  // "Applicable" deliberately excludes sources already confirmed
+  // not-applicable (status "no_applicable_record", e.g. a well with no
+  // injection permits) — scoring those against completeness would
+  // penalize a well for a category that was never expected to have data
+  // in the first place. This means this dimension's denominator is
+  // usually smaller than the report's total "sources checked" count
+  // (Section 14 / Evidence Index) — confirmed live to be genuinely
+  // confusing without saying so explicitly, so the excluded count is
+  // spelled out below rather than left for the reader to reconcile.
+  const notApplicableCount = coverage.filter(c => c.status === "no_applicable_record").length;
   const applicable = coverage.filter(c => c.status !== "no_applicable_record");
-  const definitive = applicable.filter(c => c.status === "complete" || c.status === "partial" || c.status === "no_applicable_record");
+  const definitive = applicable.filter(c => c.status === "complete" || c.status === "partial");
   const completenessPct = applicable.length > 0 ? (definitive.length / applicable.length) * 100 : 0;
   const record_completeness = dim(
     "Record Completeness", completenessPct, 0.10,
     applicable.length > 0
-      ? `${definitive.length} of ${applicable.length} applicable TRRC sources returned a definitive answer (data or confirmed absence).`
+      ? `${definitive.length} of ${applicable.length} applicable TRRC sources returned a definitive answer (data or confirmed absence).` +
+        (notApplicableCount > 0 ? ` ${notApplicableCount} additional source(s) came back confirmed not applicable and are excluded from this ratio, not counted as missing.` : "")
       : "No coverage data available to score.",
     coverage.filter(c => c.status === "retrieval_failed" || c.status === "manual_required").map(c => `${c.label}: ${c.status}`),
   );

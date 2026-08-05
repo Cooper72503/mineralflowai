@@ -2005,7 +2005,12 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
 
   // Build narrative
   const wellDesc = [
-    identity.wellName ? `"${identity.wellName}"` : "the subject well",
+    // TRRC's own lease-name convention sometimes embeds literal quotes
+    // around a well-name suffix (e.g. TAYLOR, W. J. "A") — wrapping an
+    // already-quoted name in another pair produces a nonsensical triple
+    // quote ("TAYLOR, W. J. "A""), confirmed live. Only add the wrapping
+    // quotes when the name doesn't already contain one.
+    identity.wellName ? (identity.wellName.includes('"') ? identity.wellName : `"${identity.wellName}"`) : "the subject well",
     identity.county ? `in ${identity.county} County` : "",
     identity.operator ? `operated by ${identity.operator}` : "",
   ].filter(Boolean).join(" ");
