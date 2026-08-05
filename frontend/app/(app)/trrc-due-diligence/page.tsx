@@ -148,6 +148,14 @@ type FormState = {
   apiNumber: string;
   leaseNumber: string;
   operatorName: string;
+  // Alternate primary search modes — the backend (entity-resolver.ts) has
+  // always been able to resolve both, but neither had an input surface
+  // until now. Both route through the existing needs_user_selection ->
+  // "selecting" phase (same UI already used for ambiguous API/operator
+  // matches) since neither can pinpoint a single well with high
+  // confidence on its own — that's correct behavior, not a gap.
+  legalDescription: string;
+  leaseName: string;
   county: string;
   district: string;
   searchHistorical: boolean;
@@ -257,6 +265,8 @@ export default function TrrcDueDiligencePage() {
     apiNumber: "",
     leaseNumber: "",
     operatorName: "",
+    legalDescription: "",
+    leaseName: "",
     county: "",
     district: "",
     searchHistorical: true,
@@ -352,16 +362,30 @@ export default function TrrcDueDiligencePage() {
       const api = form.apiNumber.trim();
       const lease = form.leaseNumber.trim();
       const operator = form.operatorName.trim();
+      const legalDescription = form.legalDescription.trim();
+      const leaseName = form.leaseName.trim();
 
       let primaryInput: string;
       let inputTypeOverride: TrrcIdentifierType | undefined;
 
+      // Most-specific-wins, same principle as before — a real API number or
+      // lease/gas-well ID beats a legal description (which the backend
+      // itself only resolves to a text-match candidate, always requiring
+      // user confirmation), which in turn beats a bare lease name (weaker
+      // still — see entity-resolver.ts's resolveLeaseName confidence
+      // scale), which beats an operator name (broadest, matches many wells).
       if (api) {
         primaryInput = api;
         inputTypeOverride = "api_number";
       } else if (lease) {
         primaryInput = lease;
         inputTypeOverride = "rrc_lease_number";
+      } else if (legalDescription) {
+        primaryInput = legalDescription;
+        inputTypeOverride = "legal_description";
+      } else if (leaseName) {
+        primaryInput = leaseName;
+        inputTypeOverride = "lease_name";
       } else {
         primaryInput = operator;
         inputTypeOverride = "operator_name";
@@ -376,7 +400,13 @@ export default function TrrcDueDiligencePage() {
       const payload = {
         input: primaryInput,
         input_type_override: inputTypeOverride,
+        // lease_number intentionally stays keyed off the numeric Lease/Gas
+        // Well ID field only — this is stored as resolved_lease_number and
+        // used downstream by the worker as a literal TRRC lease number for
+        // lease-keyed queries (severance, oil proration, production, W-2).
+        // A lease NAME must never land here; it has its own field below.
         lease_number: lease || undefined,
+        lease_name: leaseName || undefined,
         operator_name: operator || undefined,
         county: form.county.trim() || undefined,
         district: form.district || undefined,
@@ -634,7 +664,7 @@ function SearchForm({
   setShowAdvanced: React.Dispatch<React.SetStateAction<boolean>>;
   onSubmit: () => void;
 }) {
-  const canSubmit = !!(form.apiNumber.trim() || form.leaseNumber.trim() || form.operatorName.trim());
+  const canSubmit = !!(form.apiNumber.trim() || form.leaseNumber.trim() || form.operatorName.trim() || form.legalDescription.trim() || form.leaseName.trim());
   const [loading, setLoading] = useState(false);
 
   const handleRun = async () => {
@@ -721,6 +751,24 @@ function SearchForm({
         </div>
       </div>
 
+      {/* Legal description — an alternate primary search mode, used only
+          when none of the three fields above are filled in. Full width and
+          a textarea since these run longer than a single line ("John Smith
+          Survey, Abstract 693, McLennan County, Texas"). */}
+      <div style={{ marginBottom: "1.25rem" }}>
+        {fieldLabel("Legal Description", "no API, lease, or operator? search by survey/abstract/county instead")}
+        <textarea
+          value={form.legalDescription}
+          onChange={e => setForm(f => ({ ...f, legalDescription: e.target.value }))}
+          placeholder="e.g. John Smith Survey, Abstract 693, McLennan County, Texas"
+          rows={2}
+          style={inp({ resize: "vertical", fontFamily: "inherit" })}
+        />
+        <p style={{ fontSize: "0.72rem", color: COLORS.textFaint, marginTop: "0.35rem" }}>
+          A legal description alone can't pinpoint one exact well — you'll be asked to confirm the right match before the search runs.
+        </p>
+      </div>
+
       {/* Advanced options toggle */}
       <button
         onClick={() => setShowAdvanced(s => !s)}
@@ -760,6 +808,29 @@ function SearchForm({
             gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
             gap: "0.9rem",
           }}>
+            {/* Lease name — a weaker fallback search mode (used only when
+                API, lease number, legal description, AND operator are all
+                empty), so it lives here rather than in the primary row.
+                Deliberately separate from "Lease / Gas Well ID" above:
+                that field's value is stored as the literal TRRC lease
+                number used by downstream lease-keyed queries, and a free-
+                text name must never land there. */}
+            <div>
+              <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: COLORS.textMuted, marginBottom: "0.35rem", letterSpacing: "0.05em", textTransform: "uppercase" as const }}>
+                Lease Name
+              </label>
+              <input
+                type="text"
+                value={form.leaseName}
+                onChange={e => setForm(f => ({ ...f, leaseName: e.target.value }))}
+                placeholder="e.g. Smith Unit 3"
+                style={inp()}
+              />
+              <p style={{ fontSize: "0.7rem", color: COLORS.textMuted, marginTop: "0.3rem" }}>
+                Fallback search if you don't know the lease number. Ignored if any field above is filled.
+              </p>
+            </div>
+
             {/* County */}
             <div>
               <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: COLORS.textMuted, marginBottom: "0.35rem", letterSpacing: "0.05em", textTransform: "uppercase" as const }}>
