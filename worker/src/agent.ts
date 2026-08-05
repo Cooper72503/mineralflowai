@@ -332,12 +332,33 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
   let stepCount = 0;
   let toolCallIndex = 0;
   const MAX_STEPS = 60;
+  // Pacing heuristic only (not a hard cap) for how progress advances as
+  // tool calls complete — a typical full run makes somewhere around this
+  // many. If a run genuinely needs more, progress just approaches 90%
+  // without reaching it rather than overshooting; it's a display curve,
+  // not a correctness constraint.
+  const EXPECTED_TOOL_CALLS = 20;
   let finalReport: Record<string, unknown> | null = null;
 
+  // Fires before the pre-seed query below, not after — confirmed live to
+  // matter: everything between claim (worker sets 2%) and this call was
+  // previously invisible, and the FIRST Claude turn alone (full system
+  // prompt + tool schema) can genuinely take 10-30+ seconds. A run that
+  // was actually fine looked identical to one that was hung for that
+  // entire window, with nothing — not even a network request — to show
+  // for it. This is deliberately the very first thing the function does.
   await reportProgress(supabase, runId, 5, "running");
 
   while (stepCount < MAX_STEPS) {
     stepCount++;
+
+    // Reported BEFORE the LLM call, not just after it returns — the same
+    // "silent multi-second gap" problem as the very first turn recurs on
+    // every subsequent turn otherwise. This alone doesn't reflect real
+    // completed work (that's what the per-tool-call update below is for),
+    // just that the agent has started thinking about the next step.
+    const preCallPct = Math.min(60, 5 + Math.round((stepCount / MAX_STEPS) * 30));
+    await reportProgress(supabase, runId, preCallPct, "running");
 
     const response = await anthropic.messages.create({
       model:      "claude-fable-5",
@@ -349,10 +370,6 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
 
     // Add assistant response to message history
     messages.push({ role: "assistant", content: response.content });
-
-    // Progress update
-    const progressPct = Math.min(90, 5 + Math.round((stepCount / MAX_STEPS) * 85));
-    await reportProgress(supabase, runId, progressPct, "running");
 
     if (response.stop_reason === "end_turn") break;
 
@@ -397,6 +414,17 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
           is_error:    true,
         });
       }
+
+      // Reported after EVERY individual tool call, success or failure —
+      // not once per LLM turn. A single turn can batch several tool calls
+      // together (the agent often queries multiple TRRC sources in one
+      // response), and waiting for the whole batch before moving the bar
+      // meant several real, completed queries in a row were invisible.
+      // toolCallIndex tracks actual finished work directly, unlike
+      // stepCount (which only counts LLM turns) — never regresses below
+      // whatever preCallPct already reported this turn.
+      const toolPct = Math.min(90, 20 + Math.round((toolCallIndex / EXPECTED_TOOL_CALLS) * 70));
+      await reportProgress(supabase, runId, Math.max(toolPct, preCallPct), "running");
     }
 
     messages.push({ role: "user", content: toolResults });

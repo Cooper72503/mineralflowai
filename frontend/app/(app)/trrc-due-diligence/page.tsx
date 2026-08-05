@@ -1052,7 +1052,15 @@ function ProgressUI({ run, onCancel }: { run: TrrcDueDiligenceRun; onCancel: () 
               {stageLabel[run.status] ?? run.status}
             </div>
             <div style={{ fontSize: "0.78rem", color: COLORS.textMuted }}>
-              {run.result_summary ?? "Processing your request…"}
+              {run.result_summary
+                ?? (run.status === "pending"
+                  // Genuinely distinct from "running" — the worker hasn't
+                  // claimed this run yet (it processes a limited number
+                  // concurrently), so nothing is happening on it yet. Left
+                  // as the generic "Processing…" message, a queued run was
+                  // indistinguishable from a stuck one.
+                  ? "Queued — waiting for the next available processing slot…"
+                  : "Processing your request…")}
             </div>
           </div>
           <button onClick={onCancel} style={{
