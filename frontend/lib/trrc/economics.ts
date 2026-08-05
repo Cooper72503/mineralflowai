@@ -95,7 +95,7 @@ export interface EconomicEvaluation {
   swdModeled: boolean; // false when no water production data was available to model disposal cost against
 }
 
-function monthlyDiscountRate(annualRate: number): number {
+export function monthlyDiscountRate(annualRate: number): number {
   return Math.pow(1 + annualRate, 1 / 12) - 1;
 }
 

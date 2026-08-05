@@ -1,7 +1,7 @@
 /**
  * TRRC Due Diligence Report Builder
  *
- * 13-section structured report:
+ * 14-section structured report:
  *   1. Executive Summary (well identity + critical/important flags)
  *   2. Operator Standing (P-5 registration, bond, compliance)
  *   3. Production History (monthly table + computed analytics + charts)
@@ -12,11 +12,16 @@
  *   6. Well Construction (W-2 completion data + W-1 permits + imaged docs)
  *   7. Compliance and Legal Status (violations, orphan, plugging)
  *   8. Legal Description and Location (GLO + GIS + Maps + offset wells + lateral path)
- *   9. Missing Documents and Gaps
- *  10. Timeline (dated regulatory events, chronological)
- *  11. Evidence Index (per-source query ledger)
- *  12. Acquisition Scorecard (transparent rule-based screening aid)
- *  13. Overall Assessment (data completeness, narrative)
+ *   9. Offset Analytics (nearby-analog screening estimate for the subject
+ *      tract — see offset-analytics/, built from the same abstract/survey/
+ *      county data as Section 8; renders the honest "not calculated"
+ *      fallback whenever that data isn't available, never a fabricated
+ *      estimate)
+ *  10. Missing Documents and Gaps
+ *  11. Timeline (dated regulatory events, chronological)
+ *  12. Evidence Index (per-source query ledger)
+ *  13. Acquisition Scorecard (transparent rule-based screening aid)
+ *  14. Overall Assessment (data completeness, narrative)
  */
 
 import React from "react";
@@ -51,6 +56,7 @@ import { fitArpsDecline, estimateEur } from "./decline-curve";
 import { compareToAnalogs, type AnalogWell } from "./type-curve-comparison";
 import { getPriceDeck } from "./eia-pricing";
 import { computeEconomics, WORKOVER_RESERVE_USD_PER_BOE, SWD_DISPOSAL_USD_PER_BBL_WATER, type EconomicEvaluation } from "./economics";
+import { runOffsetAnalytics, type OffsetAnalyticsPayload, type LegalDescription } from "./offset-analytics";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1566,7 +1572,155 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
   );
 }
 
-// ─── Section 9 — Missing Documents and Gaps ──────────────────────────────────
+// ─── Section 9 — Offset Analytics ──────────────────────────────────────────────
+//
+// A nearby-analog screening estimate for the SUBJECT TRACT (not the subject
+// well's own production, which already has its own real decline curve/PV-10
+// in Sections 4-5) — built from offset-analytics/ (see that module's own
+// non-negotiable principles: no fabricated tract boundaries/wells/formations/
+// ownership, every proxy value labeled as such). This report has no acreage
+// or ownership-fraction input anywhere in its pipeline (confirmed: no such
+// field exists on TrrcDueDiligenceRun), so ownershipType is always UNKNOWN
+// here — the engine's own ownership-economics.ts then correctly falls back
+// to a GROSS_TRACT_PROXY_PV10, never a fabricated owner-level number. Legal
+// description text is built from the SAME real abstract/survey/county data
+// Section 8 already displays; when that data isn't available, this section
+// renders the honest "not calculated" fallback rather than guessing.
+
+function legalDescriptionSummary(ld: LegalDescription): string {
+  if (ld.jurisdiction === "TX_LAND_GRID") {
+    return [
+      ld.surveyName ? `${ld.surveyName} Survey` : null,
+      ld.canonicalAbstractNumber,
+      ld.county ? `${ld.county} County, Texas` : null,
+    ].filter(Boolean).join(", ") || "Texas land grid (partial match)";
+  }
+  if (ld.jurisdiction === "PLSS") {
+    return `T${ld.townshipNumber}${ld.townshipDirection}-R${ld.rangeNumber}${ld.rangeDirection}-Sec${ld.section}${ld.principalMeridian ? ` (${ld.principalMeridian})` : ""}`;
+  }
+  return "Unparsed — manual review required";
+}
+
+export function OffsetAnalyticsPage({ run, id: identity, offsetAnalytics, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  offsetAnalytics: OffsetAnalyticsPayload | null;
+  generatedAt: string;
+}) {
+  const notCalculated = !offsetAnalytics || offsetAnalytics.validationStatus === "INVALID";
+  const nonInfoWarnings = offsetAnalytics ? offsetAnalytics.warnings.filter(w => w.severity !== "info") : [];
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — OFFSET ANALYTICS"),
+
+    React.createElement(Text, { style: S.noteText },
+      "Screening-grade analog estimate based on nearby producing wells. This is not a reserve report, title opinion, drilling recommendation, or guarantee of future production.",
+    ),
+
+    notCalculated ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
+        "Offset Analytics not calculated: the subject tract could not be mapped with sufficient confidence or no qualified producing analogs were identified within the configured search radius.",
+      ),
+      React.createElement(Text, { style: [S.noteText, { marginTop: 6 }] },
+        offsetAnalytics
+          ? `Attempted using legal description "${legalDescriptionSummary(offsetAnalytics.subjectAsset.legalDescription)}" — geocode match method "${offsetAnalytics.geocode.matchMethod}", ${offsetAnalytics.search.candidatesFound} candidate well(s) found within ${offsetAnalytics.search.radiusMiles} mi.`
+          : "No abstract number or survey name was retrieved for this well in Section 8 (Legal Description and Location), so no legal-description-based tract search was attempted.",
+      ),
+    ) : React.createElement(View, {},
+      React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, "Subject Tract"),
+      React.createElement(View, { style: { marginBottom: 8 } },
+        kv("Legal Description Used", legalDescriptionSummary(offsetAnalytics.subjectAsset.legalDescription)),
+        kv("Geocode Match", `${offsetAnalytics.geocode.matchMethod} — source ${offsetAnalytics.geocode.sourceProvider}, confidence ${(offsetAnalytics.geocode.confidence * 100).toFixed(0)}%`),
+        kv("Tract Boundary Precision", offsetAnalytics.geocode.geometryType === "Polygon" || offsetAnalytics.geocode.geometryType === "MultiPolygon" ? "Real surveyed tract polygon" : "Centroid point only — no tract polygon available"),
+        kv("Search Radius", `${offsetAnalytics.search.radiusMiles} mi (${offsetAnalytics.search.distanceMode === "TRACT_BOUNDARY_TO_WELL" ? "tract boundary to well" : "centroid to well"})`),
+      ),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, `Analog Wells (${offsetAnalytics.analogWells.length} qualified of ${offsetAnalytics.search.candidatesFound} found)`),
+      offsetAnalytics.analogWells.length === 0
+        ? React.createElement(Text, { style: S.noteText }, "No qualified analogs — see warnings below.")
+        : React.createElement(View, {},
+          React.createElement(View, { style: S.tableHeader },
+            React.createElement(Text, { style: [S.tableHeaderCell, { width: "18%" }] }, "API"),
+            React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%" }] }, "Distance"),
+            React.createElement(Text, { style: [S.tableHeaderCell, { width: "30%" }] }, "Formation"),
+            React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "Score"),
+            React.createElement(Text, { style: [S.tableHeaderCell, { width: "24%", textAlign: "right" }] }, "Decline Fit (qi/Di/b)"),
+          ),
+          ...offsetAnalytics.analogWells.slice(0, 5).map((a, i) => React.createElement(
+            View, { key: a.api, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+            React.createElement(Text, { style: [S.tableCellMono, { width: "18%" }] }, a.api),
+            React.createElement(Text, { style: [S.tableCellMono, { width: "14%" }] }, `${a.distanceMiles.toFixed(2)} mi`),
+            React.createElement(Text, { style: [S.tableCell, { width: "30%" }] }, a.canonicalFormation || "—"),
+            React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, a.analogScore.toFixed(0)),
+            React.createElement(Text, { style: [S.tableCellMono, { width: "24%", textAlign: "right" }] },
+              a.declineFit ? `${Math.round(a.declineFit.qiOilBblPerMonth)} / ${(a.declineFit.diNominalMonthly * 100).toFixed(1)}% / ${a.declineFit.bFactor.toFixed(2)}` : "—"),
+          )),
+        ),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "Composite Analog Profile"),
+      offsetAnalytics.compositeProfile ? React.createElement(View, { style: { marginBottom: 8 } },
+        kv("Method", offsetAnalytics.compositeProfile.method === "NORMALIZED_TYPE_CURVE_P50" ? "Normalized type curve (P50 baseline)" : "Median parameter aggregation"),
+        kv("Analog Count Used", String(offsetAnalytics.compositeProfile.analogCount)),
+        kv("Median Initial Rate (qi)", offsetAnalytics.compositeProfile.oil.qiBblPerMonth !== null ? `${Math.round(offsetAnalytics.compositeProfile.oil.qiBblPerMonth).toLocaleString("en-US")} BBL/mo` : "—"),
+        kv("Median Technical EUR", offsetAnalytics.compositeProfile.oil.technicalEurBbl !== null ? `${Math.round(offsetAnalytics.compositeProfile.oil.technicalEurBbl).toLocaleString("en-US")} BBL` : "—"),
+      ) : React.createElement(Text, { style: S.noteText }, "No composite profile — insufficient QC-passed decline fits among selected analogs."),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "Development Case & Proxy Valuation"),
+      React.createElement(View, { style: { flexDirection: "row", marginBottom: 8 } },
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "UNRISKED PV-10"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, offsetAnalytics.economics ? fmtUsd(offsetAnalytics.economics.unriskedPv10) : "—"),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "RISKED PV-10"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, offsetAnalytics.economics ? fmtUsd(offsetAnalytics.economics.riskedPv10) : "—"),
+        ),
+        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "PROBABILITY OF DEVELOPMENT"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, `${(offsetAnalytics.developmentCase.probabilityOfDevelopment * 100).toFixed(0)}%`),
+        ),
+      ),
+      React.createElement(Text, { style: S.noteText },
+        offsetAnalytics.economics
+          ? `Valuation type: ${offsetAnalytics.economics.valuationType}` +
+            (offsetAnalytics.economics.valuationType === "GROSS_TRACT_PROXY_PV10"
+              ? " — a gross-tract proxy value, NOT an owner-level interest valuation (no verified ownership fraction was available to this report)."
+              : ".") +
+            ` Development case: ${offsetAnalytics.developmentCase.caseType === "SINGLE_WELL_PROXY" ? "single proxy well" : `${offsetAnalytics.developmentCase.wellCount} configured wells`}.`
+          : "No proxy valuation computed — see composite profile and warnings.",
+      ),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "Confidence & Key Warnings"),
+      kv("Overall Confidence", offsetAnalytics.confidence.overall),
+      nonInfoWarnings.length === 0 ? React.createElement(Text, { style: [S.noteText, { marginTop: 4 }] }, "No material warnings.") :
+        React.createElement(View, { style: { marginTop: 4 } },
+          ...nonInfoWarnings.slice(0, 6).map((w, i) => React.createElement(
+            Text, { key: String(i), style: [S.flagItem, { color: w.severity === "critical" ? C.red : C.yellow, marginBottom: 2 }] },
+            `• ${w.message}`,
+          )),
+        ),
+    ),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 10 — Missing Documents and Gaps ─────────────────────────────────
 
 function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1574,10 +1728,10 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   attempts: LiteSourceAttempt[];
   generatedAt: string;
 }) {
-  // Reuses buildEvidenceIndex() (the same source used by Section 11) instead
+  // Reuses buildEvidenceIndex() (the same source used by Section 12) instead
   // of the previous duplicated label map and ad-hoc gap detection — this is
   // the section a reader hits first when something didn't come back, so it
-  // needs the same direct portal link + exact query criteria Section 11 has,
+  // needs the same direct portal link + exact query criteria Section 12 has,
   // not a bare error message with no path to look it up by hand.
   const gaps = buildEvidenceIndex(attempts, run).filter(e => e.status !== "retrieved");
   const severityFor = (status: EvidenceIndexEntry["status"]): "red" | "yellow" | "none" =>
@@ -1591,7 +1745,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 9 — MISSING DOCUMENTS AND GAPS"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — MISSING DOCUMENTS AND GAPS"),
 
     React.createElement(Text, { style: S.noteText }, "Every source that returned no records, failed, or requires manual retrieval is listed here, with a direct link to the TRRC portal and the exact criteria to re-run it by hand. A gap that is not applicable for this well type is noted as such; gaps in critical sources are flagged."),
 
@@ -1614,7 +1768,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 10 — Timeline ─────────────────────────────────────────────────────
+// ─── Section 11 — Timeline ────────────────────────────────────────────────────
 
 const EVIDENCE_STATUS_LABEL: Record<string, string> = {
   retrieved: "Retrieved",
@@ -1650,7 +1804,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — TIMELINE"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — TIMELINE"),
 
     React.createElement(Text, { style: S.noteText }, "Dated regulatory events assembled from sources already retrieved elsewhere in this report — permits, completion, plugging, compliance, and production. An event only appears here if a date could be confidently parsed from the underlying TRRC record; nothing is estimated."),
 
@@ -1669,7 +1823,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
   );
 }
 
-// ─── Section 11 — Evidence Index ──────────────────────────────────────────────
+// ─── Section 12 — Evidence Index ──────────────────────────────────────────────
 
 function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1687,7 +1841,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — EVIDENCE INDEX"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 12 — EVIDENCE INDEX"),
 
     React.createElement(Text, { style: S.noteText }, "Every TRRC source this pipeline supports, what was queried, and what came back. TRRC's own query portals are inconsistent about honoring pre-filled links for an unauthenticated visitor, so links here point to the portal itself — re-enter the criteria listed to independently reproduce a result."),
 
@@ -1711,7 +1865,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 12 — Acquisition Scorecard ──────────────────────────────────────
+// ─── Section 13 — Acquisition Scorecard ───────────────────────────────────────
 
 const RECOMMENDATION_COLOR: Record<string, string> = {
   PURSUE: C.green, REVIEW: C.yellow, PASS: C.gray, BLOCKED: C.red,
@@ -1739,7 +1893,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 12 — ACQUISITION SCORECARD"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 13 — ACQUISITION SCORECARD"),
 
     React.createElement(Text, { style: S.noteText },
       "A transparent, rule-based screening aid computed only from the TRRC records retrieved in this report — not a black-box model, not investment advice, and not a substitute for the buyer's own underwriting. Every score below states exactly which retrieved facts produced it. Missing data always scores low, never neutral-good.",
@@ -1789,7 +1943,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
   );
 }
 
-// ─── Section 13 — Overall Assessment ─────────────────────────────────────────
+// ─── Section 14 — Overall Assessment ──────────────────────────────────────────
 
 function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, scorecard, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1818,14 +1972,14 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
   const completenessMatch = scorecard.dimensions.record_completeness.rationale.match(/^(\d+) of (\d+)/);
   const completenessFraction = completenessMatch ? `${completenessMatch[1]} / ${completenessMatch[2]} sources` : "";
 
-  // Reuses the scorecard's own Record Completeness dimension (Section 12)
+  // Reuses the scorecard's own Record Completeness dimension (Section 13)
   // instead of a separate local calculation — the two used to disagree:
   // this page's old dataCompleteness only counted a source as "complete" if
   // it returned a non-zero record_count, so a confirmed-clean answer (0
   // violations, not an orphan well, no injection permits — genuinely
   // complete, valuable information) counted the same as an outright
   // retrieval failure. That understated completeness far more harshly than
-  // Section 12's dimension, which correctly treats confirmed-absence as a
+  // Section 13's dimension, which correctly treats confirmed-absence as a
   // definitive answer and excludes not-applicable categories entirely —
   // producing two different completeness numbers for the same run in the
   // same PDF. Single source of truth now.
@@ -1864,7 +2018,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 13 — OVERALL ASSESSMENT"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 14 — OVERALL ASSESSMENT"),
 
     // Stats row
     React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
@@ -1995,6 +2149,49 @@ export async function buildTrrcPdfReport(
   // for the full explanation) rather than leaving this permanently blank.
   const wellStatus = str(wellStatusAttempt?.["status"] ?? wellStatusAttempt?.["well_status"]) || str(gisForMap?.["well_type"]);
 
+  // ── Offset Analytics (Section 9) — built only from real, already-
+  // retrieved data: the same abstract number / survey name / county Section
+  // 8 displays. This report has no acreage or ownership-fraction input
+  // anywhere in its pipeline (no such field exists on TrrcDueDiligenceRun),
+  // so ownershipType is always UNKNOWN — runOffsetAnalytics's own
+  // ownership-economics.ts then correctly falls back to a gross-tract proxy
+  // valuation rather than a fabricated owner-level number. When neither an
+  // abstract number nor a survey name was retrieved, the engine isn't
+  // invoked at all (it could not resolve a legal description anyway) and
+  // the section renders its honest "not calculated" fallback.
+  const survey = gisForMap?.["survey"] as Record<string, unknown> | null ?? null;
+  const abstractNumber = str(survey?.["abstract_number"]);
+  const surveyName = str(survey?.["survey_name"]);
+  const oilProrationForAcreage = getAttempt(attempts, "fetch_oil_proration");
+  const oilProrationWellsForAcreage = Array.isArray(oilProrationForAcreage?.["wells"]) ? (oilProrationForAcreage!["wells"] as Record<string, unknown>[]) : [];
+  const apiTail8 = (s: string) => s.replace(/\D/g, "").slice(-8);
+  const subjectAcresRaw = identity.apiNumber
+    ? oilProrationWellsForAcreage.find(w => apiTail8(str(w["api_no"])) === apiTail8(identity.apiNumber))?.["acres"]
+    : undefined;
+  const subjectAcres = subjectAcresRaw !== undefined ? parseFloat(str(subjectAcresRaw)) : NaN;
+
+  let offsetAnalytics: OffsetAnalyticsPayload | null = null;
+  if (abstractNumber || surveyName) {
+    const legalDescriptionText = [
+      surveyName ? `${surveyName} Survey` : null,
+      abstractNumber ? `Abstract ${abstractNumber}` : null,
+      identity.county ? `${identity.county} County, Texas` : "Texas",
+    ].filter(Boolean).join(", ");
+    try {
+      offsetAnalytics = await runOffsetAnalytics({
+        legalDescriptionText,
+        grossAcres: Number.isFinite(subjectAcres) ? subjectAcres : null,
+        netMineralAcres: null,
+        ownershipType: "UNKNOWN",
+        subjectFieldName: identity.field || null,
+        subjectLateralLengthFt: lateralPath?.straight_line_length_ft ?? null,
+        priceDeck,
+      });
+    } catch {
+      offsetAnalytics = null; // a genuine failure — renders the same "not calculated" fallback as never having attempted it
+    }
+  }
+
   const doc = React.createElement(
     Document,
     {
@@ -2012,6 +2209,7 @@ export async function buildTrrcPdfReport(
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),
+    React.createElement(OffsetAnalyticsPage,    { run, id: identity, offsetAnalytics, generatedAt }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
