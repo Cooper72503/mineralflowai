@@ -7,12 +7,14 @@
  * cost assumptions below are generic or basin-typical defaults, not
  * lease-specific.
  *
- * IRR and payout months are deliberately NOT computed in v1 — both require
- * a proposed purchase price, and no such input exists anywhere in this
- * report's data model. Rather than inventing a number against nothing,
- * `irr`/`payoutMonths` are always null with a clear disclosure string; the
- * offer range stands on its own as a direct function of PV-10, which needs
- * no purchase price.
+ * IRR and payout months are computed only when the caller supplies a real
+ * proposed purchase price (an optional input, threaded from the run's
+ * `purchase_price` field — see the due-diligence intake form). Both are
+ * derived from the BASE price scenario's forecasted monthly net cash flow
+ * with the purchase price as the month-0 outflow — not from PV-10, which
+ * needs no purchase price at all. When no purchase price is supplied,
+ * `irr`/`payoutMonths` are null with a clear disclosure string, same as
+ * before — never a fabricated number against a price nobody entered.
  */
 
 import { fitArpsDecline, forecastToTerminalRate, stabilizedRate, type DeclineCurveFit } from "./decline-curve";
@@ -79,8 +81,8 @@ export interface EconomicEvaluation {
   offerRangeLow: number;   // = stress scenario PV-10
   offerRangeMid: number;   // = base scenario PV-10
   offerRangeHigh: number;  // = upside scenario PV-10
-  irr: null;
-  payoutMonths: null;
+  irr: number | null; // annualized %, from monthly IRR compounded — null when no purchase price was supplied or the cash flow never recoups it
+  payoutMonths: number | null; // null when no purchase price was supplied, or cumulative undiscounted net cash flow never reaches it within the forecast horizon
   irrPayoutNote: string;
   costAssumptionNote: string;
   // Flat oil price (holding the base scenario's gas price and all cost
@@ -99,6 +101,55 @@ export function monthlyDiscountRate(annualRate: number): number {
   return Math.pow(1 + annualRate, 1 / 12) - 1;
 }
 
+interface MonthlyEconomics {
+  grossRevenue: number; severanceTax: number; adValorem: number;
+  loe: number; workoverReserve: number; swdDisposal: number; netCashFlow: number;
+}
+
+// Both forecasts are indexed by "months ahead of the last real production
+// month," not aligned calendar months — oil and gas decline curves are
+// fit independently and can have different history lengths after
+// fitArpsDecline drops leading/trailing zero months. Treating "months
+// ahead" as a shared go-forward timeline is a documented simplification,
+// not an attempt at exact calendar alignment between two independent fits.
+//
+// Shared by evaluateScenario (PV-10/15, offer range) and the IRR/payout
+// solvers below — both need the same per-month cash flow, just used
+// differently (discounted-and-summed vs. cumulative-undiscounted / root-
+// solved), so this is computed once rather than re-derived per consumer.
+function computeMonthlyEconomics(
+  price: ScenarioPrice,
+  oilForecast: { rate: number }[],
+  gasForecast: { rate: number }[],
+  loeUsdPerBoe: number,
+  avgMonthlyWaterBbl: number | null,
+): MonthlyEconomics[] {
+  const horizon = Math.max(oilForecast.length, gasForecast.length);
+  const months: MonthlyEconomics[] = [];
+  for (let i = 0; i < horizon; i++) {
+    const oilRate = oilForecast[i]?.rate ?? 0;
+    const gasRate = gasForecast[i]?.rate ?? 0;
+
+    const oilRevenue = oilRate * price.oilUsdBbl;
+    const gasRevenue = gasRate * price.gasUsdMcf;
+    const grossRevenue = oilRevenue + gasRevenue;
+    const severanceTax = oilRevenue * TX_SEVERANCE_TAX_OIL + gasRevenue * TX_SEVERANCE_TAX_GAS;
+    const adValorem = grossRevenue * AD_VALOREM_PCT_OF_REVENUE;
+    const boe = oilRate + gasRate / MCF_PER_BOE;
+    const loe = boe * loeUsdPerBoe;
+    const workoverReserve = boe * WORKOVER_RESERVE_USD_PER_BOE;
+    // Held constant at the historical average water rate for the whole
+    // forecast — water cut isn't decline-curve-forecastable the way
+    // oil/gas volumes are, and this is a minor line item; only applied at
+    // all when real water production data exists (see computeEconomics).
+    const swdDisposal = avgMonthlyWaterBbl !== null ? avgMonthlyWaterBbl * SWD_DISPOSAL_USD_PER_BBL_WATER : 0;
+    const netCashFlow = grossRevenue - severanceTax - adValorem - loe - workoverReserve - swdDisposal;
+
+    months.push({ grossRevenue, severanceTax, adValorem, loe, workoverReserve, swdDisposal, netCashFlow });
+  }
+  return months;
+}
+
 function evaluateScenario(
   scenario: Scenario,
   price: ScenarioPrice,
@@ -107,50 +158,84 @@ function evaluateScenario(
   loeUsdPerBoe: number,
   avgMonthlyWaterBbl: number | null,
 ): ScenarioResult {
-  const horizon = Math.max(oilForecast.length, gasForecast.length);
+  const months = computeMonthlyEconomics(price, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl);
   const monthlyRate10 = monthlyDiscountRate(0.10);
   const monthlyRate15 = monthlyDiscountRate(0.15);
 
   let grossRevenue = 0, severanceTax = 0, adValorem = 0, loe = 0, workoverReserve = 0, swdDisposal = 0, netCashFlow = 0, pv10 = 0, pv15 = 0;
-
-  // Both forecasts are indexed by "months ahead of the last real production
-  // month," not aligned calendar months — oil and gas decline curves are
-  // fit independently and can have different history lengths after
-  // fitArpsDecline drops leading/trailing zero months. Treating "months
-  // ahead" as a shared go-forward timeline is a documented simplification,
-  // not an attempt at exact calendar alignment between two independent fits.
-  for (let i = 0; i < horizon; i++) {
+  months.forEach((m, i) => {
     const monthsAhead = i + 1;
-    const oilRate = oilForecast[i]?.rate ?? 0;
-    const gasRate = gasForecast[i]?.rate ?? 0;
-
-    const oilRevenue = oilRate * price.oilUsdBbl;
-    const gasRevenue = gasRate * price.gasUsdMcf;
-    const monthGrossRevenue = oilRevenue + gasRevenue;
-    const monthSeveranceTax = oilRevenue * TX_SEVERANCE_TAX_OIL + gasRevenue * TX_SEVERANCE_TAX_GAS;
-    const monthAdValorem = monthGrossRevenue * AD_VALOREM_PCT_OF_REVENUE;
-    const monthBoe = oilRate + gasRate / MCF_PER_BOE;
-    const monthLoe = monthBoe * loeUsdPerBoe;
-    const monthWorkover = monthBoe * WORKOVER_RESERVE_USD_PER_BOE;
-    // Held constant at the historical average water rate for the whole
-    // forecast — water cut isn't decline-curve-forecastable the way
-    // oil/gas volumes are, and this is a minor line item; only applied at
-    // all when real water production data exists (see computeEconomics).
-    const monthSwd = avgMonthlyWaterBbl !== null ? avgMonthlyWaterBbl * SWD_DISPOSAL_USD_PER_BBL_WATER : 0;
-    const monthNetCashFlow = monthGrossRevenue - monthSeveranceTax - monthAdValorem - monthLoe - monthWorkover - monthSwd;
-
-    grossRevenue += monthGrossRevenue;
-    severanceTax += monthSeveranceTax;
-    adValorem += monthAdValorem;
-    loe += monthLoe;
-    workoverReserve += monthWorkover;
-    swdDisposal += monthSwd;
-    netCashFlow += monthNetCashFlow;
-    pv10 += monthNetCashFlow / Math.pow(1 + monthlyRate10, monthsAhead);
-    pv15 += monthNetCashFlow / Math.pow(1 + monthlyRate15, monthsAhead);
-  }
+    grossRevenue += m.grossRevenue;
+    severanceTax += m.severanceTax;
+    adValorem += m.adValorem;
+    loe += m.loe;
+    workoverReserve += m.workoverReserve;
+    swdDisposal += m.swdDisposal;
+    netCashFlow += m.netCashFlow;
+    pv10 += m.netCashFlow / Math.pow(1 + monthlyRate10, monthsAhead);
+    pv15 += m.netCashFlow / Math.pow(1 + monthlyRate15, monthsAhead);
+  });
 
   return { scenario, pv10, pv15, grossRevenue, severanceTax, adValorem, loe, workoverReserve, swdDisposal, netCashFlow };
+}
+
+/**
+ * First month (1-indexed) at which cumulative UNDISCOUNTED net cash flow
+ * (base scenario) reaches the purchase price. null when the forecast
+ * horizon ends before that happens — a well that never pays back within
+ * its own forecast doesn't get a fabricated "eventually" answer.
+ */
+function computePayoutMonths(purchasePriceUsd: number, monthlyNetCashFlow: number[]): number | null {
+  let cumulative = 0;
+  for (let i = 0; i < monthlyNetCashFlow.length; i++) {
+    cumulative += monthlyNetCashFlow[i];
+    if (cumulative >= purchasePriceUsd) return i + 1;
+  }
+  return null;
+}
+
+// NPV of {month 0: -purchasePrice, months 1..N: monthlyNetCashFlow} at a
+// given MONTHLY discount rate — the function solveIrrAnnualPct finds the
+// root of.
+function npvAtMonthlyRate(purchasePriceUsd: number, monthlyNetCashFlow: number[], monthlyRate: number): number {
+  let npv = -purchasePriceUsd;
+  for (let i = 0; i < monthlyNetCashFlow.length; i++) {
+    npv += monthlyNetCashFlow[i] / Math.pow(1 + monthlyRate, i + 1);
+  }
+  return npv;
+}
+
+/**
+ * Solves for IRR via bisection rather than Newton-Raphson — robust against
+ * the flat/near-zero derivatives a declining-then-flattening production
+ * cash flow can produce, at the cost of a few more iterations (cheap here,
+ * this isn't a hot path). NPV(rate) is monotonically decreasing in rate
+ * whenever the cash flow series is predominantly positive after month 0
+ * (true for a producing well's forecast), so a single bracketing root is
+ * guaranteed once npv(0) > 0 > npv(hi) — which is why the total-undiscounted
+ * check below runs first.
+ *
+ * Returns null, not a fabricated rate, when the forecast cash flow never
+ * exceeds the purchase price even undiscounted — there is no real
+ * (positive, finite) IRR for an investment that never recoups.
+ */
+function solveIrrAnnualPct(purchasePriceUsd: number, monthlyNetCashFlow: number[]): number | null {
+  if (purchasePriceUsd <= 0 || monthlyNetCashFlow.length === 0) return null;
+  const totalUndiscounted = monthlyNetCashFlow.reduce((a, b) => a + b, 0);
+  if (totalUndiscounted <= purchasePriceUsd) return null;
+
+  let hi = 1;
+  while (npvAtMonthlyRate(purchasePriceUsd, monthlyNetCashFlow, hi) > 0 && hi < 1e6) hi *= 2;
+  if (npvAtMonthlyRate(purchasePriceUsd, monthlyNetCashFlow, hi) > 0) return null; // could not bracket a root — extremely unlikely given the check above
+
+  let lo = 0;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    const npvMid = npvAtMonthlyRate(purchasePriceUsd, monthlyNetCashFlow, mid);
+    if (npvMid > 0) lo = mid; else hi = mid;
+  }
+  const monthlyIrr = (lo + hi) / 2;
+  return (Math.pow(1 + monthlyIrr, 12) - 1) * 100;
 }
 
 /**
@@ -210,10 +295,16 @@ export function computeEconomics(
   fieldName: string | null = null,
   county: string | null = null,
   monthlyWaterBbl: (number | null)[] = [],
+  // Optional proposed purchase price — the ONLY input IRR/payout months
+  // are computed against. null/omitted (the common case today, since no
+  // UI collects this yet for most runs) keeps both null with a disclosure
+  // note, exactly as before this parameter existed.
+  purchasePriceUsd: number | null = null,
 ): EconomicEvaluation {
   const oilFit = fitArpsDecline(monthlyOilBbl);
   const gasFit = fitArpsDecline(monthlyGasMcf);
   const sufficientData = oilFit !== null || gasFit !== null;
+  const hasPurchasePrice = purchasePriceUsd !== null && purchasePriceUsd > 0;
 
   const basin = classifyBasin(fieldName, county);
   const loeUsdPerBoe = basin ? loeMidpoint(basin) : DEFAULT_LOE_USD_PER_BOE;
@@ -231,7 +322,11 @@ export function computeEconomics(
     `county appraisal district), a generic workover reserve of $${WORKOVER_RESERVE_USD_PER_BOE}/BOE, and ${loeSourceNote}. ` +
     `Saltwater disposal cost is ${swdModeled ? `modeled at $${SWD_DISPOSAL_USD_PER_BBL_WATER}/BBL against this well's known average water production` : "NOT modeled — no water production volume was available for this well/lease"}.`;
 
-  const irrPayoutNote = "Not computed — IRR and payout months both require a proposed purchase price, which this report does not currently collect.";
+  const irrPayoutNote = !sufficientData
+    ? "Not computed — no production history was available to forecast cash flows."
+    : hasPurchasePrice
+      ? `Computed against the BASE price scenario's forecasted monthly net cash flow, using the proposed purchase price of $${Math.round(purchasePriceUsd!).toLocaleString("en-US")} as the month-0 outflow — not the PV-10 offer range above. Actual returns depend heavily on which price scenario materializes; this is a screening-grade estimate, not a certified return calculation.`
+      : "Not computed — IRR and payout months both require a proposed purchase price, which was not provided for this run.";
 
   const stabilizedOilRateBblPerMonth = stabilizedRate(monthlyOilBbl);
 
@@ -257,12 +352,18 @@ export function computeEconomics(
 
   const declineSanityCheck = basin && oilFit ? checkDeclineAgainstBasin(basin, oilFit.currentAnnualDeclinePct) : null;
 
+  const baseMonthlyNetCashFlow = hasPurchasePrice
+    ? computeMonthlyEconomics(priceDeck.scenarios.base, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl).map(m => m.netCashFlow)
+    : [];
+  const irr = hasPurchasePrice ? solveIrrAnnualPct(purchasePriceUsd!, baseMonthlyNetCashFlow) : null;
+  const payoutMonths = hasPurchasePrice ? computePayoutMonths(purchasePriceUsd!, baseMonthlyNetCashFlow) : null;
+
   return {
     sufficientData, oilFit, gasFit, priceDeck, scenarios,
     offerRangeLow: byScenario.stress.pv10,
     offerRangeMid: byScenario.base.pv10,
     offerRangeHigh: byScenario.upside.pv10,
-    irr: null, payoutMonths: null, irrPayoutNote, costAssumptionNote,
+    irr, payoutMonths, irrPayoutNote, costAssumptionNote,
     breakevenOilPriceUsdBbl, basin, loeUsdPerBoe, declineSanityCheck,
     stabilizedOilRateBblPerMonth, swdModeled,
   };

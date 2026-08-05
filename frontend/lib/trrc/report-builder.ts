@@ -1222,8 +1222,26 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
 
       React.createElement(View, { style: S.divider }),
 
+      React.createElement(Text, { style: S.subTitle }, "Return on Proposed Purchase Price"),
+      (econ.irr !== null || econ.payoutMonths !== null) ? React.createElement(View, { style: { flexDirection: "row", marginBottom: 6 } },
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "PURCHASE PRICE"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, run.purchase_price !== null ? fmtUsd(run.purchase_price) : "—"),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "IRR (ANNUALIZED)"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, econ.irr !== null ? `${econ.irr.toFixed(1)}%` : "—"),
+        ),
+        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "PAYOUT"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, econ.payoutMonths !== null ? `${econ.payoutMonths} mo` : "—"),
+        ),
+      ) : null,
+      React.createElement(Text, { style: [S.bodyText, { color: C.gray, marginTop: (econ.irr !== null || econ.payoutMonths !== null) ? 4 : 0 }] }, econ.irrPayoutNote),
+
+      React.createElement(View, { style: S.divider }),
+
       React.createElement(Text, { style: [S.bodyText, { color: C.gray, marginTop: 6 } ] }, econ.costAssumptionNote),
-      React.createElement(Text, { style: [S.bodyText, { color: C.gray, marginTop: 6 }] }, econ.irrPayoutNote),
     ),
 
     React.createElement(Footer, { generatedAt, runId: run.id }),
@@ -2126,6 +2144,7 @@ export async function buildTrrcPdfReport(
     identity.field || null,
     identity.county || null,
     analytics.months.map(m => m.water_bbl),
+    run.purchase_price,
   );
   const flags     = generateFlags(attempts, analytics, run);
   const scorecard = buildAcquisitionScorecard({

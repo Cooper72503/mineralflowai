@@ -152,6 +152,52 @@ describe("computeEconomics — SWD disposal cost, when water production is known
   });
 });
 
+describe("computeEconomics — IRR and payout months, when a purchase price is supplied", () => {
+  const oilSeries = generateCurve(3000, 0.05, 0.9, 36);
+  const baseTotalNetCashFlow = computeEconomics(oilSeries, [], flatPriceDeck).scenarios.find(s => s.scenario === "base")!.netCashFlow;
+
+  it("computes a positive, finite IRR and a payout month when the price is comfortably recoverable", () => {
+    const price = baseTotalNetCashFlow * 0.3;
+    const result = computeEconomics(oilSeries, [], flatPriceDeck, null, null, [], price);
+    expect(result.payoutMonths).not.toBeNull();
+    expect(result.payoutMonths!).toBeGreaterThan(0);
+    expect(result.irr).not.toBeNull();
+    expect(Number.isFinite(result.irr!)).toBe(true);
+    expect(result.irr!).toBeGreaterThan(0);
+    expect(result.irrPayoutNote).toContain(`$${Math.round(price).toLocaleString("en-US")}`);
+  });
+
+  it("a lower purchase price yields a strictly higher IRR and an equal-or-earlier payout than a higher one — the defining monotonic property of both figures", () => {
+    const low = computeEconomics(oilSeries, [], flatPriceDeck, null, null, [], baseTotalNetCashFlow * 0.2);
+    const high = computeEconomics(oilSeries, [], flatPriceDeck, null, null, [], baseTotalNetCashFlow * 0.6);
+    expect(low.irr!).toBeGreaterThan(high.irr!);
+    expect(low.payoutMonths!).toBeLessThanOrEqual(high.payoutMonths!);
+  });
+
+  it("returns null IRR and payout, not a fabricated number, when the price is never recouped even undiscounted", () => {
+    const result = computeEconomics(oilSeries, [], flatPriceDeck, null, null, [], baseTotalNetCashFlow * 1.5);
+    expect(result.irr).toBeNull();
+    expect(result.payoutMonths).toBeNull();
+  });
+
+  it("stays at the no-purchase-price behavior for a zero or negative price, not a divide-by-zero or NaN", () => {
+    const zero = computeEconomics(oilSeries, [], flatPriceDeck, null, null, [], 0);
+    const negative = computeEconomics(oilSeries, [], flatPriceDeck, null, null, [], -5000);
+    for (const result of [zero, negative]) {
+      expect(result.irr).toBeNull();
+      expect(result.payoutMonths).toBeNull();
+      expect(result.irrPayoutNote).toMatch(/purchase price/i);
+    }
+  });
+
+  it("stays null when there's insufficient production data to forecast a cash flow at all, even with a purchase price supplied", () => {
+    const result = computeEconomics([100, 90, 80], [], flatPriceDeck, null, null, [], 50000);
+    expect(result.sufficientData).toBe(false);
+    expect(result.irr).toBeNull();
+    expect(result.payoutMonths).toBeNull();
+  });
+});
+
 describe("computeEconomics — an oil+gas well blends both severance tax rates", () => {
   it("effective severance rate sits between the pure-oil and pure-gas statutory rates when both streams contribute revenue", () => {
     const oilSeries = generateCurve(2000, 0.04, 0.8, 36);

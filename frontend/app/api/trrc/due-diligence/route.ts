@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
     search_historical?: boolean;
     include_offset_wells?: boolean;
     production_months?: number;
+    purchase_price?: number;
   };
 
   try {
@@ -78,6 +79,12 @@ export async function POST(request: NextRequest) {
   if (rawInput.length > 500) {
     return NextResponse.json(
       { ok: false, error: "input must be 500 characters or fewer." },
+      { status: 400 },
+    );
+  }
+  if (body.purchase_price !== undefined && (typeof body.purchase_price !== "number" || !Number.isFinite(body.purchase_price) || body.purchase_price <= 0)) {
+    return NextResponse.json(
+      { ok: false, error: "purchase_price must be a positive number." },
       { status: 400 },
     );
   }
@@ -129,6 +136,7 @@ export async function POST(request: NextRequest) {
       resolved_gas_id: null,
       operator_name:            body.operator_name?.trim() ?? null,
       resolved_operator_number: null,
+      purchase_price: body.purchase_price ?? null,
       report_storage_path: null,
       archive_storage_path: null,
       manifest_storage_path: null,

@@ -245,6 +245,11 @@ export interface TrrcDueDiligenceRun {
   resolved_lease_number: string | null;
   resolved_gas_id: string | null;
   resolved_operator_number: string | null;
+  // Optional proposed deal price — the only input economics.ts's IRR and
+  // payout-months figures are computed against (see economics.ts's own
+  // doc comment). null for the vast majority of runs, which is expected
+  // and handled with an honest "not computed" disclosure in the report.
+  purchase_price: number | null;
   report_storage_path: string | null;
   archive_storage_path: string | null;
   manifest_storage_path: string | null;

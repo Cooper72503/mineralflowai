@@ -153,6 +153,11 @@ type FormState = {
   searchHistorical: boolean;
   includeOffsetWells: boolean;
   productionMonths: number;
+  // Optional proposed deal price, as typed text (kept as a string so the
+  // field can be empty — Number("") is 0, which would silently become a
+  // fake $0 purchase price rather than "not provided"). Parsed and
+  // validated on submit.
+  purchasePrice: string;
 };
 
 type Phase = "form" | "running" | "selecting" | "complete" | "error";
@@ -257,6 +262,7 @@ export default function TrrcDueDiligencePage() {
     searchHistorical: true,
     includeOffsetWells: false,
     productionMonths: 36,
+    purchasePrice: "",
   });
 
   // Polling
@@ -361,6 +367,12 @@ export default function TrrcDueDiligencePage() {
         inputTypeOverride = "operator_name";
       }
 
+      const trimmedPrice = form.purchasePrice.trim();
+      const purchasePrice = trimmedPrice ? Number(trimmedPrice) : undefined;
+      if (purchasePrice !== undefined && (!Number.isFinite(purchasePrice) || purchasePrice <= 0)) {
+        throw new Error("Purchase price must be a positive number.");
+      }
+
       const payload = {
         input: primaryInput,
         input_type_override: inputTypeOverride,
@@ -371,6 +383,7 @@ export default function TrrcDueDiligencePage() {
         search_historical: form.searchHistorical,
         include_offset_wells: form.includeOffsetWells,
         production_months: form.productionMonths,
+        purchase_price: purchasePrice,
       };
 
       const res = await apiFetch("/api/trrc/due-diligence", {
@@ -789,6 +802,25 @@ function SearchForm({
                 onChange={e => setForm(f => ({ ...f, productionMonths: Number(e.target.value) }))}
                 style={inp()}
               />
+            </div>
+
+            {/* Purchase price — optional, only used to compute IRR and payout months */}
+            <div>
+              <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: COLORS.textMuted, marginBottom: "0.35rem", letterSpacing: "0.05em", textTransform: "uppercase" as const }}>
+                Proposed Purchase Price
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={form.purchasePrice}
+                onChange={e => setForm(f => ({ ...f, purchasePrice: e.target.value }))}
+                placeholder="Optional — e.g. 250000"
+                style={inp()}
+              />
+              <p style={{ fontSize: "0.7rem", color: COLORS.textMuted, marginTop: "0.3rem" }}>
+                Enables IRR and payout months in the report. Leave blank to skip.
+              </p>
             </div>
           </div>
 
