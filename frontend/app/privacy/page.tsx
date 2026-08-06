@@ -4,8 +4,8 @@ import { PublicHeader } from "../components/PublicHeader";
 import { PublicFooter } from "../components/PublicFooter";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — Mineral Flow AI",
-  description: "Privacy Policy for Mineral Flow AI.",
+  title: "Privacy Policy — MineralFlow AI",
+  description: "Privacy Policy for MineralFlow AI.",
 };
 
 const EFFECTIVE_DATE = "April 18, 2025";
@@ -26,7 +26,7 @@ export default function PrivacyPage() {
 
         <LegalSection title="1. Overview">
           <p>
-            Mineral Flow AI ("Company," "we," "us," or "our") is committed to protecting your privacy.
+            MineralFlow AI ("Company," "we," "us," or "our") is committed to protecting your privacy.
             This Privacy Policy explains what information we collect, how we use it, and your rights
             regarding that information when you use our platform at mineralflowai.com (the "Service").
           </p>
@@ -43,10 +43,10 @@ export default function PrivacyPage() {
             passwords.
           </p>
           <p style={{ marginTop: "0.75rem" }}>
-            <strong style={{ color: "#f8fafc" }}>Uploaded documents.</strong> When you upload a document
-            (deed, lease, division order, royalty statement, or similar instrument), we store the file
-            and the data extracted from it. This may include property descriptions, ownership information,
-            financial figures, and other content appearing in the document.
+            <strong style={{ color: "#f8fafc" }}>Search inputs and reports.</strong> When you submit a
+            well API number, lease number, operator name, or legal description to run a due diligence
+            report, we store that input along with the public regulatory records we retrieve and the
+            report we generate from them.
           </p>
           <p style={{ marginTop: "0.75rem" }}>
             <strong style={{ color: "#f8fafc" }}>Usage data.</strong> We collect standard server logs
@@ -67,35 +67,37 @@ export default function PrivacyPage() {
         <LegalSection title="3. How We Use Your Information">
           <ul style={listStyle}>
             <li>To provide, operate, and maintain the Service.</li>
-            <li>To process uploaded documents and generate AI-powered analysis and outputs.</li>
+            <li>To retrieve public regulatory records and generate AI-powered due diligence reports.</li>
             <li>To manage your subscription and process payments via Stripe.</li>
-            <li>To send transactional emails such as account confirmations, billing receipts, and lease expiration alerts you have opted into.</li>
+            <li>To send transactional emails such as account confirmations and billing receipts.</li>
             <li>To respond to your support requests and communications.</li>
             <li>To detect and prevent fraud, abuse, and security incidents.</li>
-            <li>To improve our AI models and platform using aggregated, de-identified data. We do not use your identifiable documents to train models shared with or sold to third parties.</li>
+            <li>To improve our AI models and platform using aggregated, de-identified data. We do not use your identifiable reports or search inputs to train models shared with or sold to third parties.</li>
             <li>To comply with legal obligations.</li>
           </ul>
         </LegalSection>
 
-        <LegalSection title="4. Document Data and Confidentiality">
+        <LegalSection title="4. AI Processing and Confidentiality">
           <p>
-            Documents you upload are processed to provide the Service to you. We treat uploaded documents
-            and the data extracted from them as confidential. We do not sell, rent, or share your
-            documents or their extracted contents with third parties except as necessary to operate the
-            Service (e.g., passing document text to OpenAI's API for AI processing) or as required by law.
+            Your search inputs and the public regulatory records we retrieve on your behalf are processed
+            to generate your due diligence report. We treat your reports and search history as
+            confidential. We do not sell, rent, or share them with third parties except as necessary to
+            operate the Service (e.g., passing search inputs and retrieved records to Anthropic's API for
+            AI processing) or as required by law.
           </p>
           <p style={{ marginTop: "0.75rem" }}>
-            <strong style={{ color: "#f8fafc" }}>OpenAI processing.</strong> Document text is sent to
-            OpenAI's API to perform AI extraction and analysis. OpenAI's use of this data is governed
+            <strong style={{ color: "#f8fafc" }}>Anthropic processing.</strong> Your search inputs and the
+            public regulatory records retrieved for your report are sent to Anthropic's Claude API to
+            generate the report's analysis and narrative content. Anthropic's use of this data is governed
             by{" "}
             <a
-              href="https://openai.com/policies/api-data-usage-policies"
+              href="https://www.anthropic.com/legal/commercial-terms"
               target="_blank"
               rel="noopener noreferrer"
               style={linkStyle}
             >
-              OpenAI's API data usage policies
-            </a>. We use the API under agreements that restrict OpenAI from using your data to train
+              Anthropic's commercial terms
+            </a>. We use the API under agreements that restrict Anthropic from using your data to train
             its models.
           </p>
         </LegalSection>
@@ -104,10 +106,10 @@ export default function PrivacyPage() {
           <p>We share limited data with the following categories of service providers to operate the Service:</p>
           <ul style={listStyle}>
             <li><strong style={{ color: "#f8fafc" }}>Stripe</strong> — payment processing. Receives your email and billing details to manage subscriptions.</li>
-            <li><strong style={{ color: "#f8fafc" }}>Supabase</strong> — cloud database and authentication. Stores account information, document records, and extracted data in secure, encrypted databases.</li>
-            <li><strong style={{ color: "#f8fafc" }}>OpenAI</strong> — AI document analysis. Receives document text for extraction and analysis. See Section 4.</li>
+            <li><strong style={{ color: "#f8fafc" }}>Supabase</strong> — cloud database and authentication. Stores account information, search history, and generated reports in secure, encrypted databases.</li>
+            <li><strong style={{ color: "#f8fafc" }}>Anthropic</strong> — AI report generation. Receives search inputs and public regulatory records for analysis. See Section 4.</li>
             <li><strong style={{ color: "#f8fafc" }}>Vercel</strong> — hosting and CDN. Hosts the web application and processes server-side requests.</li>
-            <li><strong style={{ color: "#f8fafc" }}>State government APIs</strong> — publicly available well data APIs (Texas RRC, North Dakota NDIC, Oklahoma OCC, West Virginia DEP, Ohio DNR). Only county/location data is sent; no personal information is transmitted.</li>
+            <li><strong style={{ color: "#f8fafc" }}>Texas Railroad Commission (TRRC)</strong> — the source of the public regulatory records our reports are built from. We query TRRC's public well, lease, and operator databases using the identifiers you submit; no account or personal information is sent to TRRC.</li>
           </ul>
           <p style={{ marginTop: "0.75rem" }}>
             We do not sell your personal information to advertisers or data brokers.
@@ -125,10 +127,10 @@ export default function PrivacyPage() {
 
         <LegalSection title="7. Data Retention">
           <p>
-            We retain your account information and uploaded documents for as long as your account is
-            active. If you delete your account, we will delete your personal data and documents within
-            30 days, except where retention is required by applicable law or to resolve disputes.
-            Aggregated, de-identified usage statistics may be retained indefinitely.
+            We retain your account information, search history, and generated reports for as long as
+            your account is active. If you delete your account, we will delete your personal data and
+            reports within 30 days, except where retention is required by applicable law or to resolve
+            disputes. Aggregated, de-identified usage statistics may be retained indefinitely.
           </p>
         </LegalSection>
 
@@ -191,7 +193,7 @@ export default function PrivacyPage() {
           </p>
           <p style={{ marginTop: "0.75rem" }}>
             For questions about your subscription or billing, you can also visit your{" "}
-            <Link href="/settings/billing" style={linkStyle}>billing settings</Link> or contact Stripe
+            <Link href="/billing" style={linkStyle}>billing settings</Link> or contact Stripe
             directly.
           </p>
         </LegalSection>

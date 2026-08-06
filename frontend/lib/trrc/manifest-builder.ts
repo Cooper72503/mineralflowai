@@ -60,7 +60,7 @@ export type TrrcManifest = {
 // ─── Standard disclaimer ──────────────────────────────────────────────────────
 
 const DISCLAIMER =
-  "Mineral Flow AI compiles and analyzes publicly available regulatory information for preliminary " +
+  "MineralFlow AI compiles and analyzes publicly available regulatory information for preliminary " +
   "acquisition screening. This report is not a title opinion, reserve report, engineering certification, " +
   "environmental assessment, legal opinion, or substitute for independent due diligence. " +
   "Public records may be incomplete, delayed, amended, incorrectly indexed, or unavailable online.";

@@ -3,7 +3,7 @@
  * public ArcGIS FeatureServer — real survey/abstract polygons, not
  * fabricated tract boundaries. This is the "Texas GLO or county GIS
  * records" tier of the Phase 3 provider priority (there is no existing
- * Mineral Flow AI survey/parcel database — confirmed in the Phase 0 audit
+ * MineralFlow AI survey/parcel database — confirmed in the Phase 0 audit
  * — so this is the first tier actually available).
  *
  * County -> abstract-prefix table adapted from a real prior implementation

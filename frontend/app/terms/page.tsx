@@ -4,8 +4,8 @@ import { PublicHeader } from "../components/PublicHeader";
 import { PublicFooter } from "../components/PublicFooter";
 
 export const metadata: Metadata = {
-  title: "Terms of Service — Mineral Flow AI",
-  description: "Terms of Service for Mineral Flow AI.",
+  title: "Terms of Service — MineralFlow AI",
+  description: "Terms of Service for MineralFlow AI.",
 };
 
 const EFFECTIVE_DATE = "April 18, 2025";
@@ -26,19 +26,20 @@ export default function TermsPage() {
 
         <LegalSection title="1. Acceptance of Terms">
           <p>
-            By accessing or using Mineral Flow AI (the "Service"), you agree to be bound by these Terms of
+            By accessing or using MineralFlow AI (the "Service"), you agree to be bound by these Terms of
             Service ("Terms"). If you do not agree, do not use the Service. These Terms form a legally
-            binding agreement between you and Mineral Flow AI ("Company," "we," "us," or "our").
+            binding agreement between you and MineralFlow AI ("Company," "we," "us," or "our").
           </p>
         </LegalSection>
 
         <LegalSection title="2. Description of Service">
           <p>
-            Mineral Flow AI is an AI-powered software platform designed to assist mineral rights
-            professionals — including landmen, acquisition teams, and mineral buyers — with document
-            analysis, deal screening, valuation estimation, and pipeline management. The Service
-            processes uploaded documents (deeds, leases, division orders, royalty statements, and related
-            instruments) and returns structured data, scores, and analytical outputs.
+            MineralFlow AI is an AI-powered software platform designed to assist mineral rights
+            professionals — including landmen, acquisition teams, and mineral buyers — with acquisition
+            due diligence on Texas oil and gas wells and leases. Given a well API number, lease number,
+            operator name, or legal description, the Service retrieves public records from the Texas
+            Railroad Commission (TRRC) and returns a structured due diligence report, including
+            engineering, economic, and risk analysis derived from that public data.
           </p>
         </LegalSection>
 
@@ -87,11 +88,10 @@ export default function TermsPage() {
           <p>You agree not to:</p>
           <ul style={listStyle}>
             <li>Use the Service for any unlawful purpose or in violation of any applicable law or regulation.</li>
-            <li>Upload documents you do not own or have authorization to process.</li>
             <li>Attempt to reverse-engineer, decompile, or extract the underlying models or source code.</li>
             <li>Resell or sublicense access to the Service without written permission.</li>
             <li>Use automated scripts or bots to scrape or abuse the platform.</li>
-            <li>Upload content that is fraudulent, defamatory, or that infringes third-party intellectual property rights.</li>
+            <li>Submit search inputs for an unlawful purpose or to harass, defraud, or infringe the rights of any third party.</li>
           </ul>
         </LegalSection>
 
@@ -104,10 +104,11 @@ export default function TermsPage() {
           </p>
           <p style={{ marginTop: "0.75rem" }}>
             Valuation ranges, deal scores, financial estimates, and extracted field values are generated
-            algorithmically from the content of uploaded documents and publicly available data. Accuracy
-            depends on the quality and completeness of the input documents. You should independently
-            verify all material figures before making acquisition decisions, executing transactions, or
-            relying on any output for legal or financial purposes.
+            algorithmically from publicly available regulatory records. Accuracy depends on the
+            completeness and timeliness of those public records, which may be delayed, amended, or
+            incorrectly indexed by the source agency. You should independently verify all material
+            figures before making acquisition decisions, executing transactions, or relying on any output
+            for legal or financial purposes.
           </p>
           <p style={{ marginTop: "0.75rem" }}>
             Mineral rights transactions involve complex legal and financial considerations. We strongly
@@ -118,14 +119,13 @@ export default function TermsPage() {
 
         <LegalSection title="8. Intellectual Property">
           <p>
-            The Service, including its software, models, interfaces, and branding, is owned by Mineral
-            Flow AI and protected by applicable intellectual property laws. Nothing in these Terms
+            The Service, including its software, models, interfaces, and branding, is owned by
+            MineralFlow AI and protected by applicable intellectual property laws. Nothing in these Terms
             transfers any ownership rights to you.
           </p>
           <p style={{ marginTop: "0.75rem" }}>
-            You retain all rights to the documents you upload. By uploading a document, you grant us a
-            limited, non-exclusive license to process and analyze that document solely to provide the
-            Service to you.
+            You retain all rights to the reports generated for your account. We grant you a limited,
+            non-exclusive license to use those reports for your own internal business purposes.
           </p>
         </LegalSection>
 
@@ -139,18 +139,19 @@ export default function TermsPage() {
 
         <LegalSection title="10. Confidentiality">
           <p>
-            We treat uploaded documents and extracted data as confidential. We do not sell your documents
-            or data to third parties. Documents are processed to provide the Service and may be retained
-            as described in our Privacy Policy. We implement reasonable technical and organizational
-            measures to protect your data.
+            We treat your search inputs and generated reports as confidential. We do not sell your
+            reports or data to third parties. This data is processed to provide the Service and may be
+            retained as described in our Privacy Policy. We implement reasonable technical and
+            organizational measures to protect your data.
           </p>
         </LegalSection>
 
         <LegalSection title="11. Third-Party Services">
           <p>
             The Service integrates with third-party providers including Stripe (payment processing),
-            Supabase (data storage), and OpenAI (AI analysis). Your use of those services is also subject
-            to their respective terms and privacy policies. We are not responsible for the practices of
+            Supabase (data storage), and Anthropic (AI analysis), and retrieves public records from the
+            Texas Railroad Commission (TRRC). Your use of those services is also subject to their
+            respective terms and privacy policies. We are not responsible for the practices of
             third-party providers.
           </p>
         </LegalSection>
@@ -182,7 +183,7 @@ export default function TermsPage() {
 
         <LegalSection title="14. Indemnification">
           <p>
-            You agree to indemnify and hold harmless Mineral Flow AI and its affiliates, officers,
+            You agree to indemnify and hold harmless MineralFlow AI and its affiliates, officers,
             directors, and employees from any claims, losses, damages, liabilities, costs, and expenses
             (including reasonable attorneys' fees) arising out of or relating to your use of the Service,
             your violation of these Terms, or your violation of any third-party rights.

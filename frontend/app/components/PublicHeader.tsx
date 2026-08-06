@@ -14,7 +14,7 @@ export function PublicHeader({ variant = "default" }: PublicHeaderProps) {
     return (
       <header className="public-header public-header--landing">
         <Link href="/" className="public-brand public-brand--landing">
-          Mineral Flow AI
+          MineralFlow AI
         </Link>
         <nav className="public-nav public-nav--landing" aria-label="Primary">
           <a href="#how-it-works" className="public-nav-quiet">
@@ -40,7 +40,7 @@ export function PublicHeader({ variant = "default" }: PublicHeaderProps) {
   return (
     <header className="public-header">
       <Link href="/" className="public-brand">
-        Mineral Flow AI
+        MineralFlow AI
       </Link>
       <nav className="public-nav">
         <Link href="/pricing">Pricing</Link>

@@ -165,7 +165,6 @@ export function LoginForm() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
         void (async () => {
-          console.log("SIGNED_IN EVENT");
           try {
             const { data: sessionData, error: sessionError } = await withTimeout(
               supabase.auth.getSession(),
@@ -173,19 +172,16 @@ export function LoginForm() {
               "Session could not be loaded after sign-in. Please try again."
             );
             if (sessionError) {
-              console.log("LOGIN ERROR", sessionError);
               setError(sessionError.message);
               return;
             }
             if (!sessionData.session) {
               const message =
                 "Session was not available after sign-in. Check Supabase cookie configuration.";
-              console.log("LOGIN ERROR", message);
               setError(message);
               return;
             }
           } catch (err) {
-            console.log("LOGIN ERROR", err);
             setError(
               err instanceof Error
                 ? err.message
@@ -210,7 +206,6 @@ export function LoginForm() {
     const submittedPassword = password;
 
     try {
-      console.log("LOGIN START — Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL ?? "(not set)");
       const supabase = createClient();
       const result = await withTimeout(
         supabase.auth.signInWithPassword({
@@ -222,14 +217,8 @@ export function LoginForm() {
       );
 
       const { data, error: authError } = result;
-      console.log("LOGIN RESPONSE", {
-        error: authError,
-        userId: data?.user?.id ?? null,
-        hasSession: !!data?.session,
-      });
 
       if (authError) {
-        console.log("LOGIN ERROR", authError);
         logFullAuthError("[Login]", authError);
         setError(formatAuthErrorForUi(authError));
         return;
@@ -237,7 +226,6 @@ export function LoginForm() {
 
       if (!data.session) {
         const message = "Sign in succeeded but no session was returned.";
-        console.log("LOGIN ERROR", message);
         setError(message);
         return;
       }
@@ -249,21 +237,18 @@ export function LoginForm() {
       );
 
       if (sessionError) {
-        console.log("LOGIN ERROR", sessionError);
         setError(sessionError.message);
         return;
       }
       if (!sessionData.session) {
         const message =
           "Session was not persisted after sign-in. Check Supabase cookie configuration.";
-        console.log("LOGIN ERROR", message);
         setError(message);
         return;
       }
 
       await redirectAfterLogin();
     } catch (err) {
-      console.log("LOGIN ERROR", err);
       if (isAuthError(err)) {
         logFullAuthError("[Login]", err);
         setError(formatAuthErrorForUi(err));
@@ -284,7 +269,7 @@ export function LoginForm() {
   return (
     <div className="auth-card">
       <div className="auth-card-header">
-        <h1>Mineral Flow AI</h1>
+        <h1>MineralFlow AI</h1>
         <p>Sign in to your account</p>
       </div>
       {error && (

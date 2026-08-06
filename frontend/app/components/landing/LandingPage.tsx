@@ -30,7 +30,7 @@ export function LandingPage() {
                 Underwriting-Grade Deal Analysis in Minutes
               </h1>
               <p className={styles.subhead}>
-                Enter an API number or RRC lease ID. Mineral Flow AI pulls the full
+                Enter an API number or RRC lease ID. MineralFlow AI pulls the full
                 TRRC production history, verifies seller claims against public records,
                 runs Arps decline curve analysis, assesses title and mineral ownership
                 risk, and returns a gated offer range — blocked until production,

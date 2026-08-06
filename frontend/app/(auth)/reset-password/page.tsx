@@ -4,7 +4,7 @@ import { ResetPasswordForm } from "./ResetPasswordForm";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Set new password — Mineral Flow AI",
+  title: "Set new password — MineralFlow AI",
 };
 
 export default function ResetPasswordPage() {

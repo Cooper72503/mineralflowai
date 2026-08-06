@@ -34,7 +34,7 @@ export default async function TrialExpiredPage() {
         Your free trial has ended
       </h1>
       <p style={{ fontSize: "0.9rem", color: "#6b7280", lineHeight: 1.6, marginBottom: "1.75rem" }}>
-        Your 7-day trial of Mineral Flow AI has expired. Upgrade to a paid plan to restore full access to screening, valuation, well intelligence, and alerts.
+        Your 7-day trial of MineralFlow AI has expired. Upgrade to a paid plan to restore full access to screening, valuation, well intelligence, and alerts.
       </p>
 
       {/* Upgrade CTA */}

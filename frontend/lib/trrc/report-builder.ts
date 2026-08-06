@@ -315,7 +315,7 @@ function kv(label: string, value: string | null | undefined, highlight?: "red" |
 function Footer({ generatedAt, runId }: { generatedAt: string; runId: string }) {
   return React.createElement(
     View, { style: S.footer },
-    React.createElement(Text, { style: S.footerText }, "CONFIDENTIAL — Mineral Flow AI — TRRC Public Records"),
+    React.createElement(Text, { style: S.footerText }, "CONFIDENTIAL — MineralFlow AI — TRRC Public Records"),
     React.createElement(Text, { style: S.footerText }, `Run ${runId.slice(0, 8)} · ${generatedAt.slice(0, 10)}`),
   );
 }
@@ -690,7 +690,7 @@ function CoverPage({ run, id: identity, generatedAt, isSampleReport }: {
       ),
       React.createElement(View, {},
         React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "PREPARED BY"),
-        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, "Mineral Flow AI"),
+        React.createElement(Text, { style: { fontSize: 9, color: "#94A3B8", fontFamily: "Helvetica" } }, "MineralFlow AI"),
       ),
       identity.district ? React.createElement(View, {},
         React.createElement(Text, { style: { fontSize: 7, color: "#64748B", fontFamily: "Helvetica-Bold", letterSpacing: 1, marginBottom: 3 } }, "TRRC DISTRICT"),
@@ -725,7 +725,7 @@ function ExecutiveSummaryPage({ run, id: identity, flags, wellStatus, generatedA
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -792,7 +792,7 @@ function OperatorStandingPage({ run, id: identity, attempts, flags, generatedAt 
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -860,7 +860,7 @@ function ProductionPage({ run, id: identity, analytics, generatedAt }: {
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -977,7 +977,7 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1117,7 +1117,7 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1283,7 +1283,7 @@ function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1397,7 +1397,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1517,7 +1517,7 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1632,7 +1632,7 @@ export function OffsetAnalyticsPage({ run, id: identity, offsetAnalytics, genera
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1759,7 +1759,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1818,7 +1818,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1855,7 +1855,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -1907,7 +1907,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -2037,7 +2037,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
     Page, { size: "LETTER", style: S.page },
 
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
-      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — Mineral Flow AI"),
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
@@ -2219,10 +2219,10 @@ export async function buildTrrcPdfReport(
   const doc = React.createElement(
     Document,
     {
-      title: `Mineral Flow AI — TRRC Due Diligence — ${identity.apiNumber || run.original_input}`,
-      author: "Mineral Flow AI",
+      title: `MineralFlow AI — TRRC Due Diligence — ${identity.apiNumber || run.original_input}`,
+      author: "MineralFlow AI",
       subject: "TRRC Public Records Due Diligence",
-      creator: "Mineral Flow AI",
+      creator: "MineralFlow AI",
     },
     React.createElement(CoverPage,              { run, id: identity, generatedAt, isSampleReport }),
     React.createElement(ExecutiveSummaryPage,   { run, id: identity, flags, wellStatus, generatedAt }),

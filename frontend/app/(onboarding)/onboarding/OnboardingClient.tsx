@@ -63,7 +63,7 @@ export function OnboardingClient({ email }: { email: string }) {
       <div style={{ textAlign: "center", marginBottom: "1.75rem" }}>
         <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>⛏️</div>
         <h1 style={{ fontSize: "1.55rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-          Mineral Flow AI
+          MineralFlow AI
         </h1>
         <p style={{ fontSize: "0.88rem", color: "#6b7280", marginTop: "0.35rem" }}>
           Welcome, {email}

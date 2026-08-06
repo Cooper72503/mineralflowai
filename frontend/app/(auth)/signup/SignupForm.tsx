@@ -131,7 +131,6 @@ export function SignupForm() {
     const submittedPassword = password;
 
     try {
-      console.log("SIGNUP START");
       const supabase = createClient();
       const result = await withTimeout(
         supabase.auth.signUp({
@@ -143,14 +142,8 @@ export function SignupForm() {
       );
 
       const { data, error: authError } = result;
-      console.log("SIGNUP RESPONSE", {
-        error: authError,
-        userId: data?.user?.id ?? null,
-        hasSession: !!data?.session,
-      });
 
       if (authError) {
-        console.log("SIGNUP ERROR", authError);
         logFullAuthError("[Signup]", authError);
         setError(formatAuthErrorForUi(authError));
         return;
@@ -164,7 +157,6 @@ export function SignupForm() {
       // Email confirmation required — show a friendly waiting screen
       setSuccessMessage("confirm_email");
     } catch (err) {
-      console.log("SIGNUP ERROR", err);
       if (isAuthError(err)) {
         logFullAuthError("[Signup]", err);
         setError(formatAuthErrorForUi(err));
@@ -209,7 +201,7 @@ export function SignupForm() {
     <div className="auth-card">
       <div className="auth-card-header">
         <h1>Create an account</h1>
-        <p>Mineral Flow AI</p>
+        <p>MineralFlow AI</p>
       </div>
       {error && (
         <div

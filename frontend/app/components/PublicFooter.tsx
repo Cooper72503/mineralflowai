@@ -12,7 +12,7 @@ export function PublicFooter({ variant = "default" }: PublicFooterProps) {
   return (
     <footer className="public-footer public-footer--landing">
       <div className="public-footer-inner">
-        <span className="public-footer-brand">Mineral Flow AI</span>
+        <span className="public-footer-brand">MineralFlow AI</span>
         <nav className="public-footer-nav" aria-label="Footer">
           <Link href="/pricing">Pricing</Link>
           <Link href="/about">About</Link>
@@ -22,7 +22,7 @@ export function PublicFooter({ variant = "default" }: PublicFooterProps) {
           <Link href="/privacy">Privacy</Link>
         </nav>
         <p className="public-footer-copy">
-          © {new Date().getFullYear()} Mineral Flow AI. All rights reserved.
+          © {new Date().getFullYear()} MineralFlow AI. All rights reserved.
         </p>
       </div>
     </footer>

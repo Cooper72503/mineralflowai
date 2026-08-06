@@ -190,7 +190,7 @@ export default function BillingPage() {
             {status?.plan === "pro" ? (
               <div style={{ fontSize: "0.88rem", color: "#374151" }}>
                 <p style={{ margin: "0 0 0.4rem" }}>
-                  <strong>Mineral Flow AI Pro</strong>
+                  <strong>MineralFlow AI Pro</strong>
                 </p>
                 <p style={{ margin: "0 0 0.2rem", color: "#6b7280" }}>
                   Status:{" "}

@@ -61,7 +61,7 @@ export async function sendLeaseAlertEmail(p: LeaseAlertEmailPayload) {
 
     <!-- Header -->
     <div style="background: ${p.days_until <= 7 ? "#dc2626" : p.days_until <= 30 ? "#d97706" : "#2563eb"}; padding: 1.5rem 2rem;">
-      <p style="color: rgba(255,255,255,0.8); font-size: 0.8rem; margin: 0 0 0.25rem; text-transform: uppercase; letter-spacing: 0.08em;">Mineral Flow AI · Lease Alert</p>
+      <p style="color: rgba(255,255,255,0.8); font-size: 0.8rem; margin: 0 0 0.25rem; text-transform: uppercase; letter-spacing: 0.08em;">MineralFlow AI · Lease Alert</p>
       <h1 style="color: #fff; font-size: 1.35rem; font-weight: 700; margin: 0;">
         Lease expiring in <strong>${p.days_until} day${p.days_until === 1 ? "" : "s"}</strong>
       </h1>
@@ -97,7 +97,7 @@ export async function sendLeaseAlertEmail(p: LeaseAlertEmailPayload) {
       </a>
 
       <p style="margin-top: 1.5rem; font-size: 0.78rem; color: #9ca3af; line-height: 1.6;">
-        You're receiving this because you have lease expiration alerts enabled in Mineral Flow AI.
+        You're receiving this because you have lease expiration alerts enabled in MineralFlow AI.
         <a href="${p.document_url.split("/documents")[0]}/alerts" style="color: #6b7280;">Manage alert preferences</a>
       </p>
     </div>
