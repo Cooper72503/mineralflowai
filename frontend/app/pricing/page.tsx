@@ -7,26 +7,20 @@ import { createClient } from "@/lib/supabase/client";
 
 const PILOT_FEATURES = [
   "7-day free trial — no charge until day 8",
-  // Underwriting engine
-  "Full TRRC production history — complete lease-level record, not just 36 months",
-  "Seller claim verification — TRRC cross-check flags overstatements automatically",
-  "Arps DCA — exponential / hyperbolic / harmonic; best-fit by SSE; P10/P50/P90 reserves",
-  "Title & mineral ownership risk — NRI, ORRI, division order, operator match, HBP",
-  "Multi-scenario NPV — stress / base / strip / upside, EIA-anchored pricing",
-  "Gated offer range — blocked until production, ownership, and LOE are each verified",
-  "Six-dimension risk score with pursue / review / pass recommendation",
-  "Evidence tracking — every field tagged by source",
-  // Document intelligence
-  "AI document extraction — LOE, run tickets, division orders, workover AFEs, W-2 completions",
-  // Compliance & data
-  "Live Texas RRC — production, compliance, injections, P-5 operator status",
-  "ICE field inspection records and open violation tracker",
+  // Retrieval
+  "Every applicable Texas Railroad Commission (TRRC) public record source, queried automatically",
+  "Full lease-level production history — not capped to a rolling window",
+  "Live compliance, injection, and P-5 operator status checks",
   "Plugging liability estimate per API number",
-  // Deal management
-  "Kanban deal pipeline",
-  "Lease expiration alerts (90 / 30 / 7 days)",
+  // Analysis
+  "Arps decline-curve fitting — exponential / hyperbolic / harmonic, best-fit by SSE, with EUR",
+  "Multi-scenario economics — stress / base / strip / upside pricing, PV-10 / PV-15, offer range",
+  "Acquisition Scorecard — automated deal-quality scoring across mechanical, compliance, and operator risk",
+  "Offset Analytics — geodesic-radius offset search, analog well scoring, proxy valuation for undeveloped tracts",
+  "Evidence-first reporting — every field traceable to its source record; gaps disclosed, not guessed",
+  // Delivery
+  "Full report exports — PDF, Excel workbook, CSV, and ZIP evidence archive",
   "Parcel map (PLSS centroid)",
-  "Notes per document",
   // Support
   "Priority email support",
   "Dedicated onboarding",

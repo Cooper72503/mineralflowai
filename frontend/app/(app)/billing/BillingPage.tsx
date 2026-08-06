@@ -219,10 +219,10 @@ export default function BillingPage() {
             ) : (
               <div style={{ fontSize: "0.88rem", color: "#374151" }}>
                 <p style={{ margin: "0 0 0.4rem" }}>
-                  <strong>Free tier</strong>
+                  <strong>No active subscription</strong>
                 </p>
                 <p style={{ margin: "0 0 0.75rem", color: "#6b7280" }}>
-                  50 document analyses per week · all core features included
+                  Start a 7-day free trial to get full platform access — $1,250/mo after the trial, cancel anytime.
                 </p>
               </div>
             )}
@@ -244,7 +244,7 @@ export default function BillingPage() {
                     cursor: actionLoading ? "wait" : "pointer",
                   }}
                 >
-                  {actionLoading ? "Redirecting…" : "Upgrade to Pro"}
+                  {actionLoading ? "Redirecting…" : "Start free trial"}
                 </button>
               )}
               {status?.has_stripe_customer && (
@@ -285,7 +285,7 @@ export default function BillingPage() {
                   marginBottom: "0.875rem",
                 }}
               >
-                What&apos;s included in Pro
+                What&apos;s included — $1,250/mo, 7-day free trial
               </h2>
               <ul
                 style={{
@@ -296,12 +296,11 @@ export default function BillingPage() {
                   lineHeight: 1.8,
                 }}
               >
-                <li>Unlimited document analyses per day</li>
-                <li>Priority AI processing queue</li>
-                <li>Advanced deal scoring &amp; benchmarking</li>
-                <li>Export reports to PDF / CSV</li>
-                <li>Email alerts on lease expirations</li>
-                <li>API access for bulk imports</li>
+                <li>Every applicable TRRC public record source, queried automatically</li>
+                <li>Full lease-level production history and Arps decline-curve analysis</li>
+                <li>Multi-scenario economics — PV-10 / PV-15 and offer range</li>
+                <li>Acquisition Scorecard and Offset Analytics</li>
+                <li>Full report exports — PDF, Excel, CSV, ZIP evidence archive</li>
                 <li>Priority email support</li>
               </ul>
               {!status?.stripe_configured && (
@@ -315,7 +314,7 @@ export default function BillingPage() {
                 >
                   Questions about upgrading?{" "}
                   <a
-                    href="mailto:cbosher@mineralflowai.com?subject=Mineral%20Flow%20AI%20%E2%80%94%20Upgrade%20inquiry"
+                    href="mailto:cbosher@mineralflowai.com?subject=MineralFlow%20AI%20%E2%80%94%20Upgrade%20inquiry"
                     style={{ color: "#C9A84C", textDecoration: "none" }}
                   >
                     Contact us

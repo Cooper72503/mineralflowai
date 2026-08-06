@@ -10,7 +10,7 @@ const FEATURES = [
   { icon: "🛢️", label: "Nearby well intelligence with real well data" },
   { icon: "📊", label: "Pre-underwriting valuation & deal scoring" },
   { icon: "📄", label: "PDF export for every screen result" },
-  { icon: "🔔", label: "Lease expiry alerts & pipeline tracking" },
+  { icon: "📈", label: "Arps decline-curve analysis & multi-scenario PV-10/PV-15" },
   { icon: "🗺️", label: "PLSS parcel maps & basin activity overlays" },
 ];
 
