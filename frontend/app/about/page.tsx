@@ -7,14 +7,14 @@ export default function AboutPage() {
       <main className="public-main">
         <h1>About</h1>
         <p className="public-tagline">
-          MineralFlow AI helps mineral buyers, landmen, and acquisition teams find opportunities near drilling activity.
+          MineralFlow AI helps mineral buyers, landmen, and acquisition teams run acquisition due diligence on Texas oil and gas wells and leases.
         </p>
         <div className="card" style={{ maxWidth: 560, marginTop: "1.5rem", textAlign: "left" }}>
           <h2 style={{ fontSize: "1.1rem", fontWeight: 600, marginBottom: "0.75rem" }}>
             Our mission
           </h2>
           <p style={{ color: "#666", fontSize: "0.9rem" }}>
-            We combine public records, document extraction, and mapping to surface mineral ownership opportunities and streamline due diligence.
+            We automate the retrieval and analysis of public Texas Railroad Commission records — production history, compliance, engineering, and economics — into a single due diligence report, with every field traceable to its source and every gap disclosed, not guessed.
           </p>
         </div>
       </main>

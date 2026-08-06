@@ -30,15 +30,15 @@ export function LandingPage() {
                 Underwriting-Grade Deal Analysis in Minutes
               </h1>
               <p className={styles.subhead}>
-                Enter an API number or RRC lease ID. MineralFlow AI pulls the full
-                TRRC production history, verifies seller claims against public records,
-                runs Arps decline curve analysis, assesses title and mineral ownership
-                risk, and returns a gated offer range — blocked until production,
-                division orders, and LOE are each sourced and verified.
+                Enter an API number, lease ID, or operator name. MineralFlow AI queries
+                every applicable Texas Railroad Commission public record source, runs
+                Arps decline curve analysis, models multi-scenario economics, and
+                returns an acquisition scorecard and offer range — with every field
+                traced to its source record and every gap disclosed, not guessed.
               </p>
               <p className={styles.trustLine}>
-                Full TRRC history &nbsp;·&nbsp; Seller claim verification &nbsp;·&nbsp;
-                Title &amp; ownership risk &nbsp;·&nbsp; Arps DCA &nbsp;·&nbsp; Gated offer range &nbsp;·&nbsp; Evidence-tracked per field
+                Full TRRC retrieval &nbsp;·&nbsp; Arps DCA &nbsp;·&nbsp;
+                Multi-scenario economics &nbsp;·&nbsp; Offset Analytics &nbsp;·&nbsp; Acquisition Scorecard &nbsp;·&nbsp; Evidence-tracked per field
               </p>
               <div className={styles.ctaRow}>
                 <a className={styles.btnPrimary} href={MAIL_DEMO}>
@@ -50,12 +50,12 @@ export function LandingPage() {
               </div>
               <div className={styles.chips} aria-hidden>
                 <span className={styles.chip}>Production analysis</span>
-                <span className={styles.chip}>Seller truth check</span>
-                <span className={styles.chip}>Title risk</span>
+                <span className={styles.chip}>Offset Analytics</span>
+                <span className={styles.chip}>Acquisition Scorecard</span>
                 <span className={styles.chip}>Arps DCA</span>
-                <span className={styles.chip}>NPV model</span>
-                <span className={styles.chip}>Gated offer range</span>
-                <span className={styles.chip}>Document extraction</span>
+                <span className={styles.chip}>Economic model</span>
+                <span className={styles.chip}>Offer range</span>
+                <span className={styles.chip}>Evidence-first</span>
               </div>
             </div>
             <div className={styles.heroMock} aria-hidden>
@@ -139,11 +139,11 @@ export function LandingPage() {
               <div>
                 <h3>Full TRRC production history</h3>
                 <p>
-                  Pulls the complete monthly production record from the Texas Railroad
-                  Commission by API number or RRC lease ID — not just the trailing 36
-                  months. Every month is classified: active, downtime, restart, flush,
-                  or incomplete, with calendar gaps preserved so the decline model sees
-                  the true time axis. Multi-lease assets are aggregated before DCA fitting.
+                  Pulls the monthly production record from the Texas Railroad
+                  Commission by API number or lease ID, alongside wellbore identity,
+                  operator/P-5 status, compliance, injection, oil proration, drilling
+                  permits, and lease inventory — 18 public record sources queried
+                  automatically, every attempt logged.
                 </p>
               </div>
             </div>
@@ -166,13 +166,14 @@ export function LandingPage() {
                 <IconCurrency />
               </div>
               <div>
-                <h3>Multi-scenario NPV model</h3>
+                <h3>Multi-scenario economic model</h3>
                 <p>
-                  Stress / Base / Strip / Upside price decks anchored to live EIA WTI
-                  and Henry Hub, with basin-specific differentials applied. Computes
-                  NPV10, NPV15, IRR, payout months, offer range (low/mid/high), and
-                  breakeven oil price — including severance tax, ad valorem, workover reserve,
-                  and SWD disposal costs.
+                  Stress / Base / Strip / Upside price decks, with basin-specific
+                  differentials applied. Computes PV-10, PV-15, offer range
+                  (low/mid/high), and breakeven oil price — including severance tax,
+                  ad valorem, workover reserve, and SWD disposal costs. IRR and payout
+                  months compute when a proposed purchase price is supplied; otherwise
+                  the report says so explicitly rather than guessing.
                 </p>
               </div>
             </div>
@@ -181,12 +182,12 @@ export function LandingPage() {
                 <IconShield />
               </div>
               <div>
-                <h3>Six-dimension risk score</h3>
+                <h3>Acquisition Scorecard</h3>
                 <p>
-                  Scores production risk, financial risk, compliance, plugging liability,
-                  operator quality, and data completeness on a 1–10 scale where 1 is lowest
-                  risk. Returns a pursue / review / pass recommendation with specific red,
-                  yellow, and green flags — not a number without reasoning.
+                  Scores mechanical integrity, regulatory compliance, operator profile,
+                  and development activity, weighted into a single deal-quality score
+                  with a pursue / review / pass recommendation — each dimension shows
+                  its reasoning, not just a number.
                 </p>
               </div>
             </div>
@@ -195,13 +196,11 @@ export function LandingPage() {
                 <IconDoc />
               </div>
               <div>
-                <h3>AI document extraction</h3>
+                <h3>Offset Analytics</h3>
                 <p>
-                  Processes LOE statements, run tickets, division orders, joint interest
-                  billings, workover AFEs, W-1/W-2 completion reports, and equipment lists.
-                  Extracts monthly production, line-item costs, NRI/WI, water cut, formation
-                  depth, and completion data — with physical bounds validation before any
-                  number reaches the model.
+                  True geodesic-radius offset well search, analog similarity scoring,
+                  and composite type-curve construction — used to proxy-value
+                  undeveloped tracts against nearby comparable completions.
                 </p>
               </div>
             </div>
@@ -210,13 +209,13 @@ export function LandingPage() {
                 <IconCheck />
               </div>
               <div>
-                <h3>Evidence tracking &amp; offer gate</h3>
+                <h3>Evidence-first reporting</h3>
                 <p>
-                  Every diligence field shows its data source: TRRC structured data,
-                  TRRC imaged record, seller document, or assumption. An offer gate
-                  blocks the recommendation until Production, Division Orders, LOE,
-                  and Workover History are verified — preventing a number from being
-                  mistaken for a fact.
+                  Every diligence field shows its data source and the record it was
+                  pulled from. When a source can&apos;t be reached, or production is
+                  ramping instead of declining, or ownership data doesn&apos;t exist for
+                  this well, the report says so explicitly — it will not force a number
+                  it can&apos;t back.
                 </p>
               </div>
             </div>
@@ -232,33 +231,33 @@ export function LandingPage() {
       >
         <div className={styles.wrap}>
           <h2 className={styles.sectionTitle} id="how-heading">
-            From API number to gated offer recommendation in four steps
+            From identifier to full report in minutes
           </h2>
           <p className={styles.sectionLead}>
-            The platform runs the full evaluation automatically. You provide the
-            identifiers and documents; it does the rest — and tells you exactly
-            what&apos;s still missing before the offer is written.
+            The platform runs the full retrieval and analysis automatically. You
+            provide the identifier; it queries every applicable public record source,
+            fits the decline curve, and builds the report.
           </p>
           <div className={styles.steps}>
             <div className={styles.stepCard}>
               <div className={styles.stepNum}>1</div>
               <h3>Identify the asset</h3>
-              <p>Enter the API number, RRC lease ID, or operator name. No manual TRRC searching required.</p>
+              <p>Enter the API number, lease ID, operator name, or legal description. No manual TRRC searching required.</p>
             </div>
             <div className={styles.stepCard}>
               <div className={styles.stepNum}>2</div>
-              <h3>Production pulled automatically</h3>
-              <p>36 months of TRRC production fetched, classified, and analyzed for downtime, restarts, and TRRC reporting lag.</p>
+              <h3>Public records retrieved automatically</h3>
+              <p>Every applicable TRRC source is queried in sequence — production, compliance, injection, permits, and more — with every attempt logged, success or failure.</p>
             </div>
             <div className={styles.stepCard}>
               <div className={styles.stepNum}>3</div>
-              <h3>Upload operator documents</h3>
-              <p>LOE statements, division orders, workover records, run tickets. AI extracts every structured field with bounds validation.</p>
+              <h3>Analysis runs on what was retrieved</h3>
+              <p>Decline curve fit, multi-scenario economics, offset analytics, and the acquisition scorecard are built from the records actually found — not assumed.</p>
             </div>
             <div className={styles.stepCard}>
               <div className={styles.stepNum}>4</div>
-              <h3>Review the full report</h3>
-              <p>Seller claim verification, title risk, decline curve, NPV model, and a gated offer range — unlocked only after production, ownership, and LOE are each sourced. Missing items generate a specific document request list.</p>
+              <h3>Review and download the full report</h3>
+              <p>PDF report, Excel workbook, CSV exports, and a ZIP evidence archive. Any source that couldn&apos;t be reached or record that wasn&apos;t found is disclosed, not omitted.</p>
             </div>
           </div>
         </div>
@@ -323,7 +322,7 @@ export function LandingPage() {
                 <strong>8,400 BBL remaining</strong>
               </div>
               <div className={styles.finRow}>
-                <span>NPV10 — base deck</span>
+                <span>PV-10 — base deck</span>
                 <strong className={styles.finHighlight}>$342,000</strong>
               </div>
               <div className={styles.finRow}>
@@ -335,127 +334,16 @@ export function LandingPage() {
                 <strong>$215K – $290K – $342K</strong>
               </div>
               <div className={styles.finRow}>
-                <span>Risk score (1=low risk, 10=high)</span>
-                <strong>3.8 — Pursue</strong>
+                <span>Acquisition score (0–100)</span>
+                <strong>82 — Pursue</strong>
               </div>
             </div>
           </div>
           <div className={styles.noteBox} style={{ marginTop: "1.5rem" }}>
-            Economics are suppressed when NRI and WI are both unverified — an unverified interest
-            fraction can move the offer range by 30–50%. The platform blocks the offer recommendation
-            and generates a specific document request list until ownership is confirmed.
-          </div>
-        </div>
-      </section>
-
-      {/* ── Seller truth check ───────────────────────────────────────── */}
-      <section
-        id="truth-check"
-        className={`${styles.section} ${styles.sectionAlt}`}
-        aria-labelledby="truth-heading"
-      >
-        <div className={styles.wrap}>
-          <h2 className={styles.sectionTitle} id="truth-heading">
-            Seller claims verified against TRRC before the offer is written
-          </h2>
-          <p className={styles.sectionLead}>
-            Sellers routinely overstate production. The platform pulls the public
-            TRRC record, compares it to whatever rate the seller claimed, and flags
-            discrepancies — automatically, on every deal.
-          </p>
-          <div className={styles.confGrid}>
-            <div className={styles.confCard}>
-              <h3>What it checks</h3>
-              <ul>
-                <li>Current combined rate vs. seller's stated rate — by lease, by well</li>
-                <li>Last reported production month and staleness (TRRC reporting lag flagged)</li>
-                <li>Zero-production months — downtime the seller didn't mention</li>
-                <li>Compliance record vs. "clean title" seller claim</li>
-                <li>Operator name match between stated and TRRC record</li>
-              </ul>
-            </div>
-            <div className={styles.confCard}>
-              <h3>What a discrepancy looks like</h3>
-              <ul>
-                <li>Seller claims 25 BOPD — TRRC shows 14.3 BOPD, last reported 13 months ago</li>
-                <li>Seller claims clean compliance — TRRC shows 3 open violations</li>
-                <li>Seller claims 73 combined BOPD — TRRC shows 59.9 (18% overstatement)</li>
-                <li>Verdict: block — economics suppressed until overstatement is explained</li>
-              </ul>
-            </div>
-          </div>
-          <div className={styles.noteBox} style={{ marginTop: "1.5rem" }}>
-            Truth-check items that can be verified with public data are marked true or false
-            automatically. Items that require seller documents are marked unsupported — not assumed
-            clean. The offer gate stays closed until each critical item resolves.
-          </div>
-        </div>
-      </section>
-
-      {/* ── Title risk ────────────────────────────────────────────────── */}
-      <section
-        id="title-risk"
-        className={styles.section}
-        aria-labelledby="title-heading"
-      >
-        <div className={styles.wrap}>
-          <h2 className={styles.sectionTitle} id="title-heading">
-            Mineral ownership and title risk assessed automatically
-          </h2>
-          <p className={styles.sectionLead}>
-            Before a dollar moves, the platform cross-checks seven title signals
-            against the documents you have — and tells you exactly which ones
-            require a licensed title attorney to resolve.
-          </p>
-          <div className={styles.valGrid}>
-            <div className={styles.valCard}>
-              <strong>Division order verification</strong>
-              <p>
-                No division order on file means decimal interest is unconfirmed.
-                The platform flags this as critical and blocks NRI-dependent
-                economics until an executed division order is uploaded.
-              </p>
-            </div>
-            <div className={styles.valCard}>
-              <strong>NRI / WI plausibility check</strong>
-              <p>
-                NRI is cross-checked against typical working interest structures.
-                An NRI above the WI or outside the plausible range for the lease
-                type is flagged for investigation before closing.
-              </p>
-            </div>
-            <div className={styles.valCard}>
-              <strong>ORRI and burden detection</strong>
-              <p>
-                Overriding royalty interests reduce net revenue. The platform
-                detects ORRI language in uploaded documents and flags the implied
-                lease burden so it flows into the NPV model correctly.
-              </p>
-            </div>
-            <div className={styles.valCard}>
-              <strong>Operator name cross-check</strong>
-              <p>
-                The stated operator is compared to the TRRC record. A mismatch
-                may indicate an unreported operator change or an acquisition
-                that hasn't been reflected in the public record.
-              </p>
-            </div>
-            <div className={styles.valCard}>
-              <strong>HBP status and lease copy requirement</strong>
-              <p>
-                Production confirms HBP status, but HBP doesn't eliminate lease
-                review — pugh clauses, depth limitations, and primary term
-                provisions still require the underlying lease document.
-              </p>
-            </div>
-            <div className={styles.valCard}>
-              <strong>Title opinion gate</strong>
-              <p>
-                No automated analysis substitutes for a formal title examination.
-                The platform generates a specific document checklist and flags
-                when a licensed title attorney must be engaged before closing.
-              </p>
-            </div>
+            Economics are computed on a gross (100%) interest basis. This product
+            does not collect or verify mineral or working-interest ownership
+            fractions — confirm NRI/WI independently before relying on any dollar
+            figure for an actual offer.
           </div>
         </div>
       </section>
@@ -475,12 +363,12 @@ export function LandingPage() {
           </p>
           <div className={styles.confGrid}>
             <div className={styles.confCard}>
-              <h3>Production &amp; completion records</h3>
+              <h3>Production &amp; identity records</h3>
               <ul>
-                <li>36 months of monthly oil and gas production by lease ID</li>
+                <li>Monthly oil and gas production by API number or lease ID</li>
                 <li>API-to-district-code resolution via wellbore lookup</li>
-                <li>W-2 completion data: formation, depth, perforations, casing, tubing</li>
-                <li>ICE field inspection records: visit date, pass/fail, deficiency notes</li>
+                <li>Drilling permits (W-1), lease inventory, and oil proration filings</li>
+                <li>Imaged document packets where structured data isn&apos;t available</li>
               </ul>
             </div>
             <div className={styles.confCard}>
@@ -515,31 +403,29 @@ export function LandingPage() {
             <div className={styles.valCard}>
               <strong>TRRC Structured</strong>
               <p>
-                Production, formation, compliance, and inspection data pulled directly
+                Production, compliance, injection, and permit data pulled directly
                 from the Railroad Commission. Highest-quality public record source for Texas wells.
               </p>
             </div>
             <div className={styles.valCard}>
               <strong>TRRC Imaged</strong>
               <p>
-                W-1 / W-2 scanned records, field inspection forms, and permit filings.
-                Extracted from imaged documents where structured data is unavailable.
+                Scanned document packets and permit filings, retrieved where
+                structured data isn&apos;t available for a given source.
               </p>
             </div>
             <div className={styles.valCard}>
-              <strong>Seller Documents</strong>
+              <strong>Disclosed Gap</strong>
               <p>
-                LOE statements, run tickets, division orders, and workover AFEs uploaded
-                by the operator. AI-extracted with physical bounds validation and
-                cross-checked against basin benchmarks.
+                When a source can&apos;t be reached, returns no applicable record, or
+                doesn&apos;t exist for this well, the report says so explicitly —
+                never silently substituted with an estimate.
               </p>
             </div>
           </div>
           <div className={styles.noteBox} style={{ marginTop: "1.5rem" }}>
-            The offer gate is locked until Production History, Division Orders / Ownership, LOE Statements,
-            and Workover History are each sourced from TRRC structured data or a verified seller document —
-            not from a model estimate or assumption. If a field is still missing, the platform generates
-            the specific document request and names who to ask.
+            Every source attempt — success, failure, or not-applicable — is logged and
+            shown in the report&apos;s coverage summary, not just the ones that returned data.
           </div>
         </div>
       </section>
@@ -581,7 +467,7 @@ export function LandingPage() {
             </div>
             <div className={styles.valCard}>
               <strong>Gulf Coast &amp; others</strong>
-              <p>Frio / Yegua / Austin Chalk and six additional Texas basins. Each with EIA 2022-sourced LOE, differential, and decline benchmarks.</p>
+              <p>Frio / Yegua / Austin Chalk and six additional Texas basins, each with a documented reference range for LOE, differential, and decline.</p>
             </div>
           </div>
         </div>
