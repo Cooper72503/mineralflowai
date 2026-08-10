@@ -93,16 +93,16 @@ export function LandingPage() {
           </h2>
           <p className={styles.sectionLead}>
             A complete working interest evaluation means pulling TRRC production,
-            fitting a decline curve, modeling NPV across price scenarios, verifying
-            LOE against basin benchmarks, and checking compliance — all before
-            you write an LOI. Most teams do this in a spreadsheet, by hand, one
-            deal at a time.
+            fitting a decline curve, modeling PV-10/PV-15 across price scenarios,
+            verifying LOE against basin benchmarks, and checking compliance — all
+            before you write an LOI. Most teams do this in a spreadsheet, by hand,
+            one deal at a time.
           </p>
           <div className={styles.statGrid}>
             <div className={styles.statCard}>
               <div className={styles.statValue}>8–12 hrs</div>
               <div className={styles.statLabel}>
-                Time to complete a proper WI evaluation with TRRC pull, DCA, and NPV model
+                Time to complete a proper WI evaluation with TRRC pull, DCA, and economic model
               </div>
             </div>
             <div className={styles.statCard}>
@@ -375,8 +375,8 @@ export function LandingPage() {
               <h3>Compliance &amp; environmental</h3>
               <ul>
                 <li>Violations by API number or operator — open vs. resolved status</li>
-                <li>Injection well records: SWD permit, MIT test currency, max permitted pressure</li>
-                <li>Orphan well risk flagged against bond amount on file</li>
+                <li>Injection-storage permit records: UIC number, well/lease/field identity, operator</li>
+                <li>Orphan well program status checked automatically; operator bond standing verified via P-5 registration</li>
                 <li>Multi-well lease attribution warning when TRRC aggregate covers multiple wellbores</li>
               </ul>
             </div>
@@ -522,7 +522,7 @@ export function LandingPage() {
           <p className={styles.subhead}>
             Want to see the full output on a real Texas well before committing?
             Send an API number or RRC lease ID and we&apos;ll walk through the
-            production analysis, DCA fit, NPV model, and offer range together.
+            production analysis, DCA fit, economic model, and offer range together.
           </p>
           <div className={styles.ctaRow}>
             <a className={styles.btnPrimary} href={MAIL_DEMO}>
