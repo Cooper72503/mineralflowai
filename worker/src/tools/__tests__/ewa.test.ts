@@ -710,3 +710,57 @@ describe("getOilProration — real oilProQueryAction.do table structure", () => 
     expect(result.error).toBeDefined();
   });
 });
+
+// ─── Dirty Set-Cookie session id ─────────────────────────────────────────────
+//
+// Real incident, confirmed live from weeks of trrc_due_diligence_runs rows:
+// "Cannot convert argument to a ByteString because the character at index 8
+// has a value of 8226 which is greater than 255." — repeated 11 times
+// against the same API over about two hours on 2026-07-22, then never
+// diagnosed. Every JSESSIONID this file uses is captured out of TRRC's own
+// Set-Cookie response header via regex and fed straight back into an
+// outgoing Cookie header with no validation — a single non-Latin-1 byte in
+// TRRC's own (independently confirmed flaky this session) response is
+// enough to poison it and crash the whole POST before a byte goes out,
+// with an error message that names no file, line, or well. This proves the
+// fix: a dirty session id degrades to "no session cookie" (the same
+// fallback every caller already has for a genuinely missing one) instead
+// of throwing.
+
+describe("ewaFetch — dirty JSESSIONID from TRRC's own Set-Cookie response", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("degrades to no session cookie instead of crashing on a non-ByteString session id", async () => {
+    let postHeaders: Record<string, string> | undefined;
+    let call = 0;
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      call++;
+      if (call === 1) {
+        // The session GET — TRRC returns a Set-Cookie with a stray "•"
+        // (U+2022, code point 8226) baked into the session id, exactly the
+        // byte value named in the real incident's error message.
+        return {
+          ok: true, status: 200,
+          headers: { get: (name: string) => (name === "set-cookie" ? "JSESSIONID=ABC12•34XYZ; Path=/EWA" : null) },
+          text: async () => "<html></html>",
+        } as unknown as Response;
+      }
+      // The POST — capture the actual headers Node would have to turn into
+      // a ByteString-safe Headers object. If sanitizeSessionId didn't run,
+      // this call is never reached at all: fetch() throws while building
+      // the Headers object from the dirty Cookie value below, before this
+      // mock is ever invoked.
+      postHeaders = (init?.headers ?? {}) as Record<string, string>;
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => emptyHtml } as unknown as Response;
+    }) as typeof fetch;
+
+    const result = await searchWellbore("4216550208");
+
+    expect(call).toBe(2); // proves the POST was actually reached, not thrown before it
+    expect(postHeaders?.["Cookie"]).toBeUndefined(); // dirty session id discarded, not forwarded
+    expect(result.found).toBe(false); // the lookup still completed and parsed a real (empty) response
+  });
+});

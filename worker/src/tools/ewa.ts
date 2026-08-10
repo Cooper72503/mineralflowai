@@ -20,6 +20,38 @@ function formBody(params: Record<string, string>): string {
     .join("&");
 }
 
+// Real incident, confirmed live from weeks of trrc_due_diligence_runs.error_summary
+// rows: "Cannot convert argument to a ByteString because the character at
+// index N has a value of NNNN which is greater than 255." — thrown by
+// Node's native fetch() the instant a Headers object gets a value outside
+// the Latin-1/ByteString range, before a single byte goes over the wire.
+// Both call sites below build an outgoing Cookie header from a JSESSIONID
+// captured out of TRRC's own Set-Cookie response via regex, completely
+// unsanitized — the same class of bug index.ts's assertCleanSecret already
+// guards for the three boot-time secrets, just not for this per-request
+// value. TRRC's servers are independently confirmed flaky this session
+// (see the ArcGIS query outage); a malformed or corrupted Set-Cookie value
+// on their end is enough to poison every subsequent header we build from
+// it and crash the whole tool call with a message that names no file, no
+// line, and no session — every run for that well then fails opaquely.
+// Reject rather than propagate: treat a dirty session id exactly like a
+// missing one (every caller already has a working "no session cookie"
+// fallback path), and log loudly so this is attributable next time.
+function sanitizeSessionId(raw: string | null | undefined, source: string): string | null {
+  if (!raw) return null;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw.charCodeAt(i) > 255) {
+      console.error(
+        `[ewa] ${source}: JSESSIONID from TRRC's Set-Cookie response contains a ` +
+        `non-ByteString character at index ${i} (code point ${raw.charCodeAt(i)}) — ` +
+        `discarding it and continuing without a session cookie rather than crashing the request.`,
+      );
+      return null;
+    }
+  }
+  return raw;
+}
+
 // The district codes surfaced elsewhere in this codebase (the frontend's own
 // dropdown, extractDistrictFromApi, etc.) use a leading zero for single-digit
 // districts even when they carry a letter suffix — "07B", "07C", "08A". The
@@ -84,7 +116,8 @@ async function ewaFetch(path: string, params?: Record<string, string>, cookies?:
     if (!sessionRes.ok) throw new Error(`EWA ${path} session GET returned HTTP ${sessionRes.status}`);
     const sessionHtml = await sessionRes.text();
     const jSessionMatch = sessionRes.headers.get("set-cookie")?.match(/JSESSIONID=([^;]+)/);
-    sessionCookie = jSessionMatch ? `JSESSIONID=${jSessionMatch[1]}` : null;
+    const cleanJSessionId = sanitizeSessionId(jSessionMatch?.[1], `ewaFetch(${path})`);
+    sessionCookie = cleanJSessionId ? `JSESSIONID=${cleanJSessionId}` : null;
     const viewStateMatch = sessionHtml.match(/id="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
     viewState = viewStateMatch?.[1] ?? "";
   }
@@ -540,7 +573,7 @@ export async function getProduction(leaseNumber: string | null, district: string
     });
     if (!sessionRes.ok) throw new Error(`EWA specificLeaseQueryAction.do session GET returned HTTP ${sessionRes.status}`);
     const jSessionMatch = sessionRes.headers.get("set-cookie")?.match(/JSESSIONID=([^;]+)/);
-    const jSession = jSessionMatch?.[1] ?? null;
+    const jSession = sanitizeSessionId(jSessionMatch?.[1], "specificLeaseQueryAction.do");
     const postUrl = jSession ? `${url};jsessionid=${jSession}` : url;
 
     const now = new Date();
