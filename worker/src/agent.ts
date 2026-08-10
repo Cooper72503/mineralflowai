@@ -366,6 +366,19 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
       system:     SYSTEM_PROMPT,
       tools:      TRRC_TOOLS,
       messages,
+    }, {
+      // The SDK's own default is 10 minutes per attempt, retried up to 2
+      // more times on top of that — its own client.d.ts warns "you may
+      // wait much longer than this timeout before the promise succeeds or
+      // fails." With MAX_STEPS up to 60 LLM turns per run, an unbounded
+      // per-call wait is indistinguishable from a genuine stall to anyone
+      // watching a run in progress — this is a real, demo-critical risk,
+      // not a hypothetical one. 90s per attempt (SDK default retry count,
+      // so worst case ~4.5min instead of ~30min) still gives real
+      // resilience against a transient blip without leaving a run
+      // sitting silent for half an hour before the existing catch-all in
+      // index.ts's claimAndRun() ever gets the chance to mark it failed.
+      timeout: 90_000,
     });
 
     // Add assistant response to message history
