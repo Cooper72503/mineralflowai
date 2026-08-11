@@ -216,6 +216,9 @@ export async function GET(
     production: TrrcDDProductionRow[],
     coverage: SourceCoverageStatus[],
     sourceAttempts: LiteSourceAttempt[],
+    analogWells?: never[],
+    isSampleReport?: boolean,
+    persistGeologyTo?: { supabase: typeof supabase; runId: string },
   ) => Promise<Buffer>;
 
   try {
@@ -230,7 +233,10 @@ export async function GET(
 
   let pdfBuffer: Buffer;
   try {
-    pdfBuffer = await buildTrrcPdfReport(run, manifest, findings, scorecard ?? {} as AcquisitionScorecard, production, coverage, sourceAttemptRows);
+    pdfBuffer = await buildTrrcPdfReport(
+      run, manifest, findings, scorecard ?? {} as AcquisitionScorecard, production, coverage, sourceAttemptRows,
+      undefined, false, { supabase, runId },
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[report] PDF generation error:", msg);

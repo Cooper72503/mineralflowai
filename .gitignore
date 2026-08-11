@@ -5,3 +5,6 @@ frontend/.next
 .env
 .env.local
 .vercel
+
+# Supabase CLI runtime cache/session artifacts — not source, regenerated per machine
+supabase/.temp/

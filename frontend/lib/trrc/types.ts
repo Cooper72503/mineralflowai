@@ -266,6 +266,13 @@ export interface TrrcDueDiligenceRun {
   // flag logic the PDF report uses. There is no trrc_findings table; this
   // is the real source of truth for "findings" in this codebase.
   flags?: { critical: string[]; important: string[] };
+  // Not computed live on this route — the geology engine's own subject-
+  // location + offset-well search is a real, multi-request TRRC GIS call
+  // (same cost concern as offset analytics, see below), too expensive to
+  // run on a route the dashboard polls every 3s. Read back from migration
+  // 023's tables (written once, by /report, the first time the PDF is
+  // generated for this run) — null until a report has been generated.
+  geology?: TrrcGeologyDashboardSummary | null;
   source_attempts?: Array<{
     source_id: string;
     source_name: string;
@@ -292,6 +299,38 @@ export interface SourceAttempt {
   request_parameters?: Record<string, unknown>;
   request_url?: string;
   result_data_json?: Record<string, unknown> | null;
+}
+
+// ─── Geological Due Diligence — dashboard summary ─────────────────────────────
+//
+// A lighter-weight read model than geology/types.ts's full
+// GeologicalAssessmentResult — reconstructed from what migration 023
+// actually persists (geology_assessments + geology_findings), not
+// everything the live engine computes (e.g. per-well production stats and
+// the full development-activity summary aren't persisted as their own
+// columns). Good enough for the dashboard tab; the PDF report always has
+// the complete result.
+
+export interface TrrcGeologyFindingSummary {
+  category: "supporting" | "contradicting" | "risk" | "gap";
+  classification: "observed" | "calculated" | "inferred";
+  title: string;
+  description: string;
+  evidenceIds: string[];
+}
+
+export interface TrrcGeologyDashboardSummary {
+  classification: "FAVORABLE" | "MIXED" | "UNFAVORABLE" | "INSUFFICIENT_DATA";
+  confidence: "HIGH" | "MODERATE" | "LOW" | "INSUFFICIENT_DATA";
+  diligenceImplication: string;
+  subjectFormation: string | null;
+  subjectTvdFt: number | null;
+  subjectTvdssFt: number | null;
+  tvdssMethodology: string | null;
+  offsetWellCount3mi: number;
+  producingWellCount3mi: number;
+  findings: TrrcGeologyFindingSummary[];
+  generatedAt: string;
 }
 
 // ─── Orchestrator result (returned by the edge function retrieval engine) ─────

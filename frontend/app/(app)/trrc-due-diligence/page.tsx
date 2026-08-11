@@ -10,6 +10,7 @@ import type {
   ScoreDimension,
   TrrcDDProductionRow,
   SourceCoverageStatus,
+  TrrcGeologyDashboardSummary,
 } from "../../../lib/trrc/types";
 import { createClient } from "@/lib/supabase/client";
 import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
@@ -170,7 +171,7 @@ type FormState = {
 };
 
 type Phase = "form" | "running" | "selecting" | "complete" | "error";
-type TabKey = "summary" | "scorecard" | "production" | "findings" | "coverage" | "missing";
+type TabKey = "summary" | "scorecard" | "production" | "findings" | "coverage" | "missing" | "geology";
 
 const DOWNLOAD_PATHS = {
   report:              (id: string) => `/api/trrc/due-diligence/${id}/report`,
@@ -1346,6 +1347,7 @@ function ResultsDashboard({
           { key: "production" as const, label: "Production" },
           { key: "findings" as const,   label: "Findings" },
           { key: "coverage" as const,   label: "Coverage" },
+          { key: "geology" as const,    label: "Geology" },
         ]).map(({ key, label }) => (
           <button key={key} onClick={() => setActiveTab(key)} style={{
             background: activeTab === key ? COLORS.accentDim : "transparent",
@@ -1439,6 +1441,7 @@ function ResultsDashboard({
       {activeTab === "production" && <ProductionTab production={run.production ?? []} />}
       {activeTab === "findings" && <FindingsTab flags={run.flags ?? { critical: [], important: [] }} />}
       {activeTab === "coverage" && <CoverageTab coverage={run.coverage ?? []} run={run} />}
+      {activeTab === "geology" && <GeologyTab geology={run.geology ?? null} />}
 
       {/* Downloads */}
       <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.25rem 1.5rem", marginBottom: "1rem" }}>
@@ -1633,6 +1636,125 @@ function FindingsTab({ flags }: { flags: { critical: string[]; important: string
           <div style={{ fontSize: "0.85rem", color: COLORS.text, marginTop: 4 }}>{f}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ─── Geology tab ────────────────────────────────────────────────────────────────
+//
+// Mirrors report-builder.ts's GeologicalDueDiligencePage: every finding gets
+// a small colored FACT / CALCULATION / INTERPRETATION label so a reviewer
+// can tell at a glance what's directly observed vs. computed vs. a bounded
+// conclusion — never presented with uniform-looking confidence.
+
+const GEOLOGY_CLASSIFICATION_COLOR: Record<string, string> = {
+  FAVORABLE: COLORS.green, MIXED: COLORS.yellow, UNFAVORABLE: COLORS.red, INSUFFICIENT_DATA: COLORS.textMuted,
+};
+
+const STATEMENT_LABEL: Record<string, { text: string; color: string; dim: string }> = {
+  observed:   { text: "FACT",           color: COLORS.accent, dim: COLORS.accentDim },
+  calculated: { text: "CALCULATION",    color: COLORS.green,  dim: COLORS.greenDim },
+  inferred:   { text: "INTERPRETATION", color: COLORS.yellow, dim: COLORS.yellowDim },
+};
+
+const GEOLOGY_CATEGORY_LABEL: Record<string, string> = {
+  supporting: "Supporting", contradicting: "Contradicting", risk: "Risk", gap: "Data Gap",
+};
+
+function GeologyTab({ geology }: { geology: TrrcGeologyDashboardSummary | null }) {
+  if (!geology) {
+    return (
+      <div style={{ color: COLORS.textMuted, fontSize: "0.85rem", padding: "1rem 0" }}>
+        Geological due diligence has not been generated for this run yet — download the PDF report to compute it
+        (offset-well search, formation context, and the FACT/CALCULATION/INTERPRETATION assessment below all come
+        from that same run and appear here afterward).
+      </div>
+    );
+  }
+
+  const findingGroups: Array<{ key: TrrcGeologyDashboardSummary["findings"][number]["category"]; label: string }> = [
+    { key: "risk", label: "Risk" },
+    { key: "supporting", label: "Supporting" },
+    { key: "contradicting", label: "Contradicting" },
+    { key: "gap", label: "Data Gap" },
+  ];
+
+  return (
+    <div style={{ marginBottom: "1rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.6rem", marginBottom: "1rem" }}>
+        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
+          <div style={{ fontSize: "1.15rem", fontWeight: 700, color: GEOLOGY_CLASSIFICATION_COLOR[geology.classification] ?? COLORS.text }}>
+            {geology.classification.replace("_", " ")}
+          </div>
+          <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Assessment</div>
+        </div>
+        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
+          <div style={{ fontSize: "1.15rem", fontWeight: 700, color: COLORS.text }}>{geology.confidence.replace("_", " ")}</div>
+          <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Confidence</div>
+        </div>
+        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
+          <div style={{ fontSize: "1.5rem", fontWeight: 700, color: COLORS.text }}>{geology.offsetWellCount3mi}</div>
+          <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Offset Wells (3mi)</div>
+        </div>
+        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem", textAlign: "center" as const }}>
+          <div style={{ fontSize: "1.5rem", fontWeight: 700, color: COLORS.text }}>{geology.producingWellCount3mi}</div>
+          <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, marginTop: 2, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Producing (3mi)</div>
+        </div>
+      </div>
+
+      <div style={{ background: COLORS.accentDim, border: `1px solid ${COLORS.accent}`, borderRadius: 8, padding: "0.85rem 1rem", marginBottom: "1rem" }}>
+        <span style={{ fontSize: "0.65rem", fontWeight: 700, color: COLORS.accent, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>
+          Transaction-Specific Implication (Interpretation)
+        </span>
+        <div style={{ fontSize: "0.85rem", color: COLORS.text, marginTop: 4, lineHeight: 1.5 }}>{geology.diligenceImplication}</div>
+      </div>
+
+      {findingGroups.map(({ key, label }) => {
+        const group = geology.findings.filter(f => f.category === key);
+        if (group.length === 0) return null;
+        return (
+          <div key={key} style={{ marginBottom: "1rem" }}>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.1em", marginBottom: "0.6rem" }}>
+              {label} ({group.length})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: "0.5rem" }}>
+              {group.map((f, i) => {
+                const stmt = STATEMENT_LABEL[f.classification] ?? { text: f.classification.toUpperCase(), color: COLORS.textMuted, dim: COLORS.surfaceAlt };
+                return (
+                  <div key={i} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.75rem 1rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{
+                        fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" as const,
+                        color: stmt.color, background: stmt.dim, borderRadius: 4, padding: "2px 6px",
+                      }}>
+                        {stmt.text}
+                      </span>
+                      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: COLORS.text }}>{f.title}</span>
+                    </div>
+                    <div style={{ fontSize: "0.8rem", color: COLORS.textMuted, lineHeight: 1.45 }}>{f.description}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "0.6rem" }}>
+        {[
+          { label: "Subject Formation", value: geology.subjectFormation },
+          { label: "Subject TVD", value: geology.subjectTvdFt !== null ? `${geology.subjectTvdFt.toLocaleString()} ft` : null },
+          { label: "Subject TVDSS", value: geology.subjectTvdssFt !== null ? `${geology.subjectTvdssFt.toLocaleString()} ft` : null },
+        ].map(({ label, value }) => (
+          <div key={label} style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: "0.5rem 0.75rem" }}>
+            <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 3 }}>{label}</div>
+            <div style={{ fontSize: "0.85rem", color: value ? COLORS.text : COLORS.textFaint, fontWeight: value ? 500 : 400 }}>{value ?? "Not available"}</div>
+          </div>
+        ))}
+      </div>
+      {geology.tvdssMethodology && (
+        <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, fontStyle: "italic" as const, marginTop: 8 }}>{geology.tvdssMethodology}</div>
+      )}
     </div>
   );
 }

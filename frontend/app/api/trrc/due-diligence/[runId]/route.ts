@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
-import type { FindingSeverity, TrrcDDProductionRow, SourceCoverageStatus, TrrcDueDiligenceRun } from "@/lib/trrc/types";
+import type { FindingSeverity, TrrcDDProductionRow, SourceCoverageStatus, TrrcDueDiligenceRun, TrrcGeologyDashboardSummary } from "@/lib/trrc/types";
 import { deriveCoverageFromAttempts, type LiteSourceAttempt } from "@/lib/trrc/coverage";
 import { computeProductionAnalytics, generateFlags } from "@/lib/trrc/report-builder";
 import { buildAcquisitionScorecard } from "@/lib/trrc/scorecard-builder";
@@ -59,7 +59,7 @@ export async function GET(
   }
 
   // 3. Load joined data in parallel
-  const [entitiesResult, attemptsResult, findingsResult, productionResult] =
+  const [entitiesResult, attemptsResult, findingsResult, productionResult, geologyAssessmentResult, geologyFindingsResult, geologyOffsetsResult] =
     await Promise.all([
       supabase
         .from("trrc_resolved_entities")
@@ -81,6 +81,25 @@ export async function GET(
         .eq("run_id", runId)
         .order("production_month", { ascending: false })
         .limit(120),
+      // Geological Due Diligence (migration 023) — written once, the first
+      // time /report is generated for this run (see report-builder.ts's
+      // persistGeologyTo). Absent until then; the dashboard shows an honest
+      // "generate the report to compute this" state rather than a live
+      // re-run on every 3s poll (same cost reasoning as offset analytics).
+      supabase
+        .from("geology_assessments")
+        .select("*")
+        .eq("run_id", runId)
+        .maybeSingle(),
+      supabase
+        .from("geology_findings")
+        .select("*")
+        .eq("run_id", runId)
+        .order("display_order", { ascending: true }),
+      supabase
+        .from("geology_offsets")
+        .select("distance_miles, classified_status")
+        .eq("run_id", runId),
     ]);
 
   const findings = (findingsResult.data ?? []).slice().sort(
@@ -125,6 +144,34 @@ export async function GET(
     });
   }
 
+  // Assemble the geology dashboard summary from migration 023's tables —
+  // null (not an empty object) when no assessment has been persisted yet,
+  // so the UI can render its own honest "not generated yet" state instead
+  // of a misleadingly-populated-looking empty result.
+  const geologyRow = geologyAssessmentResult.data as Record<string, unknown> | null;
+  let geology: TrrcGeologyDashboardSummary | null = null;
+  if (geologyRow) {
+    const geologyOffsetRows = (geologyOffsetsResult.data ?? []) as Array<{ distance_miles: number; classified_status: string }>;
+    const offsetWellCount3mi = geologyOffsetRows.filter(w => w.distance_miles <= 3).length;
+    const producingWellCount3mi = geologyOffsetRows.filter(w => w.distance_miles <= 3 && (w.classified_status === "PRODUCING" || w.classified_status === "RECENTLY_ACTIVE")).length;
+    geology = {
+      classification: geologyRow["classification"] as TrrcGeologyDashboardSummary["classification"],
+      confidence: geologyRow["confidence"] as TrrcGeologyDashboardSummary["confidence"],
+      diligenceImplication: String(geologyRow["diligence_implication"] ?? ""),
+      subjectFormation: (geologyRow["subject_formation"] as string | null) ?? null,
+      subjectTvdFt: (geologyRow["subject_tvd_ft"] as number | null) ?? null,
+      subjectTvdssFt: (geologyRow["subject_tvdss_ft"] as number | null) ?? null,
+      tvdssMethodology: (geologyRow["tvdss_methodology"] as string | null) ?? null,
+      offsetWellCount3mi,
+      producingWellCount3mi,
+      findings: (geologyFindingsResult.data ?? []).map(f => ({
+        category: f["category"], classification: f["classification"], title: f["title"], description: f["description"],
+        evidenceIds: f["evidence_ids"] ?? [],
+      })) as TrrcGeologyDashboardSummary["findings"],
+      generatedAt: String(geologyRow["generated_at"] ?? ""),
+    };
+  }
+
   return NextResponse.json(
     {
       ok: true,
@@ -138,6 +185,7 @@ export async function GET(
         scorecard,
         coverage,
         flags,
+        geology,
       },
     },
     // The frontend polls this route every 3s while a run is in progress —

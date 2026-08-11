@@ -57,6 +57,9 @@ import { compareToAnalogs, type AnalogWell } from "./type-curve-comparison";
 import { getPriceDeck } from "./eia-pricing";
 import { computeEconomics, WORKOVER_RESERVE_USD_PER_BOE, SWD_DISPOSAL_USD_PER_BBL_WATER, type EconomicEvaluation } from "./economics";
 import { runOffsetAnalytics, type OffsetAnalyticsPayload, type LegalDescription } from "./offset-analytics";
+import { runGeologicalDueDiligence, persistGeologicalAssessment } from "./geology";
+import type { GeologicalAssessmentResult } from "./geology/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type LiteSourceAttempt = {
   source_id: string;
@@ -1738,7 +1741,164 @@ export function OffsetAnalyticsPage({ run, id: identity, offsetAnalytics, genera
   );
 }
 
-// ─── Section 10 — Missing Documents and Gaps ─────────────────────────────────
+// ─── Section 10 — Geological Due Diligence ────────────────────────────────────
+//
+// Renders the geology/ engine's GeologicalAssessmentResult. The spec's core
+// visual requirement — a reader must be able to tell FACT from CALCULATION
+// from INFERENCE at a glance — is done with a small colored label prefix on
+// every finding line (not three different card styles, which would bury the
+// actual content), and every finding's evidenceIds are listed as clickable-
+// looking source refs so a reviewer can trace a conclusion back to its
+// underlying TRRC data. No numeric score is rendered anywhere on this page —
+// there isn't one in the underlying result type either.
+
+const GEOLOGY_CLASSIFICATION_COLOR: Record<string, string> = {
+  FAVORABLE: C.green, MIXED: C.yellow, UNFAVORABLE: C.red, INSUFFICIENT_DATA: C.gray,
+};
+
+const STATEMENT_LABEL: Record<string, { text: string; color: string }> = {
+  observed:  { text: "FACT",           color: C.blue },
+  calculated:{ text: "CALCULATION",    color: C.green },
+  inferred:  { text: "INTERPRETATION", color: C.yellow },
+};
+
+function GeologyFindingRow({ finding }: { finding: { classification: string; title: string; description: string; evidenceIds: string[] } }) {
+  const label = STATEMENT_LABEL[finding.classification] ?? { text: finding.classification.toUpperCase(), color: C.gray };
+  return React.createElement(
+    View, { style: { marginBottom: 6, paddingBottom: 6, borderBottomWidth: 0.5, borderBottomColor: C.border } },
+    React.createElement(View, { style: { flexDirection: "row", alignItems: "center", marginBottom: 2 } },
+      React.createElement(Text, { style: [S.badge, { backgroundColor: label.color, color: C.white, marginRight: 6 }] }, label.text),
+      React.createElement(Text, { style: { fontSize: 8, fontFamily: "Helvetica-Bold", color: C.dark, flex: 1 } }, finding.title),
+    ),
+    React.createElement(Text, { style: { fontSize: 7.5, color: C.dark, lineHeight: 1.4 } }, finding.description),
+    finding.evidenceIds.length > 0
+      ? React.createElement(Text, { style: { fontSize: 6.5, color: C.lightGray, fontFamily: "Courier", marginTop: 2 } },
+          `Evidence: ${finding.evidenceIds.map(id => id.slice(0, 8)).join(", ")}`)
+      : null,
+  );
+}
+
+export function GeologicalDueDiligencePage({ run, id: identity, geology, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  geology: GeologicalAssessmentResult | null;
+  generatedAt: string;
+}) {
+  if (!geology) {
+    return React.createElement(
+      Page, { size: "LETTER", style: S.page },
+      React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+        React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+      ),
+      React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — GEOLOGICAL DUE DILIGENCE"),
+      React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
+        React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
+          "Geological due diligence not calculated: this well's location could not be resolved, or the assessment could not be run for this report.",
+        ),
+      ),
+      React.createElement(Footer, { generatedAt, runId: run.id }),
+    );
+  }
+
+  const allFindings = [
+    ...geology.supportingFactors.map(f => ({ ...f, group: "Supporting" })),
+    ...geology.contradictingFactors.map(f => ({ ...f, group: "Contradicting" })),
+    ...geology.risks.map(f => ({ ...f, group: "Risk" })),
+  ];
+  const producing3mi = geology.offsetSummary.wells.filter(w => w.distanceMiles <= 3 && (w.classifiedStatus === "PRODUCING" || w.classifiedStatus === "RECENTLY_ACTIVE")).length;
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — GEOLOGICAL DUE DILIGENCE"),
+
+    React.createElement(Text, { style: S.noteText },
+      "First-pass geological diligence from offset well, production, and permit evidence within 1/3/5-mile rings of the subject well. Every material line below is labeled FACT (directly observed), CALCULATION (computed from observed data, formula shown), or INTERPRETATION (a bounded conclusion drawn from the facts and calculations above it) — never presented as more certain than it is. Nearby production does not prove subject-well performance; a permit is not proof a well will be drilled.",
+    ),
+
+    React.createElement(View, { style: { flexDirection: "row", marginTop: 6, marginBottom: 8 } },
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "ASSESSMENT"),
+        React.createElement(Text, { style: { fontSize: 12, fontFamily: "Helvetica-Bold", color: GEOLOGY_CLASSIFICATION_COLOR[geology.classification] ?? C.navy } }, geology.classification.replace("_", " ")),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "CONFIDENCE"),
+        React.createElement(Text, { style: { fontSize: 12, fontFamily: "Helvetica-Bold", color: C.navy } }, geology.confidence.replace("_", " ")),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "OFFSET WELLS (3MI)"),
+        React.createElement(Text, { style: { fontSize: 12, fontFamily: "Helvetica-Bold", color: C.navy } }, String(geology.offsetSummary.countByRadius[3])),
+      ),
+      React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "PRODUCING (3MI)"),
+        React.createElement(Text, { style: { fontSize: 12, fontFamily: "Helvetica-Bold", color: C.navy } }, String(producing3mi)),
+      ),
+    ),
+
+    React.createElement(View, { style: [S.flagBox, { backgroundColor: C.blueBg, marginBottom: 8 }] },
+      React.createElement(Text, { style: [S.flagLabel, { color: C.blue }] }, "TRANSACTION-SPECIFIC IMPLICATION (INTERPRETATION)"),
+      React.createElement(Text, { style: [S.flagItem, { color: C.dark }] }, geology.diligenceImplication),
+    ),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, `Findings (${allFindings.length})`),
+    allFindings.length === 0
+      ? React.createElement(Text, { style: S.noteText }, "No supporting, contradicting, or risk findings — see data gaps below.")
+      : React.createElement(View, {}, ...allFindings.map((f, i) => React.createElement(GeologyFindingRow, { key: String(i), finding: f }))),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, `Data Gaps (${geology.dataGaps.length})`),
+    geology.dataGaps.length === 0
+      ? React.createElement(Text, { style: S.noteText }, "No material data gaps identified.")
+      : React.createElement(View, {}, ...geology.dataGaps.map((f, i) => React.createElement(GeologyFindingRow, { key: String(i), finding: f }))),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Formation / Depth Context"),
+    kv("Subject Formation (from field name)", geology.formationDepthContext.subjectFormation),
+    kv("Subject TVD", geology.formationDepthContext.subjectTvdFt !== null ? `${geology.formationDepthContext.subjectTvdFt.toLocaleString()} ft (${geology.formationDepthContext.subjectTvdSource ?? "source unknown"})` : "Not available"),
+    kv("Subject TVDSS", geology.formationDepthContext.subjectTvdssFt !== null ? `${geology.formationDepthContext.subjectTvdssFt.toLocaleString()} ft` : "Not calculated — see data gaps"),
+    React.createElement(Text, { style: [S.noteText, { marginTop: 2 }] }, geology.formationDepthContext.dataGapNote),
+
+    geology.comparableGroups.length > 0 ? React.createElement(View, {},
+      React.createElement(View, { style: S.divider }),
+      React.createElement(Text, { style: S.subTitle }, `Comparable Well Production Groups (${geology.comparableGroups.length})`),
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "Wells"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "28%" }] }, "Median 12mo Oil"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "28%" }] }, "Distance-Wtd 12mo Oil"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "28%" }] }, "Valid Comparison"),
+      ),
+      ...geology.productionStats.map((s, i) => React.createElement(
+        View, { key: s.groupId, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCellMono, { width: "16%" }] }, String(s.wellCount)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "28%" }] }, s.medianTwelveMonthOilBbl !== null ? `${s.medianTwelveMonthOilBbl.toLocaleString()} BBL` : "—"),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "28%" }] }, s.distanceWeightedTwelveMonthOilBbl !== null ? `${s.distanceWeightedTwelveMonthOilBbl.toLocaleString()} BBL` : "—"),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "28%", color: s.validComparison ? C.green : C.yellow }] }, s.validComparison ? "Yes" : "No — too few wells"),
+      )),
+    ) : null,
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Development Activity"),
+    React.createElement(Text, { style: [S.noteText, { marginBottom: 4 }] }, geology.developmentActivity.developmentRecencyNote),
+    kv("Permits (3mi)", String(geology.developmentActivity.permitCountByRadius[3])),
+    kv("Recently Completed Wells (≤24mo)", String(geology.developmentActivity.recentlyCompletedWellCount)),
+    kv("Distinct Operators Nearby", String(geology.developmentActivity.activeOperatorCount)),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+// ─── Section 11 — Missing Documents and Gaps ─────────────────────────────────
 
 function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1763,7 +1923,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — MISSING DOCUMENTS AND GAPS"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — MISSING DOCUMENTS AND GAPS"),
 
     React.createElement(Text, { style: S.noteText }, "Every source that returned no records, failed, or requires manual retrieval is listed here, with a direct link to the TRRC portal and the exact criteria to re-run it by hand. A gap that is not applicable for this well type is noted as such; gaps in critical sources are flagged."),
 
@@ -1786,7 +1946,7 @@ function MissingDocumentsPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 11 — Timeline ────────────────────────────────────────────────────
+// ─── Section 12 — Timeline ────────────────────────────────────────────────────
 
 const EVIDENCE_STATUS_LABEL: Record<string, string> = {
   retrieved: "Retrieved",
@@ -1822,7 +1982,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 11 — TIMELINE"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 12 — TIMELINE"),
 
     React.createElement(Text, { style: S.noteText }, "Dated regulatory events assembled from sources already retrieved elsewhere in this report — permits, completion, plugging, compliance, and production. An event only appears here if a date could be confidently parsed from the underlying TRRC record; nothing is estimated."),
 
@@ -1841,7 +2001,7 @@ function TimelinePage({ run, id: identity, attempts, production, generatedAt }: 
   );
 }
 
-// ─── Section 12 — Evidence Index ──────────────────────────────────────────────
+// ─── Section 13 — Evidence Index ──────────────────────────────────────────────
 
 function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -1859,7 +2019,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 12 — EVIDENCE INDEX"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 13 — EVIDENCE INDEX"),
 
     React.createElement(Text, { style: S.noteText }, "Every TRRC source this pipeline supports, what was queried, and what came back. TRRC's own query portals are inconsistent about honoring pre-filled links for an unauthenticated visitor, so links here point to the portal itself — re-enter the criteria listed to independently reproduce a result."),
 
@@ -1883,7 +2043,7 @@ function EvidenceIndexPage({ run, id: identity, attempts, generatedAt }: {
   );
 }
 
-// ─── Section 13 — Acquisition Scorecard ───────────────────────────────────────
+// ─── Section 14 — Acquisition Scorecard ───────────────────────────────────────
 
 const RECOMMENDATION_COLOR: Record<string, string> = {
   PURSUE: C.green, REVIEW: C.yellow, PASS: C.gray, BLOCKED: C.red,
@@ -1911,7 +2071,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 13 — ACQUISITION SCORECARD"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 14 — ACQUISITION SCORECARD"),
 
     React.createElement(Text, { style: S.noteText },
       "A transparent, rule-based screening aid computed only from the TRRC records retrieved in this report — not a black-box model, not investment advice, and not a substitute for the buyer's own underwriting. Every score below states exactly which retrieved facts produced it. Missing data always scores low, never neutral-good.",
@@ -1961,7 +2121,7 @@ function AcquisitionScorecardPage({ run, id: identity, scorecard, generatedAt }:
   );
 }
 
-// ─── Section 14 — Overall Assessment ──────────────────────────────────────────
+// ─── Section 15 — Overall Assessment ──────────────────────────────────────────
 
 function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, scorecard, generatedAt }: {
   run: TrrcDueDiligenceRun;
@@ -2041,7 +2201,7 @@ function OverallAssessmentPage({ run, id: identity, attempts, flags, analytics, 
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
 
-    React.createElement(Text, { style: S.sectionTitle }, "SECTION 14 — OVERALL ASSESSMENT"),
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 15 — OVERALL ASSESSMENT"),
 
     // Stats row
     React.createElement(View, { style: { flexDirection: "row", marginBottom: 12 } },
@@ -2114,6 +2274,14 @@ export async function buildTrrcPdfReport(
   // Real report generation (the /report route) never sets this; only the
   // sample-report generator does.
   isSampleReport = false,
+  // Optional — when the caller (the real /report route, not the sample
+  // generator) passes its own Supabase client + this run's id, the
+  // Geological Due Diligence result computed below is persisted to
+  // migration 023's tables so the dashboard tab (page.tsx) can read it
+  // back without re-running a live TRRC GIS search on every 3s poll. A
+  // persistence failure is logged and never fails report generation — the
+  // PDF the user is downloading right now already has the real result.
+  persistGeologyTo?: { supabase: SupabaseClient; runId: string },
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
 
@@ -2216,6 +2384,36 @@ export async function buildTrrcPdfReport(
     }
   }
 
+  // ── Geological Due Diligence (Section 10) — reuses this run's already-
+  // resolved identity (API/district/lease/operator, migration 019) rather
+  // than re-resolving anything; the engine's own context.ts fetches only
+  // the one new thing it needs (subject lat/long). Never allowed to fail
+  // the whole report — a thrown error here renders the same honest
+  // "not calculated" fallback the page shows for an unresolved location.
+  let geology: GeologicalAssessmentResult | null = null;
+  try {
+    geology = await runGeologicalDueDiligence({
+      run: {
+        resolved_primary_api: run.resolved_primary_api,
+        resolved_district: run.resolved_district,
+        resolved_lease_number: run.resolved_lease_number,
+        resolved_operator_number: null,
+      },
+      extras: {
+        county: identity.county || null,
+        wellName: identity.wellName || null,
+        producingFormation: identity.field || null,
+        wellStatus: wellStatus || null,
+      },
+    });
+  } catch {
+    geology = null;
+  }
+  if (geology && persistGeologyTo) {
+    const { ok, error } = await persistGeologicalAssessment(persistGeologyTo.supabase, persistGeologyTo.runId, geology);
+    if (!ok) console.error(`[geology] persistence failed for run ${persistGeologyTo.runId}: ${error}`);
+  }
+
   const doc = React.createElement(
     Document,
     {
@@ -2234,6 +2432,7 @@ export async function buildTrrcPdfReport(
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),
     React.createElement(OffsetAnalyticsPage,    { run, id: identity, offsetAnalytics, generatedAt }),
+    React.createElement(GeologicalDueDiligencePage, { run, id: identity, geology, generatedAt }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),
