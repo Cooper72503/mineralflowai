@@ -35,7 +35,7 @@ describe("resolveWellboreToLease", () => {
   it("extracts lease number and district from the lease-detail link, not fragile cell text", async () => {
     mockFetchSequence([{ body: "<html></html>" }, { body: wellboreHtmlWithLease }]);
     const result = await resolveWellboreToLease("42-165-02733");
-    expect(result).toEqual({ leaseNumber: "52210", district: "08", fieldName: "SPRABERRY (TREND AREA)" });
+    expect(result).toEqual({ leaseNumber: "52210", district: "08", fieldName: "SPRABERRY (TREND AREA)", operatorName: null });
   });
 
   it("also captures field name from the real table column — needed for analog formation matching (Phase 7)", async () => {
@@ -53,6 +53,23 @@ describe("resolveWellboreToLease", () => {
   it("returns null for a malformed API number rather than guessing a lease", async () => {
     const result = await resolveWellboreToLease("not-an-api");
     expect(result).toBeNull();
+  });
+
+  // Real, severe bug caught live 2026-08-10: every real caller of this
+  // function (offset-analytics/service.ts's analog selection AND
+  // geology/production.ts's offset-well enrichment) passes the 8-digit
+  // TRRC "county+well" form straight off well-search.ts's ArcGIS results
+  // (confirmed live: {"API":"16502733", ...}) — never the 10+-digit
+  // state-prefixed form the existing tests above use. The original
+  // splitApi() required >=10 digits and returned null on the very first
+  // line for anything shorter, so every real offset-well call silently
+  // short-circuited before a single fetch was attempted — indistinguishable
+  // from a clean "no data" result, and invisible to every test above since
+  // none of them exercised the 8-digit shape actually used in production.
+  it("resolves a lease from the real 8-digit county+well API form real offset wells actually use — not just the 10-digit form", async () => {
+    mockFetchSequence([{ body: "<html></html>" }, { body: wellboreHtmlWithLease }]);
+    const result = await resolveWellboreToLease("16502733");
+    expect(result).toEqual({ leaseNumber: "52210", district: "08", fieldName: "SPRABERRY (TREND AREA)", operatorName: null });
   });
 });
 

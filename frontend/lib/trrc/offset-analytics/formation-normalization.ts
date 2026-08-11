@@ -60,6 +60,26 @@ const FORMATION_RULES: FormationRule[] = [
   { canonicalFormation: "COTTON VALLEY", basin: "East Texas / Haynesville", stratigraphicGroup: "Cotton Valley", fieldNameKeywords: ["COTTON VALLEY"] },
   { canonicalFormation: "FRIO", basin: "Gulf Coast", stratigraphicGroup: null, fieldNameKeywords: ["FRIO"] },
   { canonicalFormation: "YEGUA", basin: "Gulf Coast", stratigraphicGroup: null, fieldNameKeywords: ["YEGUA"] },
+  // Conventional Permian Basin formations — added 2026-08-10 after a live
+  // run against a real Gaines County well showed the bulk of its real
+  // offset wells (real TRRC field names "O D C (DEVONIAN)", "O D C (SAN
+  // ANDRES)") coming back UNKNOWN, not because the match logic was wrong,
+  // but because these older, vertical, conventional zones were simply
+  // never in the table — it only covered unconventional shale targets.
+  // San Andres in particular is one of the most common Permian Basin
+  // field-name components there is; leaving it UNKNOWN was silently
+  // degrading formation-match accuracy for a large share of real West
+  // Texas wells, not a rare edge case. Pure additions — no existing rule
+  // changed, so this cannot turn a correct match into an incorrect one.
+  { canonicalFormation: "SAN ANDRES", basin: "Permian Basin", stratigraphicGroup: "San Andres", fieldNameKeywords: ["SAN ANDRES"] },
+  { canonicalFormation: "DEVONIAN", basin: "Permian Basin", stratigraphicGroup: "Devonian", fieldNameKeywords: ["DEVONIAN"] },
+  { canonicalFormation: "CLEARFORK", basin: "Permian Basin", stratigraphicGroup: "Clear Fork", fieldNameKeywords: ["CLEARFORK", "CLEAR FORK"] },
+  { canonicalFormation: "YATES", basin: "Permian Basin", stratigraphicGroup: null, fieldNameKeywords: ["YATES"] },
+  { canonicalFormation: "GRAYBURG", basin: "Permian Basin", stratigraphicGroup: null, fieldNameKeywords: ["GRAYBURG"] },
+  { canonicalFormation: "QUEEN", basin: "Permian Basin", stratigraphicGroup: null, fieldNameKeywords: ["QUEEN"] },
+  { canonicalFormation: "ELLENBURGER", basin: "Permian Basin", stratigraphicGroup: null, fieldNameKeywords: ["ELLENBURGER"] },
+  { canonicalFormation: "STRAWN", basin: "Permian Basin", stratigraphicGroup: null, fieldNameKeywords: ["STRAWN"] },
+  { canonicalFormation: "CANYON", basin: "Permian Basin", stratigraphicGroup: null, fieldNameKeywords: ["CANYON"] },
 ];
 
 /** Classifies a raw TRRC field name into a canonical formation profile. Returns an explicit UNKNOWN profile (never null) — Phase 6's filter and Phase 8's scoring both need a real value to reason about, not an absent one. */

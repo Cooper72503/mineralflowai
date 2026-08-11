@@ -34,10 +34,30 @@ function formBody(params: Record<string, string>): string {
   return Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
 }
 
+// Real, previously-invisible bug, confirmed live 2026-08-10: every caller of
+// resolveWellboreToLease (offset-analytics/service.ts's analog selection AND
+// geology/production.ts's offset-well enrichment) passes the API in the
+// 8-digit TRRC "county+well" form — that's what well-search.ts's
+// ArcGisWellSearchProvider reads straight off the ArcGIS "API" attribute
+// (confirmed live: {"API":"16502733", "GIS_API5":"02733", ...}), and it's
+// the only form any real caller in this codebase has ever had for an
+// OFFSET well (as opposed to the subject well, which sometimes carries a
+// full state-prefixed API from resolved_primary_api). The original
+// implementation only accepted ≥10 digits and unconditionally sliced off
+// a 2-digit state prefix — for every real 8-digit call this silently
+// returned null on the very first line, before a single fetch was ever
+// attempted. That's a hard, structural failure, not a network hiccup: it
+// looks identical to a clean "no data" result, so it went undetected
+// through every unit test in this file (which use directly-fabricated
+// LeaseIdentity values, never the real 8-digit-in/parsed-out path) and
+// silently zeroed out comparable-well production analysis — one of the
+// most concrete, numeric parts of both engines' output — for every run,
+// since this function was written.
 function splitApi(api: string): { prefix: string; suffix: string } | null {
   const d = api.replace(/\D/g, "");
-  if (d.length < 10) return null;
-  return { prefix: d.slice(2, 5), suffix: d.slice(5, 10) };
+  if (d.length === 8) return { prefix: d.slice(0, 3), suffix: d.slice(3, 8) };
+  if (d.length >= 10) return { prefix: d.slice(2, 5), suffix: d.slice(5, 10) };
+  return null;
 }
 
 export interface LeaseIdentity {
@@ -45,6 +65,8 @@ export interface LeaseIdentity {
   district: string;
   /** Real column in wellboreQueryAction.do's response table (confirmed live 2026-08-04: "Field Name", e.g. "O D C (DEVONIAN)") — captured here so formation-normalization.ts (Phase 7) has real field-name data for ANALOG wells too, not just the subject well. Null if the row structure didn't match (never fabricated). */
   fieldName: string | null;
+  /** Real column 6 (0-based) in the same response table — "Operator Name", confirmed live in the same 10-column layout documented on searchLeaseWells's doc comment (API/District/Lease No./Lease Name/Well No./Field Name/Operator Name/County/On Schedule/API Depth). Added for the Geological Due Diligence Engine's operator-concentration analysis (geology/activity.ts) — additive, existing callers that only read leaseNumber/district/fieldName are unaffected. Null if the row has fewer than 7 cells (older/shorter table layouts). */
+  operatorName: string | null;
 }
 
 /** Resolves an API number to its lease number + district (+ field name) via wellboreQueryAction.do — ported from worker/src/tools/ewa.ts's searchWellbore. */
@@ -89,16 +111,20 @@ export async function resolveWellboreToLease(apiNumber: string, signal?: AbortSi
   // find the first data row with enough direct-child <td>s to plausibly be
   // this table, not the header/toolbar rows.
   let fieldName: string | null = null;
+  let operatorName: string | null = null;
   $("table").each((_, table) => {
     if (fieldName !== null) return;
     $(table).find("> tbody > tr, > tr").each((__, tr) => {
       if (fieldName !== null) return;
       const cells = $(tr).find("> td").map((___, td) => $(td).text().trim().replace(/\s+/g, " ")).get();
-      if (cells.length >= 6 && /^\d{7,8}\b/.test(cells[0])) fieldName = cells[5] || null;
+      if (cells.length >= 6 && /^\d{7,8}\b/.test(cells[0])) {
+        fieldName = cells[5] || null;
+        operatorName = cells.length >= 7 ? (cells[6] || null) : null;
+      }
     });
   });
 
-  return { leaseNumber: leaseMatch[1], district: distMatch[1], fieldName };
+  return { leaseNumber: leaseMatch[1], district: distMatch[1], fieldName, operatorName };
 }
 
 export interface AnalogProductionRow {
