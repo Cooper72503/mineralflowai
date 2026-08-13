@@ -27,14 +27,32 @@ export interface ResolvedRunIdentity {
   resolved_operator_name?: string | null;
 }
 
+// Real bug, same class as production-loader.ts's splitApi (fixed live
+// 2026-08-10) and agent.ts's resolved_primary_api persistence (fixed live
+// 2026-08-13): TRRC's own "API" values show up in this codebase in two
+// real shapes — the bare 8-digit "county+well" form (what
+// wellboreQueryAction.do's confirmed api_no field returns, and what
+// agent.ts now persists into resolved_primary_api) and the 10+-digit
+// state-prefixed form (what a user often types, "42-329-42230"). This
+// function only ever accepted the second, so a real, fully-resolved
+// subject well with resolved_primary_api = "32942230" (8 digits, TRRC-
+// confirmed) still failed as INVALID_API_NUMBER — the same
+// "structurally correct but silently unusable" failure mode, just one
+// layer further down the chain than the one already fixed today.
+function fullApiToApi8(apiNumber: string): string | null {
+  const digits = apiNumber.replace(/\D/g, "");
+  if (digits.length === 8) return digits;
+  if (digits.length >= 10) return digits.slice(2, 10);
+  return null;
+}
+
 async function fetchSubjectLocation(apiNumber: string): Promise<{ latitude: number | null; longitude: number | null; sourceUrlOrQueryId: string | null; warnings: WarningEntry[] }> {
   const warnings: WarningEntry[] = [];
-  const digits = apiNumber.replace(/\D/g, "");
-  if (digits.length < 10) {
+  const api8 = fullApiToApi8(apiNumber);
+  if (!api8) {
     warnings.push({ code: "INVALID_API_NUMBER", message: `API number "${apiNumber}" does not have enough digits to resolve a district/county/well suffix`, severity: "critical" });
     return { latitude: null, longitude: null, sourceUrlOrQueryId: null, warnings };
   }
-  const api8 = digits.slice(2, 10);
   const url = `${GIS_MAPSERVER_BASE}/1/query?f=json&where=API%3D%27${api8}%27&outFields=*&returnGeometry=false`;
 
   try {
