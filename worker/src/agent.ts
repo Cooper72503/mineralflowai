@@ -97,6 +97,21 @@ async function dispatchTool(
     case "search_wellbore": {
       const r = await ewa.searchWellbore(String(input.api_number ?? state.apiNumber ?? ""));
       if (r.found) {
+        // Real, previously-undiscovered bug, caught live 2026-08-13:
+        // state.apiNumber is declared, read as a fallback on every other
+        // tool call, and written to resolved_primary_api at the very end
+        // of the run — but nothing anywhere in this file ever ASSIGNED it
+        // from a successful search result. A run could retrieve 20/20
+        // sources, real production, a real lease number, and still save
+        // resolved_primary_api=null, which silently breaks the
+        // Geological Due Diligence section downstream (it requires a
+        // resolved subject API and degrades to INSUFFICIENT_DATA without
+        // one) on a run that otherwise succeeded completely. r.wells[0]'s
+        // api_no is TRRC-confirmed (extracted from the real
+        // leaseDetailAction.do link, not just echoed user input), so it's
+        // the authoritative value to persist here.
+        const confirmedApi = r.wells[0]?.["api_no"];
+        if (confirmedApi && !state.apiNumber)             state.apiNumber       = confirmedApi;
         if (r.lease_number    && !state.leaseNumber)    state.leaseNumber    = r.lease_number;
         if (r.district        && !state.district)        state.district        = r.district;
         if (r.operator        && !state.operatorName)    state.operatorName    = r.operator;
