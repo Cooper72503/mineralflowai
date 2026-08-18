@@ -100,7 +100,20 @@ export function buildEvidenceIndex(
 
     if (a.status !== "success") {
       status = "retrieval_failed";
-      statusNote = a.error_message ?? "Query failed.";
+      // A bare "Query failed." (or a raw exception string) reads as our
+      // fault to whoever's reading the report, even when it isn't. Live-
+      // confirmed 2026-08-18 by hitting TRRC's own endpoint directly,
+      // outside this pipeline entirely: wellStatusQueryAction.do and
+      // pluggingQueryAction.do return TRRC's own generic HTTP 500 error
+      // page, byte-identical, repeatably — this is TRRC's server, not a
+      // MineralFlow retrieval defect. Say that plainly whenever the
+      // captured error carries that signature, instead of leaving a
+      // reader to guess whose system is broken. Anything without that
+      // signature falls back to the raw error text unchanged, since we
+      // haven't independently confirmed those are TRRC-side.
+      statusNote = /HTTP 500|Internal Server Error/i.test(a.error_message ?? "")
+        ? `TRRC's own server returned an internal error (HTTP 500) on this query — confirmed as a TRRC-side issue, not a MineralFlow retrieval failure. Manually verify via the portal link above.`
+        : (a.error_message ?? "Query failed.");
     } else if (d["data_gap"] === true || d["endpoint_available"] === false) {
       status = "manual_required";
       statusNote = "Automated access unavailable — manual review required via the portal above.";
