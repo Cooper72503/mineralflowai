@@ -343,7 +343,8 @@ export default function TrrcDueDiligencePage() {
     if (!runId || phase !== "running") return;
     terminalReachedRef.current = false;
     consecutiveFailuresRef.current = 0;
-    const interval = setInterval(async () => {
+
+    const doPoll = async () => {
       try {
         const res = await apiFetch(`/api/trrc/due-diligence/${runId}`);
         const data = await res.json();
@@ -403,8 +404,30 @@ export default function TrrcDueDiligencePage() {
           clearInterval(interval);
         }
       }
-    }, 3000);
-    return () => clearInterval(interval);
+    };
+
+    const interval = setInterval(doPoll, 3000);
+
+    // Real, live-observed incident (2026-08-18): a run completed server-side
+    // in under 3 minutes, but a tab left backgrounded (switched away, e.g.
+    // to pull up the deck or take a call — exactly what happens in a live
+    // meeting) never displayed it, showing 2% until manually refreshed. The
+    // interval above is unaffected server-side, but browsers throttle or
+    // fully suspend setInterval in a hidden/inactive tab, so its next tick
+    // can be delayed indefinitely rather than merely late. Firing an
+    // immediate poll the moment the tab becomes visible or regains focus —
+    // on top of, not instead of, the interval — means switching back to
+    // this tab mid-demo re-syncs instantly instead of waiting on a timer
+    // the browser itself may not be honoring.
+    const onWake = () => { if (document.visibilityState === "visible") void doPoll(); };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+    };
   }, [runId, phase, apiFetch]);
 
   const handleSubmit = useCallback(async () => {
