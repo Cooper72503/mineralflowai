@@ -353,6 +353,26 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
   // without reaching it rather than overshooting; it's a display curve,
   // not a correctness constraint.
   const EXPECTED_TOOL_CALLS = 20;
+
+  // Real bug, live-caught 2026-08-18: a turn that batches many tool calls
+  // (common — the agent often queries several TRRC sources in one
+  // response) can drive toolPct well ahead of what stepCount-based
+  // preCallPct would predict for the *next* turn (e.g. toolCallIndex=17
+  // → 80%, while stepCount is still only 2 → preCallPct ~7%). The old
+  // code called reportProgress(preCallPct) at the top of every loop
+  // iteration with no memory of what was already reported, so that next
+  // preCallPct write silently overwrote the 80% with ~7% — a real,
+  // observed regression (confirmed live: 7 → 80 → 8 → 100 on one run).
+  // From the frontend, progress visibly running backward reads
+  // identically to "frozen" if the viewer's next poll happens to land on
+  // the post-regression value. highestPct is a per-run monotonic floor:
+  // every write goes through here so progress_percent can only ever go
+  // up until the terminal update at the end of this function.
+  let highestPct = 0;
+  const reportProgressClamped = async (pct: number, status: string) => {
+    highestPct = Math.max(highestPct, pct);
+    await reportProgress(supabase, runId, highestPct, status);
+  };
   let finalReport: Record<string, unknown> | null = null;
 
   // Fires before the pre-seed query below, not after — confirmed live to
@@ -362,7 +382,7 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
   // was actually fine looked identical to one that was hung for that
   // entire window, with nothing — not even a network request — to show
   // for it. This is deliberately the very first thing the function does.
-  await reportProgress(supabase, runId, 5, "running");
+  await reportProgressClamped(5, "running");
 
   while (stepCount < MAX_STEPS) {
     stepCount++;
@@ -373,7 +393,7 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
     // completed work (that's what the per-tool-call update below is for),
     // just that the agent has started thinking about the next step.
     const preCallPct = Math.min(60, 5 + Math.round((stepCount / MAX_STEPS) * 30));
-    await reportProgress(supabase, runId, preCallPct, "running");
+    await reportProgressClamped(preCallPct, "running");
 
     const response = await anthropic.messages.create({
       model:      "claude-fable-5",
@@ -452,7 +472,7 @@ Work through every applicable TRRC source. If one path fails, try another. Do no
       // stepCount (which only counts LLM turns) — never regresses below
       // whatever preCallPct already reported this turn.
       const toolPct = Math.min(90, 20 + Math.round((toolCallIndex / EXPECTED_TOOL_CALLS) * 70));
-      await reportProgress(supabase, runId, Math.max(toolPct, preCallPct), "running");
+      await reportProgressClamped(Math.max(toolPct, preCallPct), "running");
     }
 
     messages.push({ role: "user", content: toolResults });
