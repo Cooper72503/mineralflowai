@@ -10,9 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { isTrrcDdEnabled } from "@/lib/trrc/source-registry";
-import { detectInputType, normalizeApiNumber } from "@/lib/trrc/normalization";
-import { resolveEntities } from "@/lib/trrc/entity-resolver";
-import type { TrrcIdentifierType } from "@/lib/trrc/types";
+import { createDueDiligenceRun, type CreateRunInput } from "@/lib/trrc/create-run";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,143 +49,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 3. Parse and validate body
-  let body: {
-    input?: string;
-    input_type_override?: TrrcIdentifierType;
-    county?: string;
-    district?: string;
-    operator_name?: string;
-    lease_number?: string;
-    lease_name?: string;
-    search_historical?: boolean;
-    include_offset_wells?: boolean;
-    production_months?: number;
-    purchase_price?: number;
-  };
-
+  // 3. Parse body
+  let body: CreateRunInput;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const rawInput = body.input?.trim() ?? "";
-  if (!rawInput) {
-    return NextResponse.json({ ok: false, error: "input is required." }, { status: 400 });
-  }
-  if (rawInput.length > 500) {
-    return NextResponse.json(
-      { ok: false, error: "input must be 500 characters or fewer." },
-      { status: 400 },
-    );
-  }
-  if (body.purchase_price !== undefined && (typeof body.purchase_price !== "number" || !Number.isFinite(body.purchase_price) || body.purchase_price <= 0)) {
-    return NextResponse.json(
-      { ok: false, error: "purchase_price must be a positive number." },
-      { status: 400 },
-    );
-  }
+  // 4-7. Validate, resolve entities, insert run + resolved entities —
+  // shared with the bulk/portfolio endpoint via createDueDiligenceRun so
+  // the two never drift out of sync.
+  const result = await createDueDiligenceRun(supabase, user.id, body);
 
-  // 4. Detect and normalize input type
-  const detected_input_type = body.input_type_override ?? detectInputType(rawInput);
-  const normalizedApi = normalizeApiNumber(rawInput);
-  const normalized_input = normalizedApi?.api10 ?? rawInput;
-
-  // 5. Resolve entities
-  const resolution = await resolveEntities(
-    rawInput,
-    body.input_type_override ?? null,
-    body.county ?? null,
-    body.district ?? null,
-    body.operator_name ?? null,
-    body.lease_name ?? null,
-  );
-
-  if (resolution.error && resolution.entities.length === 0) {
-    return NextResponse.json(
-      { ok: false, error: `Could not resolve input: ${resolution.error}` },
-      { status: 422 },
-    );
-  }
-
-  const needs_user_selection = resolution.needs_user_selection;
-  // If multiple candidates were returned, hold in awaiting_selection until the
-  // user picks one. Otherwise go straight to pending so the worker can claim it.
-  const status = needs_user_selection ? "awaiting_selection" : "pending";
-
-  // 6. Insert run row
-  const { data: runRow, error: runInsertError } = await supabase
-    .from("trrc_due_diligence_runs")
-    .insert({
-      user_id: user.id,
-      original_input: rawInput,
-      detected_input_type,
-      selected_input_type: resolution.input_type,
-      normalized_input: resolution.normalized_input ?? normalized_input,
-      status,
-      started_at: new Date().toISOString(),
-      progress_percent: 0,
-      result_summary: null,
-      error_summary: null,
-      resolved_primary_api: normalizedApi?.api10 ?? null,
-      resolved_district: body.district ?? null,
-      resolved_lease_number: body.lease_number?.trim() ?? null,
-      resolved_gas_id: null,
-      operator_name:            body.operator_name?.trim() ?? null,
-      resolved_operator_number: null,
-      purchase_price: body.purchase_price ?? null,
-      report_storage_path: null,
-      archive_storage_path: null,
-      manifest_storage_path: null,
-    })
-    .select("id, status")
-    .single();
-
-  if (runInsertError || !runRow) {
-    console.error("[trrc/due-diligence POST] run insert error:", runInsertError);
-    return NextResponse.json(
-      { ok: false, error: "Failed to create due diligence run." },
-      { status: 500 },
-    );
-  }
-
-  const run_id = runRow.id as string;
-
-  // 7. Insert resolved entities
-  if (resolution.entities.length > 0) {
-    const entityRows = resolution.entities.map((e) => ({
-      id: e.id,
-      run_id,
-      entity_type: e.entity_type,
-      canonical_identifier: e.canonical_identifier,
-      display_name: e.display_name,
-      attributes_json: e.attributes,
-      confidence: e.confidence,
-      resolution_method: e.resolution_method,
-      is_user_selected: e.is_user_selected,
-    }));
-
-    const { error: entityInsertError } = await supabase
-      .from("trrc_resolved_entities")
-      .insert(entityRows);
-
-    if (entityInsertError) {
-      console.error("[trrc/due-diligence POST] entity insert error:", entityInsertError);
-      // Non-fatal — run row exists; client can still proceed
-    }
+  if (!result.ok) {
+    const status = result.error.startsWith("Could not resolve") ? 422 : result.error === "Failed to create due diligence run." ? 500 : 400;
+    return NextResponse.json({ ok: false, error: result.error }, { status });
   }
 
   return NextResponse.json({
     ok: true,
     data: {
-      id: run_id,
-      run_id,
-      status,
-      needs_user_selection,
-      entities: resolution.entities,
-      normalized_input: resolution.normalized_input,
-      input_type: resolution.input_type,
+      id: result.id,
+      run_id: result.id,
+      status: result.status,
+      needs_user_selection: result.needs_user_selection,
+      entities: result.entities,
+      normalized_input: result.normalized_input,
+      input_type: result.input_type,
     },
   });
 }

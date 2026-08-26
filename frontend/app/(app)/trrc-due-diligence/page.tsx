@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
   TrrcDueDiligenceRun,
@@ -12,13 +13,13 @@ import type {
   SourceCoverageStatus,
   TrrcGeologyDashboardSummary,
 } from "../../../lib/trrc/types";
-import { createClient } from "@/lib/supabase/client";
 import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
+import { useApiFetch } from "@/lib/trrc/use-api-fetch";
 // detectInputType unused — each field has an explicit type now
 
 // ─── Design tokens (matches UnderwritingPage.tsx exactly) ─────────────────────
 
-const COLORS = {
+export const COLORS = {
   bg:           "#0f1117",
   surface:      "#181c25",
   surfaceAlt:   "#1e2333",
@@ -207,63 +208,11 @@ export default function TrrcDueDiligencePage() {
   // rendering it, so the download button just silently did nothing.
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  // Keep a fresh Bearer token in a ref so all fetches can use it without cookies.
-  // Bypassing cookies eliminates the ByteString error caused by non-ASCII cookie values.
-  const tokenRef = useRef<string>("");
-  const supabaseRef = useRef(createClient());
-  useEffect(() => {
-    const supabase = supabaseRef.current;
-    supabase.auth.getSession().then(({ data }) => {
-      tokenRef.current = data.session?.access_token ?? "";
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      tokenRef.current = session?.access_token ?? "";
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const apiFetch = useCallback(async (url: string, init: RequestInit = {}) => {
-    const doFetch = (token: string) => {
-      const headers: Record<string, string> = {
-        ...(init.headers as Record<string, string> ?? {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
-      // Without this, the browser's own HTTP cache can serve a stale GET
-      // response for the run-status poll indefinitely — confirmed live: the
-      // exact same "running"/5% body kept coming back from the identical
-      // polled URL long after the run had actually completed server-side
-      // (verified directly against the DB), because nothing here or in the
-      // route handler told the browser not to cache it. `force-dynamic` on
-      // the route only guarantees the server re-runs the query; it says
-      // nothing about whether the browser is allowed to reuse a prior
-      // response for the same URL instead of asking again.
-      //
-      // credentials was "omit" — no real reason found for it, and it meant
-      // session cookies never went out on these requests at all, only the
-      // bearer header. Confirmed live: bearer-token auth was silently
-      // failing against the deployed site (see from-route-request.ts) while
-      // cookies would have worked, and this line was the reason cookies
-      // were never even offered as a fallback. "include" sends both, so the
-      // server can fall back to cookie auth when the bearer path fails.
-      return fetch(url, { ...init, credentials: "include", headers, cache: init.cache ?? "no-store" });
-    };
-
-    const res = await doFetch(tokenRef.current);
-    if (res.status !== 401) return res;
-
-    // Confirmed live: on a long-idle tab (e.g. a user reviewing a completed
-    // report for over an hour before clicking a download), the access token
-    // can genuinely expire — 2026-07-30T00:10:01Z expiry vs
-    // 2026-07-30T00:12:41Z actual request, 160s stale — without
-    // onAuthStateChange ever firing a refresh. A real refresh_token is still
-    // present in the session cookie the whole time, so a single explicit
-    // refresh-and-retry recovers transparently instead of surfacing a
-    // confusing "Not authenticated" to a user who is, in fact, logged in.
-    const { data, error: refreshError } = await supabaseRef.current.auth.refreshSession();
-    if (refreshError || !data.session?.access_token) return res;
-    tokenRef.current = data.session.access_token;
-    return doFetch(tokenRef.current);
-  }, []);
+  // Shared with the portfolio/bulk page — see use-api-fetch.ts for what
+  // each piece of this fixes and why (ByteString cookie errors, stale
+  // cached GETs, 401-expiry mid-session, etc.). Extracted so the two pages
+  // can't drift out of sync on any of those fixes.
+  const apiFetch = useApiFetch();
 
   // Resume a run from the URL on load — confirmed live: with runId only
   // ever held in React state, ANY reload (a stale/backgrounded tab that
@@ -644,6 +593,11 @@ export default function TrrcDueDiligencePage() {
           <p style={{ margin: 0, fontSize: "0.9rem", color: COLORS.textMuted }}>
             Query every available Texas Railroad Commission public record for any well, lease, or operator.
           </p>
+          {phase === "form" && (
+            <Link href="/trrc-due-diligence/portfolio" style={{ fontSize: "0.8rem", color: COLORS.accent, textDecoration: "none", display: "inline-block", marginTop: "0.5rem" }}>
+              Have a list of wells? Run them as a portfolio →
+            </Link>
+          )}
         </div>
 
         {/* Start Over — always visible when not on form */}
