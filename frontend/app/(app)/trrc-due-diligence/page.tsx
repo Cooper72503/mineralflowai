@@ -1664,6 +1664,7 @@ interface RecalcResult {
   breakevenOilPriceUsdBbl: number | null;
   costAssumptionNote: string;
   irrPayoutNote: string;
+  sufficientData: boolean;
 }
 
 function fmtUsd(n: number | null): string {
@@ -1760,6 +1761,12 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
       {error && (
         <div style={{ background: COLORS.redDim, border: `1px solid ${COLORS.red}`, borderRadius: 8, padding: "0.75rem 1rem", color: COLORS.red, fontSize: "0.82rem", marginBottom: "1rem" }}>
           {error}
+        </div>
+      )}
+
+      {result && !result.sufficientData && (
+        <div style={{ background: COLORS.yellowDim, border: `1px solid ${COLORS.yellow}`, borderRadius: 8, padding: "0.75rem 1rem", color: COLORS.yellow, fontSize: "0.82rem", marginBottom: "1rem" }}>
+          Every figure below is a dash because this well doesn't have enough production history for a decline-curve fit — not because the recalculation failed. Nothing is estimated in its place.
         </div>
       )}
 

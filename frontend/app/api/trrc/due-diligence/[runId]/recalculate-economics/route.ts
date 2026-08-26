@@ -188,6 +188,13 @@ export async function POST(
       breakevenOilPriceUsdBbl: econ.breakevenOilPriceUsdBbl,
       costAssumptionNote: econ.costAssumptionNote,
       irrPayoutNote: econ.irrPayoutNote,
+      // Real edge case, live-caught pressure-testing this against a
+      // 39-month well: computeEconomics deliberately returns an empty
+      // scenarios array (all fields above null, not a crash) when neither
+      // oil nor gas has enough history for an Arps fit. Surfacing this
+      // explicitly so the frontend can say why every number is a dash,
+      // instead of a wall of unexplained "—" that reads as broken.
+      sufficientData: econ.sufficientData,
     },
   });
 }
