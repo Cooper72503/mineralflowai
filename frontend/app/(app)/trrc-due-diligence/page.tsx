@@ -171,7 +171,7 @@ type FormState = {
 };
 
 type Phase = "form" | "running" | "selecting" | "complete" | "error";
-type TabKey = "summary" | "scorecard" | "production" | "findings" | "coverage" | "missing" | "geology";
+type TabKey = "summary" | "scorecard" | "production" | "economics" | "findings" | "coverage" | "missing" | "geology";
 
 const DOWNLOAD_PATHS = {
   report:              (id: string) => `/api/trrc/due-diligence/${id}/report`,
@@ -722,6 +722,7 @@ export default function TrrcDueDiligencePage() {
             onDownload={handleDownload}
             downloadError={downloadError}
             onDismissDownloadError={() => setDownloadError(null)}
+            apiFetch={apiFetch}
           />
         )}
         {/* unused tab state kept to avoid breaking form-phase logic */}
@@ -1300,13 +1301,14 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 function ResultsDashboard({
-  run, activeTab, setActiveTab, onReset, onDownload, downloadError, onDismissDownloadError,
+  run, activeTab, setActiveTab, onReset, onDownload, downloadError, onDismissDownloadError, apiFetch,
 }: {
   run: TrrcDueDiligenceRun;
   activeTab: TabKey;
   setActiveTab: (t: TabKey) => void;
   onReset: () => void;
   onDownload: (type: keyof typeof DOWNLOAD_PATHS) => void;
+  apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
   downloadError: string | null;
   onDismissDownloadError: () => void;
 }) {
@@ -1368,6 +1370,7 @@ function ResultsDashboard({
           { key: "summary" as const,    label: "Summary" },
           { key: "scorecard" as const,  label: "Scorecard" },
           { key: "production" as const, label: "Production" },
+          { key: "economics" as const,  label: "Economics" },
           { key: "findings" as const,   label: "Findings" },
           { key: "coverage" as const,   label: "Coverage" },
           { key: "geology" as const,    label: "Geology" },
@@ -1462,6 +1465,7 @@ function ResultsDashboard({
 
       {activeTab === "scorecard" && <ScorecardTab scorecard={run.scorecard ?? null} />}
       {activeTab === "production" && <ProductionTab production={run.production ?? []} />}
+      {activeTab === "economics" && <EconomicsTab runId={run.id} defaultPurchasePrice={run.purchase_price ?? null} apiFetch={apiFetch} />}
       {activeTab === "findings" && <FindingsTab flags={run.flags ?? { critical: [], important: [] }} />}
       {activeTab === "coverage" && <CoverageTab coverage={run.coverage ?? []} run={run} />}
       {activeTab === "geology" && <GeologyTab geology={run.geology ?? null} />}
@@ -1635,6 +1639,163 @@ function ProductionTab({ production }: { production: TrrcDDProductionRow[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ─── Economics tab — interactive "what if" recalculation ────────────────────────
+//
+// Asked for directly in the 2026-08-18 Novi call: "do I get to go into
+// software and change my assumptions? Does it recalculate the economics on
+// the fly?" Hits /recalculate-economics on every input change (debounced),
+// which re-runs the same deterministic engine the PDF uses against this
+// run's already-persisted production — no re-retrieval, no re-fit-from-
+// scratch wait. Starting values (70/3.0) match eia-pricing.ts's own static
+// fallback deck, not an arbitrary guess — that fallback is what's actually
+// in effect today (EIA_API_KEY isn't confirmed live yet).
+
+interface RecalcResult {
+  pv10: number | null;
+  pv15: number | null;
+  netCashFlow: number | null;
+  grossRevenue: number | null;
+  irr: number | null;
+  payoutMonths: number | null;
+  breakevenOilPriceUsdBbl: number | null;
+  costAssumptionNote: string;
+  irrPayoutNote: string;
+}
+
+function fmtUsd(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+}
+
+function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
+  runId: string;
+  defaultPurchasePrice: number | null;
+  apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
+}) {
+  const [oilPrice, setOilPrice] = useState(70);
+  const [gasPrice, setGasPrice] = useState(3.0);
+  const [purchasePrice, setPurchasePrice] = useState(defaultPurchasePrice !== null ? String(defaultPurchasePrice) : "");
+  const [result, setResult] = useState<RecalcResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    // Debounced so dragging a slider or typing doesn't fire a request per
+    // keystroke — 400ms is long enough to coalesce rapid input, short
+    // enough that "on the fly" still feels true.
+    const handle = setTimeout(async () => {
+      try {
+        const pp = purchasePrice.trim() ? Number(purchasePrice.trim()) : undefined;
+        const res = await apiFetch(`/api/trrc/due-diligence/${runId}/recalculate-economics`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            oil_usd_bbl: oilPrice,
+            gas_usd_mcf: gasPrice,
+            ...(pp !== undefined && Number.isFinite(pp) && pp > 0 ? { purchase_price_usd: pp } : {}),
+          }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.ok) {
+          setError(data.error ?? "Recalculation failed.");
+          setResult(null);
+        } else {
+          setResult(data.data as RecalcResult);
+        }
+      } catch {
+        if (!cancelled) setError("Lost connection while recalculating.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [oilPrice, gasPrice, purchasePrice, runId, apiFetch]);
+
+  const inputStyle = {
+    width: "100%", background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`,
+    borderRadius: 7, color: COLORS.text, fontSize: "0.9rem", padding: "0.5rem 0.7rem",
+  };
+  const labelStyle = {
+    fontSize: "0.68rem", color: COLORS.textMuted, fontWeight: 600,
+    textTransform: "uppercase" as const, letterSpacing: "0.05em", marginBottom: 5, display: "block" as const,
+  };
+
+  return (
+    <div>
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.25rem", marginBottom: "1rem" }}>
+        <div style={{ fontSize: "0.85rem", fontWeight: 600, color: COLORS.text, marginBottom: "0.25rem" }}>Interactive Assumptions</div>
+        <div style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "1rem" }}>
+          Adjusts oil/gas price and purchase price live against this run's already-retrieved production — recalculates in place, no re-run needed.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.9rem" }}>
+          <div>
+            <label style={labelStyle}>Oil Price ($/BBL)</label>
+            <input type="number" step="0.5" min="0.01" style={inputStyle} value={oilPrice}
+              onChange={e => setOilPrice(Number(e.target.value))} />
+          </div>
+          <div>
+            <label style={labelStyle}>Gas Price ($/MCF)</label>
+            <input type="number" step="0.1" min="0.01" style={inputStyle} value={gasPrice}
+              onChange={e => setGasPrice(Number(e.target.value))} />
+          </div>
+          <div>
+            <label style={labelStyle}>Purchase Price ($, optional — for IRR/payout)</label>
+            <input type="number" step="1000" min="0" style={inputStyle} placeholder="Not supplied" value={purchasePrice}
+              onChange={e => setPurchasePrice(e.target.value)} />
+          </div>
+        </div>
+        <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, marginTop: "0.6rem", fontStyle: "italic" as const }}>
+          NGL yield/price and Waha basis differential aren't modeled yet — the price deck here is oil/gas only, same as the underlying engine today.
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ background: COLORS.redDim, border: `1px solid ${COLORS.red}`, borderRadius: 8, padding: "0.75rem 1rem", color: COLORS.red, fontSize: "0.82rem", marginBottom: "1rem" }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem", marginBottom: "1rem", opacity: loading ? 0.55 : 1, transition: "opacity 0.2s ease" }}>
+        {[
+          { label: "PV-10", value: fmtUsd(result?.pv10 ?? null), color: COLORS.accent },
+          { label: "PV-15", value: fmtUsd(result?.pv15 ?? null), color: COLORS.accent },
+          { label: "Net Cash Flow", value: fmtUsd(result?.netCashFlow ?? null), color: COLORS.green },
+          { label: "Gross Revenue", value: fmtUsd(result?.grossRevenue ?? null), color: COLORS.text },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.85rem" }}>
+            <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", marginBottom: 5 }}>{label}</div>
+            <div style={{ fontSize: "1.15rem", fontWeight: 700, color }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem", opacity: loading ? 0.55 : 1, transition: "opacity 0.2s ease" }}>
+        {[
+          { label: "IRR (annualized)", value: result?.irr !== null && result?.irr !== undefined ? `${result.irr.toFixed(1)}%` : "—" },
+          { label: "Payout", value: result?.payoutMonths !== null && result?.payoutMonths !== undefined ? `${result.payoutMonths.toFixed(1)} mo` : "—" },
+          { label: "Breakeven Oil Price", value: result?.breakevenOilPriceUsdBbl !== null && result?.breakevenOilPriceUsdBbl !== undefined ? fmtUsd(result.breakevenOilPriceUsdBbl) : "—" },
+        ].map(({ label, value }) => (
+          <div key={label} style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.85rem" }}>
+            <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", marginBottom: 5 }}>{label}</div>
+            <div style={{ fontSize: "1.05rem", fontWeight: 700, color: COLORS.text }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {result && (
+        <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, lineHeight: 1.5 }}>
+          {result.costAssumptionNote}
+          {result.irrPayoutNote ? <> · {result.irrPayoutNote}</> : null}
+        </div>
+      )}
     </div>
   );
 }
