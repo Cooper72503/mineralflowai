@@ -1608,6 +1608,13 @@ function ProductionTab({ production }: { production: TrrcDDProductionRow[] }) {
 // fallback deck, not an arbitrary guess — that fallback is what's actually
 // in effect today (EIA_API_KEY isn't confirmed live yet).
 
+interface SensitivityRow {
+  oilUsdBbl: number;
+  pv10: number | null;
+  netCashFlow: number | null;
+  isCurrent: boolean;
+}
+
 interface RecalcResult {
   pv10: number | null;
   pv15: number | null;
@@ -1619,6 +1626,7 @@ interface RecalcResult {
   costAssumptionNote: string;
   irrPayoutNote: string;
   sufficientData: boolean;
+  sensitivityGrid: SensitivityRow[];
 }
 
 function fmtUsd(n: number | null): string {
@@ -1750,6 +1758,42 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
           </div>
         ))}
       </div>
+
+      {result && result.sensitivityGrid.length > 0 && (
+        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1rem 1.25rem", marginBottom: "1rem", opacity: loading ? 0.55 : 1, transition: "opacity 0.2s ease" }}>
+          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: COLORS.text, marginBottom: "0.15rem" }}>Price Sensitivity</div>
+          <div style={{ fontSize: "0.7rem", color: COLORS.textMuted, marginBottom: "0.75rem" }}>
+            PV-10 at $7 increments around the oil price above — everything else held constant.
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse" as const, fontSize: "0.8rem" }}>
+            <thead>
+              <tr>
+                {result.sensitivityGrid.map((row) => (
+                  <th key={row.oilUsdBbl} style={{
+                    textAlign: "center" as const, padding: "0.4rem 0.3rem", fontWeight: 700,
+                    color: row.isCurrent ? COLORS.accent : COLORS.textMuted,
+                    borderBottom: `2px solid ${row.isCurrent ? COLORS.accent : COLORS.border}`,
+                  }}>
+                    {fmtUsd(row.oilUsdBbl)}/bbl
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                {result.sensitivityGrid.map((row) => (
+                  <td key={row.oilUsdBbl} style={{
+                    textAlign: "center" as const, padding: "0.55rem 0.3rem", fontWeight: row.isCurrent ? 700 : 500,
+                    color: row.isCurrent ? COLORS.text : COLORS.textMuted,
+                  }}>
+                    {fmtUsd(row.pv10)}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {result && (
         <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, lineHeight: 1.5 }}>

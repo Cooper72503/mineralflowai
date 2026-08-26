@@ -163,17 +163,50 @@ export async function POST(
 
   const purchasePrice = body.purchase_price_usd ?? (runResult.data["purchase_price"] as number | null) ?? null;
 
-  const econ = computeEconomics(
+  // Shared by the primary result and the sensitivity grid below — same
+  // months of production, same gas price, only oil price varies. Kept as
+  // a closure over `analytics`/`purchasePrice` rather than a module-level
+  // export since it's only ever called with this request's data.
+  const runEconomicsAt = (oil: number, gas: number) => computeEconomics(
     analytics.months.map(m => m.oil_bbl ?? 0),
     analytics.months.map(m => m.gas_mcf ?? 0),
-    priceDeck,
-    null, // field — not loaded above; basin falls back to the generic LOE default, same as computeEconomics' own documented behavior
-    null, // county — same
+    {
+      source: "static_fallback", asOf: "user-adjusted",
+      wtiSpotUsdBbl: oil, henryHubUsdMcf: gas,
+      scenarios: {
+        stress: { oilUsdBbl: oil, gasUsdMcf: gas }, base: { oilUsdBbl: oil, gasUsdMcf: gas },
+        strip:  { oilUsdBbl: oil, gasUsdMcf: gas }, upside: { oilUsdBbl: oil, gasUsdMcf: gas },
+      },
+    },
+    null, null, // field/county — not loaded above; basin falls back to the generic LOE default, same as computeEconomics' own documented behavior
     analytics.months.map(m => m.water_bbl),
     purchasePrice,
   );
 
+  const econ = runEconomicsAt(priceDeck.wtiSpotUsdBbl, priceDeck.henryHubUsdMcf);
   const result = econ.scenarios.find(s => s.scenario === "base") ?? econ.scenarios[0] ?? null;
+
+  // Price-sensitivity grid — $7 increments around the requested oil price,
+  // matching the increment size Novi's own tool uses (per the 2026-08-18
+  // call: "I think we do it in increments of... seven dollar increments").
+  // Gas price held constant across the row, same convention as their table
+  // ("to break even, say oil price is seventy-two dollars a barrel...").
+  // Only computed when there's enough data for a real base result — an
+  // insufficient-data well would just repeat five identical null rows.
+  const STEP = 7;
+  const sensitivityGrid = econ.sufficientData
+    ? [-2, -1, 0, 1, 2].map(mult => {
+        const oil = Math.max(1, priceDeck!.wtiSpotUsdBbl + mult * STEP);
+        const rowEcon = runEconomicsAt(oil, priceDeck!.henryHubUsdMcf);
+        const rowResult = rowEcon.scenarios.find(s => s.scenario === "base") ?? rowEcon.scenarios[0] ?? null;
+        return {
+          oilUsdBbl: oil,
+          pv10: rowResult?.pv10 ?? null,
+          netCashFlow: rowResult?.netCashFlow ?? null,
+          isCurrent: mult === 0,
+        };
+      })
+    : [];
 
   return NextResponse.json({
     ok: true,
@@ -195,6 +228,7 @@ export async function POST(
       // explicitly so the frontend can say why every number is a dash,
       // instead of a wall of unexplained "—" that reads as broken.
       sufficientData: econ.sufficientData,
+      sensitivityGrid,
     },
   });
 }
