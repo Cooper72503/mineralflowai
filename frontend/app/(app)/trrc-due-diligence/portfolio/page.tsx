@@ -162,6 +162,45 @@ export default function PortfolioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.map(r => `${r.runId}:${r.status}`).join(","), apiFetch]);
 
+  const [bundling, setBundling] = useState(false);
+  const [bundleError, setBundleError] = useState<string | null>(null);
+
+  // "Upload a list of APIs... spit out a report for me... one PDF report" —
+  // closes the gap between a completed batch and actually having the
+  // reports in hand: one click here instead of opening each row and
+  // downloading individually.
+  const handleDownloadAll = useCallback(async () => {
+    const completedIds = rows.filter(r => r.status === "complete" && r.runId).map(r => r.runId as string);
+    if (completedIds.length === 0) return;
+    setBundling(true);
+    setBundleError(null);
+    try {
+      const res = await apiFetch("/api/trrc/due-diligence/bulk-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runIds: completedIds }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to build the report bundle." }));
+        setBundleError(data.error ?? "Failed to build the report bundle.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `TRRC_DD_Portfolio_Reports_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setBundleError("Lost connection while building the report bundle.");
+    } finally {
+      setBundling(false);
+    }
+  }, [rows, apiFetch]);
+
   const statusColor = (status: RowStatus): string => {
     if (status === "complete") return COLORS.green;
     if (status === "failed" || status === "cancelled" || status === "create_failed") return COLORS.red;
@@ -278,12 +317,29 @@ export default function PortfolioPage() {
                 </div>
               )}
               <button
+                onClick={handleDownloadAll}
+                disabled={completedCount === 0 || bundling}
+                style={{
+                  marginLeft: "auto", background: COLORS.accent, color: "#fff", border: "none", borderRadius: 7,
+                  fontSize: "0.8rem", fontWeight: 600, padding: "0.55rem 1.1rem",
+                  cursor: completedCount === 0 || bundling ? "default" : "pointer",
+                  opacity: completedCount === 0 || bundling ? 0.5 : 1,
+                }}
+              >
+                {bundling ? "Building bundle…" : `Download ${completedCount > 0 ? completedCount : ""} Report${completedCount === 1 ? "" : "s"} (ZIP)`}
+              </button>
+              <button
                 onClick={() => { setRows([]); setRawText(""); }}
-                style={{ marginLeft: "auto", background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 7, color: COLORS.textMuted, fontSize: "0.78rem", padding: "0.5rem 0.9rem", cursor: "pointer" }}
+                style={{ background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 7, color: COLORS.textMuted, fontSize: "0.78rem", padding: "0.5rem 0.9rem", cursor: "pointer" }}
               >
                 New Batch
               </button>
             </div>
+            {bundleError && (
+              <div style={{ marginBottom: "1rem", background: COLORS.redDim, border: `1px solid ${COLORS.red}`, borderRadius: 7, padding: "0.6rem 0.9rem", color: COLORS.red, fontSize: "0.8rem" }}>
+                {bundleError}
+              </div>
+            )}
 
             <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" as const, fontSize: "0.82rem" }}>
