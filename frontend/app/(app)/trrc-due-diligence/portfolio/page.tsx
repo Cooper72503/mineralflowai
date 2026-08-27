@@ -41,13 +41,55 @@ export default function PortfolioPage() {
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractNote, setExtractNote] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const parseInputs = useCallback((text: string): string[] => {
     return Array.from(new Set(
       text.split(/[\n,]+/).map(s => s.trim()).filter(s => s.length > 0),
     ));
   }, []);
+
+  // "Putting a PDF of 50 API's and receiving overviews of each well" —
+  // extracts candidates server-side, then drops them into the SAME
+  // editable textarea the manual-paste path uses rather than submitting
+  // directly. Extraction from an arbitrary PDF can have false positives
+  // (page numbers, dates); showing the result for review before it turns
+  // into 50 real runs matches this project's rule against silently
+  // trusting an unverified guess.
+  const handlePdfUpload = useCallback(async (file: File) => {
+    setExtracting(true);
+    setExtractNote(null);
+    setSubmitError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await apiFetch("/api/trrc/due-diligence/extract-apis", { method: "POST", body: form });
+      const data = await res.json();
+      if (!data.ok) {
+        setSubmitError(data.error ?? "Could not extract API numbers from that PDF.");
+        return;
+      }
+      const found: string[] = data.data.apiNumbersFound;
+      if (found.length === 0) {
+        setExtractNote("No recognizable API numbers found in this PDF — review it below and paste manually if needed.");
+        return;
+      }
+      setRawText(prev => {
+        const existing = parseInputs(prev);
+        const merged = Array.from(new Set([...existing, ...found]));
+        return merged.join("\n");
+      });
+      setExtractNote(`Found ${found.length} API number${found.length === 1 ? "" : "s"} in "${file.name}" — review the list below before running.`);
+    } catch {
+      setSubmitError("Lost connection while reading the PDF.");
+    } finally {
+      setExtracting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [apiFetch, parseInputs]);
 
   const inputCount = parseInputs(rawText).length;
 
@@ -155,12 +197,39 @@ export default function PortfolioPage() {
           <Link href="/trrc-due-diligence" style={{ fontSize: "0.8rem", color: COLORS.textMuted, textDecoration: "none" }}>← Single well</Link>
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: COLORS.text, margin: "0.5rem 0 0.3rem 0" }}>Portfolio Due Diligence</h1>
           <p style={{ fontSize: "0.85rem", color: COLORS.textMuted, margin: 0 }}>
-            Paste a list of wells (one per line, or comma-separated) — up to 50 at once. Each runs the full diligence pipeline independently.
+            Upload a PDF of well numbers, or paste a list directly — up to 50 at once. Each runs the full diligence pipeline independently.
           </p>
         </div>
 
         {rows.length === 0 && (
           <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.25rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.9rem" }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={e => { const f = e.target.files?.[0]; if (f) void handlePdfUpload(f); }}
+                disabled={extracting}
+                style={{ display: "none" }}
+                id="portfolio-pdf-upload"
+              />
+              <label
+                htmlFor="portfolio-pdf-upload"
+                style={{
+                  background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 7,
+                  color: extracting ? COLORS.textFaint : COLORS.text, fontSize: "0.82rem", fontWeight: 600,
+                  padding: "0.55rem 1rem", cursor: extracting ? "default" : "pointer",
+                }}
+              >
+                {extracting ? "Reading PDF…" : "Upload a PDF of well numbers"}
+              </label>
+              <span style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>— or paste directly below</span>
+            </div>
+            {extractNote && (
+              <div style={{ marginBottom: "0.75rem", background: COLORS.accentDim, border: `1px solid ${COLORS.accent}`, borderRadius: 7, padding: "0.55rem 0.85rem", color: COLORS.accent, fontSize: "0.78rem" }}>
+                {extractNote}
+              </div>
+            )}
             <textarea
               value={rawText}
               onChange={e => setRawText(e.target.value)}
