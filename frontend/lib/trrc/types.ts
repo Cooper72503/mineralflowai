@@ -123,6 +123,44 @@ export type TrrcIdentifierType =
   | 'lease_name'
   | 'unknown';
 
+// The category vocabulary source-registry.ts actually uses — genuinely
+// distinct from RecordCategory above (that one's the older underwriting
+// enum). source-registry.ts imported this under the same name as if it
+// were already defined here, papered over with @ts-nocheck instead of
+// ever actually being added. Values below are the exhaustive real set
+// used across every SOURCE_REGISTRY entry's expected_record_types, not
+// guessed independently of them.
+export type TrrcRecordCategory =
+  | 'identity'
+  | 'well_status'
+  | 'production'
+  | 'completion'
+  | 'drilling_permit'
+  | 'plugging_inactive'
+  | 'compliance'
+  | 'injection_uic'
+  | 'imaged_records'
+  | 'gis'
+  | 'operator_p5'
+  | 'p4_gatherer'
+  | 'miscellaneous';
+
+// Return shape of normalizeApiNumber() (normalization.ts) — was previously
+// imported by normalization.ts and entity-resolver.ts as if defined here,
+// but never actually existed; both files carried @ts-nocheck instead of
+// surfacing the missing export. Added to match normalizeApiNumber's real
+// return object exactly, not guessed independently of it.
+export interface NormalizedApi {
+  raw: string;
+  api10: string;
+  api14: string;
+  formatted: string;
+  state_code: string;
+  county_code: string;
+  well_code: string;
+  is_texas: boolean;
+}
+
 export type SourceAttemptStatus =
   | 'success'
   | 'failed_transient'

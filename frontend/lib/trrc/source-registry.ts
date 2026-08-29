@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * TRRC Public Records Due Diligence — Authoritative source registry.
  *

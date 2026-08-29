@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * TRRC Public Records Due Diligence — Identifier normalization utilities.
  *
