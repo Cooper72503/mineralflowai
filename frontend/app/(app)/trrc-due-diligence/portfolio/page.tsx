@@ -21,7 +21,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useApiFetch } from "@/lib/trrc/use-api-fetch";
-import { COLORS } from "../page";
+import { COLORS } from "../colors";
 
 type RowStatus = "creating" | "create_failed" | "pending" | "running" | "complete" | "failed" | "cancelled" | "awaiting_selection" | string;
 

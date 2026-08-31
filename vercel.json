@@ -5,6 +5,10 @@
     {
       "path": "/api/cron/lease-alerts",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/permit-alerts",
+      "schedule": "0 13 * * *"
     }
   ],
   "experimentalServices": {

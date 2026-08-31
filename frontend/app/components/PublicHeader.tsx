@@ -23,15 +23,12 @@ export function PublicHeader({ variant = "default" }: PublicHeaderProps) {
           <a href="#product" className="public-nav-quiet">
             Product
           </a>
-          <Link href="/pricing">Pricing</Link>
+          <Link href="/pricing">Request Access</Link>
           <Link href="/about">About</Link>
           <Link href="/login">Log in</Link>
           <a href={MAIL_DEMO} className="btn btnLandingPrimary">
             Book a Demo
           </a>
-          <Link href="/signup" className="btn btnLandingSecondary">
-            Run a Deal
-          </Link>
         </nav>
       </header>
     );
@@ -43,13 +40,10 @@ export function PublicHeader({ variant = "default" }: PublicHeaderProps) {
         MineralFlow AI
       </Link>
       <nav className="public-nav">
-        <Link href="/pricing">Pricing</Link>
+        <Link href="/pricing">Request Access</Link>
         <Link href="/about">About</Link>
         <Link href="/dashboard">Dashboard</Link>
         <Link href="/login">Log in</Link>
-        <Link href="/signup" className="btn btnPrimary">
-          Sign up
-        </Link>
       </nav>
     </header>
   );

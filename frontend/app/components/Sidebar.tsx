@@ -26,6 +26,14 @@ function IconDueDiligence() {
     </svg>
   );
 }
+function IconPermitTracker() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 1.5L14 5v6L8 14.5 2 11V5L8 1.5z" />
+      <path d="M8 5v3.5l2.5 1.5" />
+    </svg>
+  );
+}
 function IconSettings() {
   return (
     <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -64,6 +72,7 @@ function IconBrandMark() {
 // ── Nav config ─────────────────────────────────────────────────────────────
 const primaryNav = [
   { href: "/trrc-due-diligence", label: "TRRC Due Diligence", Icon: IconDueDiligence },
+  { href: "/trrc-permit-tracker", label: "TRRC Permit Tracker", Icon: IconPermitTracker },
 ] as const;
 
 const accountNav = [

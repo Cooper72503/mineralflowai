@@ -82,6 +82,51 @@ export default function DashboardPage() {
               </div>
             </div>
           </Link>
+
+          <Link href="/trrc-permit-tracker" style={{ textDecoration: "none" }}>
+            <div style={{
+              background: "#181c25",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 12,
+              padding: "1.5rem",
+              cursor: "pointer",
+              transition: "border-color 0.15s",
+            }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(79,142,247,0.5)")}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)")}
+            >
+              <div style={{
+                width: 40,
+                height: 40,
+                background: "rgba(79,142,247,0.12)",
+                borderRadius: 8,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: "1rem",
+              }}>
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="#4f8ef7" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 1.5L14 5v6L8 14.5 2 11V5L8 1.5z" />
+                  <path d="M8 5v3.5l2.5 1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: "1rem", fontWeight: 600, color: "#e2e8f0", marginBottom: "0.35rem" }}>
+                TRRC Permit Tracker
+              </div>
+              <div style={{ fontSize: "0.82rem", color: "#8892a4", lineHeight: 1.5 }}>
+                Live search of new-drill W-1 filings by county and date range, straight from the Railroad Commission.
+              </div>
+              <div style={{
+                marginTop: "1rem",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                color: "#4f8ef7",
+                letterSpacing: "0.04em",
+              }}>
+                Open →
+              </div>
+            </div>
+          </Link>
         </div>
       </div>
     </div>

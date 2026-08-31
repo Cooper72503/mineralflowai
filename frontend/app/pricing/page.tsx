@@ -1,30 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { PublicHeader } from "../components/PublicHeader";
-import { createClient } from "@/lib/supabase/client";
 
-const PILOT_FEATURES = [
-  "7-day free trial — no charge until day 8",
-  // Retrieval
+const CAPABILITIES = [
   "Every applicable Texas Railroad Commission (TRRC) public record source, queried automatically",
   "Full lease-level production history — not capped to a rolling window",
   "Live compliance, injection, and P-5 operator status checks",
   "Plugging liability estimate per API number",
-  // Analysis
   "Arps decline-curve fitting — exponential / hyperbolic / harmonic, best-fit by SSE, with EUR",
   "Multi-scenario economics — stress / base / strip / upside pricing, PV-10 / PV-15, offer range",
   "Acquisition Scorecard — automated deal-quality scoring across mechanical, compliance, and operator risk",
   "Offset Analytics — geodesic-radius offset search, analog well scoring, proxy valuation for undeveloped tracts",
   "Evidence-first reporting — every field traceable to its source record; gaps disclosed, not guessed",
-  // Delivery
   "Full report exports — PDF, Excel workbook, CSV, and ZIP evidence archive",
-  "Parcel map (PLSS centroid)",
-  // Support
-  "Priority email support",
-  "Dedicated onboarding",
+  "Live drilling-permit tracking with SMS alerts",
 ];
+
+const MAIL_ACCESS =
+  "mailto:cbosher@mineralflowai.com?subject=Request%20access%20%E2%80%94%20MineralFlow%20AI";
 
 function CheckIcon() {
   return (
@@ -35,66 +28,7 @@ function CheckIcon() {
   );
 }
 
-export default function PricingPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [loading, setLoading] = useState(false);
-
-  // Auto-trigger checkout when returning from login with ?plan=pro
-  useEffect(() => {
-    if (searchParams.get("plan") === "pro") {
-      void startCheckout();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function startCheckout() {
-    const supabase = createClient();
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-
-    if (!token) {
-      router.push(`/login?redirect=/pricing%3Fplan%3Dpro`);
-      return;
-    }
-
-    const res = await fetch("/api/billing/checkout", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ plan: "pro" }),
-    });
-
-    if (res.status === 401) {
-      router.push(`/login?redirect=/pricing%3Fplan%3Dpro`);
-      return null;
-    }
-
-    const data = await res.json();
-    if (data.url) {
-      window.location.href = data.url;
-      return null;
-    }
-    return data.error ?? `Error ${res.status}`;
-  }
-
-  async function handleCheckout() {
-    setLoading(true);
-    try {
-      const err = await startCheckout();
-      if (err) {
-        alert(err);
-        setLoading(false);
-      }
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Network error — please try again.");
-      setLoading(false);
-    }
-  }
-
+export default function AccessPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#0a1628", color: "#e2e8f0" }}>
       <PublicHeader variant="landing" />
@@ -115,13 +49,14 @@ export default function PricingPage() {
             letterSpacing: "0.08em",
             marginBottom: "1rem",
           }}>
-            Pilot Program
+            By Request
           </div>
           <h1 style={{ fontSize: "2.2rem", fontWeight: 700, color: "#f8fafc", marginBottom: "0.75rem", letterSpacing: "-0.02em" }}>
-            Try free for 7 days.
+            Request access.
           </h1>
           <p style={{ fontSize: "1.05rem", color: "#94a3b8", maxWidth: 460, margin: "0 auto" }}>
-            Full access from day one. No charge until your trial ends. Cancel anytime.
+            MineralFlow AI is engaged directly with acquisition teams and service companies operating
+            in Texas oil and gas. Reach out and we'll set up your account.
           </p>
         </div>
 
@@ -135,62 +70,41 @@ export default function PricingPage() {
             position: "relative",
             boxShadow: "0 0 40px rgba(201,168,76,0.08)",
           }}>
-            {/* Badge */}
-            <div style={{
-              position: "absolute",
-              top: -13,
-              left: "50%",
-              transform: "translateX(-50%)",
-              background: "linear-gradient(135deg,#C9A84C 0%,#d4a832 100%)",
-              color: "#0a1628",
-              fontSize: "0.72rem",
-              fontWeight: 800,
-              padding: "0.25rem 0.85rem",
-              borderRadius: 99,
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-              whiteSpace: "nowrap",
-            }}>
-              Pilot Access
-            </div>
-
             <div style={{ marginBottom: "1.5rem" }}>
               <p style={{ fontSize: "0.8rem", fontWeight: 700, color: "#F0CC6E", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.5rem" }}>
                 Full Platform
               </p>
-              <div style={{ display: "flex", alignItems: "baseline", gap: "0.3rem" }}>
-                <span style={{ fontSize: "2.6rem", fontWeight: 700, color: "#f8fafc" }}>$1,250</span>
-                <span style={{ color: "#94a3b8", fontSize: "0.9rem" }}>/month after trial</span>
-              </div>
-              <p style={{ fontSize: "0.875rem", color: "#94a3b8", marginTop: "0.5rem" }}>
-                Free for 7 days · then $1,250/mo · cancel anytime
+              <p style={{ fontSize: "0.95rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+                One engagement, tailored to how your team works — diligence volume, alert coverage,
+                and reporting are scoped to your operation, not a fixed tier.
               </p>
             </div>
 
-            <button
-              onClick={handleCheckout}
-              disabled={loading}
+            <a
+              href={MAIL_ACCESS}
               style={{
                 display: "block",
                 width: "100%",
                 textAlign: "center",
                 padding: "0.7rem 1.25rem",
-                background: loading ? "rgba(201,168,76,0.6)" : "linear-gradient(135deg,#C9A84C 0%,#d4a832 100%)",
+                background: "linear-gradient(135deg,#C9A84C 0%,#d4a832 100%)",
                 color: "#0a1628",
                 borderRadius: 8,
                 fontWeight: 700,
                 fontSize: "0.95rem",
                 border: "none",
-                cursor: loading ? "wait" : "pointer",
+                cursor: "pointer",
                 marginBottom: "1.75rem",
                 boxShadow: "0 2px 10px rgba(201,168,76,0.4)",
+                textDecoration: "none",
+                boxSizing: "border-box",
               }}
             >
-              {loading ? "Redirecting to Stripe…" : "Start free trial"}
-            </button>
+              Request Access
+            </a>
 
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.65rem" }}>
-              {PILOT_FEATURES.map((f) => (
+              {CAPABILITIES.map((f) => (
                 <li key={f} style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem", fontSize: "0.875rem", color: "#cbd5e1" }}>
                   <CheckIcon />
                   {f}
@@ -203,16 +117,12 @@ export default function PricingPage() {
         {/* Footer note */}
         <div style={{ maxWidth: 420, margin: "3rem auto 0", textAlign: "center" }}>
           <p style={{ fontSize: "0.875rem", color: "#64748b", lineHeight: 1.7 }}>
-            7-day free trial. No charge until day 8 — we&apos;ll remind you before billing starts.
-            Payments processed securely by Stripe. Cancel anytime.{" "}
-            By subscribing you agree to our{" "}
+            By requesting access you agree to our{" "}
             <a href="/terms" style={{ color: "#C9A84C", textDecoration: "none" }}>Terms of Service</a>
             {" "}and{" "}
             <a href="/privacy" style={{ color: "#C9A84C", textDecoration: "none" }}>Privacy Policy</a>.
-            Questions?{" "}
-            <a href="mailto:cbosher@mineralflowai.com" style={{ color: "#C9A84C", textDecoration: "none" }}>
-              Contact us
-            </a>.
+            Already have an account?{" "}
+            <a href="/login" style={{ color: "#C9A84C", textDecoration: "none" }}>Log in</a>.
           </p>
         </div>
       </main>
