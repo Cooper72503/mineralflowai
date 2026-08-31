@@ -23,6 +23,9 @@ export function PublicHeader({ variant = "default" }: PublicHeaderProps) {
           <a href="#product" className="public-nav-quiet">
             Product
           </a>
+          <a href="#permit-tracker" className="public-nav-quiet">
+            Permit Tracker
+          </a>
           <Link href="/pricing">Request Access</Link>
           <Link href="/about">About</Link>
           <Link href="/login">Log in</Link>

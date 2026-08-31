@@ -13,6 +13,15 @@ export interface PermitSearchParams {
   counties: string[];
   since: Date;
   until: Date;
+  /**
+   * Overrides the default 15-page (300-row) safety cap. The live on-demand
+   * search route never sets this (300 rows is plenty for an interactive
+   * search and keeps response times low); the basin_operators backfill
+   * script sets it much higher so a busy county/window doesn't silently
+   * truncate — completeness matters more than speed there, and it isn't
+   * running inside a request/response cycle with a timeout.
+   */
+  maxPages?: number;
 }
 
 export interface PermitSearchResult {
@@ -40,7 +49,7 @@ function formatDate(d: Date): string {
  * form would risk silently mis-filtering results.
  */
 export async function searchNewDrillPermits(params: PermitSearchParams): Promise<PermitSearchResult> {
-  const { counties, since, until } = params;
+  const { counties, since, until, maxPages = MAX_PAGES } = params;
 
   const rangeDays = (until.getTime() - since.getTime()) / (1000 * 60 * 60 * 24);
   if (rangeDays > MAX_DATE_RANGE_DAYS) {
@@ -78,13 +87,13 @@ export async function searchNewDrillPermits(params: PermitSearchParams): Promise
 
   let offset = 20;
   let truncated = false;
-  while (pageIsFull(page) && offset / 20 < MAX_PAGES) {
+  while (pageIsFull(page) && offset / 20 < maxPages) {
     html = await session.get(`${PAGE_PATH}?pager.offset=${offset}`);
     page = parseSearchResultsPage(html);
     rows.push(...page);
     offset += 20;
   }
-  if (pageIsFull(page) && offset / 20 >= MAX_PAGES) truncated = true;
+  if (pageIsFull(page) && offset / 20 >= maxPages) truncated = true;
 
   return { rows, skippedCounties, truncated };
 }

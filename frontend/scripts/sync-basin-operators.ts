@@ -1,14 +1,26 @@
 /**
- * One-off / periodic backfill for `basin_operators` — crawls TRRC's public
- * W-1 New Drill search across every Permian Basin + Eagle Ford county over
- * a trailing window, in ~90-day chunks (fetch-permits.ts caps a single
- * search's date range at 92 days), and aggregates every distinct operator
- * seen into the basin_operators table.
+ * Full backfill for `basin_operators` — crawls TRRC's public W-1 New Drill
+ * search across every Permian Basin + Eagle Ford county individually
+ * (not combined into one multi-county query — see below), covering
+ * January 2015 onward (the modern unconventional/shale era in both
+ * basins), and aggregates every distinct operator seen into the
+ * basin_operators table.
  *
- * Not real-time — this is a periodically-refreshed roster (see the
- * synced_at column) for populating the Permit Tracker's operator-exclude
- * filter, not a live query. Re-run this occasionally to pick up new
- * operators; it's additive (upsert), so re-running is always safe.
+ * Two corners deliberately NOT cut, both found the hard way:
+ *
+ * 1. Per-county, not combined. A combined query across all 55 counties
+ *    and a wide date range silently returns ZERO rows past some internal
+ *    TRRC threshold instead of erroring or truncating — confirmed
+ *    reproducible (same window, re-run twice, same silent empty result).
+ *    Querying one county at a time keeps each request's real result
+ *    volume low enough to stay clear of that failure mode entirely, and
+ *    was verified clean even on the busiest county (Midland) at 300+
+ *    real rows per 90-day window.
+ * 2. maxPages is set high (not left at the default 15-page/300-row cap
+ *    used by the live on-demand search) so a busy county/window is fully
+ *    paginated instead of silently truncated. Confirmed against real data:
+ *    Midland alone, one 90-day window, returned 370 rows with the raised
+ *    cap — 70 more than the default cap would have captured.
  *
  * Run with: npx tsx scripts/sync-basin-operators.ts
  * Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the
@@ -19,17 +31,11 @@ import { createClient } from "@supabase/supabase-js";
 import { searchNewDrillPermits } from "../lib/trrc/permit-tracker/fetch-permits";
 import { ALL_BASIN_COUNTIES, basinsForCounty } from "../lib/trrc/permit-tracker/county-groups";
 
-const TRAILING_MONTHS = 18;
-// fetch-permits.ts allows up to 92 days per search, but empirically, a
-// combined 55-county query wider than ~60-90 days silently returns ZERO
-// rows instead of erroring or truncating — confirmed by re-running the
-// identical failing window in isolation and by bisecting: 45 and 60 days
-// both returned a full (capped) page, 91 days returned nothing, twice.
-// This looks like a server-side timeout/limit on TRRC's ~20-year-old
-// Struts app that fails silently rather than a real "no permits" result.
-// 30 days stays with a healthy margin under that boundary.
-const CHUNK_DAYS = 30;
-const DELAY_BETWEEN_CHUNKS_MS = 1500; // pace requests against TRRC's public system
+const HISTORY_START = new Date("2015-01-01"); // modern unconventional era, both basins
+const CHUNK_DAYS = 90; // stays under fetch-permits.ts's 92-day cap
+const MAX_PAGES = 200; // 4,000-row ceiling per chunk — a real safety backstop, not a realistic cap
+const DELAY_BETWEEN_REQUESTS_MS = 800; // pace requests against TRRC's public system
+const MAX_RETRIES = 2;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,6 +56,17 @@ function toIsoDate(mmddyyyy: string | null): string | null {
   return `${m[3]}-${m[1]}-${m[2]}`;
 }
 
+function buildChunks(start: Date, end: Date): { since: Date; until: Date }[] {
+  const chunks: { since: Date; until: Date }[] = [];
+  let cursor = new Date(start);
+  while (cursor < end) {
+    const until = new Date(Math.min(cursor.getTime() + CHUNK_DAYS * 24 * 60 * 60 * 1000, end.getTime()));
+    chunks.push({ since: new Date(cursor), until });
+    cursor = new Date(until.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return chunks;
+}
+
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -60,63 +77,78 @@ async function main() {
   const supabase = createClient(url, key);
 
   const now = new Date();
-  const windowStart = new Date(now);
-  windowStart.setMonth(windowStart.getMonth() - TRAILING_MONTHS);
+  const chunks = buildChunks(HISTORY_START, now);
+  const totalRequests = ALL_BASIN_COUNTIES.length * chunks.length;
 
-  const chunks: { since: Date; until: Date }[] = [];
-  let cursor = new Date(windowStart);
-  while (cursor < now) {
-    const until = new Date(Math.min(cursor.getTime() + CHUNK_DAYS * 24 * 60 * 60 * 1000, now.getTime()));
-    chunks.push({ since: new Date(cursor), until });
-    cursor = new Date(until.getTime() + 24 * 60 * 60 * 1000);
-  }
-
-  console.log(`Crawling ${ALL_BASIN_COUNTIES.length} basin counties across ${chunks.length} ~${CHUNK_DAYS}-day windows (trailing ${TRAILING_MONTHS} months)...`);
+  console.log(`Crawling ${ALL_BASIN_COUNTIES.length} counties x ${chunks.length} ~${CHUNK_DAYS}-day windows since ${HISTORY_START.toISOString().slice(0, 10)} = ${totalRequests} requests.`);
+  console.log(`At ~${DELAY_BETWEEN_REQUESTS_MS}ms/request this will take roughly ${Math.round((totalRequests * (DELAY_BETWEEN_REQUESTS_MS + 1800)) / 60000)} minutes.\n`);
 
   const aggregates = new Map<string, Aggregate>();
   let totalRowsSeen = 0;
-  let anyTruncated = false;
+  let requestsDone = 0;
+  let failedRequests = 0;
+  const truncatedChunks: string[] = [];
 
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    process.stdout.write(`  [${i + 1}/${chunks.length}] ${chunk.since.toISOString().slice(0, 10)} → ${chunk.until.toISOString().slice(0, 10)} ... `);
-    try {
-      const result = await searchNewDrillPermits({ counties: ALL_BASIN_COUNTIES, since: chunk.since, until: chunk.until });
-      totalRowsSeen += result.rows.length;
-      if (result.truncated) anyTruncated = true;
-      console.log(`${result.rows.length} permits${result.truncated ? " (truncated — hit the 300-row cap)" : ""}${result.rows.length === 0 ? " — SUSPECT: 0 rows on a wide multi-county query is more likely a silent TRRC failure than a true zero, verify manually if this recurs" : ""}`);
+  for (const county of ALL_BASIN_COUNTIES) {
+    let countyRows = 0;
+    for (const chunk of chunks) {
+      const label = `${county} ${chunk.since.toISOString().slice(0, 10)}→${chunk.until.toISOString().slice(0, 10)}`;
+      let attempt = 0;
+      let ok = false;
+      while (attempt <= MAX_RETRIES && !ok) {
+        try {
+          const result = await searchNewDrillPermits({ counties: [county], since: chunk.since, until: chunk.until, maxPages: MAX_PAGES });
+          totalRowsSeen += result.rows.length;
+          countyRows += result.rows.length;
+          if (result.truncated) truncatedChunks.push(label);
 
-      for (const row of result.rows) {
-        if (!row.operatorNumber || !row.operatorName) continue;
-        const basins = basinsForCounty(row.county ?? "");
-        if (basins.length === 0) continue; // shouldn't happen given the query scope, but don't guess
+          for (const row of result.rows) {
+            if (!row.operatorNumber || !row.operatorName) continue;
+            const basins = basinsForCounty(row.county ?? county);
+            if (basins.length === 0) continue;
 
-        const existing = aggregates.get(row.operatorNumber);
-        const isoDate = toIsoDate(row.applicationDate);
-        if (existing) {
-          basins.forEach((b) => existing.basins.add(b));
-          existing.permitCount++;
-          if (isoDate && (!existing.firstSeen || isoDate < existing.firstSeen)) existing.firstSeen = isoDate;
-          if (isoDate && (!existing.lastSeen || isoDate > existing.lastSeen)) existing.lastSeen = isoDate;
-        } else {
-          aggregates.set(row.operatorNumber, {
-            orgName: row.operatorName,
-            basins: new Set(basins),
-            permitCount: 1,
-            firstSeen: isoDate,
-            lastSeen: isoDate,
-          });
+            const existing = aggregates.get(row.operatorNumber);
+            const isoDate = toIsoDate(row.applicationDate);
+            if (existing) {
+              basins.forEach((b) => existing.basins.add(b));
+              existing.permitCount++;
+              if (isoDate && (!existing.firstSeen || isoDate < existing.firstSeen)) existing.firstSeen = isoDate;
+              if (isoDate && (!existing.lastSeen || isoDate > existing.lastSeen)) existing.lastSeen = isoDate;
+            } else {
+              aggregates.set(row.operatorNumber, {
+                orgName: row.operatorName,
+                basins: new Set(basins),
+                permitCount: 1,
+                firstSeen: isoDate,
+                lastSeen: isoDate,
+              });
+            }
+          }
+          ok = true;
+        } catch (err) {
+          attempt++;
+          if (attempt > MAX_RETRIES) {
+            console.log(`  FAILED (${MAX_RETRIES + 1} attempts): ${label} — ${err instanceof Error ? err.message : err}`);
+            failedRequests++;
+          } else {
+            await sleep(DELAY_BETWEEN_REQUESTS_MS * 2);
+          }
         }
       }
-    } catch (err) {
-      console.log(`FAILED: ${err instanceof Error ? err.message : err}`);
+      requestsDone++;
+      if (requestsDone % 100 === 0) {
+        console.log(`  [${requestsDone}/${totalRequests}] ${aggregates.size} distinct operators so far, ${totalRowsSeen} rows seen, ${failedRequests} failed requests...`);
+      }
+      await sleep(DELAY_BETWEEN_REQUESTS_MS);
     }
-    await sleep(DELAY_BETWEEN_CHUNKS_MS);
+    console.log(`${county}: ${countyRows} rows across full history.`);
   }
 
-  console.log(`\nAggregated ${aggregates.size} distinct operators from ${totalRowsSeen} total permit rows.`);
-  if (anyTruncated) {
-    console.log("Note: at least one window hit the 300-row cap — coverage is a strong sample, not exhaustive.");
+  console.log(`\nDone crawling. Aggregated ${aggregates.size} distinct operators from ${totalRowsSeen} total permit rows across ${requestsDone} requests (${failedRequests} failed).`);
+  if (truncatedChunks.length > 0) {
+    console.log(`WARNING: ${truncatedChunks.length} chunk(s) still hit the ${MAX_PAGES}-page cap — coverage may be incomplete for: ${truncatedChunks.slice(0, 10).join(", ")}${truncatedChunks.length > 10 ? "…" : ""}`);
+  } else {
+    console.log("No chunk hit the pagination cap — every window was fully captured.");
   }
 
   const upsertRows = Array.from(aggregates.entries()).map(([orgNumber, agg]) => ({

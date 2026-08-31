@@ -430,6 +430,93 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* ── Permit Tracker ───────────────────────────────────────────── */}
+      <section
+        id="permit-tracker"
+        className={`${styles.section} ${styles.sectionAlt}`}
+        aria-labelledby="permit-tracker-heading"
+      >
+        <div className={styles.wrap}>
+          <h2 className={styles.sectionTitle} id="permit-tracker-heading">
+            Permit Tracker — know the moment a new well is filed
+          </h2>
+          <p className={styles.sectionLead}>
+            Built for service companies and acquisition teams who need to move on
+            new drilling activity before the rest of the market hears about it —
+            live New Drill (W-1) filings from the Railroad Commission, watched by
+            county, with a text the moment one hits.
+          </p>
+          <div className={styles.featureGrid}>
+            <div className={styles.featureCard}>
+              <div className={styles.featureIcon} aria-hidden>
+                <IconWell />
+              </div>
+              <div>
+                <h3>Full basin coverage</h3>
+                <p>
+                  Every Permian Basin county — Midland and Delaware sub-basins — and
+                  every Eagle Ford county, watched at once. Not a handful of the
+                  busiest counties; the whole play.
+                </p>
+              </div>
+            </div>
+            <div className={styles.featureCard}>
+              <div className={styles.featureIcon} aria-hidden>
+                <IconBell />
+              </div>
+              <div>
+                <h3>SMS alerts</h3>
+                <p>
+                  Pick the counties your team operates in and get a text the moment
+                  a new-drill permit is filed there — operator, lease, well number,
+                  no manual searching or waiting for word to get around.
+                </p>
+              </div>
+            </div>
+            <div className={styles.featureCard}>
+              <div className={styles.featureIcon} aria-hidden>
+                <IconPhone />
+              </div>
+              <div>
+                <h3>Operator contact, right on the permit</h3>
+                <p>
+                  Every result carries the operator&apos;s registered TRRC contact
+                  number, sourced from the Railroad Commission&apos;s own public
+                  operator directory — so a lead doesn&apos;t sit for a day while
+                  someone tracks down who to call.
+                </p>
+              </div>
+            </div>
+            <div className={styles.featureCard}>
+              <div className={styles.featureIcon} aria-hidden>
+                <IconCheck />
+              </div>
+              <div>
+                <h3>A real exclude list</h3>
+                <p>
+                  Search and hide the operators you don&apos;t service from your
+                  results and alerts, built from a real roster of operators
+                  confirmed active in these basins — not a static, generic list.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className={styles.noteBox} style={{ marginTop: "1.5rem" }}>
+            Runs on the same live TRRC retrieval engine behind the due diligence
+            platform above. Currently rolling out to a limited group of service
+            companies and acquisition teams.
+          </div>
+          <div className={styles.ctaRow} style={{ marginTop: "1.5rem" }}>
+            <a className={styles.btnPrimary} href={MAIL_DEMO}>
+              Book a Demo
+            </a>
+            <Link className={styles.btnSecondary} href="/pricing">
+              Request Access
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* ── Basin intelligence ─────────────────────────────────────────── */}
       <section
         className={`${styles.section} ${styles.sectionAlt}`}
@@ -616,6 +703,32 @@ function IconCheck() {
       />
       <path
         d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+        stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconBell() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9Z"
+        stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+      />
+      <path
+        d="M13.73 21a2 2 0 0 1-3.46 0"
+        stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconPhone() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92Z"
         stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
       />
     </svg>

@@ -14,10 +14,9 @@ export function PublicFooter({ variant = "default" }: PublicFooterProps) {
       <div className="public-footer-inner">
         <span className="public-footer-brand">MineralFlow AI</span>
         <nav className="public-footer-nav" aria-label="Footer">
-          <Link href="/pricing">Pricing</Link>
+          <Link href="/pricing">Request Access</Link>
           <Link href="/about">About</Link>
           <Link href="/login">Log in</Link>
-          <Link href="/signup">Sign up</Link>
           <Link href="/terms">Terms</Link>
           <Link href="/privacy">Privacy</Link>
         </nav>
