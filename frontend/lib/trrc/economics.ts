@@ -106,6 +106,34 @@ interface MonthlyEconomics {
   loe: number; workoverReserve: number; swdDisposal: number; netCashFlow: number;
 }
 
+// NGL and Waha basis — real gaps raised directly in the 2026-08-18 Novi
+// call ("What happens if NGLs? What happens if WAHA is this?"). There is
+// no live-sourced NGL yield or Waha differential feed anywhere in this
+// codebase, and inventing one — a guessed multiplier presented as if it
+// were retrieved — would violate the evidence-first rule this entire
+// product is built on. So neither is modeled as automated data: both are
+// explicit, optional, user-supplied assumptions, entered the same way a
+// user already overrides oil/gas price in the interactive Economics tab.
+// That's not a lesser version of what Scott asked for — his own framing
+// was a "what if assumptions" tool ("here's my different price decks..."),
+// which is exactly this.
+//
+// NGL revenue is folded into the gas-side revenue bucket and taxed at the
+// gas severance rate, not modeled as a third independent stream — Texas
+// severance tax treats plant-extracted NGLs as part of gas production
+// value, and keeping a two-bucket (oil / gas-plus-NGL) model preserves
+// solveBreakevenOilPrice's closed-form derivation below without a
+// separate re-derivation. Waha differential is subtracted from Henry Hub
+// to get the realized gas price BEFORE that revenue is computed —
+// deliberately allowed to go negative if the differential exceeds the
+// base price, since a negative realized Permian gas price is a real,
+// documented market condition, not a bug to clamp away.
+export interface NglAndBasisAssumptions {
+  nglYieldBblPerMcf: number;
+  nglPriceUsdBbl: number;
+  wahaDifferentialUsdMcf: number;
+}
+
 // Both forecasts are indexed by "months ahead of the last real production
 // month," not aligned calendar months — oil and gas decline curves are
 // fit independently and can have different history lengths after
@@ -123,7 +151,9 @@ function computeMonthlyEconomics(
   gasForecast: { rate: number }[],
   loeUsdPerBoe: number,
   avgMonthlyWaterBbl: number | null,
+  nglAndBasis: NglAndBasisAssumptions | null = null,
 ): MonthlyEconomics[] {
+  const effectiveGasPriceUsdMcf = price.gasUsdMcf - (nglAndBasis?.wahaDifferentialUsdMcf ?? 0);
   const horizon = Math.max(oilForecast.length, gasForecast.length);
   const months: MonthlyEconomics[] = [];
   for (let i = 0; i < horizon; i++) {
@@ -131,7 +161,8 @@ function computeMonthlyEconomics(
     const gasRate = gasForecast[i]?.rate ?? 0;
 
     const oilRevenue = oilRate * price.oilUsdBbl;
-    const gasRevenue = gasRate * price.gasUsdMcf;
+    const nglRevenue = nglAndBasis ? gasRate * nglAndBasis.nglYieldBblPerMcf * nglAndBasis.nglPriceUsdBbl : 0;
+    const gasRevenue = gasRate * effectiveGasPriceUsdMcf + nglRevenue;
     const grossRevenue = oilRevenue + gasRevenue;
     const severanceTax = oilRevenue * TX_SEVERANCE_TAX_OIL + gasRevenue * TX_SEVERANCE_TAX_GAS;
     const adValorem = grossRevenue * AD_VALOREM_PCT_OF_REVENUE;
@@ -157,8 +188,9 @@ function evaluateScenario(
   gasForecast: { rate: number }[],
   loeUsdPerBoe: number,
   avgMonthlyWaterBbl: number | null,
+  nglAndBasis: NglAndBasisAssumptions | null = null,
 ): ScenarioResult {
-  const months = computeMonthlyEconomics(price, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl);
+  const months = computeMonthlyEconomics(price, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, nglAndBasis);
   const monthlyRate10 = monthlyDiscountRate(0.10);
   const monthlyRate15 = monthlyDiscountRate(0.15);
 
@@ -260,9 +292,17 @@ function solveBreakevenOilPrice(
   baseGasPriceUsdMcf: number,
   loeUsdPerBoe: number,
   avgMonthlyWaterBbl: number | null,
+  nglAndBasis: NglAndBasisAssumptions | null = null,
 ): number | null {
   const totalOilBbl = oilForecast.reduce((s, p) => s + p.rate, 0);
   if (totalOilBbl <= 0) return null;
+
+  // Must stay algebraically consistent with evaluateScenario's own
+  // gas-side formula above (effective price after Waha, NGL revenue
+  // folded in and taxed at the gas rate) — not a separately-derived
+  // approximation.
+  const effectiveGasPriceUsdMcf = baseGasPriceUsdMcf - (nglAndBasis?.wahaDifferentialUsdMcf ?? 0);
+  const nglRevenuePerMcf = nglAndBasis ? nglAndBasis.nglYieldBblPerMcf * nglAndBasis.nglPriceUsdBbl : 0;
 
   let gasRevenueNetOfTaxes = 0;
   let totalCosts = 0;
@@ -271,7 +311,7 @@ function solveBreakevenOilPrice(
   for (let i = 0; i < horizon; i++) {
     const oilRate = oilForecast[i]?.rate ?? 0;
     const gasRate = gasForecast[i]?.rate ?? 0;
-    gasRevenueNetOfTaxes += gasRate * baseGasPriceUsdMcf * gasKeepFraction;
+    gasRevenueNetOfTaxes += gasRate * (effectiveGasPriceUsdMcf + nglRevenuePerMcf) * gasKeepFraction;
     const boe = oilRate + gasRate / MCF_PER_BOE;
     const swd = avgMonthlyWaterBbl !== null ? avgMonthlyWaterBbl * SWD_DISPOSAL_USD_PER_BBL_WATER : 0;
     totalCosts += boe * (loeUsdPerBoe + WORKOVER_RESERVE_USD_PER_BOE) + swd;
@@ -300,6 +340,12 @@ export function computeEconomics(
   // UI collects this yet for most runs) keeps both null with a disclosure
   // note, exactly as before this parameter existed.
   purchasePriceUsd: number | null = null,
+  // Optional, user-supplied only — see NglAndBasisAssumptions above for
+  // why this is never automated/inferred. null (the default, and the
+  // common case since no UI collected this before the Economics tab's
+  // NGL/Waha inputs existed) preserves exact prior behavior — every
+  // formula above falls back to a 0 NGL/Waha adjustment when omitted.
+  nglAndBasis: NglAndBasisAssumptions | null = null,
 ): EconomicEvaluation {
   const oilFit = fitArpsDecline(monthlyOilBbl);
   const gasFit = fitArpsDecline(monthlyGasMcf);
@@ -320,7 +366,11 @@ export function computeEconomics(
     `Costs modeled: Texas statutory severance tax (${(TX_SEVERANCE_TAX_OIL * 100).toFixed(1)}% oil / ${(TX_SEVERANCE_TAX_GAS * 100).toFixed(1)}% gas, market value), ` +
     `a generic ad valorem estimate of ${(AD_VALOREM_PCT_OF_REVENUE * 100).toFixed(1)}% of gross revenue (real rates are set per-county — verify with the relevant ` +
     `county appraisal district), a generic workover reserve of $${WORKOVER_RESERVE_USD_PER_BOE}/BOE, and ${loeSourceNote}. ` +
-    `Saltwater disposal cost is ${swdModeled ? `modeled at $${SWD_DISPOSAL_USD_PER_BBL_WATER}/BBL against this well's known average water production` : "NOT modeled — no water production volume was available for this well/lease"}.`;
+    `Saltwater disposal cost is ${swdModeled ? `modeled at $${SWD_DISPOSAL_USD_PER_BBL_WATER}/BBL against this well's known average water production` : "NOT modeled — no water production volume was available for this well/lease"}. ` +
+    (nglAndBasis
+      ? `NGL modeled at a user-supplied ${nglAndBasis.nglYieldBblPerMcf} BBL/MCF yield and $${nglAndBasis.nglPriceUsdBbl}/BBL, taxed at the gas severance rate; ` +
+        `gas price adjusted for a user-supplied Waha differential of $${nglAndBasis.wahaDifferentialUsdMcf}/MCF. Both are explicit assumptions entered for this scenario, not retrieved or inferred data.`
+      : "NGL and Waha basis are not modeled for this scenario — no automated source exists for either; both are optional, user-supplied assumptions in the interactive Economics tab.");
 
   const irrPayoutNote = !sufficientData
     ? "Not computed — no production history was available to forecast cash flows."
@@ -344,16 +394,16 @@ export function computeEconomics(
   const gasForecast = gasFit ? forecastToTerminalRate(gasFit, GAS_TERMINAL_RATE_MCF_PER_MONTH) : [];
 
   const scenarios: ScenarioResult[] = (["stress", "base", "strip", "upside"] as Scenario[])
-    .map(s => evaluateScenario(s, priceDeck.scenarios[s], oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl));
+    .map(s => evaluateScenario(s, priceDeck.scenarios[s], oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, nglAndBasis));
 
   const byScenario = Object.fromEntries(scenarios.map(s => [s.scenario, s])) as Record<Scenario, ScenarioResult>;
 
-  const breakevenOilPriceUsdBbl = solveBreakevenOilPrice(oilForecast, gasForecast, priceDeck.scenarios.base.gasUsdMcf, loeUsdPerBoe, avgMonthlyWaterBbl);
+  const breakevenOilPriceUsdBbl = solveBreakevenOilPrice(oilForecast, gasForecast, priceDeck.scenarios.base.gasUsdMcf, loeUsdPerBoe, avgMonthlyWaterBbl, nglAndBasis);
 
   const declineSanityCheck = basin && oilFit ? checkDeclineAgainstBasin(basin, oilFit.currentAnnualDeclinePct) : null;
 
   const baseMonthlyNetCashFlow = hasPurchasePrice
-    ? computeMonthlyEconomics(priceDeck.scenarios.base, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl).map(m => m.netCashFlow)
+    ? computeMonthlyEconomics(priceDeck.scenarios.base, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, nglAndBasis).map(m => m.netCashFlow)
     : [];
   const irr = hasPurchasePrice ? solveIrrAnnualPct(purchasePriceUsd!, baseMonthlyNetCashFlow) : null;
   const payoutMonths = hasPurchasePrice ? computePayoutMonths(purchasePriceUsd!, baseMonthlyNetCashFlow) : null;

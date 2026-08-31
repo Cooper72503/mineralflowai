@@ -1642,6 +1642,14 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
   const [oilPrice, setOilPrice] = useState(70);
   const [gasPrice, setGasPrice] = useState(3.0);
   const [purchasePrice, setPurchasePrice] = useState(defaultPurchasePrice !== null ? String(defaultPurchasePrice) : "");
+  // NGL/Waha — real gaps raised directly in the 2026-08-18 Novi call
+  // ("What happens if NGLs? What happens if WAHA is this?"). Zero means
+  // "not modeled," matching computeEconomics' own default — these are
+  // explicit user assumptions, never automated data (no live NGL/Waha
+  // feed exists anywhere in this codebase).
+  const [nglYield, setNglYield] = useState("");
+  const [nglPrice, setNglPrice] = useState("");
+  const [wahaDiff, setWahaDiff] = useState("");
   const [result, setResult] = useState<RecalcResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1656,6 +1664,9 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
     const handle = setTimeout(async () => {
       try {
         const pp = purchasePrice.trim() ? Number(purchasePrice.trim()) : undefined;
+        const ny = nglYield.trim() ? Number(nglYield.trim()) : undefined;
+        const np = nglPrice.trim() ? Number(nglPrice.trim()) : undefined;
+        const wd = wahaDiff.trim() ? Number(wahaDiff.trim()) : undefined;
         const res = await apiFetch(`/api/trrc/due-diligence/${runId}/recalculate-economics`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1663,6 +1674,9 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
             oil_usd_bbl: oilPrice,
             gas_usd_mcf: gasPrice,
             ...(pp !== undefined && Number.isFinite(pp) && pp > 0 ? { purchase_price_usd: pp } : {}),
+            ...(ny !== undefined && Number.isFinite(ny) && ny >= 0 ? { ngl_yield_bbl_per_mcf: ny } : {}),
+            ...(np !== undefined && Number.isFinite(np) && np >= 0 ? { ngl_price_usd_bbl: np } : {}),
+            ...(wd !== undefined && Number.isFinite(wd) ? { waha_differential_usd_mcf: wd } : {}),
           }),
         });
         const data = await res.json();
@@ -1680,7 +1694,7 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
       }
     }, 400);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [oilPrice, gasPrice, purchasePrice, runId, apiFetch]);
+  }, [oilPrice, gasPrice, purchasePrice, nglYield, nglPrice, wahaDiff, runId, apiFetch]);
 
   const inputStyle = {
     width: "100%", background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`,
@@ -1715,8 +1729,25 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
               onChange={e => setPurchasePrice(e.target.value)} />
           </div>
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.9rem", marginTop: "0.9rem" }}>
+          <div>
+            <label style={labelStyle}>NGL Yield (BBL/MCF, optional)</label>
+            <input type="number" step="0.01" min="0" style={inputStyle} placeholder="Not modeled" value={nglYield}
+              onChange={e => setNglYield(e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>NGL Price ($/BBL, optional)</label>
+            <input type="number" step="0.5" min="0" style={inputStyle} placeholder="Not modeled" value={nglPrice}
+              onChange={e => setNglPrice(e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>Waha Differential ($/MCF below Henry Hub, optional)</label>
+            <input type="number" step="0.1" style={inputStyle} placeholder="Not modeled" value={wahaDiff}
+              onChange={e => setWahaDiff(e.target.value)} />
+          </div>
+        </div>
         <div style={{ fontSize: "0.68rem", color: COLORS.textFaint, marginTop: "0.6rem", fontStyle: "italic" as const }}>
-          NGL yield/price and Waha basis differential aren't modeled yet — the price deck here is oil/gas only, same as the underlying engine today.
+          NGL and Waha are explicit assumptions you enter, not retrieved or live-sourced data — no automated NGL/Waha feed exists yet. Leave blank to exclude either from the calculation.
         </div>
       </div>
 

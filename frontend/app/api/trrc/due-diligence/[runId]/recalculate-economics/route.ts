@@ -13,13 +13,14 @@
  * override, which is what makes "on the fly" actually true instead of a
  * label on another 2.5-minute wait.
  *
- * V1 scope: oil price ($/bbl), gas price ($/Mcf), and purchase price are
- * live-adjustable. NGL yield/price and Waha basis differential are a real,
- * currently-missing input (raised in the same call) — intentionally not
- * added here; economics.ts's PriceDeck has no NGL/basis fields yet, and
- * bolting them on as an unlabeled fudge factor would violate this
- * project's evidence-first rule against inventing precision that isn't
- * there. Scoped as a fast-follow engine change, not shipped half-done.
+ * Oil price ($/bbl), gas price ($/Mcf), purchase price, and — as of
+ * economics.ts's NglAndBasisAssumptions — NGL yield/price and Waha basis
+ * differential are all live-adjustable. NGL/Waha are explicit, optional,
+ * user-supplied assumptions, never automated/inferred data: there is no
+ * live NGL or Waha feed anywhere in this codebase, and presenting a
+ * guessed multiplier as if it were retrieved would violate this project's
+ * evidence-first rule. See economics.ts's NglAndBasisAssumptions doc
+ * comment for the full reasoning.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -27,7 +28,7 @@ import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-reques
 import type { TrrcDDProductionRow } from "@/lib/trrc/types";
 import type { PriceDeck } from "@/lib/trrc/eia-pricing";
 import { computeProductionAnalytics, } from "@/lib/trrc/report-builder";
-import { computeEconomics } from "@/lib/trrc/economics";
+import { computeEconomics, type NglAndBasisAssumptions } from "@/lib/trrc/economics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,9 @@ interface RecalcBody {
   oil_usd_bbl?: number;
   gas_usd_mcf?: number;
   purchase_price_usd?: number;
+  ngl_yield_bbl_per_mcf?: number;
+  ngl_price_usd_bbl?: number;
+  waha_differential_usd_mcf?: number;
 }
 
 function isFiniteNumber(v: unknown): v is number {
@@ -74,6 +78,19 @@ export async function POST(
   }
   if (body.purchase_price_usd !== undefined && (!isFiniteNumber(body.purchase_price_usd) || body.purchase_price_usd <= 0)) {
     return NextResponse.json({ ok: false, error: "purchase_price_usd must be a positive number." }, { status: 400 });
+  }
+  if (body.ngl_yield_bbl_per_mcf !== undefined && (!isFiniteNumber(body.ngl_yield_bbl_per_mcf) || body.ngl_yield_bbl_per_mcf < 0)) {
+    return NextResponse.json({ ok: false, error: "ngl_yield_bbl_per_mcf must be zero or a positive number." }, { status: 400 });
+  }
+  if (body.ngl_price_usd_bbl !== undefined && (!isFiniteNumber(body.ngl_price_usd_bbl) || body.ngl_price_usd_bbl < 0)) {
+    return NextResponse.json({ ok: false, error: "ngl_price_usd_bbl must be zero or a positive number." }, { status: 400 });
+  }
+  // Deliberately not constrained to >= 0 — a real Waha differential is
+  // usually a discount to Henry Hub, but the field represents whatever the
+  // caller wants to model; a negative value (a premium) is a legitimate
+  // scenario to test, not a malformed input.
+  if (body.waha_differential_usd_mcf !== undefined && !isFiniteNumber(body.waha_differential_usd_mcf)) {
+    return NextResponse.json({ ok: false, error: "waha_differential_usd_mcf must be a number." }, { status: 400 });
   }
 
   // 3. Load run (for field/county basin classification) + already-persisted
@@ -163,10 +180,25 @@ export async function POST(
 
   const purchasePrice = body.purchase_price_usd ?? (runResult.data["purchase_price"] as number | null) ?? null;
 
+  // Built whenever ANY of the three fields is supplied, defaulting the
+  // unset ones to 0 within the object — a caller can supply just a Waha
+  // differential without also needing to supply NGL fields, and vice
+  // versa. null (all three omitted) preserves exact prior behavior via
+  // computeEconomics' own default.
+  const nglAndBasis: NglAndBasisAssumptions | null =
+    (body.ngl_yield_bbl_per_mcf !== undefined || body.ngl_price_usd_bbl !== undefined || body.waha_differential_usd_mcf !== undefined)
+      ? {
+          nglYieldBblPerMcf: body.ngl_yield_bbl_per_mcf ?? 0,
+          nglPriceUsdBbl: body.ngl_price_usd_bbl ?? 0,
+          wahaDifferentialUsdMcf: body.waha_differential_usd_mcf ?? 0,
+        }
+      : null;
+
   // Shared by the primary result and the sensitivity grid below — same
   // months of production, same gas price, only oil price varies. Kept as
-  // a closure over `analytics`/`purchasePrice` rather than a module-level
-  // export since it's only ever called with this request's data.
+  // a closure over `analytics`/`purchasePrice`/`nglAndBasis` rather than a
+  // module-level export since it's only ever called with this request's
+  // data.
   const runEconomicsAt = (oil: number, gas: number) => computeEconomics(
     analytics.months.map(m => m.oil_bbl ?? 0),
     analytics.months.map(m => m.gas_mcf ?? 0),
@@ -181,6 +213,7 @@ export async function POST(
     null, null, // field/county — not loaded above; basin falls back to the generic LOE default, same as computeEconomics' own documented behavior
     analytics.months.map(m => m.water_bbl),
     purchasePrice,
+    nglAndBasis,
   );
 
   const econ = runEconomicsAt(priceDeck.wtiSpotUsdBbl, priceDeck.henryHubUsdMcf);
@@ -211,7 +244,12 @@ export async function POST(
   return NextResponse.json({
     ok: true,
     data: {
-      inputs: { oilUsdBbl: priceDeck.wtiSpotUsdBbl, gasUsdMcf: priceDeck.henryHubUsdMcf, purchasePriceUsd: purchasePrice },
+      inputs: {
+        oilUsdBbl: priceDeck.wtiSpotUsdBbl, gasUsdMcf: priceDeck.henryHubUsdMcf, purchasePriceUsd: purchasePrice,
+        nglYieldBblPerMcf: nglAndBasis?.nglYieldBblPerMcf ?? 0,
+        nglPriceUsdBbl: nglAndBasis?.nglPriceUsdBbl ?? 0,
+        wahaDifferentialUsdMcf: nglAndBasis?.wahaDifferentialUsdMcf ?? 0,
+      },
       pv10: result?.pv10 ?? null,
       pv15: result?.pv15 ?? null,
       netCashFlow: result?.netCashFlow ?? null,
