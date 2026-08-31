@@ -18,6 +18,9 @@ export interface PermitSearchRow {
   applicationDate: string | null; // parsed from "Submitted MM/DD/YYYY" in the first cell
   issuanceDate: string | null; // parsed from "Approved MM/DD/YYYY" in the first cell
   detailUrl: string | null;
+  /** Joined in by the API route from operator_directory — absent on a raw scrape result. */
+  operatorPhone?: string | null;
+  operatorEmergencyPhone?: string | null;
 }
 
 const BASE_URL = "https://webapps.rrc.state.tx.us";

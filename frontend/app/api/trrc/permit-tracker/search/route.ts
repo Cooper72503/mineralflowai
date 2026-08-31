@@ -51,11 +51,38 @@ export async function POST(request: NextRequest) {
   // 3. Fetch — all outbound requests inside this call are hard-coded to
   // webapps.rrc.state.tx.us (see lib/trrc/permit-tracker/session.ts); no
   // user-controlled URL ever reaches fetch().
+  let result;
   try {
-    const result = await searchNewDrillPermits({ counties: body.counties, since, until });
-    return NextResponse.json({ ok: true, data: result });
+    result = await searchNewDrillPermits({ counties: body.counties, since, until });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Permit search failed.";
     return NextResponse.json({ ok: false, error: message }, { status: 502 });
   }
+
+  // 4. Enrich with operator contact info from TRRC's public P-5 Oil & Gas
+  // Directory (operator_directory — see migration 025 for provenance).
+  // Looked up here, not scraped live per operator: the live P-5 query is
+  // session-based and would multiply request count by every distinct
+  // operator in the result set.
+  const operatorNumbers = Array.from(
+    new Set(result.rows.map((r) => r.operatorNumber).filter((n): n is string => !!n))
+  );
+  const phonesByOperator = new Map<string, { phone: string | null; emergencyPhone: string | null }>();
+  if (operatorNumbers.length > 0) {
+    const { data: directoryRows } = await supabase
+      .from("operator_directory")
+      .select("org_number, phone, emergency_phone")
+      .in("org_number", operatorNumbers);
+    for (const row of directoryRows ?? []) {
+      phonesByOperator.set(row.org_number, { phone: row.phone, emergencyPhone: row.emergency_phone });
+    }
+  }
+
+  const enrichedRows = result.rows.map((r) => ({
+    ...r,
+    operatorPhone: r.operatorNumber ? phonesByOperator.get(r.operatorNumber)?.phone ?? null : null,
+    operatorEmergencyPhone: r.operatorNumber ? phonesByOperator.get(r.operatorNumber)?.emergencyPhone ?? null : null,
+  }));
+
+  return NextResponse.json({ ok: true, data: { ...result, rows: enrichedRows } });
 }

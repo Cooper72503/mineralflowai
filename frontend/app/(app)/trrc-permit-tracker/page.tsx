@@ -25,11 +25,40 @@ const COLORS = {
   red:          "#ef4444",
 };
 
-const QUICK_COUNTIES = [
-  "MIDLAND", "ECTOR", "REEVES", "LOVING", "WARD", "CULBERSON",
-  "HOWARD", "MARTIN", "ANDREWS", "GLASSCOCK", "UPTON", "REAGAN",
-  "KARNES", "DEWITT", "GONZALES",
+// Grouped by basin so the quick-pick list stays scannable. Permian Basin
+// (TX side) covers both the Midland Basin and Delaware Basin sub-basins;
+// Eagle Ford is the South Texas shale play. Any of the other 254 TX
+// counties is still reachable via the text input below — this is a
+// convenience shortlist, not a capability limit.
+const COUNTY_GROUPS: { label: string; counties: string[] }[] = [
+  {
+    label: "Permian Basin",
+    counties: [
+      "ANDREWS", "BORDEN", "COCHRAN", "COKE", "CONCHO", "CRANE", "CROCKETT",
+      "CROSBY", "CULBERSON", "DAWSON", "DICKENS", "ECTOR", "GAINES", "GARZA",
+      "GLASSCOCK", "HOCKLEY", "HOWARD", "IRION", "LOVING", "LYNN", "MARTIN",
+      "MIDLAND", "MITCHELL", "NOLAN", "PECOS", "REAGAN", "REEVES", "SCHLEICHER",
+      "SCURRY", "STERLING", "SUTTON", "TERRELL", "TERRY", "UPTON", "VAL VERDE",
+      "WARD", "WINKLER", "YOAKUM",
+    ],
+  },
+  {
+    label: "Eagle Ford",
+    counties: [
+      "ATASCOSA", "BEE", "DEWITT", "DIMMIT", "FAYETTE", "FRIO", "GOLIAD",
+      "GONZALES", "KARNES", "LA SALLE", "LAVACA", "LIVE OAK", "MAVERICK",
+      "MCMULLEN", "WEBB", "WILSON", "ZAVALA",
+    ],
+  },
 ];
+const QUICK_COUNTIES = COUNTY_GROUPS.flatMap((g) => g.counties);
+
+function formatPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length !== 10) return raw;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -80,30 +109,38 @@ function CountyPicker({
 
   return (
     <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.6rem" }}>
-        {QUICK_COUNTIES.map((c) => {
-          const active = selected.includes(c);
-          return (
-            <button
-              key={c}
-              type="button"
-              onClick={() => toggle(c)}
-              style={{
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                padding: "0.35rem 0.7rem",
-                borderRadius: 6,
-                border: `1px solid ${active ? COLORS.accent : COLORS.borderStrong}`,
-                background: active ? COLORS.accentDim : "transparent",
-                color: active ? COLORS.accent : COLORS.textMuted,
-                cursor: "pointer",
-              }}
-            >
-              {c.charAt(0) + c.slice(1).toLowerCase()}
-            </button>
-          );
-        })}
-      </div>
+      {COUNTY_GROUPS.map((group) => (
+        <div key={group.label} style={{ marginBottom: "0.5rem" }}>
+          <div style={{ fontSize: "0.68rem", fontWeight: 600, color: COLORS.textFaint, marginBottom: "0.3rem" }}>
+            {group.label}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+            {group.counties.map((c) => {
+              const active = selected.includes(c);
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => toggle(c)}
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    padding: "0.35rem 0.7rem",
+                    borderRadius: 6,
+                    border: `1px solid ${active ? COLORS.accent : COLORS.borderStrong}`,
+                    background: active ? COLORS.accentDim : "transparent",
+                    color: active ? COLORS.accent : COLORS.textMuted,
+                    cursor: "pointer",
+                  }}
+                >
+                  {c.toLowerCase().replace(/\b\w/g, (ch) => ch.toUpperCase())}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <div style={{ marginBottom: "0.6rem" }} />
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
         <input
           list={datalistId}
@@ -447,17 +484,20 @@ export default function PermitTrackerPage() {
           </div>
         )}
 
-        {/* Results */}
+        {/* Results — white/light theme on purpose: this is the table people
+            actually read off of (and potentially print/screenshot), so it
+            stays legible rather than matching the rest of the page's dark
+            theme. */}
         {rows !== null && (
           <div style={{
-            background: COLORS.surface, border: `1px solid ${COLORS.border}`,
+            background: "#ffffff", border: "1px solid #e5e7eb",
             borderRadius: 10, padding: "1.25rem 1.5rem",
           }}>
-            <div style={{ fontSize: "0.8rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "1rem" }}>
+            <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "1rem" }}>
               {rows.length} permit{rows.length === 1 ? "" : "s"} found
             </div>
             {rows.length === 0 ? (
-              <p style={{ color: COLORS.textFaint, fontSize: "0.85rem", margin: 0 }}>
+              <p style={{ color: "#9ca3af", fontSize: "0.85rem", margin: 0 }}>
                 No new-drill filings for the selected counties and date range.
               </p>
             ) : (
@@ -465,11 +505,11 @@ export default function PermitTrackerPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
                   <thead>
                     <tr>
-                      {["Operator", "Lease", "Well #", "County", "Dist.", "Profile", "Submitted", "Status"].map((h) => (
+                      {["Operator", "Phone", "Lease", "Well #", "County", "Dist.", "Profile", "Submitted", "Status"].map((h) => (
                         <th key={h} style={{
-                          textAlign: "left", padding: "0.4rem 0.75rem", color: COLORS.textMuted,
+                          textAlign: "left", padding: "0.4rem 0.75rem", color: "#6b7280",
                           fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.06em",
-                          borderBottom: `1px solid ${COLORS.border}`, whiteSpace: "nowrap",
+                          borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap",
                         }}>
                           {h}
                         </th>
@@ -479,15 +519,19 @@ export default function PermitTrackerPage() {
                   <tbody>
                     {rows.map((r, i) => {
                       const sc = statusColor(r.currentStatus);
+                      const phone = formatPhone(r.operatorPhone);
                       return (
-                        <tr key={`${r.apiNumber}-${i}`} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                          <td style={{ padding: "0.5rem 0.75rem" }}>{r.operatorName ?? "—"}</td>
-                          <td style={{ padding: "0.5rem 0.75rem" }}>{r.leaseName ?? "—"}</td>
-                          <td style={{ padding: "0.5rem 0.75rem" }}>{r.wellNumber ?? "—"}</td>
-                          <td style={{ padding: "0.5rem 0.75rem" }}>{r.county ?? "—"}</td>
-                          <td style={{ padding: "0.5rem 0.75rem" }}>{r.district ?? "—"}</td>
-                          <td style={{ padding: "0.5rem 0.75rem" }}>{r.wellboreProfile ?? "—"}</td>
-                          <td style={{ padding: "0.5rem 0.75rem", whiteSpace: "nowrap" }}>{r.applicationDate ?? "—"}</td>
+                        <tr key={`${r.apiNumber}-${i}`} style={{ borderBottom: "1px solid #f0f1f3" }}>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.operatorName ?? "—"}</td>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827", whiteSpace: "nowrap" }}>
+                            {phone ? <a href={`tel:${r.operatorPhone}`} style={{ color: "#2563eb", textDecoration: "none" }}>{phone}</a> : "—"}
+                          </td>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.leaseName ?? "—"}</td>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.wellNumber ?? "—"}</td>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.county ?? "—"}</td>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.district ?? "—"}</td>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.wellboreProfile ?? "—"}</td>
+                          <td style={{ padding: "0.5rem 0.75rem", whiteSpace: "nowrap", color: "#111827" }}>{r.applicationDate ?? "—"}</td>
                           <td style={{ padding: "0.5rem 0.75rem" }}>
                             <span style={{
                               display: "inline-block", fontSize: "0.68rem", fontWeight: 700,
@@ -502,6 +546,10 @@ export default function PermitTrackerPage() {
                     })}
                   </tbody>
                 </table>
+                <p style={{ margin: "0.75rem 0 0 0", fontSize: "0.72rem", color: "#9ca3af" }}>
+                  Phone numbers are the operator's TRRC P-5 registered contact number (Texas Oil &amp; Gas
+                  Directory) — not necessarily the direct line for this specific well or lease.
+                </p>
               </div>
             )}
           </div>
