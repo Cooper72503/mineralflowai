@@ -156,10 +156,10 @@ interface BasinOperator {
 }
 
 /**
- * Searchable "hide this operator" filter. Backed by basin_operators (every
- * operator confirmed active in these basins via real permit history — see
- * scripts/sync-basin-operators.ts) and permit_tracker_operator_excludes
- * (per-user, RLS-scoped). Toggling saves immediately — no separate save step.
+ * Full checkbox list of every basin operator (basin_operators — see
+ * scripts/sync-basin-operators.ts) with a single Save that writes the
+ * whole set of exclusions at once against permit_tracker_operator_excludes
+ * (per-user, RLS-scoped) — nothing is persisted until Save is pressed.
  */
 function OperatorExcludePanel({
   excludedNumbers,
@@ -170,11 +170,12 @@ function OperatorExcludePanel({
 }) {
   const supabase = createClient();
   const [operators, setOperators] = useState<BasinOperator[]>([]);
-  const [excludedDetails, setExcludedDetails] = useState<Map<string, string>>(new Map());
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [savedNumbers, setSavedNumbers] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -183,53 +184,70 @@ function OperatorExcludePanel({
 
       const [{ data: basinOps }, { data: excludes }] = await Promise.all([
         supabase.from("basin_operators").select("org_number, org_name, basins, permit_count").order("permit_count", { ascending: false }),
-        supabase.from("permit_tracker_operator_excludes").select("org_number, org_name").eq("user_id", user.id),
+        supabase.from("permit_tracker_operator_excludes").select("org_number").eq("user_id", user.id),
       ]);
 
       setOperators((basinOps as BasinOperator[]) ?? []);
-      const details = new Map<string, string>();
-      const numbers = new Set<string>();
-      for (const e of excludes ?? []) {
-        numbers.add(e.org_number);
-        details.set(e.org_number, e.org_name ?? e.org_number);
-      }
-      setExcludedDetails(details);
+      const numbers = new Set((excludes ?? []).map((e) => e.org_number));
+      setChecked(numbers);
+      setSavedNumbers(numbers);
       onChange(numbers);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function toggleExclude(orgNumber: string, orgName: string) {
-    setPending(orgNumber);
+  function toggle(orgNumber: string) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(orgNumber)) next.delete(orgNumber);
+      else next.add(orgNumber);
+      return next;
+    });
+    setMessage(null);
+  }
+
+  async function save() {
+    setSaving(true);
+    setMessage(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) throw new Error("Not signed in.");
 
-      const next = new Set(excludedNumbers);
-      const nextDetails = new Map(excludedDetails);
-      if (next.has(orgNumber)) {
-        await supabase.from("permit_tracker_operator_excludes").delete().eq("user_id", user.id).eq("org_number", orgNumber);
-        next.delete(orgNumber);
-        nextDetails.delete(orgNumber);
-      } else {
-        await supabase.from("permit_tracker_operator_excludes").upsert(
-          { user_id: user.id, org_number: orgNumber, org_name: orgName },
+      const toAdd = Array.from(checked).filter((n) => !savedNumbers.has(n));
+      const toRemove = Array.from(savedNumbers).filter((n) => !checked.has(n));
+
+      if (toAdd.length > 0) {
+        const byNumber = new Map(operators.map((op) => [op.org_number, op.org_name]));
+        const { error } = await supabase.from("permit_tracker_operator_excludes").upsert(
+          toAdd.map((orgNumber) => ({ user_id: user.id, org_number: orgNumber, org_name: byNumber.get(orgNumber) ?? orgNumber })),
           { onConflict: "user_id,org_number" }
         );
-        next.add(orgNumber);
-        nextDetails.set(orgNumber, orgName);
+        if (error) throw error;
       }
-      setExcludedDetails(nextDetails);
-      onChange(next);
+      if (toRemove.length > 0) {
+        const { error } = await supabase
+          .from("permit_tracker_operator_excludes")
+          .delete()
+          .eq("user_id", user.id)
+          .in("org_number", toRemove);
+        if (error) throw error;
+      }
+
+      setSavedNumbers(new Set(checked));
+      onChange(new Set(checked));
+      setMessage(`Saved — ${checked.size} operator${checked.size === 1 ? "" : "s"} excluded.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Save failed.");
     } finally {
-      setPending(null);
+      setSaving(false);
     }
   }
 
-  const matches = query.trim()
-    ? operators.filter((op) => op.org_name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 25)
-    : [];
+  const dirty = checked.size !== savedNumbers.size || Array.from(checked).some((n) => !savedNumbers.has(n));
+  const visibleOperators = query.trim()
+    ? operators.filter((op) => op.org_name.toLowerCase().includes(query.trim().toLowerCase()))
+    : operators;
 
   return (
     <div style={{
@@ -239,79 +257,87 @@ function OperatorExcludePanel({
       padding: "1.25rem 1.5rem",
       marginBottom: "1.5rem",
     }}>
-      <div style={{ fontSize: "0.75rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.6rem" }}>
-        Exclude Operators
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Exclude Operators
+        </div>
+        {checked.size > 0 && (
+          <span style={{ fontSize: "0.72rem", color: COLORS.textFaint }}>{checked.size} excluded</span>
+        )}
       </div>
       <p style={{ margin: "0 0 0.75rem 0", fontSize: "0.8rem", color: COLORS.textMuted }}>
-        {loading ? "Loading operators…" : `Search ${operators.length} operators confirmed active in these basins and hide the ones you don't want to see.`}
+        {loading ? "Loading operators…" : `Check every operator you don't want to see, then Save. ${operators.length} operators confirmed active in these basins.`}
       </p>
 
-      <div style={{ position: "relative", marginBottom: excludedNumbers.size > 0 ? "0.75rem" : 0 }}>
-        <input
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          placeholder="Search operator name…"
-          style={{ ...inputStyle, width: 320 }}
-        />
-        {open && query.trim() && (
+      {!loading && (
+        <>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter the list…"
+            style={{ ...inputStyle, width: 320, marginBottom: "0.75rem" }}
+          />
+
           <div style={{
-            position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, maxHeight: 260, overflowY: "auto",
-            background: "#0f1117", border: `1px solid ${COLORS.borderStrong}`, borderRadius: 8, zIndex: 10,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+            maxHeight: 340, overflowY: "auto", border: `1px solid ${COLORS.border}`, borderRadius: 8,
+            marginBottom: "1rem",
           }}>
-            {matches.length === 0 ? (
-              <div style={{ padding: "0.6rem 0.75rem", fontSize: "0.78rem", color: COLORS.textFaint }}>No matches.</div>
+            {visibleOperators.length === 0 ? (
+              <div style={{ padding: "0.75rem", fontSize: "0.8rem", color: COLORS.textFaint }}>No matches.</div>
             ) : (
-              matches.map((op) => {
-                const isExcluded = excludedNumbers.has(op.org_number);
+              visibleOperators.map((op) => {
+                const isChecked = checked.has(op.org_number);
                 return (
-                  <button
+                  <label
                     key={op.org_number}
-                    type="button"
-                    onClick={() => toggleExclude(op.org_number, op.org_name)}
-                    disabled={pending === op.org_number}
                     style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
-                      padding: "0.5rem 0.75rem", background: "transparent", border: "none",
-                      borderBottom: `1px solid ${COLORS.border}`, cursor: "pointer", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: "0.6rem", width: "100%",
+                      padding: "0.45rem 0.75rem", borderBottom: `1px solid ${COLORS.border}`, cursor: "pointer",
+                      background: isChecked ? "rgba(239,68,68,0.06)" : "transparent",
                     }}
                   >
-                    <span style={{ fontSize: "0.8rem", color: COLORS.text }}>{op.org_name}</span>
-                    <span style={{
-                      fontSize: "0.68rem", fontWeight: 700, padding: "0.1rem 0.45rem", borderRadius: 4,
-                      background: isExcluded ? "rgba(239,68,68,0.15)" : COLORS.accentDim,
-                      color: isExcluded ? COLORS.red : COLORS.accent, whiteSpace: "nowrap", marginLeft: "0.75rem",
-                    }}>
-                      {isExcluded ? "Excluded" : "Exclude"}
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggle(op.org_number)}
+                      style={{ cursor: "pointer", flexShrink: 0 }}
+                    />
+                    <span style={{ fontSize: "0.8rem", color: isChecked ? COLORS.red : COLORS.text, flex: 1 }}>
+                      {op.org_name}
                     </span>
-                  </button>
+                    <span style={{ fontSize: "0.7rem", color: COLORS.textFaint, whiteSpace: "nowrap" }}>
+                      {op.permit_count} permit{op.permit_count === 1 ? "" : "s"}
+                    </span>
+                  </label>
                 );
               })
             )}
           </div>
-        )}
-      </div>
 
-      {excludedNumbers.size > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-          {Array.from(excludedNumbers).map((num) => (
-            <span key={num} style={{
-              display: "inline-flex", alignItems: "center", gap: "0.4rem",
-              fontSize: "0.75rem", padding: "0.25rem 0.55rem", borderRadius: 99,
-              background: "rgba(239,68,68,0.1)", color: COLORS.red, border: "1px solid rgba(239,68,68,0.25)",
-            }}>
-              {excludedDetails.get(num) ?? num}
-              <button
-                type="button"
-                onClick={() => toggleExclude(num, excludedDetails.get(num) ?? num)}
-                style={{ background: "none", border: "none", color: COLORS.red, cursor: "pointer", fontWeight: 700, padding: 0, lineHeight: 1 }}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
+          <div style={{ display: "flex", gap: "0.6rem", alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving || !dirty}
+              style={{
+                fontSize: "0.8rem", fontWeight: 700, padding: "0.5rem 1.1rem",
+                borderRadius: 6, border: "none",
+                background: !dirty ? COLORS.textFaint : saving ? COLORS.textFaint : COLORS.accent,
+                color: "#0f1117", cursor: saving || !dirty ? "default" : "pointer",
+              }}
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            {dirty && !saving && (
+              <span style={{ fontSize: "0.75rem", color: COLORS.yellow }}>Unsaved changes</span>
+            )}
+            {message && (
+              <span style={{ fontSize: "0.75rem", color: message.startsWith("Saved") ? COLORS.green : COLORS.red }}>
+                {message}
+              </span>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
