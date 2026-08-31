@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { ALL_COUNTY_NAMES } from "@/lib/trrc/permit-tracker/county-codes";
+import { COUNTY_GROUPS } from "@/lib/trrc/permit-tracker/county-groups";
 import type { PermitSearchRow } from "@/lib/trrc/permit-tracker/search-results";
 import { createClient } from "@/lib/supabase/client";
 import { fetchTrialStatus } from "@/lib/trial/trial-status";
@@ -25,33 +26,6 @@ const COLORS = {
   red:          "#ef4444",
 };
 
-// Grouped by basin so the quick-pick list stays scannable. Permian Basin
-// (TX side) covers both the Midland Basin and Delaware Basin sub-basins;
-// Eagle Ford is the South Texas shale play. Any of the other 254 TX
-// counties is still reachable via the text input below — this is a
-// convenience shortlist, not a capability limit.
-const COUNTY_GROUPS: { label: string; counties: string[] }[] = [
-  {
-    label: "Permian Basin",
-    counties: [
-      "ANDREWS", "BORDEN", "COCHRAN", "COKE", "CONCHO", "CRANE", "CROCKETT",
-      "CROSBY", "CULBERSON", "DAWSON", "DICKENS", "ECTOR", "GAINES", "GARZA",
-      "GLASSCOCK", "HOCKLEY", "HOWARD", "IRION", "LOVING", "LYNN", "MARTIN",
-      "MIDLAND", "MITCHELL", "NOLAN", "PECOS", "REAGAN", "REEVES", "SCHLEICHER",
-      "SCURRY", "STERLING", "SUTTON", "TERRELL", "TERRY", "UPTON", "VAL VERDE",
-      "WARD", "WINKLER", "YOAKUM",
-    ],
-  },
-  {
-    label: "Eagle Ford",
-    counties: [
-      "ATASCOSA", "BEE", "DEWITT", "DIMMIT", "FAYETTE", "FRIO", "GOLIAD",
-      "GONZALES", "KARNES", "LA SALLE", "LAVACA", "LIVE OAK", "MAVERICK",
-      "MCMULLEN", "WEBB", "WILSON", "ZAVALA",
-    ],
-  },
-];
-const QUICK_COUNTIES = COUNTY_GROUPS.flatMap((g) => g.counties);
 
 function formatPhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -170,6 +144,175 @@ function CountyPicker({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+interface BasinOperator {
+  org_number: string;
+  org_name: string;
+  basins: string[];
+  permit_count: number;
+}
+
+/**
+ * Searchable "hide this operator" filter. Backed by basin_operators (every
+ * operator confirmed active in these basins via real permit history — see
+ * scripts/sync-basin-operators.ts) and permit_tracker_operator_excludes
+ * (per-user, RLS-scoped). Toggling saves immediately — no separate save step.
+ */
+function OperatorExcludePanel({
+  excludedNumbers,
+  onChange,
+}: {
+  excludedNumbers: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const supabase = createClient();
+  const [operators, setOperators] = useState<BasinOperator[]>([]);
+  const [excludedDetails, setExcludedDetails] = useState<Map<string, string>>(new Map());
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const [{ data: basinOps }, { data: excludes }] = await Promise.all([
+        supabase.from("basin_operators").select("org_number, org_name, basins, permit_count").order("permit_count", { ascending: false }),
+        supabase.from("permit_tracker_operator_excludes").select("org_number, org_name").eq("user_id", user.id),
+      ]);
+
+      setOperators((basinOps as BasinOperator[]) ?? []);
+      const details = new Map<string, string>();
+      const numbers = new Set<string>();
+      for (const e of excludes ?? []) {
+        numbers.add(e.org_number);
+        details.set(e.org_number, e.org_name ?? e.org_number);
+      }
+      setExcludedDetails(details);
+      onChange(numbers);
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function toggleExclude(orgNumber: string, orgName: string) {
+    setPending(orgNumber);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const next = new Set(excludedNumbers);
+      const nextDetails = new Map(excludedDetails);
+      if (next.has(orgNumber)) {
+        await supabase.from("permit_tracker_operator_excludes").delete().eq("user_id", user.id).eq("org_number", orgNumber);
+        next.delete(orgNumber);
+        nextDetails.delete(orgNumber);
+      } else {
+        await supabase.from("permit_tracker_operator_excludes").upsert(
+          { user_id: user.id, org_number: orgNumber, org_name: orgName },
+          { onConflict: "user_id,org_number" }
+        );
+        next.add(orgNumber);
+        nextDetails.set(orgNumber, orgName);
+      }
+      setExcludedDetails(nextDetails);
+      onChange(next);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  const matches = query.trim()
+    ? operators.filter((op) => op.org_name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 25)
+    : [];
+
+  return (
+    <div style={{
+      background: COLORS.surface,
+      border: `1px solid ${COLORS.border}`,
+      borderRadius: 10,
+      padding: "1.25rem 1.5rem",
+      marginBottom: "1.5rem",
+    }}>
+      <div style={{ fontSize: "0.75rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.6rem" }}>
+        Exclude Operators
+      </div>
+      <p style={{ margin: "0 0 0.75rem 0", fontSize: "0.8rem", color: COLORS.textMuted }}>
+        {loading ? "Loading operators…" : `Search ${operators.length} operators confirmed active in these basins and hide the ones you don't want to see.`}
+      </p>
+
+      <div style={{ position: "relative", marginBottom: excludedNumbers.size > 0 ? "0.75rem" : 0 }}>
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder="Search operator name…"
+          style={{ ...inputStyle, width: 320 }}
+        />
+        {open && query.trim() && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, maxHeight: 260, overflowY: "auto",
+            background: "#0f1117", border: `1px solid ${COLORS.borderStrong}`, borderRadius: 8, zIndex: 10,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+          }}>
+            {matches.length === 0 ? (
+              <div style={{ padding: "0.6rem 0.75rem", fontSize: "0.78rem", color: COLORS.textFaint }}>No matches.</div>
+            ) : (
+              matches.map((op) => {
+                const isExcluded = excludedNumbers.has(op.org_number);
+                return (
+                  <button
+                    key={op.org_number}
+                    type="button"
+                    onClick={() => toggleExclude(op.org_number, op.org_name)}
+                    disabled={pending === op.org_number}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
+                      padding: "0.5rem 0.75rem", background: "transparent", border: "none",
+                      borderBottom: `1px solid ${COLORS.border}`, cursor: "pointer", textAlign: "left",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.8rem", color: COLORS.text }}>{op.org_name}</span>
+                    <span style={{
+                      fontSize: "0.68rem", fontWeight: 700, padding: "0.1rem 0.45rem", borderRadius: 4,
+                      background: isExcluded ? "rgba(239,68,68,0.15)" : COLORS.accentDim,
+                      color: isExcluded ? COLORS.red : COLORS.accent, whiteSpace: "nowrap", marginLeft: "0.75rem",
+                    }}>
+                      {isExcluded ? "Excluded" : "Exclude"}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
+      {excludedNumbers.size > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+          {Array.from(excludedNumbers).map((num) => (
+            <span key={num} style={{
+              display: "inline-flex", alignItems: "center", gap: "0.4rem",
+              fontSize: "0.75rem", padding: "0.25rem 0.55rem", borderRadius: 99,
+              background: "rgba(239,68,68,0.1)", color: COLORS.red, border: "1px solid rgba(239,68,68,0.25)",
+            }}>
+              {excludedDetails.get(num) ?? num}
+              <button
+                type="button"
+                onClick={() => toggleExclude(num, excludedDetails.get(num) ?? num)}
+                style={{ background: "none", border: "none", color: COLORS.red, cursor: "pointer", fontWeight: 700, padding: 0, lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -342,6 +485,10 @@ export default function PermitTrackerPage() {
   const [rows, setRows] = useState<PermitSearchRow[] | null>(null);
   const [skippedCounties, setSkippedCounties] = useState<string[]>([]);
   const [truncated, setTruncated] = useState(false);
+  const [excludedOperators, setExcludedOperators] = useState<Set<string>>(new Set());
+
+  const visibleRows = rows?.filter((r) => !r.operatorNumber || !excludedOperators.has(r.operatorNumber)) ?? null;
+  const hiddenCount = rows && visibleRows ? rows.length - visibleRows.length : 0;
 
   async function runSearch() {
     if (selectedCounties.length === 0) {
@@ -395,6 +542,9 @@ export default function PermitTrackerPage() {
 
         {/* SMS alerts */}
         <AlertPanel />
+
+        {/* Operator exclude filter */}
+        <OperatorExcludePanel excludedNumbers={excludedOperators} onChange={setExcludedOperators} />
 
         {/* Search form */}
         <div style={{
@@ -488,17 +638,24 @@ export default function PermitTrackerPage() {
             actually read off of (and potentially print/screenshot), so it
             stays legible rather than matching the rest of the page's dark
             theme. */}
-        {rows !== null && (
+        {visibleRows !== null && (
           <div style={{
             background: "#ffffff", border: "1px solid #e5e7eb",
             borderRadius: 10, padding: "1.25rem 1.5rem",
           }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "1rem" }}>
-              {rows.length} permit{rows.length === 1 ? "" : "s"} found
+              {visibleRows.length} permit{visibleRows.length === 1 ? "" : "s"} found
+              {hiddenCount > 0 && (
+                <span style={{ textTransform: "none", fontWeight: 400, color: "#9ca3af", letterSpacing: "normal" }}>
+                  {" "}· {hiddenCount} hidden by your operator filter
+                </span>
+              )}
             </div>
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <p style={{ color: "#9ca3af", fontSize: "0.85rem", margin: 0 }}>
-                No new-drill filings for the selected counties and date range.
+                {hiddenCount > 0
+                  ? "All matching permits are from excluded operators."
+                  : "No new-drill filings for the selected counties and date range."}
               </p>
             ) : (
               <div style={{ overflowX: "auto" }}>
@@ -517,7 +674,7 @@ export default function PermitTrackerPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r, i) => {
+                    {visibleRows.map((r, i) => {
                       const sc = statusColor(r.currentStatus);
                       const phone = formatPhone(r.operatorPhone);
                       return (
