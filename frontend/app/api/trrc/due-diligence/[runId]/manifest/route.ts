@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * GET /api/trrc/due-diligence/[runId]/manifest
  *
@@ -167,6 +166,7 @@ export async function GET(
     resolved_lease_number: (runRaw["resolved_lease_number"] as string | null) ?? null,
     resolved_gas_id: (runRaw["resolved_gas_id"] as string | null) ?? null,
     resolved_operator_number: (runRaw["resolved_operator_number"] as string | null) ?? null,
+    purchase_price: (runRaw["purchase_price"] as number | null) ?? null,
     report_storage_path: (runRaw["report_storage_path"] as string | null) ?? null,
     archive_storage_path: (runRaw["archive_storage_path"] as string | null) ?? null,
     manifest_storage_path: storagePath,

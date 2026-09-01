@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * TRRC Public Records Due Diligence — Manifest Builder
  *
@@ -104,7 +103,7 @@ function collectDiscoveredRecords(
         title: `${attempt.source_name} — Record ${i + 1}`,
         category: "miscellaneous",
         form_type: null,
-        url: attempt.request_url,
+        url: attempt.request_url ?? null,
         filing_date: null,
         is_downloadable: false,
       });
@@ -202,7 +201,7 @@ function deriveMissingItems(
       status: "retrieval_failed",
       explanation: `Source "${attempt.source_name}" failed after ${attempt.retry_count} attempt(s): ${attempt.error_message ?? "unknown error"}`,
       source_checked: attempt.source_id,
-      manual_retrieval_url: attempt.request_url,
+      manual_retrieval_url: attempt.request_url ?? null,
       recommended_action: "Re-run the query or check source availability. Consider manual retrieval.",
     });
   }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * GET /api/trrc/due-diligence/[runId]/export?type=production|coverage|evidence|timeline|xlsx
  *
@@ -10,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import type { TrrcDueDiligenceRun, SourceCoverageStatus, TrrcDDProductionRow } from "@/lib/trrc/types";
 import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 const EXPORT_TYPES = ["production", "coverage", "evidence", "timeline", "offset", "lateral", "county", "xlsx"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
-async function loadProduction(supabase, runId: string): Promise<TrrcDDProductionRow[]> {
+async function loadProduction(supabase: SupabaseClient, runId: string): Promise<TrrcDDProductionRow[]> {
   const { data } = await supabase
     .from("trrc_production_monthly")
     .select("*")
@@ -37,7 +37,7 @@ async function loadProduction(supabase, runId: string): Promise<TrrcDDProduction
     .order("production_month", { ascending: true })
     .limit(240);
 
-  return (data ?? []).map((p) => ({
+  return (data ?? []).map((p: Record<string, unknown>) => ({
     entity_type: p["entity_type"] as "lease" | "api",
     api_number: (p["api_number"] as string | null) ?? null,
     district: (p["district"] as string) ?? "",
@@ -53,14 +53,14 @@ async function loadProduction(supabase, runId: string): Promise<TrrcDDProduction
   }));
 }
 
-async function loadAttempts(supabase, runId: string): Promise<LiteSourceAttempt[]> {
+async function loadAttempts(supabase: SupabaseClient, runId: string): Promise<LiteSourceAttempt[]> {
   const { data } = await supabase
     .from("trrc_source_attempts")
     .select("source_id, source_name, status, result_count, result_data_json, attempted_at, error_message")
     .eq("run_id", runId)
     .order("attempted_at", { ascending: true });
 
-  return (data ?? []).map((a) => ({
+  return (data ?? []).map((a: Record<string, unknown>) => ({
     source_id: a["source_id"] as string,
     source_name: a["source_name"] as string,
     status: a["status"] as string,
@@ -261,7 +261,7 @@ export async function GET(
     ];
 
     const xlsx = await buildXlsxWorkbook(sheets);
-    return new NextResponse(xlsx, {
+    return new NextResponse(new Uint8Array(xlsx), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -72,6 +72,12 @@ The report is what the buyer pays for. Make it count.`;
 
 interface AgentState {
   apiNumber:      string | null;
+  // True only once search_wellbore has actually matched apiNumber against a
+  // real TRRC record. apiNumber can be non-null while this is false — it's
+  // pre-seeded from the run's original (unconfirmed, possibly malformed or
+  // fake-but-structurally-valid) user input. Downstream persistence must not
+  // treat an unconfirmed guess as equivalent to a TRRC-confirmed identity.
+  apiNumberConfirmed: boolean;
   leaseNumber:    string | null;
   district:       string | null;
   operatorName:   string | null;
@@ -95,7 +101,12 @@ async function dispatchTool(
 
   switch (name) {
     case "search_wellbore": {
-      const r = await ewa.searchWellbore(String(input.api_number ?? state.apiNumber ?? ""));
+      const explicitApi = input.api_number ? String(input.api_number) : null;
+      const r = await ewa.searchWellbore(String(explicitApi ?? state.apiNumber ?? ""));
+      // Whether this call actually tested the subject asset's number, vs. a
+      // caller-supplied number for some other well (e.g. an offset/analog
+      // lookup) — only a subject-number result should ever touch state.
+      const searchedSubject = explicitApi === null || explicitApi === state.apiNumber;
       if (r.found) {
         // Real, previously-undiscovered bug, caught live 2026-08-13:
         // state.apiNumber is declared, read as a fallback on every other
@@ -111,12 +122,30 @@ async function dispatchTool(
         // leaseDetailAction.do link, not just echoed user input), so it's
         // the authoritative value to persist here.
         const confirmedApi = r.wells[0]?.["api_no"];
-        if (confirmedApi && !state.apiNumber)             state.apiNumber       = confirmedApi;
+        if (confirmedApi && searchedSubject) {
+          // Reconcile, don't just fill-if-empty — apiNumber can already be
+          // non-null (pre-seeded from unconfirmed input) and still need to
+          // be corrected/confirmed by the real TRRC match.
+          state.apiNumber = confirmedApi;
+          state.apiNumberConfirmed = true;
+        }
         if (r.lease_number    && !state.leaseNumber)    state.leaseNumber    = r.lease_number;
         if (r.district        && !state.district)        state.district        = r.district;
         if (r.operator        && !state.operatorName)    state.operatorName    = r.operator;
         if (r.operator_number && !state.operatorNumber)  state.operatorNumber  = r.operator_number;
         if (r.county          && !state.county)          state.county          = r.county;
+      } else if (searchedSubject && !state.apiNumberConfirmed) {
+        // Second real bug, found while fixing the first: apiNumber is
+        // pre-seeded from the run's raw, unconfirmed input (create-run.ts
+        // parses it from whatever the user typed — never TRRC-verified).
+        // If TRRC's own wellbore search comes back with zero results for
+        // that exact number, it must not be persisted to resolved_primary_api
+        // as if it were confirmed — a structurally-valid-but-fake API number
+        // would otherwise look identical to a real, TRRC-matched one to
+        // every downstream consumer (the report, the scorecard, the
+        // geology engine). Evidence-first: an unconfirmed guess that TRRC
+        // itself couldn't verify is a disclosed gap, not a resolved fact.
+        state.apiNumber = null;
       }
       result = r;
       sourceName = "search_by_api";
@@ -306,6 +335,7 @@ export async function runLandmanAgent(
 ): Promise<void> {
   const state: AgentState = {
     apiNumber:      null,
+    apiNumberConfirmed: false,
     leaseNumber:    null,
     district:       null,
     operatorName:   null,

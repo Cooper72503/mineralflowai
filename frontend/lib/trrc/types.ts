@@ -126,7 +126,6 @@ export type TrrcIdentifierType =
 // The category vocabulary source-registry.ts actually uses — genuinely
 // distinct from RecordCategory above (that one's the older underwriting
 // enum). source-registry.ts imported this under the same name as if it
-// were already defined here, papered over with @ts-nocheck instead of
 // ever actually being added. Values below are the exhaustive real set
 // used across every SOURCE_REGISTRY entry's expected_record_types, not
 // guessed independently of them.
@@ -147,7 +146,6 @@ export type TrrcRecordCategory =
 
 // Return shape of normalizeApiNumber() (normalization.ts) — was previously
 // imported by normalization.ts and entity-resolver.ts as if defined here,
-// but never actually existed; both files carried @ts-nocheck instead of
 // surfacing the missing export. Added to match normalizeApiNumber's real
 // return object exactly, not guessed independently of it.
 export interface NormalizedApi {
@@ -246,10 +244,12 @@ export interface TrrcDDProductionRow {
 }
 
 export interface TrrcMissingItem {
+  id: string;
   category: string;
   expected_record_type: string;
   status: string;
   explanation: string;
+  source_checked: string;
   manual_retrieval_url: string | null;
   recommended_action: string | null;
 }
@@ -327,15 +327,15 @@ export interface SourceAttempt {
   source_name: string;
   status: SourceAttemptStatus;
   result_count: number;
-  http_status?: number;
+  http_status?: number | null;
   retry_count: number;
-  error_code?: string;
+  error_code?: string | null;
   error_message: string | null;
-  manual_action_url?: string;
+  manual_action_url?: string | null;
   started_at: string;
-  completed_at: string;
+  completed_at: string | null;
   request_parameters?: Record<string, unknown>;
-  request_url?: string;
+  request_url?: string | null;
   result_data_json?: Record<string, unknown> | null;
 }
 
@@ -426,8 +426,8 @@ export interface SourceRecordRef {
   document_id: string;
   title: string;
   category: string;
-  form_type: string;
-  url: string;
+  form_type: string | null;
+  url: string | null;
   filing_date: string | null;
   is_downloadable: boolean;
 }
