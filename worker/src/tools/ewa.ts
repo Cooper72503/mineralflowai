@@ -232,8 +232,26 @@ function rowsToObjects(header: string[], rows: string[][]): Record<string, strin
   });
 }
 
+// Real gap found live during the deterministic sequencer's Phase 3
+// validation (2026-09-03): TRRC's own wellbore-query results return the
+// TRRC-confirmed API number in this short, state-prefix-less form (county
+// code + well sequence, 8 digits — e.g. "16502733") rather than the full
+// "42-165-02733" a user or create-run.ts's normalizer supplies (10+
+// digits). Both encode the identical well; the "42" Texas prefix is
+// implicit since every source this file queries only ever returns Texas
+// wells. Every fetcher below that takes an apiNumber can be called either
+// with the original full-format input OR with a value read back off
+// AgentState after search_wellbore reconciled it to TRRC's own short
+// form — the LLM-orchestrated agent.ts path happened to never hit this,
+// because the LLM (with the original input still in its own context)
+// consistently re-supplied the full-format number on later tool calls
+// rather than relying on the reconciled state value. The deterministic
+// sequencer has no such incidental "memory" and calls every step with
+// state.apiNumber directly, so this was a real latent bug the rewrite
+// surfaced, not one it introduced — fixing it here fixes both paths.
 function splitApi(api: string): { prefix: string; suffix: string } | null {
   const d = api.replace(/\D/g, "");
+  if (d.length === 8) return { prefix: d.slice(0, 3), suffix: d.slice(3, 8) };
   if (d.length < 10) return null;
   return { prefix: d.slice(2, 5), suffix: d.slice(5, 10) };
 }

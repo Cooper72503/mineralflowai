@@ -178,10 +178,20 @@ export async function getInactiveWellStatus(
   message: string;
   error?: string;
 }> {
+  // Accepts both the full "42-165-02733" (10+ digit) form and TRRC's own
+  // short, state-prefix-less confirmed form (8 digits) — see the matching
+  // comment on ewa.ts's splitApi() for why both must work here.
   const digits = apiNumber.replace(/\D/g, "");
-  if (digits.length < 10) return { is_inactive: false, records: [], plugging_deadline: null, message: "Invalid API", error: "Invalid API" };
-  const prefix = digits.slice(2, 5);
-  const suffix = digits.slice(5, 10);
+  let prefix: string, suffix: string;
+  if (digits.length === 8) {
+    prefix = digits.slice(0, 3);
+    suffix = digits.slice(3, 8);
+  } else if (digits.length >= 10) {
+    prefix = digits.slice(2, 5);
+    suffix = digits.slice(5, 10);
+  } else {
+    return { is_inactive: false, records: [], plugging_deadline: null, message: "Invalid API", error: "Invalid API" };
+  }
 
   if (!operatorNumber) {
     return { is_inactive: false, records: [], plugging_deadline: null, message: "Operator number required for inactive well lookup — not resolved yet", error: "Operator number required for inactive well lookup — not resolved yet" };
