@@ -24,6 +24,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { runLandmanSequencer } from "./sequencer.js";
+import { runTitleResearchJob } from "./title-sequencer.js";
 import { closeBrowser } from "./tools/browser.js";
 
 const SUPABASE_URL             = process.env.SUPABASE_URL             ?? "";
@@ -62,6 +63,57 @@ assertCleanSecret("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY);
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const activeRuns = new Set<string>();
+const activeTitleJobs = new Set<string>();
+
+// ─── Title-chain research jobs (migration 028) ───────────────────────────────
+// Same claim-then-run discipline as due-diligence runs, against
+// title_research_jobs. The frontend owns everything after retrieval
+// (tract confirmation, document ingestion, analysis); this loop only does
+// the network-bound stages.
+async function claimAndRunTitleJob(jobId: string): Promise<void> {
+  if (activeTitleJobs.has(jobId)) return;
+  const { data: claimed } = await supabase
+    .from("title_research_jobs")
+    .update({ status: "resolving_wells", progress_percent: 2, updated_at: new Date().toISOString() })
+    .eq("id", jobId)
+    .eq("status", "pending")
+    .select("id");
+  if (!claimed || claimed.length === 0) return;
+
+  activeTitleJobs.add(jobId);
+  console.log(`[worker] starting title job ${jobId}`);
+  try {
+    await runTitleResearchJob(jobId, supabase);
+    console.log(`[worker] title job ${jobId} reached tract confirmation`);
+  } catch (err) {
+    console.error(`[worker] title job ${jobId} failed:`, err);
+    await supabase.from("title_research_jobs").update({
+      status: "failed",
+      error_summary: err instanceof Error ? err.message : String(err),
+      stage_detail: "Retrieval failed — retry from the job page",
+      updated_at: new Date().toISOString(),
+    }).eq("id", jobId);
+  } finally {
+    activeTitleJobs.delete(jobId);
+  }
+}
+
+async function pollTitleJobs(): Promise<void> {
+  if (activeTitleJobs.size >= MAX_CONCURRENT) return;
+  const { data: jobs, error } = await supabase
+    .from("title_research_jobs")
+    .select("id")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(MAX_CONCURRENT - activeTitleJobs.size);
+  if (error) {
+    // The table may not exist yet on a database that has not applied migration 028 — log once per poll, never crash.
+    if (!/relation .* does not exist/i.test(error.message)) console.error("[worker] title poll error:", error.message);
+    return;
+  }
+  for (const job of (jobs ?? [])) claimAndRunTitleJob(String(job["id"])).catch(console.error);
+}
+
 async function claimAndRun(runId: string, input: string): Promise<void> {
   if (activeRuns.has(runId)) return;
 
@@ -150,6 +202,16 @@ async function recoverStaleRuns(): Promise<void> {
     console.log(`[worker] recovered ${recovered.length} run(s) stuck in "running" from a previous process: ${recovered.map(r => r["id"]).join(", ")}`);
   }
 
+  // Title jobs interrupted mid-retrieval go back to pending; their per-well
+  // resolution status and stored documents survive, so the rerun resumes.
+  const { data: titleRecovered } = await supabase
+    .from("title_research_jobs")
+    .update({ status: "pending", stage_detail: "Re-queued after worker restart", updated_at: new Date().toISOString() })
+    .in("status", ["resolving_wells", "searching_records"])
+    .select("id");
+  if (titleRecovered && titleRecovered.length > 0) {
+    console.log(`[worker] re-queued ${titleRecovered.length} title job(s) interrupted by a previous process`);
+  }
 }
 
 async function main() {
@@ -172,8 +234,9 @@ async function main() {
   });
 
   // Poll loop
-  setInterval(() => { poll().catch(console.error); }, POLL_INTERVAL_MS);
+  setInterval(() => { poll().catch(console.error); pollTitleJobs().catch(console.error); }, POLL_INTERVAL_MS);
   await poll(); // immediate first poll
+  await pollTitleJobs();
 }
 
 main().catch(err => {

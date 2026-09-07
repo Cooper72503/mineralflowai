@@ -42,7 +42,13 @@ export function normalizeAbstractNumber(raw: string | null | undefined): string 
 const SECTION_PATTERN = /\bSec(?:tion)?\.?\s+(\d+[A-Za-z]?(?:\s*\/\s*\d+)?)\b/i;
 const BLOCK_PATTERN = /\bBlock\s+([A-Za-z0-9]+(?:-[A-Za-z0-9]+)?)\b/i;
 const SURVEY_PATTERN = /\b((?:[A-Z][A-Za-z0-9&'.\s-]{1,64}?)(?:Survey|Srvy|Surv)\.?)\b/i;
-const COUNTY_PATTERN = /\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\s+County\b/i;
+// The /i flag defeated this pattern's own capitalization anchor: under it
+// [A-Z] also matches lowercase, so "the same land of Martin County" captured
+// "land of Martin" and "160 acres in Martin County" captured "acres in
+// Martin". County names are proper nouns, so the leading letters must be
+// genuinely uppercase. Only the word "County" itself is case-folded, which
+// keeps all-caps instrument text ("MARTIN COUNTY, TEXAS") matching.
+const COUNTY_PATTERN = /\b([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*){0,2})\s+[Cc][Oo][Uu][Nn][Tt][Yy]\b/;
 const GRANTEE_PATTERN = /\b(?:Original\s+Grantee|Grantee)\s*:?\s*([A-Z][A-Za-z0-9&'.\s-]{1,64})\b/i;
 const TRACT_PATTERN = /\bTract\s+(?:No\.?\s*)?([A-Za-z0-9]+(?:-[A-Za-z0-9]+)?)\b/i;
 const ACREAGE_PATTERN = /\b(\d+(?:\.\d+)?)\s*(?:gross\s+)?acres\b/i;
