@@ -13,7 +13,7 @@ function generateCurve(qi: number, di: number, b: number, months: number): numbe
 }
 
 const flatPriceDeck: PriceDeck = {
-  source: "static_fallback",
+  source: "user_input",
   asOf: "test-fixture",
   wtiSpotUsdBbl: 70,
   henryHubUsdMcf: 3,
@@ -26,13 +26,13 @@ const flatPriceDeck: PriceDeck = {
 };
 
 describe("computeEconomics — insufficient data", () => {
-  it("reports sufficientData:false and zeroed offer range when neither oil nor gas can be fit", () => {
+  it("reports sufficientData:false and unavailable offer range when neither oil nor gas can be fit", () => {
     const result = computeEconomics([100, 90, 80], [], flatPriceDeck);
     expect(result.sufficientData).toBe(false);
     expect(result.scenarios).toEqual([]);
-    expect(result.offerRangeLow).toBe(0);
-    expect(result.offerRangeMid).toBe(0);
-    expect(result.offerRangeHigh).toBe(0);
+    expect(result.offerRangeLow).toBeNull();
+    expect(result.offerRangeMid).toBeNull();
+    expect(result.offerRangeHigh).toBeNull();
   });
 });
 
@@ -47,8 +47,8 @@ describe("computeEconomics — a real oil-only decline", () => {
   });
 
   it("orders the offer range low <= mid <= high, matching stress <= base <= upside pricing", () => {
-    expect(result.offerRangeLow).toBeLessThanOrEqual(result.offerRangeMid);
-    expect(result.offerRangeMid).toBeLessThanOrEqual(result.offerRangeHigh);
+    expect(result.offerRangeLow).toBeLessThanOrEqual(result.offerRangeMid!);
+    expect(result.offerRangeMid).toBeLessThanOrEqual(result.offerRangeHigh!);
   });
 
   it("PV-10 is always >= PV-15 for a positive cash flow stream (a higher discount rate discounts more)", () => {
@@ -208,4 +208,12 @@ describe("computeEconomics — an oil+gas well blends both severance tax rates",
     expect(effectiveRate).toBeGreaterThanOrEqual(TX_SEVERANCE_TAX_OIL - 0.001);
     expect(effectiveRate).toBeLessThanOrEqual(TX_SEVERANCE_TAX_GAS + 0.001);
   });
+});
+
+it("withholds valuation when the only prices are static placeholders", () => {
+  const result = computeEconomics(generateCurve(5000, 0.03, 0, 24), [], { ...flatPriceDeck, source: "static_fallback" });
+  expect(result.sufficientData).toBe(false);
+  expect(result.offerRangeMid).toBeNull();
+  expect(result.scenarios).toEqual([]);
+  expect(result.unavailableReason).toContain("placeholder");
 });

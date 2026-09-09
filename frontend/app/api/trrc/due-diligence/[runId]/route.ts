@@ -1,3 +1,4 @@
+import { currentProduction } from "@/lib/trrc/production-series";
 /**
  * GET /api/trrc/due-diligence/[runId]
  *
@@ -102,6 +103,9 @@ export async function GET(
         .eq("run_id", runId),
     ]);
 
+  if ([entitiesResult, attemptsResult, findingsResult, productionResult, geologyAssessmentResult, geologyFindingsResult, geologyOffsetsResult].some(result => result.error)) {
+    return NextResponse.json({error:"Run evidence could not be loaded. Retry the request."},{status:503});
+  }
   const findings = (findingsResult.data ?? []).slice().sort(
     (a, b) => SEVERITY_RANK[a.severity as FindingSeverity] - SEVERITY_RANK[b.severity as FindingSeverity],
   );
@@ -115,11 +119,11 @@ export async function GET(
   // though the underlying data (source_attempts) was right there. Mirror
   // the same derivation here so the dashboard and the exports agree.
   const attempts = (attemptsResult.data ?? []) as unknown as LiteSourceAttempt[];
-  const production = (productionResult.data ?? []) as unknown as TrrcDDProductionRow[];
+  const production = currentProduction((productionResult.data ?? []) as unknown as TrrcDDProductionRow[], attempts);
   const storedCoverage = (run.coverage_json as SourceCoverageStatus[] | null) ?? [];
-  const coverage = storedCoverage.length > 0 ? storedCoverage : deriveCoverageFromAttempts(attempts);
+  const coverage = deriveCoverageFromAttempts(attempts);
 
-  let scorecard = run.scorecard_json ?? null;
+  let scorecard = null;
   let flags: { critical: string[]; important: string[] } = { critical: [], important: [] };
   if (!scorecard) {
     const analytics = computeProductionAnalytics(production);

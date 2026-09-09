@@ -1,3 +1,4 @@
+import { checkedQuery } from "./persistence.js";
 /**
  * MineralFlow TRRC Worker
  *
@@ -72,12 +73,12 @@ const activeTitleJobs = new Set<string>();
 // the network-bound stages.
 async function claimAndRunTitleJob(jobId: string): Promise<void> {
   if (activeTitleJobs.has(jobId)) return;
-  const { data: claimed } = await supabase
+  const { data: claimed } = await checkedQuery(supabase
     .from("title_research_jobs")
     .update({ status: "resolving_wells", progress_percent: 2, updated_at: new Date().toISOString() })
     .eq("id", jobId)
     .eq("status", "pending")
-    .select("id");
+    .select("id"), "Title job claim");
   if (!claimed || claimed.length === 0) return;
 
   activeTitleJobs.add(jobId);
@@ -87,12 +88,12 @@ async function claimAndRunTitleJob(jobId: string): Promise<void> {
     console.log(`[worker] title job ${jobId} reached tract confirmation`);
   } catch (err) {
     console.error(`[worker] title job ${jobId} failed:`, err);
-    await supabase.from("title_research_jobs").update({
+    await checkedQuery(supabase.from("title_research_jobs").update({
       status: "failed",
       error_summary: err instanceof Error ? err.message : String(err),
       stage_detail: "Retrieval failed — retry from the job page",
       updated_at: new Date().toISOString(),
-    }).eq("id", jobId);
+    }).eq("id", jobId).neq("status", "cancelled"), "Title failure status");
   } finally {
     activeTitleJobs.delete(jobId);
   }
@@ -119,7 +120,7 @@ async function claimAndRun(runId: string, input: string): Promise<void> {
 
   // Atomic claim: update only succeeds if status is still "pending".
   // If another process already claimed it, data will be empty — we abort.
-  const { data: claimed } = await supabase
+  const { data: claimed } = await checkedQuery(supabase
     .from("trrc_due_diligence_runs")
     .update({
       status:           "running",
@@ -128,7 +129,7 @@ async function claimAndRun(runId: string, input: string): Promise<void> {
     })
     .eq("id", runId)
     .eq("status", "pending")
-    .select("id");
+    .select("id"), "Diligence run claim");
 
   if (!claimed || claimed.length === 0) {
     return; // lost the race to another worker process
@@ -142,12 +143,12 @@ async function claimAndRun(runId: string, input: string): Promise<void> {
     console.log(`[worker] completed run ${runId}`);
   } catch (err) {
     console.error(`[worker] run ${runId} failed:`, err);
-    await supabase.from("trrc_due_diligence_runs").update({
+    await checkedQuery(supabase.from("trrc_due_diligence_runs").update({
       status:        "failed",
       error_summary: err instanceof Error ? err.message : String(err),
       completed_at:  new Date().toISOString(),
       updated_at:    new Date().toISOString(),
-    }).eq("id", runId);
+    }).eq("id", runId).neq("status", "cancelled"), "Diligence failure status");
   } finally {
     activeRuns.delete(runId);
   }

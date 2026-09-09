@@ -90,15 +90,8 @@ export async function POST(
     );
   }
 
-  // 3. Mark as pending — the DigitalOcean worker polls for pending runs and claims them
-  await supabase
-    .from("trrc_due_diligence_runs")
-    .update({
-      status:           "pending",
-      progress_percent: 2,
-      updated_at:       new Date().toISOString(),
-    })
-    .eq("id", runId);
+  // The worker already polls pending rows. A write here races its atomic claim
+  // and could reset a running job to pending, causing duplicate execution.
 
   return NextResponse.json({ ok: true, status: "pending" });
 }

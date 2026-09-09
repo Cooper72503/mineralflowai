@@ -1,0 +1,116 @@
+{
+  "case": {
+    "id": "permit-only",
+    "api10": "4232901040",
+    "gis_symbol": "Permitted Location",
+    "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27329_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Permitted+Location%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+    "verified_at": "2026-09-09T04:14:18.624080+00:00",
+    "evidence": {
+      "API": "32901040",
+      "GIS_SYMBOL_DESCRIPTION": "Permitted Location"
+    }
+  },
+  "started_at": "2026-09-09T15:58:24.549Z",
+  "finished_at": "2026-09-09T15:59:02.656Z",
+  "attempts": [
+    {
+      "source_id": "permit-only-search_by_api",
+      "source_name": "search_by_api",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "TimeoutError: The operation was aborted due to timeout",
+      "attempted_at": "2026-09-09T15:58:24.549Z",
+      "result_data_json": {
+        "found": false,
+        "wells": [],
+        "lease_number": null,
+        "district": null,
+        "operator": null,
+        "operator_number": null,
+        "county": null,
+        "message": "Error: TimeoutError: The operation was aborted due to timeout",
+        "error": "TimeoutError: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "source_id": "permit-only-fetch_gis_plat",
+      "source_name": "fetch_gis_plat",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "TimeoutError: The operation was aborted due to timeout",
+      "attempted_at": "2026-09-09T15:58:24.550Z",
+      "result_data_json": {
+        "found": false,
+        "latitude": null,
+        "longitude": null,
+        "well_type": null,
+        "survey": null,
+        "alert_areas": [],
+        "message": "GIS error: TimeoutError: The operation was aborted due to timeout",
+        "error": "TimeoutError: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "source_id": "permit-only-fetch_production",
+      "source_name": "fetch_production",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Production requires lease number + district \u2014 not resolved yet",
+      "attempted_at": "2026-09-09T15:58:45.124Z",
+      "result_data_json": {
+        "found": false,
+        "rows": [],
+        "lease_number": null,
+        "district": null,
+        "message": "Production requires lease number + district \u2014 not resolved yet",
+        "error": "Production requires lease number + district \u2014 not resolved yet"
+      }
+    },
+    {
+      "source_id": "permit-only-fetch_drilling_permits",
+      "source_name": "fetch_drilling_permits",
+      "status": "success",
+      "result_count": 2,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:58:45.295Z",
+      "result_data_json": {
+        "found": true,
+        "permits": [
+          {
+            "api_no": "32901040",
+            "district": "08",
+            "lease": "PEGASUS FIELD UNIT #3 (131160)",
+            "well_number": "115",
+            "permitted_operator": "MOBIL PRODUCING TX. & N.M. INC.(572550)",
+            "county": "MIDLAND",
+            "status_date": "Submitted: 06/08/1989 Approved: 06/08/1989",
+            "status_number": "360221",
+            "wellbore_profiles": "Vertical",
+            "filing_purpose": "Recompletion",
+            "amend": "N",
+            "total_depth": "12100",
+            "stacked_lateral_parent_well_dp": "",
+            "status": "APPROVED"
+          },
+          {
+            "api_no": "32901040",
+            "district": "08",
+            "lease": "PEGASUS FIELD UNIT #3",
+            "well_number": "115H",
+            "permitted_operator": "XTO ENERGY INC.(945936)",
+            "county": "MIDLAND",
+            "status_date": "Submitted: 06/04/2014 Approved: 07/07/2014",
+            "status_number": "788704",
+            "wellbore_profiles": "Horizontal",
+            "filing_purpose": "Recompletion",
+            "amend": "N",
+            "total_depth": "12200",
+            "stacked_lateral_parent_well_dp": "",
+            "status": "APPROVED"
+          }
+        ],
+        "message": "Found 2 drilling permit record(s) for 42-329-01040"
+      }
+    }
+  ]
+}

@@ -48,7 +48,8 @@ export async function createDueDiligenceRun(
   }
 
   const detected_input_type = body.input_type_override ?? detectInputType(rawInput);
-  const normalizedApi = normalizeApiNumber(rawInput);
+  const normalizedApi = detected_input_type === "api_number" ? normalizeApiNumber(rawInput) : null;
+  if (detected_input_type === "api_number" && !normalizedApi) return { ok: false, error: "Invalid Texas API number.", original_input: rawInput };
   const normalized_input = normalizedApi?.api10 ?? rawInput;
 
   const resolution = await resolveEntities(

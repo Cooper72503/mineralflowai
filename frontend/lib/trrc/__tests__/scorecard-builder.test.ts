@@ -68,6 +68,7 @@ describe("buildAcquisitionScorecard", () => {
         attempt({ source_name: "search_by_operator", result_data_json: { records: [{ p5_status: "Active", bond_amount: "50000" }] } }),
       ],
       coverage: [coverageRow({ category: "wellbore_identity" })],
+      production: Array.from({ length: 24 }, (_, i) => ({ production_month: `2025-${String(i % 12 + 1).padStart(2, "0")}-01`, oil_bbl: 800, gas_mcf: null, casinghead_gas_mcf: null, condensate_bbl: null, water_bbl: null })) as ScorecardInputs["production"],
       monthsOfHistory: 24,
       recentAvgOil: 500,
       zeroProductionMonths: 0,
@@ -88,6 +89,7 @@ describe("buildAcquisitionScorecard", () => {
         attempt({ source_name: "search_by_operator", result_data_json: { records: [{ p5_status: "Active", bond_amount: "50000" }] } }),
         attempt({ source_name: "fetch_compliance_violations", result_data_json: { found: true, open_count: 0 } }),
         attempt({ source_name: "fetch_orphan_well", result_data_json: { is_orphan: false } }),
+        attempt({ source_name: "fetch_inactive_well_status", result_data_json: { found: false, records: [] } }),
         attempt({ source_name: "fetch_drilling_permits", result_data_json: { permits: [{ amend: "N" }] } }),
       ],
       coverage: [
@@ -96,6 +98,7 @@ describe("buildAcquisitionScorecard", () => {
         coverageRow({ category: "compliance" }),
         coverageRow({ category: "production" }),
       ],
+      production: Array.from({ length: 24 }, (_, i) => ({ production_month: `2025-${String(i % 12 + 1).padStart(2, "0")}-01`, oil_bbl: 800, gas_mcf: null, casinghead_gas_mcf: null, condensate_bbl: null, water_bbl: null })) as ScorecardInputs["production"],
       monthsOfHistory: 24,
       recentAvgOil: 800,
       zeroProductionMonths: 0,
@@ -130,4 +133,40 @@ describe("buildAcquisitionScorecard", () => {
     expect(pluggedCard.dimensions.mechanical_integrity.score).toBeLessThan(30);
     expect(activeCard.dimensions.mechanical_integrity.score).toBe(100);
   });
+});
+
+it("does not infer clean plugging checks or compliance from missing responses", () => {
+  const card = buildAcquisitionScorecard({ ...baseInputs, attempts: [attempt({ source_name: "fetch_compliance_violations", result_data_json: { found: true } })] });
+  expect(card.dimensions.plugging_exposure.data_points.join(" ")).toContain("Insufficient data");
+  expect(card.dimensions.regulatory_compliance.data_points.join(" ")).not.toContain("No open compliance");
+  expect(card.recommendation).toBe("REVIEW");
+});
+
+it("uses the latest failed lookup instead of an older clean result", () => {
+  const card = buildAcquisitionScorecard({ ...baseInputs, attempts: [
+    attempt({ source_name: "search_by_api", result_data_json: { found: true } }),
+    attempt({ source_name: "search_by_api", status: "failed_transient", attempted_at: "2026-08-01T00:00:00Z" }),
+  ] });
+  expect(card.dimensions.identity_confidence.score).toBe(0);
+});
+
+it("uses the same population for the data confidence numerator and denominator", () => {
+  const card = buildAcquisitionScorecard({ ...baseInputs, coverage: [
+    coverageRow({ status: "no_applicable_record" }), coverageRow({ status: "retrieval_failed" }),
+  ] });
+  expect(card.dimensions.data_confidence.score).toBe(50);
+});
+
+it("does not award production consistency to entirely unreported volumes", () => {
+  const card = buildAcquisitionScorecard({ ...baseInputs, monthsOfHistory: 49 });
+  expect(card.dimensions.production_quality.score).toBe(0);
+  expect(card.dimensions.production_consistency.score).toBe(0);
+});
+
+it("reads the actual operator adapter record shape", () => {
+  const card = buildAcquisitionScorecard({ ...baseInputs, attempts: [attempt({
+    source_name: "search_by_operator", result_data_json: { found: true, record: { organization_status: "Active", bond_amount: "50000" } },
+  })] });
+  expect(card.dimensions.operator_profile.data_points).toContain("Bond: $50,000.");
+  expect(card.dimensions.regulatory_compliance.data_points).toContain("Operator P-5 status: Active.");
 });

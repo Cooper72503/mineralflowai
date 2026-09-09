@@ -1,3 +1,4 @@
+import { PipelinePersistenceError } from "./persistence.js";
 /**
  * Deterministic TRRC Sequencer — replaces agent.ts's Claude-orchestrated
  * tool-selection loop with real control flow. The LLM's job there was
@@ -29,6 +30,7 @@
  * (worker/src/index.ts, Phase 3).
  */
 
+import { canonicalApi10 } from "./identity.js";
 import * as ewa from "./tools/ewa.js";
 import * as browser from "./tools/browser.js";
 import * as countyRecords from "./tools/county-records.js";
@@ -38,6 +40,7 @@ import type { ProductionRow } from "./tools/ewa.js";
 
 export interface AgentState {
   apiNumber:      string | null;
+  requestedApiNumber?: string | null;
   // True only once search_wellbore has actually matched apiNumber against a
   // real TRRC record. apiNumber can be non-null while this is false — it's
   // pre-seeded from the run's original (unconfirmed, possibly malformed or
@@ -71,13 +74,9 @@ async function persistAttempt(
     Array.isArray(resultData?.["permits"])    ? (resultData["permits"]    as unknown[]).length :
     resultData?.["found"] === true ? 1 : 0;
 
-  const isOk = resultData?.["error"] == null;
+  const isOk = resultData != null && typeof resultData === "object" && resultData["error"] == null;
 
-  // Write failure here is intentionally not surfaced beyond a console log —
-  // matches agent.ts's original .then(null, () => {}) swallow for this
-  // specific write (unlike reportProgress, which does surface failures;
-  // see progress.ts's own comment on that distinction).
-  await supabase.from("trrc_source_attempts").upsert({
+  const { error } = await supabase.from("trrc_source_attempts").upsert({
     run_id:           runId,
     source_id:        `${sourceName}_${callIndex}`,
     source_name:      sourceName,
@@ -86,7 +85,8 @@ async function persistAttempt(
     error_message:    isOk ? null : String(resultData?.["error"] ?? resultData?.["message"] ?? ""),
     attempted_at:     new Date().toISOString(),
     result_data_json: result,
-  }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).then(null, () => {});
+  }, { onConflict: "run_id,source_id", ignoreDuplicates: false });
+  if (error) throw new PipelinePersistenceError(`Evidence persistence failed for ${sourceName}: ${error.message}`);
 
   await logStep(supabase, runId, sourceName, isOk ? "done" : "failed", String(
     (resultData?.["message"] ?? resultData?.["error"] ?? "ok") as string
@@ -100,7 +100,7 @@ async function persistNotApplicable(
   callIndex: number,
   reason: string,
 ): Promise<void> {
-  await supabase.from("trrc_source_attempts").upsert({
+  const { error } = await supabase.from("trrc_source_attempts").upsert({
     run_id:        runId,
     source_id:     `${sourceName}_${callIndex}`,
     source_name:   sourceName,
@@ -109,7 +109,8 @@ async function persistNotApplicable(
     error_message: reason,
     attempted_at:  new Date().toISOString(),
     result_data_json: null,
-  }, { onConflict: "run_id,source_id", ignoreDuplicates: false }).then(null, () => {});
+  }, { onConflict: "run_id,source_id", ignoreDuplicates: false });
+  if (error) throw new PipelinePersistenceError(`Evidence persistence failed for ${sourceName}: ${error.message}`);
 
   await logStep(supabase, runId, sourceName, "done", reason);
 }
@@ -121,31 +122,43 @@ async function persistNotApplicable(
 
 export async function stepSearchWellbore(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "search_wellbore", "running");
-  const r = await ewa.searchWellbore(String(state.apiNumber ?? ""));
+  state.requestedApiNumber ??= state.apiNumber;
+  const r = await ewa.searchWellbore(String(state.requestedApiNumber ?? state.apiNumber ?? ""));
   const rr = r as unknown as Record<string, unknown>;
   if (rr["found"]) {
-    // Deliberate simplification vs. agent.ts: the LLM could call this tool
-    // with an arbitrary api_number for an unrelated offset/analog well
-    // lookup, so the original guarded state mutation on "was this actually
-    // the subject asset's number". A deterministic sequencer only ever
-    // calls search_wellbore for the subject asset — that guard is always
-    // true here, so it's dropped rather than carried as dead logic.
+    // Confirm the requested API and select its unique current association.
     const wells = rr["wells"] as Array<Record<string, unknown>> | undefined;
-    const confirmedApi = wells?.[0]?.["api_no"] as string | undefined;
+    const requested = canonicalApi10(state.requestedApiNumber ?? state.apiNumber);
+    const matches = wells?.filter(w => canonicalApi10(w["api_no"]) === requested) ?? [];
+    const scheduled = matches.filter(w => String(w["on_schedule"]).toUpperCase() === "Y");
+    const candidates = scheduled.length ? scheduled : matches;
+    const match = candidates[0];
+    const confirmedApi = canonicalApi10(match?.["api_no"]);
+    if (!confirmedApi) {
+      if (!state.apiNumberConfirmed) state.apiNumber = null;
+      await persistAttempt(supabase, runId, "search_by_api", callIndex, { ...r, found: false, error: "Wellbore response did not contain the requested API; identity unresolved." });
+      return;
+    }
     if (confirmedApi) {
       state.apiNumber = confirmedApi;
       state.apiNumberConfirmed = true;
     }
-    const leaseNumber = rr["lease_number"] as string | undefined;
-    const district = rr["district"] as string | undefined;
-    const operator = rr["operator"] as string | undefined;
-    const operatorNumber = rr["operator_number"] as string | undefined;
-    const county = rr["county"] as string | undefined;
-    if (leaseNumber && !state.leaseNumber) state.leaseNumber = leaseNumber;
-    if (district && !state.district) state.district = district;
-    if (operator && !state.operatorName) state.operatorName = operator;
-    if (operatorNumber && !state.operatorNumber) state.operatorNumber = operatorNumber;
-    if (county && !state.county) state.county = county;
+    const associations = new Set(candidates.map(w => `${w["district"] ?? w["dist_code"] ?? rr["district"]}:${w["lease_no"] ?? rr["lease_number"]}`));
+    if (associations.size > 1) {
+      state.leaseNumber = null; state.district = null;
+      await persistAttempt(supabase, runId, "search_by_api", callIndex, { ...r, data_gap: true, message: "Multiple lease/district associations match this API; selection required before production attribution." });
+      return;
+    }
+    const leaseNumber = (match?.["lease_no"] ?? rr["lease_number"]) as string | undefined;
+    const district = (match?.["district"] ?? match?.["dist_code"] ?? rr["district"]) as string | undefined;
+    const operator = (match?.["operator_name"] ?? rr["operator"]) as string | undefined;
+    const operatorNumber = (match?.["operator_no"] ?? rr["operator_number"]) as string | undefined;
+    const county = (match?.["county"] ?? rr["county"]) as string | undefined;
+    state.leaseNumber = leaseNumber || null;
+    state.district = district || null;
+    state.operatorName = operator || null;
+    state.operatorNumber = operatorNumber || null;
+    state.county = county || null;
   } else if (!state.apiNumberConfirmed) {
     // TRRC itself couldn't confirm this exact number — an unconfirmed
     // guess that TRRC couldn't verify is a disclosed gap, not a resolved
@@ -174,7 +187,7 @@ export async function stepSearchOperator(state: AgentState, runId: string, supab
 
 export async function stepGetWellStatus(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_well_status", "running");
-  const r = await ewa.getWellStatus(String(state.apiNumber ?? ""), state.leaseNumber, state.district);
+  const r = await ewa.getWellStatus(String(state.apiNumber ?? state.requestedApiNumber ?? ""), state.leaseNumber, state.district);
   const rr = r as unknown as Record<string, unknown>;
   if (rr["found"]) {
     const leaseNumber = rr["lease_number"] as string | undefined;
@@ -191,6 +204,18 @@ export async function stepGetProduction(state: AgentState, runId: string, supaba
   const rr = r as unknown as Record<string, unknown>;
   const rows = rr["rows"] as ProductionRow[] | undefined;
   if (rr["found"] && rows && rows.length > 0) {
+    const seen = new Map<string, string>();
+    const invalid = rr["lease_number"] !== state.leaseNumber || rr["district"] !== state.district || rows.some(row => {
+      if (!/^\d{4}-(0[1-9]|1[0-2])(?:-01)?$/.test(row.production_month)) return true;
+      if ([row.oil_bbl,row.gas_mcf,row.casinghead_gas_mcf,row.condensate_bbl,row.water_bbl].some(v=>v!==null && (typeof v!=="number" || !Number.isFinite(v) || v<0))) return true;
+      const key=row.production_month.slice(0,7), payload=JSON.stringify(row);
+      if (seen.has(key) && seen.get(key)!==payload) return true;
+      seen.set(key,payload); return false;
+    });
+    if (invalid) {
+      await persistAttempt(supabase, runId, "fetch_production", callIndex, {...rr, error:"Production handoff rejected: mismatched lease/district, invalid month/volume, or conflicting duplicate month", found:false});
+      return;
+    }
     state.production.push(...rows);
   }
   await persistAttempt(supabase, runId, "fetch_production", callIndex, r);
@@ -204,31 +229,31 @@ async function stepGetP4GathererPurchaser(state: AgentState, runId: string, supa
 
 export async function stepGetCompletionRecords(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_completion_records", "running");
-  const r = await ewa.getCompletionRecords(String(state.apiNumber ?? ""));
+  const r = await ewa.getCompletionRecords(String(state.apiNumber ?? state.requestedApiNumber ?? ""));
   await persistAttempt(supabase, runId, "fetch_completion_records", callIndex, r);
 }
 
 export async function stepGetPluggingRecords(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_plugging_records", "running");
-  const r = await ewa.getPluggingRecords(String(state.apiNumber ?? ""));
+  const r = await ewa.getPluggingRecords(String(state.apiNumber ?? state.requestedApiNumber ?? ""));
   await persistAttempt(supabase, runId, "fetch_plugging_records", callIndex, r);
 }
 
 export async function stepGetInactiveWellStatus(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_inactive_well_status", "running");
-  const r = await browser.getInactiveWellStatus(String(state.apiNumber ?? ""), state.operatorNumber);
+  const r = await browser.getInactiveWellStatus(String(state.apiNumber ?? state.requestedApiNumber ?? ""), state.operatorNumber);
   await persistAttempt(supabase, runId, "fetch_inactive_well_status", callIndex, r);
 }
 
 export async function stepGetOrphanWell(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_orphan_well", "running");
-  const r = await ewa.getOrphanWell(String(state.apiNumber ?? ""));
+  const r = await ewa.getOrphanWell(String(state.apiNumber ?? state.requestedApiNumber ?? ""));
   await persistAttempt(supabase, runId, "fetch_orphan_well", callIndex, r);
 }
 
 export async function stepGetComplianceViolations(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_compliance_violations", "running");
-  const r = await browser.getComplianceViolations(state.operatorNumber, state.apiNumber);
+  const r = await browser.getComplianceViolations(state.operatorNumber, state.apiNumber ?? state.requestedApiNumber ?? null);
   await persistAttempt(supabase, runId, "fetch_compliance_violations", callIndex, r);
 }
 
@@ -240,13 +265,13 @@ export async function stepGetSeveranceRecords(state: AgentState, runId: string, 
 
 export async function stepGetInjectionRecords(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_injection_records", "running");
-  const r = await ewa.getInjectionRecords(String(state.apiNumber ?? ""), state.operatorNumber);
+  const r = await ewa.getInjectionRecords(String(state.apiNumber ?? state.requestedApiNumber ?? ""), state.operatorNumber);
   await persistAttempt(supabase, runId, "fetch_injection_records", callIndex, r);
 }
 
 export async function stepGetDrillingPermits(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_drilling_permits", "running");
-  const r = await ewa.getDrillingPermits(String(state.apiNumber ?? ""));
+  const r = await ewa.getDrillingPermits(String(state.apiNumber ?? state.requestedApiNumber ?? ""));
   await persistAttempt(supabase, runId, "fetch_drilling_permits", callIndex, r);
 }
 
@@ -258,7 +283,7 @@ export async function stepGetOilProration(state: AgentState, runId: string, supa
 
 export async function stepGetCodaDocuments(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_coda_documents", "running");
-  const r = await browser.getCodaDocuments(String(state.apiNumber ?? ""));
+  const r = await browser.getCodaDocuments(String(state.apiNumber ?? state.requestedApiNumber ?? ""));
   await persistAttempt(supabase, runId, "fetch_coda_records", callIndex, r);
 }
 
@@ -270,7 +295,7 @@ export async function stepGetCountyRecords(state: AgentState, runId: string, sup
 
 export async function stepGetGisLocation(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_gis_location", "running");
-  const r = await ewa.getGisLocation(String(state.apiNumber ?? ""));
+  const r = await ewa.getGisLocation(String(state.apiNumber ?? state.requestedApiNumber ?? ""));
   await persistAttempt(supabase, runId, "fetch_gis_plat", callIndex, r);
 }
 
@@ -317,12 +342,13 @@ export async function runLandmanSequencer(
     production:     [],
   };
 
-  const { data: runRow } = await supabase
+  const { data: runRow, error: runError } = await supabase
     .from("trrc_due_diligence_runs")
     .select("resolved_primary_api,resolved_lease_number,resolved_district,resolved_operator_number,operator_name,selected_input_type,detected_input_type")
     .eq("id", runId)
     .single();
 
+  if (runError || !runRow) throw new Error(`Could not load run: ${runError?.message ?? "run missing"}`);
   if (runRow) {
     state.apiNumber      = runRow["resolved_primary_api"]     ?? null;
     state.leaseNumber    = runRow["resolved_lease_number"]    ?? null;
@@ -330,6 +356,8 @@ export async function runLandmanSequencer(
     state.operatorNumber = runRow["resolved_operator_number"] ?? null;
     state.operatorName   = runRow["operator_name"]            ?? null;
   }
+  state.requestedApiNumber = canonicalApi10(state.apiNumber ?? input);
+  state.apiNumber = state.requestedApiNumber;
   const inputType: string = (runRow?.["selected_input_type"] ?? runRow?.["detected_input_type"] ?? "unknown") as string;
 
   let highestPct = 0;
@@ -337,16 +365,20 @@ export async function runLandmanSequencer(
     highestPct = Math.max(highestPct, pct);
     await reportProgress(supabase, runId, highestPct, status);
   };
-  await reportProgressClamped(5, "running");
+
 
   const isCancelled = async (): Promise<boolean> => {
-    const { data: statusCheck } = await supabase
+    const { data: statusCheck, error } = await supabase
       .from("trrc_due_diligence_runs")
       .select("status")
       .eq("id", runId)
       .single();
-    return statusCheck?.["status"] === "cancelled";
+    if (error || !statusCheck) throw new Error(`Could not verify cancellation: ${error?.message ?? "run missing"}`);
+    return statusCheck["status"] === "cancelled";
   };
+
+  if (await isCancelled()) return;
+  await reportProgressClamped(5, "running");
 
   // ── Entry-point branch ────────────────────────────────────────────────────
   // Mirrors the SYSTEM_PROMPT's input-priority rules from agent.ts as real
@@ -358,14 +390,20 @@ export async function runLandmanSequencer(
 
   if (state.apiNumber && !(await isCancelled())) {
     callIndex++;
-    await stepSearchWellbore(state, runId, supabase, callIndex);
+    try { await stepSearchWellbore(state, runId, supabase, callIndex); }
+    catch (err) {
+      if (err instanceof PipelinePersistenceError) throw err;
+      await persistAttempt(supabase, runId, "search_by_api", callIndex, { error: String(err) });
+      state.apiNumber = null;
+    }
     entryHandled = true;
     if (!state.apiNumber && !state.leaseNumber) {
       // wellbore PDQ found nothing usable for this exact number — well
       // status uses a different TRRC index and often catches wells PDQ
       // misses, per the documented fallback rule.
       callIndex++;
-      await stepGetWellStatus(state, runId, supabase, callIndex);
+      try { await stepGetWellStatus(state, runId, supabase, callIndex); }
+      catch (err) { if (err instanceof PipelinePersistenceError) throw err; await persistAttempt(supabase, runId, "fetch_well_status", callIndex, { error: String(err) }); }
     }
   } else if (inputType === "rrc_lease_number" && state.leaseNumber && state.district) {
     callIndex++;
@@ -398,7 +436,7 @@ export async function runLandmanSequencer(
   if (state.leaseNumber && state.district) {
     remainingSteps.push(stepGetProduction, stepGetP4GathererPurchaser, stepGetSeveranceRecords, stepGetOilProration);
   }
-  if (state.apiNumber) {
+  if (state.apiNumber || state.requestedApiNumber) {
     remainingSteps.push(
       stepGetCompletionRecords, stepGetPluggingRecords, stepGetOrphanWell,
       stepGetInjectionRecords, stepGetDrillingPermits, stepGetGisLocation, stepGetCodaDocuments,
@@ -417,7 +455,7 @@ export async function runLandmanSequencer(
   if (!state.operatorNumber && state.operatorName) {
     remainingSteps.push(stepSearchOperator);
   }
-  if (state.operatorNumber || state.apiNumber) {
+  if (state.operatorNumber || state.apiNumber || state.requestedApiNumber) {
     remainingSteps.push(stepGetComplianceViolations);
   }
   if (state.county) {
@@ -427,10 +465,18 @@ export async function runLandmanSequencer(
   // scheduled here unconditionally when an API is known; the fetcher itself
   // reports "not applicable" via its own found:false path if the well
   // turns out to be active, same as the original LLM-driven call would.
-  if (state.apiNumber) {
+  if (state.apiNumber || state.requestedApiNumber) {
     remainingSteps.push(stepGetInactiveWellStatus);
   }
 
+  for (const [step, sourceName] of SOURCE_NAME) {
+    if (!remainingSteps.includes(step)) {
+      callIndex++;
+      await persistAttempt(supabase, runId, sourceName, callIndex, {
+        found: false, data_gap: true, error: "Required asset identifiers could not be resolved; lookup unavailable.",
+      });
+    }
+  }
   const totalApplicableSteps = callIndex + remainingSteps.length;
 
   for (const step of remainingSteps) {
@@ -438,7 +484,8 @@ export async function runLandmanSequencer(
     callIndex++;
     try {
       await step(state, runId, supabase, callIndex);
-    } catch {
+    } catch (err) {
+      if (err instanceof PipelinePersistenceError) throw err;
       // Never stop at a single failure — this source's failure doesn't
       // block independent subsequent sources. Each step already persists
       // its own attempt row internally on success; a thrown exception
@@ -446,7 +493,7 @@ export async function runLandmanSequencer(
       // could produce a result object) still needs a record so this
       // source doesn't silently vanish from the coverage matrix.
       const sourceName = SOURCE_NAME.get(step) ?? step.name;
-      await persistAttempt(supabase, runId, sourceName, callIndex, { error: "step threw before producing a result" });
+      await persistAttempt(supabase, runId, sourceName, callIndex, { error: err instanceof Error ? err.message : String(err) });
     }
     const pct = 5 + Math.round((callIndex / Math.max(totalApplicableSteps, 1)) * 85);
     await reportProgressClamped(Math.min(90, pct), "running");
@@ -470,7 +517,7 @@ export async function runLandmanSequencer(
         lease_number:       state.leaseNumber,
         gas_id:             null,
         operator_number:    state.operatorNumber,
-        production_month:   r.production_month,
+        production_month:   r.production_month.length === 7 ? `${r.production_month}-01` : r.production_month,
         oil_bbl:            r.oil_bbl,
         gas_mcf:            r.gas_mcf,
         casinghead_gas_mcf: r.casinghead_gas_mcf,
@@ -480,34 +527,36 @@ export async function runLandmanSequencer(
 
     const { error: prodUpsertError } = await supabase.from("trrc_production_monthly").upsert(prodRows, {
       onConflict: "run_id,entity_type,api_number,lease_number,production_month",
-      ignoreDuplicates: true,
+      ignoreDuplicates: false,
     });
     if (prodUpsertError) {
-      console.error(`[${runId}] production upsert failed:`, prodUpsertError.message);
+      throw new Error(`Production persistence failed: ${prodUpsertError.message}`);
     }
   }
 
   // ── Terminal update ───────────────────────────────────────────────────────
-  const { data: attempts } = await supabase
+  const { data: attempts, error: attemptsError } = await supabase
     .from("trrc_source_attempts")
     .select("source_name,status,result_count,result_data_json")
     .eq("run_id", runId);
 
+  if (attemptsError) throw new Error(`Could not load evidence: ${attemptsError.message}`);
   const successCount = (attempts ?? []).filter(a => a["status"] === "success").length;
   const totalCount   = (attempts ?? []).length;
 
-  const didComplete = true; // reached the end of the branch-filtered step list without throwing out of the loop itself
+  const didComplete = (attempts ?? []).length > 0; // completion means research finished, not diligence sufficient
 
-  await supabase.from("trrc_due_diligence_runs").update({
+  const { error: completionError } = await supabase.from("trrc_due_diligence_runs").update({
     status:                   didComplete ? "complete" : "failed",
     progress_percent:         didComplete ? 100 : 90,
     completed_at:             new Date().toISOString(),
     updated_at:               new Date().toISOString(),
-    resolved_primary_api:     state.apiNumber,
+    resolved_primary_api:     state.apiNumberConfirmed ? canonicalApi10(state.apiNumber) : null,
     resolved_district:        state.district,
     resolved_lease_number:    state.leaseNumber,
     resolved_operator_number: state.operatorNumber,
     result_summary:           `${successCount} of ${totalCount} sources retrieved. ${state.production.length} production months found.`,
     error_summary:            null,
   }).eq("id", runId).neq("status", "cancelled");
+  if (completionError) throw new Error(`Run completion persistence failed: ${completionError.message}`);
 }

@@ -253,42 +253,20 @@ describe("isValidTexasApiNumber", () => {
 
 // ─── extractDistrictFromApi ───────────────────────────────────────────────────
 
-describe("extractDistrictFromApi", () => {
-  it("extracts district '04' from county code 151 (Fisher County)", () => {
-    // county_code "151" → District 04 per COUNTY_TO_DISTRICT map
-    const result = extractDistrictFromApi("4215101734");
-    expect(result).toBe("04");
-  });
+describe("extractDistrictFromApi — official RRC county routing", () => {
+  // https://www.rrc.texas.gov/about-us/locations/oil-gas-counties-districts/
+  it.each([
+    ["4215101734", "7B"], ["4220112345", "03"], ["4232901234", "08"],
+    ["4200512345", "06"], ["4216502733", "8A"], ["4243934308", "05"],
+  ])("routes %s to %s", (api, district) => expect(extractDistrictFromApi(api)).toBe(district));
+  it.each(["not-an-api", "", "4299812345"])("rejects %s", api => expect(extractDistrictFromApi(api)).toBeNull());
+});
 
-  it("extracts district '10' from county code 201 (Harris County)", () => {
-    // county_code "201" → District 10 per COUNTY_TO_DISTRICT map
-    // API: 42 + 201 + 12345 = "4220112345"
-    const result = extractDistrictFromApi("4220112345");
-    expect(result).toBe("10");
+describe("API identity preservation", () => {
+  it.each(["G42123456", "42-165-502085", "42165027331", "421650273300001", "42-002-12345", "42-165-027"])("does not silently coerce %s", api => expect(normalizeApiNumber(api)).toBeNull());
+  it("preserves sidetrack and completion identity", () => {
+    expect(normalizeApiNumber("42-165-02733-01-02")?.api14).toBe("42165027330102");
+    expect(normalizeApiNumber("421650273301")?.api14).toBe("42165027330100");
   });
-
-  it("extracts district '03' from county code 329 (Midland County)", () => {
-    // county_code "329" → District 03
-    const result = extractDistrictFromApi("4232901234");
-    expect(result).toBe("03");
-  });
-
-  it("returns null for invalid API input", () => {
-    expect(extractDistrictFromApi("not-an-api")).toBeNull();
-  });
-
-  it("returns null for empty string", () => {
-    expect(extractDistrictFromApi("")).toBeNull();
-  });
-
-  it("returns null for county code with no district mapping", () => {
-    // County code "998" — outside the known map range → null
-    // Valid Texas API structure but county_code not in map
-    // 42 + 998 is invalid (> 507) → normalizeApiNumber returns null → district = null
-    // Use county code that parses but isn't in the map (e.g. "509" > 507 → invalid)
-    // Instead use a county code in valid numeric range but missing from map: "005"
-    const result = extractDistrictFromApi("4200512345");
-    // county_code "005" — not in COUNTY_TO_DISTRICT, so returns null
-    expect(result).toBeNull();
-  });
+  it("detects eight-digit RRC numbers without state prefix", () => expect(detectInputType("16502733")).toBe("api_number"));
 });

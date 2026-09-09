@@ -59,7 +59,8 @@ function freshState(overrides: Partial<AgentState> = {}): AgentState {
 const RUN_ID = "test-run-id";
 
 /** Minimal in-memory Supabase stand-in covering the calls sequencer.ts and progress.ts make. Every `await` on a plain (non-thenable) object resolves immediately to that object per JS semantics, so no real Promise wiring is needed for the chained calls. */
-function makeMockSupabase(runRow: Record<string, unknown> = {}, opts: { cancelled?: boolean } = {}) {
+function makeMockSupabase(runRow: Record<string, unknown> = {}, opts: { cancelled?: boolean; failTable?: string } = {}) {
+  const patches: Record<string, unknown>[] = [];
   const attempts: Record<string, unknown>[] = [];
   const upserts = { source_attempts: 0, production: 0 };
 
@@ -69,6 +70,7 @@ function makeMockSupabase(runRow: Record<string, unknown> = {}, opts: { cancelle
         return {
           select: () => ({ eq: () => ({ single: async () => ({ data: opts.cancelled ? { status: "cancelled", ...runRow } : runRow }) }) }),
           update: (patch: Record<string, unknown>) => {
+            patches.push(patch);
             const chain = {
               error: null,
               eq: () => chain,
@@ -80,18 +82,18 @@ function makeMockSupabase(runRow: Record<string, unknown> = {}, opts: { cancelle
       }
       if (table === "trrc_source_attempts") {
         return {
-          upsert: (row: Record<string, unknown>) => { attempts.push(row); upserts.source_attempts++; return Promise.resolve({ error: null }); },
+          upsert: (row: Record<string, unknown>) => { attempts.push(row); upserts.source_attempts++; return Promise.resolve({ error: opts.failTable === table ? {message: "injected database failure"} : null }); },
           select: () => ({ eq: async () => ({ data: attempts }) }),
         };
       }
       if (table === "trrc_production_monthly") {
-        return { upsert: () => { upserts.production++; return Promise.resolve({ error: null }); } };
+        return { upsert: () => { upserts.production++; return Promise.resolve({ error: opts.failTable === table ? {message: "injected database failure"} : null }); } };
       }
       throw new Error(`Unmocked table: ${table}`);
     },
   } as unknown as SupabaseClient;
 
-  return { supabase, attempts, upserts };
+  return { supabase, attempts, upserts, patches };
 }
 
 describe("stepSearchWellbore — parity with agent.ts's dispatchTool reconcile logic", () => {
@@ -112,7 +114,7 @@ describe("stepSearchWellbore — parity with agent.ts's dispatchTool reconcile l
     const state = freshState({ apiNumber: "16502733", apiNumberConfirmed: false });
     await stepSearchWellbore(state, RUN_ID, supabase, 1);
 
-    expect(state.apiNumber).toBe("16502733");
+    expect(state.apiNumber).toBe("4216502733");
     expect(state.apiNumberConfirmed).toBe(true);
     expect(state.leaseNumber).toBe("10289");
   });
@@ -141,7 +143,7 @@ describe("stepSearchWellbore — parity with agent.ts's dispatchTool reconcile l
   it("persists a real source_attempts row with the sourceName the LLM-driven path also used", async () => {
     vi.mocked(ewa.searchWellbore).mockResolvedValue({ found: true, wells: [{ api_no: "16502733" }] } as never);
     const { supabase, attempts } = makeMockSupabase();
-    const state = freshState();
+    const state = freshState({ apiNumber: "4216502733" });
     await stepSearchWellbore(state, RUN_ID, supabase, 3);
 
     expect(attempts).toHaveLength(1);
@@ -209,3 +211,36 @@ describe("runLandmanSequencer — entry branches and never-stop-at-one-failure",
     expect(upserts.source_attempts).toBeLessThanOrEqual(1);
   });
 });
+
+ describe("pipeline failure regressions", () => {
+   beforeEach(() => { vi.resetAllMocks(); });
+   it("retains the requested API through a miss, attempts independent GIS and never stores an unverified identity", async () => {
+     vi.mocked(ewa.searchWellbore).mockResolvedValue({ found: false, wells: [] } as never);
+     vi.mocked(ewa.getWellStatus).mockResolvedValue({ found: false, records: [] } as never);
+     vi.mocked(ewa.getGisLocation).mockResolvedValue({ found: false } as never);
+     const {supabase, attempts, patches} = makeMockSupabase({resolved_primary_api: "4216502733"});
+     await runLandmanSequencer(RUN_ID, "4216502733", supabase);
+     expect(ewa.getWellStatus).toHaveBeenCalledWith("4216502733", null, null);
+     expect(ewa.getGisLocation).toHaveBeenCalledWith("4216502733");
+     expect(patches.at(-1)?.resolved_primary_api).toBeNull();
+     expect(attempts.find(a => a.source_name === "fetch_production")?.status).toBe("failed_transient");
+   });
+   it("does not complete when evidence persistence fails", async () => {
+     vi.mocked(ewa.searchWellbore).mockResolvedValue({found:true,wells:[{api_no:"16502733"}]} as never);
+     const {supabase, patches} = makeMockSupabase({resolved_primary_api:"4216502733"}, {failTable:"trrc_source_attempts"});
+     await expect(runLandmanSequencer(RUN_ID,"4216502733",supabase)).rejects.toThrow("Evidence persistence");
+     expect(patches.some(p=>p.status === "complete")).toBe(false);
+   });
+   it("does not accept a different API returned by an upstream query", async () => {
+     vi.mocked(ewa.searchWellbore).mockResolvedValue({found:true,wells:[{api_no:"43934308"}],lease_number:"253905"} as never);
+     const {supabase,attempts}=makeMockSupabase(); const state=freshState({apiNumber:"4216502733"});
+     await stepSearchWellbore(state,RUN_ID,supabase,1);
+     expect(state.apiNumberConfirmed).toBe(false); expect(state.leaseNumber).toBeNull();
+     expect(attempts[0].status).toBe("failed_transient");
+   });
+   it("never resets a cancelled job to running", async () => {
+     const {supabase,patches}=makeMockSupabase({resolved_primary_api:"4216502733"},{cancelled:true});
+     await runLandmanSequencer(RUN_ID,"4216502733",supabase);
+     expect(patches).toHaveLength(0);
+   });
+ });

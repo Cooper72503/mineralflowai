@@ -58,15 +58,15 @@ describe("well_status coverage — GIS map-symbol fallback", () => {
 });
 
 describe("plugging coverage — GIS map-symbol fallback", () => {
-  it("credits plugging as a confirmed absence when GIS shows the well is not plugged", () => {
+  it("retains failed certificate lookup despite a non-plugged GIS symbol", () => {
     const attempts: LiteSourceAttempt[] = [
       attempt({ source_name: "fetch_plugging_records", status: "failed_transient", error_message: "EWA pluggingQueryAction.do session GET returned HTTP 500" }),
       attempt({ source_name: "fetch_gis_plat", status: "success", result_count: 1, result_data_json: { found: true, well_type: "Oil Well" } }),
     ];
     const coverage = deriveCoverageFromAttempts(attempts);
     const plugging = coverage.find(c => c.category === "plugging");
-    expect(plugging?.status).toBe("no_applicable_record");
-    expect(plugging?.notes).toContain("not plugged");
+    expect(plugging?.status).toBe("retrieval_failed");
+    expect(plugging?.notes).toContain("HTTP 500");
   });
 
   it("keeps plugging as retrieval_failed (never fabricates filing details) when GIS shows a plugged symbol", () => {
@@ -77,7 +77,7 @@ describe("plugging coverage — GIS map-symbol fallback", () => {
     const coverage = deriveCoverageFromAttempts(attempts);
     const plugging = coverage.find(c => c.category === "plugging");
     expect(plugging?.status).toBe("retrieval_failed");
-    expect(plugging?.notes).toContain("Manual verification required");
+    expect(plugging?.notes).toContain("HTTP 500");
   });
 
   it("does not override a genuinely successful direct plugging result", () => {
@@ -90,3 +90,10 @@ describe("plugging coverage — GIS map-symbol fallback", () => {
     expect(plugging?.sources_checked).toEqual(["fetch_plugging_records"]);
   });
 });
+
+ it("does not invent freshness and keeps latest failed refresh", () => {
+   const rows = [attempt({ source_name: "fetch_production", result_count: 12 }), attempt({ source_name: "fetch_production", status: "failed_transient", attempted_at: "2026-08-02T00:00:00Z" })];
+   const production = deriveCoverageFromAttempts(rows).find(c => c.category === "production");
+   expect(production?.status).toBe("retrieval_failed");
+   expect(production?.data_current_through).toBeNull();
+ });

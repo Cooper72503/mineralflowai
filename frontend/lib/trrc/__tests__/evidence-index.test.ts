@@ -104,6 +104,8 @@ describe("buildEvidenceIndex", () => {
     // a different, non-EWA portal (CODA/ICE/GLO/GIS/county-clerk records).
     const ewaEntries = index.filter((e) => e.portal_url.includes("/EWA/") && e.source_name !== "fetch_coda_records");
     const urls = new Set(ewaEntries.map((e) => e.portal_url));
-    expect(urls.size).toBe(ewaEntries.length);
+    // API and lease inventory correctly share wellboreQueryAction.do.
+    expect(urls.size).toBe(ewaEntries.length - 1);
+    expect(index.find(e => e.source_name === "fetch_production")?.portal_url).toContain("specificLeaseQueryAction.do");
   });
 });

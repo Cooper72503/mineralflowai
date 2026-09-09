@@ -6,212 +6,22 @@
  * The full 14-digit UWI appends sidetrack(2) + event(2), defaulting to "00" each.
  */
 
+import { COUNTY_DISTRICTS } from "./county-districts";
 import type { NormalizedApi, TrrcIdentifierType } from "./types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Texas FIPS state code embedded in all Texas API numbers */
+/** Texas API state code (not the Census FIPS state code) */
 const TX_STATE_CODE = "42";
 
 /**
  * TRRC district codes that are valid for EWA queries.
- * Derived from the first 2 digits of the 8-digit API suffix (county code → district map).
- * Districts 01–10 plus special codes 6E, 7B, 7C, 8A, 8B, 9B.
+ * County office assignments are hints; retrieved lease districts take precedence.
  */
 const VALID_DISTRICT_CODES = new Set([
-  "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
-  "6E", "7B", "7C", "8A", "8B", "9B",
+  "01", "02", "03", "04", "05", "06", "08", "09", "10",
+  "6E", "7B", "7C", "8A",
 ]);
-
-/**
- * Map from 3-digit Texas county FIPS code to primary TRRC district code.
- * Each FIPS code appears exactly once — no duplicate keys.
- * When a county straddles district boundaries, the primary O&G district is used.
- * Sourced from the TRRC official county-to-district assignment table.
- */
-const COUNTY_TO_DISTRICT: Record<string, string> = {
-  "001": "06", // Anderson       — District 06 (Kilgore)
-  "003": "8A", // Andrews        — District 8A (Odessa)
-  "007": "02", // Atascosa       — District 02 (San Antonio)
-  "009": "04", // Archer         — District 04 (Abilene)
-  "011": "10", // Austin         — District 10 (Beaumont)
-  "013": "02", // Bandera        — District 02 (San Antonio)
-  "017": "01", // Bailey         — District 01 (Lubbock)
-  "019": "02", // Bandera (2)    — District 02
-  "023": "05", // Baylor         — District 05 (Wichita Falls)
-  "025": "7B", // Bee            — District 7B (Corpus Christi)
-  "029": "02", // Bexar          — District 02
-  "031": "7C", // Borden (low)   — District 7C (Alice)
-  "033": "01", // Borden (Lub.)  — District 01
-  "037": "05", // Bowie          — District 05
-  "039": "05", // Brazos         — District 05
-  "047": "7B", // Brooks         — District 7B
-  "049": "04", // Brown          — District 04
-  "055": "02", // Caldwell       — District 02
-  "057": "06", // Cass           — District 06
-  "059": "04", // Callahan       — District 04
-  "061": "7C", // Cameron        — District 7C
-  "065": "09", // Castro         — District 09 (Amarillo)
-  "067": "09", // Childress      — District 09
-  "069": "8A", // Cochran        — District 8A
-  "071": "10", // Chambers       — District 10
-  "073": "06", // Cherokee       — District 06
-  "077": "05", // Cooke          — District 05
-  "079": "7C", // Dimmit (low)   — District 7C
-  "085": "10", // Colorado       — District 10
-  "087": "06", // Cherokee (2)   — District 06
-  "093": "02", // DeWitt (SA)    — District 02
-  "095": "7B", // Duval          — District 7B
-  "097": "02", // DeWitt         — District 02
-  "099": "10", // Coryell        — District 10
-  "101": "06", // Dallas         — District 06
-  "103": "03", // Crane          — District 03 (Midland)
-  "105": "03", // Crockett       — District 03
-  "107": "01", // Dawson (Lub.)  — District 01
-  "111": "09", // Dallam         — District 09
-  "113": "10", // Dallas (2)     — District 10
-  "115": "8A", // Dawson (W.TX)  — District 8A
-  "117": "09", // Deaf Smith     — District 09
-  "119": "9B", // Delta          — District 9B (Pampa)
-  "121": "10", // Bastrop        — District 10
-  "123": "7C", // DeWitt (S.TX)  — District 7C
-  "125": "01", // Crosby         — District 01
-  "127": "02", // Dimmit (SA)    — District 02
-  "131": "7B", // Duval (2)      — District 7B
-  "135": "03", // Ector          — District 03
-  "137": "02", // Edwards        — District 02
-  "139": "06", // Ellis          — District 06
-  "143": "06", // Erath          — District 06
-  "149": "7B", // Jim Wells      — District 7B
-  "151": "04", // Fisher         — District 04
-  "153": "09", // Floyd (N.TX)   — District 09
-  "155": "05", // Foard          — District 05
-  "157": "9B", // Gray           — District 9B
-  "159": "05", // Franklin       — District 05
-  "161": "06", // Freestone      — District 06
-  "163": "02", // Frio           — District 02
-  "165": "04", // Gaines         — District 04
-  "167": "10", // Grimes         — District 10
-  "169": "01", // Garza          — District 01
-  "171": "02", // Gillespie      — District 02
-  "173": "03", // Glasscock      — District 03
-  "175": "7B", // Goliad         — District 7B
-  "177": "10", // Harris         — District 10
-  "179": "9B", // Hall           — District 9B
-  "183": "04", // Eastland       — District 04
-  "185": "01", // Floyd (Lub.)   — District 01
-  "187": "02", // Gonzales       — District 02
-  "191": "7C", // Hidalgo        — District 7C
-  "193": "05", // Hamilton       — District 05
-  "195": "09", // Hale (N.TX)    — District 09
-  "197": "01", // Hale (Lub.)    — District 01
-  "199": "10", // Hardin         — District 10
-  "201": "10", // Harris (2)     — District 10
-  "203": "06", // Henderson      — District 06
-  "207": "09", // Hansford       — District 09
-  "211": "09", // Hardeman       — District 09
-  "213": "06", // Houston        — District 06
-  "215": "10", // Jasper         — District 10
-  "217": "06", // Hunt           — District 06
-  "219": "01", // Lamb           — District 01
-  "225": "04", // Lampasas       — District 04
-  "227": "03", // Howard         — District 03
-  "229": "10", // Jefferson      — District 10
-  "233": "09", // Hartley        — District 09
-  "235": "03", // Irion          — District 03
-  "237": "05", // Jack           — District 05
-  "241": "10", // Lamar          — District 10
-  "243": "09", // Hemphill       — District 09
-  "245": "10", // Lavaca         — District 10
-  "247": "7C", // Jim Hogg       — District 7C
-  "249": "7B", // Jim Hogg (2)   — District 7B
-  "253": "01", // Jones          — District 01
-  "255": "7C", // Kenedy         — District 7C
-  "259": "9B", // Hutchinson     — District 9B
-  "261": "05", // Kaufman        — District 05
-  "263": "01", // Kent           — District 01
-  "265": "04", // Kimble         — District 04
-  "269": "04", // King           — District 04
-  "271": "02", // Kinney         — District 02
-  "273": "7B", // Kleberg        — District 7B
-  "275": "01", // Knox           — District 01
-  "283": "02", // La Salle       — District 02
-  "285": "7B", // Lasalle (2)    — District 7B
-  "291": "10", // Montgomery     — District 10
-  "293": "05", // Montague       — District 05
-  "295": "09", // Moore          — District 09
-  "297": "7B", // Maverick       — District 7B
-  "301": "03", // Loving         — District 03
-  "303": "01", // Lubbock        — District 01
-  "305": "01", // Lynn           — District 01
-  "307": "04", // McCulloch      — District 04
-  "311": "7C", // McMullen       — District 7C
-  "313": "10", // Nacogdoches    — District 10
-  "315": "06", // Nacogdoches(2) — District 06
-  "317": "03", // Martin         — District 03
-  "319": "04", // Mason          — District 04
-  "325": "02", // Maverick (2)   — District 02
-  "327": "02", // Medina         — District 02
-  "329": "03", // Midland        — District 03
-  "335": "04", // Mitchell       — District 04
-  "341": "09", // Ochiltree      — District 09
-  "343": "09", // Oldham         — District 09
-  "349": "06", // Panola         — District 06
-  "351": "10", // Polk           — District 10
-  "353": "04", // Nolan          — District 04
-  "355": "7B", // Refugio        — District 7B
-  "357": "09", // Roberts        — District 09
-  "361": "10", // Robertson      — District 10
-  "363": "05", // Palo Pinto     — District 05
-  "365": "06", // Rains          — District 06
-  "369": "01", // Motley         — District 01
-  "371": "02", // Real           — District 02
-  "373": "10", // Sabine         — District 10
-  "375": "09", // Randall        — District 09
-  "381": "09", // Swisher        — District 09
-  "383": "03", // Reagan         — District 03
-  "385": "7C", // San Patricio   — District 7C
-  "389": "02", // Real (2)       — District 02
-  "393": "7B", // San Patricio(2)— District 7B
-  "395": "10", // San Augustine  — District 10
-  "399": "01", // Runnels        — District 01
-  "401": "06", // Rusk           — District 06
-  "403": "10", // San Jacinto    — District 10
-  "407": "06", // Sabine (2)     — District 06
-  "409": "7B", // Starr          — District 7B
-  "413": "03", // Schleicher     — District 03
-  "415": "01", // Scurry         — District 01
-  "417": "04", // Shackelford    — District 04
-  "419": "06", // Shelby         — District 06
-  "421": "09", // Sherman        — District 09
-  "423": "10", // Smith          — District 10
-  "427": "02", // Uvalde         — District 02
-  "429": "09", // Swisher(2)     — District 09
-  "431": "03", // Sterling       — District 03
-  "433": "01", // Stonewall      — District 01
-  "435": "02", // Sutton         — District 02
-  "441": "01", // Taylor         — District 01
-  "443": "04", // Terrell        — District 04
-  "445": "01", // Throckmorton   — District 01
-  "449": "06", // Trinity        — District 06
-  "451": "04", // Tom Green      — District 04
-  "457": "10", // Tyler          — District 10
-  "459": "06", // Upshur         — District 06
-  "461": "03", // Upton          — District 03
-  "463": "7B", // Webb           — District 7B
-  "467": "05", // Wichita        — District 05
-  "469": "7B", // Webb (2)       — District 7B
-  "471": "10", // Walker         — District 10
-  "473": "06", // Van Zandt      — District 06
-  "475": "03", // Ward           — District 03
-  "483": "09", // Wheeler        — District 09
-  "487": "05", // Wilbarger      — District 05
-  "495": "03", // Winkler        — District 03
-  "497": "05", // Wise           — District 05
-  "499": "05", // Wood           — District 05
-  "501": "01", // Yoakum         — District 01
-  "507": "02", // Zavala         — District 02
-};
 
 // ─── API number normalization ──────────────────────────────────────────────────
 
@@ -233,42 +43,22 @@ export function normalizeApiNumber(raw: string): NormalizedApi | null {
   if (!raw || typeof raw !== "string") return null;
 
   const trimmed = raw.trim();
-  // Strip all non-digit characters to work with pure digit string
-  const digits = trimmed.replace(/\D/g, "");
-
-  let api10: string;
-
-  if (digits.length === 14 && digits.startsWith("42")) {
-    // Full 14-digit UWI (42 + county3 + well5 + sidetrack2 + event2)
-    api10 = digits.slice(0, 10);
-  } else if (digits.length === 10 && digits.startsWith("42")) {
-    // Standard 10-digit Texas API
-    api10 = digits;
-  } else if (digits.length === 8) {
-    // 8-digit TRRC form: county3 + well5 (no state prefix)
-    api10 = `${TX_STATE_CODE}${digits}`;
-  } else if (digits.length >= 10 && digits.startsWith("42")) {
-    // Longer string starting with 42 — truncate to 10
-    api10 = digits.slice(0, 10);
-  } else {
-    return null;
+  if (!/^[\d\s-]+$/.test(trimmed)) return null;
+  if (trimmed.includes("-")) {
+    const shape = trimmed.split("-").map(s => s.trim().length).join(",");
+    if (!["3,5", "2,3,5", "2,3,5,2", "2,3,5,2,2"].includes(shape)) return null;
   }
-
-  // Validate: must be exactly 10 digits and start with "42"
-  if (api10.length !== 10 || !api10.startsWith(TX_STATE_CODE)) return null;
-
+  const digits = trimmed.replace(/\D/g, "");
+  if (![8, 10, 12, 14].includes(digits.length)) return null;
+  if (digits.length !== 8 && !digits.startsWith(TX_STATE_CODE)) return null;
+  const full = digits.length === 8 ? `${TX_STATE_CODE}${digits}` : digits;
+  const api10 = full.slice(0, 10);
   const state_code = api10.slice(0, 2);
   const county_code = api10.slice(2, 5);
   const well_code = api10.slice(5, 10);
-
-  // Validate county code is plausible (001–507, odd numbers only for TX FIPS)
-  const countyNum = parseInt(county_code, 10);
-  if (countyNum < 1 || countyNum > 507) return null;
-
-  const api14 = `${api10}0000`;
-
-  // Display format: "42-151-01734-00-00"
-  const formatted = `${state_code}-${county_code}-${well_code}-00-00`;
+  if (!COUNTY_DISTRICTS[county_code]) return null;
+  const api14 = full.padEnd(14, "0");
+  const formatted = `${state_code}-${county_code}-${well_code}-${api14.slice(10, 12)}-${api14.slice(12, 14)}`;
 
   return {
     raw: trimmed,
@@ -321,8 +111,7 @@ export function detectInputType(raw: string): TrrcIdentifierType {
   const digits = trimmed.replace(/\D/g, "");
   if (
     isDigitsAndPunctuationOnly &&
-    ((digits.startsWith("42") && digits.length >= 8 && digits.length <= 14) ||
-      (digits.length === 8 && /^\d{3}-\d{5}$/.test(trimmed)))
+    (digits.startsWith("42") || digits.length === 8)
   ) {
     const parsed = normalizeApiNumber(trimmed);
     if (parsed) return "api_number";
@@ -483,7 +272,7 @@ export function extractDistrictFromApi(api10: string): string | null {
   const normalized = normalizeApiNumber(api10);
   if (!normalized) return null;
 
-  const district = COUNTY_TO_DISTRICT[normalized.county_code];
+  const district = COUNTY_DISTRICTS[normalized.county_code]?.district;
   return district ?? null;
 }
 

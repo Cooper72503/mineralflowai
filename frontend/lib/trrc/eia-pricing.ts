@@ -23,7 +23,7 @@ export interface ScenarioPrice {
 }
 
 export interface PriceDeck {
-  source: "eia_live" | "static_fallback";
+  source: "eia_live" | "static_fallback" | "user_input";
   asOf: string; // date (or period label) the price basis reflects
   wtiSpotUsdBbl: number;
   henryHubUsdMcf: number;

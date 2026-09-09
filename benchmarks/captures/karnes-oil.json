@@ -1,0 +1,110 @@
+{
+  "case": {
+    "id": "karnes-oil",
+    "api10": "4225500009",
+    "gis_symbol": "Oil Well",
+    "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27255_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Oil+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+    "verified_at": "2026-09-09T04:14:11.176720+00:00",
+    "evidence": {
+      "API": "25500009",
+      "GIS_SYMBOL_DESCRIPTION": "Oil Well"
+    }
+  },
+  "started_at": "2026-09-09T15:56:14.720Z",
+  "finished_at": "2026-09-09T15:57:16.135Z",
+  "attempts": [
+    {
+      "source_id": "karnes-oil-fetch_gis_plat",
+      "source_name": "fetch_gis_plat",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:56:14.721Z",
+      "result_data_json": {
+        "found": true,
+        "api_number": "4225500009",
+        "query_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2725500009%27&outFields=*&returnGeometry=true&outSR=4326",
+        "partial_errors": [
+          "Survey: multiple intersecting polygons; no unique survey selected"
+        ],
+        "latitude": 29.00439211241743,
+        "longitude": -98.01551301773628,
+        "well_type": "Oil Well",
+        "survey": null,
+        "alert_areas": [],
+        "message": "Partial GIS result (Survey: multiple intersecting polygons; no unique survey selected). GIS location: 29.0044\u00b0N, -98.0155\u00b0W"
+      }
+    },
+    {
+      "source_id": "karnes-oil-search_by_api",
+      "source_name": "search_by_api",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:56:14.720Z",
+      "result_data_json": {
+        "found": true,
+        "wells": [
+          {
+            "api_no": "25500009",
+            "district": "02",
+            "lease_no": "00432",
+            "lease_name": "MARTINEZ, MERCANTILE",
+            "well_no": "11",
+            "field_name": "FALLS CITY",
+            "operator_name": "SUN EXPLORATION & PRODUCTION CO.",
+            "county": "KARNES",
+            "on_schedule": "N",
+            "api_depth": ""
+          }
+        ],
+        "lease_number": "00432",
+        "district": "02",
+        "operator": "SUN EXPLORATION & PRODUCTION CO.",
+        "operator_number": null,
+        "county": "KARNES",
+        "message": "Found 1 wellbore(s) for 42-255-00009"
+      }
+    },
+    {
+      "source_id": "karnes-oil-fetch_production",
+      "source_name": "fetch_production",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Production lookup incomplete for lease 00432 district 02: O: not_found; G: (Ewa_1011) Invalid lease number.. Confirm lease type before concluding absence.",
+      "attempted_at": "2026-09-09T15:56:29.793Z",
+      "result_data_json": {
+        "found": false,
+        "lease_type_attempts": [
+          {
+            "lease_type": "O",
+            "status": "not_found"
+          },
+          {
+            "lease_type": "G",
+            "status": "query_rejected",
+            "detail": "(Ewa_1011) Invalid lease number."
+          }
+        ],
+        "rows": [],
+        "lease_number": "00432",
+        "district": "02",
+        "message": "Production lookup incomplete for lease 00432 district 02: O: not_found; G: (Ewa_1011) Invalid lease number.. Confirm lease type before concluding absence.",
+        "error": "Production lookup incomplete for lease 00432 district 02: O: not_found; G: (Ewa_1011) Invalid lease number.. Confirm lease type before concluding absence."
+      }
+    },
+    {
+      "source_id": "karnes-oil-fetch_drilling_permits",
+      "source_name": "fetch_drilling_permits",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:56:59.174Z",
+      "result_data_json": {
+        "found": false,
+        "permits": [],
+        "message": "No drilling permit (W-1) on record for 42-255-00009"
+      }
+    }
+  ]
+}

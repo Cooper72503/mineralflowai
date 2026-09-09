@@ -85,6 +85,8 @@ export function parseApiInput(raw: string): ParsedApiInput {
     if (digits.length >= 10 && !digits.startsWith("42")) {
       return { ...base, error: `"${originalInput}" has state code ${digits.slice(0, 2)} — only Texas (42) is supported in this release.` };
     }
+    const code = digits.length === 8 ? digits.slice(0, 3) : digits.slice(2, 5);
+    if (!COUNTY_CODE_TO_NAME[code]) return { ...base, error: `"${originalInput}" has county code ${code}, which is not a Texas county code.` };
     return { ...base, error: `"${originalInput}" is not a valid Texas API number.` };
   }
 

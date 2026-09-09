@@ -1,0 +1,115 @@
+{
+  "description": "Real RRC GIS-discovered benchmark candidates. GIS symbols do not verify present production, geometry, ownership or economics.",
+  "cases": [
+    {
+      "id": "gaines-oil",
+      "api10": "4216502733",
+      "gis_symbol": "Oil Well",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2716502733%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:04.825508+00:00",
+      "evidence": {
+        "API": "16502733",
+        "GIS_SYMBOL_DESCRIPTION": "Oil Well"
+      }
+    },
+    {
+      "id": "fisher",
+      "api10": "4215131926",
+      "gis_symbol": "Injection / Disposal from Oil",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2715131926%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:04.806910+00:00",
+      "evidence": {
+        "API": "15131926",
+        "GIS_SYMBOL_DESCRIPTION": "Injection / Disposal from Oil"
+      }
+    },
+    {
+      "id": "barnett-gas",
+      "api10": "4243934308",
+      "gis_symbol": "Gas Well",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2743934308%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:04.836995+00:00",
+      "evidence": {
+        "API": "43934308",
+        "GIS_SYMBOL_DESCRIPTION": "Gas Well"
+      }
+    },
+    {
+      "id": "midland-oil",
+      "api10": "4232900028",
+      "gis_symbol": "Oil Well",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27329_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Oil+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:11.193508+00:00",
+      "evidence": {
+        "API": "32900028",
+        "GIS_SYMBOL_DESCRIPTION": "Oil Well"
+      }
+    },
+    {
+      "id": "karnes-oil",
+      "api10": "4225500009",
+      "gis_symbol": "Oil Well",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27255_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Oil+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:11.176720+00:00",
+      "evidence": {
+        "API": "25500009",
+        "GIS_SYMBOL_DESCRIPTION": "Oil Well"
+      }
+    },
+    {
+      "id": "webb-gas",
+      "api10": "4247900014",
+      "gis_symbol": "Gas Well",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27479_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Gas+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:11.453628+00:00",
+      "evidence": {
+        "API": "47900014",
+        "GIS_SYMBOL_DESCRIPTION": "Gas Well"
+      }
+    },
+    {
+      "id": "panhandle-gas",
+      "api10": "4221100014",
+      "gis_symbol": "Gas Well",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27211_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Gas+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:18.727889+00:00",
+      "evidence": {
+        "API": "21100014",
+        "GIS_SYMBOL_DESCRIPTION": "Gas Well"
+      }
+    },
+    {
+      "id": "plugged",
+      "api10": "4215100013",
+      "gis_symbol": "Plugged Oil Well",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27151_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Plugged+Oil+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:18.674490+00:00",
+      "evidence": {
+        "API": "15100013",
+        "GIS_SYMBOL_DESCRIPTION": "Plugged Oil Well"
+      }
+    },
+    {
+      "id": "permit-only",
+      "api10": "4232901040",
+      "gis_symbol": "Permitted Location",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27329_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Permitted+Location%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:18.624080+00:00",
+      "evidence": {
+        "API": "32901040",
+        "GIS_SYMBOL_DESCRIPTION": "Permitted Location"
+      }
+    },
+    {
+      "id": "dry-hole",
+      "api10": "4216500004",
+      "gis_symbol": "Dry Hole",
+      "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27165_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Dry+Hole%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+      "verified_at": "2026-09-09T04:14:25.662243+00:00",
+      "evidence": {
+        "API": "16500004",
+        "GIS_SYMBOL_DESCRIPTION": "Dry Hole"
+      }
+    }
+  ]
+}

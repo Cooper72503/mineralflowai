@@ -10,7 +10,7 @@ export async function reportProgress(
     progress_percent: pct,
     status,
     updated_at: new Date().toISOString(),
-  }).eq("id", runId);
+  }).eq("id", runId).neq("status", "cancelled");
   // Previously silently swallowed (.then(null, () => {})) — a failed write
   // here is indistinguishable, from the user's side, from the agent
   // genuinely hanging: the progress bar just stops moving, forever, with
@@ -18,7 +18,7 @@ export async function reportProgress(
   // `pm2 logs` instead of only manifesting as "still frozen at 2%" reports
   // with nothing in the database or the console to explain why.
   if (error) {
-    console.error(`[${runId.slice(0, 8)}] reportProgress(${pct}%, ${status}) failed:`, error.message);
+    throw new Error(`Run progress persistence failed: ${error.message}`);
   }
 }
 

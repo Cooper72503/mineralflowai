@@ -5,6 +5,7 @@
  * Never throws — returns errors in the result object.
  */
 
+import { COUNTY_DISTRICTS } from "./county-districts";
 import type {
   TrrcIdentifierType,
   ResolvedEntity,
@@ -39,98 +40,9 @@ export type EntityResolutionResult = {
  * Partial map — only the most common counties are listed.
  * Counties not present here require manual district input.
  */
-const COUNTY_NAME_TO_DISTRICT: Record<string, string> = {
-  // District 01
-  jasper: "01", newton: "01", orange: "01", jefferson: "01",
-  hardin: "01", tyler: "01", sabine: "01", "san augustine": "01",
-  shelby: "01", nacogdoches: "01", angelina: "01", polk: "01",
-  "san jacinto": "01", montgomery: "01", walker: "01", houston: "01",
-  trinity: "01", madison: "01", leon: "01", brazos: "01",
-  robertson: "01", milam: "01", falls: "01", mclennan: "01",
-  limestone: "01",
-
-  // District 02
-  galveston: "02", brazoria: "02", "fort bend": "02", waller: "02",
-  austin: "02", washington: "02", fayette: "02", bastrop: "02",
-  caldwell: "02", gonzales: "02", dewitt: "02", victoria: "02",
-  calhoun: "02", jackson: "02", matagorda: "02", wharton: "02",
-
-  // District 03
-  bexar: "03", wilson: "03", karnes: "03", goliad: "03",
-  bee: "03", "live oak": "03", mcmullen: "03", duval: "03",
-  webb: "03", zapata: "03", starr: "03", hidalgo: "03",
-  cameron: "03", willacy: "03", "jim hogg": "03", brooks: "03",
-  kennedy: "03", kleberg: "03", nueces: "03", "san patricio": "03",
-  aransas: "03", refugio: "03",
-
-  // District 04
-  lavaca: "04", colorado: "04",
-
-  // District 05
-  liberty: "05", chambers: "05", harris: "05",
-
-  // District 06
-  gregg: "06", upshur: "06", harrison: "06", panola: "06",
-  rusk: "06", cherokee: "06", henderson: "06", "van zandt": "06",
-  wood: "06", smith: "06", marion: "06", morris: "06",
-  titus: "06", camp: "06", franklin: "06", bowie: "06",
-  "red river": "06", lamar: "06", delta: "06", hopkins: "06",
-  hunt: "06", kaufman: "06", rockwall: "06",
-
-  // District 07B
-  "palo pinto": "7B", parker: "7B", hood: "7B", somervell: "7B",
-  johnson: "7B", ellis: "7B", navarro: "7B", hill: "7B",
-  bosque: "7B", comanche: "7B", erath: "7B",
-
-  // District 07C
-  tarrant: "7C", denton: "7C", collin: "7C", dallas: "7C", wise: "7C",
-
-  // District 08
-  mitchell: "08", nolan: "08", taylor: "08", callahan: "08",
-  jones: "08", shackelford: "08", stephens: "08", young: "08",
-  throckmorton: "08", haskell: "08", knox: "08", baylor: "08",
-  wichita: "08", archer: "08", clay: "08", montague: "08",
-  cooke: "08", grayson: "08", fannin: "08",
-
-  // District 09
-  yoakum: "09", terry: "09", lynn: "09", garza: "09",
-  kent: "09", stonewall: "09", fisher: "09", scurry: "09",
-  borden: "09", dawson: "09", lubbock: "09", crosby: "09",
-  dickens: "09", king: "09", cottle: "09", motley: "09",
-  floyd: "09", briscoe: "09", hall: "09", childress: "09",
-  collingsworth: "09", wheeler: "09", gray: "09", donley: "09",
-  armstrong: "09", randall: "09", swisher: "09", castro: "09",
-  parmer: "09", bailey: "09", lamb: "09", hale: "09",
-
-  // District 10
-  presidio: "10", "jeff davis": "10", hudspeth: "10", culberson: "10",
-  reeves: "10", pecos: "10", crockett: "10", edwards: "10",
-  "val verde": "10", kinney: "10", maverick: "10", zavala: "10",
-  frio: "10", medina: "10", uvalde: "10", real: "10",
-  bandera: "10", kerr: "10", gillespie: "10", blanco: "10",
-  hays: "10", travis: "10", comal: "10", guadalupe: "10",
-  atascosa: "10",
-
-  // Permian Basin — codes verified against the authoritative FIPS-keyed
-  // table in normalization.ts (COUNTY_TO_DISTRICT). These previously used
-  // fabricated "C1"/"C2"/"C3" codes that don't exist in VALID_DISTRICT_CODES
-  // and would always fail TRRC EWA queries.
-  gaines: "04", andrews: "8A", ector: "03", midland: "03",
-  martin: "03", howard: "03", glasscock: "03", sterling: "03",
-  ward: "03", loving: "03", winkler: "03", crane: "03",
-  upton: "03", reagan: "03", irion: "03",
-  "tom green": "04", mason: "04", lampasas: "04",
-
-  // Panhandle / South Plains — same source.
-  moore: "09", hutchinson: "9B", roberts: "09", hemphill: "09",
-  ochiltree: "09", hansford: "09", sherman: "09", oldham: "09",
-  hartley: "09", dallam: "09",
-
-  // concho, menard, llano, san saba, burnet, williamson, potter, carson,
-  // and lipscomb are intentionally omitted — normalization.ts has no
-  // verified district for them either. Falling back to "district unknown"
-  // (null) is correct here; a guessed code would silently fail downstream.
-};
+const COUNTY_NAME_TO_DISTRICT: Record<string, string> = Object.fromEntries(
+  Object.values(COUNTY_DISTRICTS).map(({ county, district }) => [county.toLowerCase().replace(/\s/g, ""), district]),
+);
 
 /**
  * Legal description keywords and their specificity weight (higher = more specific).
@@ -167,7 +79,7 @@ function makeId(): string {
 
 function inferDistrictFromCounty(county: string | null): string | null {
   if (!county) return null;
-  return COUNTY_NAME_TO_DISTRICT[county.trim().toLowerCase()] ?? null;
+  return COUNTY_NAME_TO_DISTRICT[county.trim().toLowerCase().replace(/\s/g, "")] ?? null;
 }
 
 // ─── Per-type resolvers ───────────────────────────────────────────────────────
@@ -217,25 +129,8 @@ function resolveApiNumber(
 
   const entities: ResolvedEntity[] = [wellboreEntity];
 
-  // Also infer a lease entity if district is known
-  if (district) {
-    const leaseEntity: ResolvedEntity = {
-      id: makeId(),
-      entity_type: "lease",
-      canonical_identifier: `${district}:api_derived`,
-      display_name: `Lease (API ${normalized.formatted}, District ${district})`,
-      attributes: {
-        district,
-        api10: normalized.api10,
-        inferred_from: "api_number",
-      },
-      confidence: 0.7,
-      resolution_method: "api_number_lease_inference",
-      is_user_selected: false,
-    };
-    entities.push(leaseEntity);
-    trace.push(`Inferred lease entity for district ${district} (confidence=0.7)`);
-  }
+  // An API identifies a wellbore, not a lease. Lease identity requires
+  // an actual regulator record; never manufacture an api_derived entity.
 
   return entities;
 }

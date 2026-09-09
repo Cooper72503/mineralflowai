@@ -20,7 +20,7 @@
  */
 
 import type { TrrcDueDiligenceRun } from "./types";
-import type { LiteSourceAttempt } from "./coverage";
+import { latestSourceAttempts, type LiteSourceAttempt } from "./coverage";
 
 export type EvidenceIndexEntry = {
   source_name: string;
@@ -41,13 +41,13 @@ const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
 
 const SOURCE_META: Record<string, { label: string; portal: string; portal_url: string }> = {
   search_by_api:               { label: "S1 — Wellbore Identity",             portal: "TRRC EWA — Wellbore Query",              portal_url: `${EWA_BASE}/wellboreQueryAction.do` },
-  search_by_lease:              { label: "S2 — Lease Well Inventory",          portal: "TRRC EWA — Lease Well Query",            portal_url: `${EWA_BASE}/leaseWellQueryAction.do` },
+  search_by_lease:              { label: "S2 — Lease Well Inventory",          portal: "TRRC EWA — Lease Well Query",            portal_url: `${EWA_BASE}/wellboreQueryAction.do` },
   search_by_operator:           { label: "S3 — P-5 Operator Registration",     portal: "TRRC EWA — Organization (P-5) Query",    portal_url: `${EWA_BASE}/organizationQueryAction.do` },
   fetch_well_status:            { label: "S4 — Well Status",                   portal: "TRRC EWA — Well Status Query",           portal_url: `${EWA_BASE}/wellStatusQueryAction.do` },
   fetch_inactive_well_status:   { label: "S5 — Inactive Well Designation",     portal: "TRRC EWA — Inactive Well Aging Report",  portal_url: `${EWA_BASE}/inactiveWellQueryAction.do` },
   fetch_orphan_well:            { label: "S6 — Orphan Well Program",           portal: "TRRC EWA — Orphan Well Query",           portal_url: `${EWA_BASE}/orphanWellQueryAction.do` },
   fetch_severance_records:      { label: "S7 — Severance Tax Records",         portal: "TRRC EWA — Severance Query",             portal_url: `${EWA_BASE}/severanceQueryAction.do` },
-  fetch_production:             { label: "S8 — Monthly Production",            portal: "TRRC EWA — Production Query",            portal_url: `${EWA_BASE}/productionQueryAction.do` },
+  fetch_production:             { label: "S8 — Monthly Production",            portal: "TRRC EWA — Production Query",            portal_url: `${EWA_BASE}/specificLeaseQueryAction.do` },
   fetch_p4_records:             { label: "S9 — P-4 Gatherer/Purchaser",        portal: "TRRC EWA — P-4 Gatherer/Purchaser Query", portal_url: `${EWA_BASE}/gathererPurchaserQueryAction.do` },
   fetch_completion_records:     { label: "S10 — W-2 Completion Record",        portal: "TRRC EWA — Completion Query",            portal_url: `${EWA_BASE}/completionQueryAction.do` },
   fetch_plugging_records:       { label: "S11 — Plugging Records (W-3C)",      portal: "TRRC EWA — Plugging Query",              portal_url: `${EWA_BASE}/pluggingQueryAction.do` },
@@ -87,7 +87,7 @@ export function buildEvidenceIndex(
   const seen = new Set<string>();
   const entries: EvidenceIndexEntry[] = [];
 
-  for (const a of attempts) {
+  for (const a of latestSourceAttempts(attempts)) {
     if (a.source_name === "submit_report") continue;
     if (seen.has(a.source_name)) continue;
     const meta = SOURCE_META[a.source_name];
@@ -112,7 +112,7 @@ export function buildEvidenceIndex(
       // signature falls back to the raw error text unchanged, since we
       // haven't independently confirmed those are TRRC-side.
       statusNote = /HTTP 500|Internal Server Error/i.test(a.error_message ?? "")
-        ? `TRRC's own server returned an internal error (HTTP 500) on this query — confirmed as a TRRC-side issue, not a MineralFlow retrieval failure. Manually verify via the portal link above.`
+        ? `The query returned HTTP 500. Retrieval failed; the response alone does not establish the cause. Manually verify via the portal link above.`
         : (a.error_message ?? "Query failed.");
     } else if (d["data_gap"] === true || d["endpoint_available"] === false) {
       status = "manual_required";

@@ -21,6 +21,7 @@ function makeSupabase(seed: Store) {
   let idSeq = 0;
   const matches = (row: Record<string, unknown>, filters: Array<[string, string, unknown]>) => filters.every(([op, k, v]) => {
     if (op === "eq") return row[k] === v;
+    if (op === "neq") return row[k] !== v;
     if (op === "in") return (v as unknown[]).includes(row[k]);
     return true;
   });
@@ -59,6 +60,7 @@ function makeSupabase(seed: Store) {
       update: (p: never) => { op = "update"; payload = p; return chain; },
       upsert: (p: never, o?: { onConflict?: string }) => { op = "upsert"; payload = p; upsertConflict = (o?.onConflict ?? "id").split(","); return chain; },
       eq: (k: string, v: unknown) => { filters.push(["eq", k, v]); return chain; },
+      neq: (k: string, v: unknown) => { filters.push(["neq", k, v]); return chain; },
       in: (k: string, v: unknown[]) => { filters.push(["in", k, v]); return chain; },
       order: () => chain, limit: () => chain,
       single: async () => { const r = exec(); return { data: (r.data as unknown[])[0] ?? null, error: null }; },

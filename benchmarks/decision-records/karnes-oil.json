@@ -1,0 +1,682 @@
+{
+  "schema_version": "provenance-1.0.0",
+  "run_id": "karnes-oil",
+  "input": "4225500009",
+  "generated_at": "2026-09-09T12:00:00Z",
+  "fields": {
+    "identity.api10": {
+      "status": "calculated",
+      "value": "4225500009",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-search_by_api",
+          "pointer": "/wells/0/api_no"
+        }
+      ],
+      "reason": null,
+      "method": "texas_api10",
+      "inputs": []
+    },
+    "identity.api14": {
+      "status": "insufficient_data",
+      "value": null,
+      "citations": [],
+      "reason": "RRC base-API lookup does not independently verify the requested sidetrack/completion suffix."
+    },
+    "identity.county": {
+      "status": "observed",
+      "value": "KARNES",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-search_by_api",
+          "pointer": "/wells/0/county"
+        }
+      ],
+      "reason": null
+    },
+    "identity.lease": {
+      "status": "observed",
+      "value": "00432",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-search_by_api",
+          "pointer": "/wells/0/lease_no"
+        }
+      ],
+      "reason": null
+    },
+    "identity.district": {
+      "status": "observed",
+      "value": "02",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-search_by_api",
+          "pointer": "/wells/0/district"
+        }
+      ],
+      "reason": null
+    },
+    "identity.operator": {
+      "status": "observed",
+      "value": "SUN EXPLORATION & PRODUCTION CO.",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-search_by_api",
+          "pointer": "/wells/0/operator_name"
+        }
+      ],
+      "reason": null
+    },
+    "identity.well_name": {
+      "status": "observed",
+      "value": "MARTINEZ, MERCANTILE",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-search_by_api",
+          "pointer": "/wells/0/lease_name"
+        }
+      ],
+      "reason": null
+    },
+    "identity.field": {
+      "status": "observed",
+      "value": "FALLS CITY",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-search_by_api",
+          "pointer": "/wells/0/field_name"
+        }
+      ],
+      "reason": null
+    },
+    "identity.tract": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "identity.evaluated_position": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "identity.interest_scope": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "production.lease_monthly": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "production.subject_monthly": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "production.vendor_lease_sum": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "production.regulator_lease_total": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "production.variance_pct": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "production.variance_threshold": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "production.subject_ttm_oil": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "production.subject_ttm_gas": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "production.subject_yoy_decline": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "forecast.next12_oil": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "forecast.remaining_oil": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "forecast.remaining_gas": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "forecast.method": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "No matched, cited well-level vendor feed is connected to this run; lease production is not allocated to the subject well."
+    },
+    "geology.latitude": {
+      "status": "observed",
+      "value": 29.00439211241743,
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-fetch_gis_plat",
+          "pointer": "/latitude"
+        }
+      ],
+      "reason": null
+    },
+    "geology.longitude": {
+      "status": "observed",
+      "value": -98.01551301773628,
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-fetch_gis_plat",
+          "pointer": "/longitude"
+        }
+      ],
+      "reason": null
+    },
+    "geology.map_symbol": {
+      "status": "observed",
+      "value": "Oil Well",
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-fetch_gis_plat",
+          "pointer": "/well_type"
+        }
+      ],
+      "reason": null
+    },
+    "geology.survey": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.formation": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.tvd": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.tvdss": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.net_pay": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.porosity": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.water_saturation": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.pressure_gradient": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.net_to_gross": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.parent_child": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.same_bench_spacing": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.interference": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.wells_per_section": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.lateral_length": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.completion_stages": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.proppant": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "geology.fluid": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.operator_standing": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.compliance": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.severance": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.orphan": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.plugging": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.injection": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.imaged_documents": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "regulatory.permits": {
+      "status": "observed",
+      "value": [],
+      "citations": [
+        {
+          "evidenceId": "karnes-oil-fetch_drilling_permits",
+          "pointer": "/permits"
+        }
+      ],
+      "reason": null
+    },
+    "title.instruments": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "The separate title research job is not linked to this diligence run; reviewed tract-specific instruments are required."
+    },
+    "title.search_scope": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "The separate title research job is not linked to this diligence run; reviewed tract-specific instruments are required."
+    },
+    "title.ownership_graph": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "The separate title research job is not linked to this diligence run; reviewed tract-specific instruments are required."
+    },
+    "title.encumbrances": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "The separate title research job is not linked to this diligence run; reviewed tract-specific instruments are required."
+    },
+    "title.exceptions": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "The separate title research job is not linked to this diligence run; reviewed tract-specific instruments are required."
+    },
+    "title.scenarios": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "The separate title research job is not linked to this diligence run; reviewed tract-specific instruments are required."
+    },
+    "ownership.mineral_fraction": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Evaluated interest, tract, allocation and reviewed ownership evidence are required; no ownership fraction is assumed."
+    },
+    "ownership.gross_acres": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Evaluated interest, tract, allocation and reviewed ownership evidence are required; no ownership fraction is assumed."
+    },
+    "ownership.net_mineral_acres": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Evaluated interest, tract, allocation and reviewed ownership evidence are required; no ownership fraction is assumed."
+    },
+    "ownership.unit_acres": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Evaluated interest, tract, allocation and reviewed ownership evidence are required; no ownership fraction is assumed."
+    },
+    "ownership.tract_participation": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Evaluated interest, tract, allocation and reviewed ownership evidence are required; no ownership fraction is assumed."
+    },
+    "ownership.lease_royalty": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Evaluated interest, tract, allocation and reviewed ownership evidence are required; no ownership fraction is assumed."
+    },
+    "ownership.nri": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Evaluated interest, tract, allocation and reviewed ownership evidence are required; no ownership fraction is assumed."
+    },
+    "economics.base_value": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.downside_value": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.upside_value": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.evidence_adjusted_value": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.risk_adjusted_value": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.measured_exposure": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.maximum_buy_price": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.asking_price": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.price_deck": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.costs": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.tax_assumptions": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.discount_rate": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.horizon": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.minimum_margin": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "economics.sensitivity": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Position-specific economics require evidenced ownership, forecast, price/cost/tax inputs and buyer criteria; generic screening defaults are not acquisition values."
+    },
+    "decision.posture": {
+      "status": "calculated",
+      "value": "INSUFFICIENT_DATA",
+      "reason": null,
+      "citations": [],
+      "method": "hold_for_missing_inputs",
+      "inputs": [
+        "ownership.nri",
+        "title.instruments",
+        "forecast.next12_oil",
+        "economics.base_value",
+        "economics.minimum_margin"
+      ]
+    },
+    "decision.closing_readiness": {
+      "status": "insufficient_data",
+      "value": null,
+      "citations": [],
+      "reason": "Closing readiness cannot be evaluated without a linked title/evidence file and reviewed blockers."
+    },
+    "decision.confidence": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    },
+    "decision.rule_trace": {
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
+    }
+  },
+  "evidence": [
+    {
+      "id": "karnes-oil-fetch_gis_plat",
+      "source": "fetch_gis_plat",
+      "sourceUrl": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2725500009%27&outFields=*&returnGeometry=true&outSR=4326",
+      "retrievedAt": "2026-09-09T15:56:14.721Z",
+      "status": "success",
+      "error": null,
+      "sha256": "7c8bf0adc2335baf289cf1b6534ceda92619468251ad2132975b7ff20fd7d63b",
+      "data": {
+        "found": true,
+        "api_number": "4225500009",
+        "query_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2725500009%27&outFields=*&returnGeometry=true&outSR=4326",
+        "partial_errors": [
+          "Survey: multiple intersecting polygons; no unique survey selected"
+        ],
+        "latitude": 29.00439211241743,
+        "longitude": -98.01551301773628,
+        "well_type": "Oil Well",
+        "survey": null,
+        "alert_areas": [],
+        "message": "Partial GIS result (Survey: multiple intersecting polygons; no unique survey selected). GIS location: 29.0044°N, -98.0155°W"
+      }
+    },
+    {
+      "id": "karnes-oil-search_by_api",
+      "source": "search_by_api",
+      "sourceUrl": "https://webapps2.rrc.texas.gov/EWA/wellboreQueryAction.do",
+      "retrievedAt": "2026-09-09T15:56:14.720Z",
+      "status": "success",
+      "error": null,
+      "sha256": "4d9e5578e6e8d0dbbe49f51e8d59cba88450a801156fb3c49c2cde5f0a154cbd",
+      "data": {
+        "found": true,
+        "wells": [
+          {
+            "api_no": "25500009",
+            "district": "02",
+            "lease_no": "00432",
+            "lease_name": "MARTINEZ, MERCANTILE",
+            "well_no": "11",
+            "field_name": "FALLS CITY",
+            "operator_name": "SUN EXPLORATION & PRODUCTION CO.",
+            "county": "KARNES",
+            "on_schedule": "N",
+            "api_depth": ""
+          }
+        ],
+        "lease_number": "00432",
+        "district": "02",
+        "operator": "SUN EXPLORATION & PRODUCTION CO.",
+        "operator_number": null,
+        "county": "KARNES",
+        "message": "Found 1 wellbore(s) for 42-255-00009"
+      }
+    },
+    {
+      "id": "karnes-oil-fetch_production",
+      "source": "fetch_production",
+      "sourceUrl": "https://webapps2.rrc.texas.gov/EWA/specificLeaseQueryAction.do",
+      "retrievedAt": "2026-09-09T15:56:29.793Z",
+      "status": "failed_transient",
+      "error": "Production lookup incomplete for lease 00432 district 02: O: not_found; G: (Ewa_1011) Invalid lease number.. Confirm lease type before concluding absence.",
+      "sha256": "d24508960779f098bee1c4919c2282a833c89630b45445f75f537bdb7edc4488",
+      "data": {
+        "found": false,
+        "lease_type_attempts": [
+          {
+            "lease_type": "O",
+            "status": "not_found"
+          },
+          {
+            "lease_type": "G",
+            "status": "query_rejected",
+            "detail": "(Ewa_1011) Invalid lease number."
+          }
+        ],
+        "rows": [],
+        "lease_number": "00432",
+        "district": "02",
+        "message": "Production lookup incomplete for lease 00432 district 02: O: not_found; G: (Ewa_1011) Invalid lease number.. Confirm lease type before concluding absence.",
+        "error": "Production lookup incomplete for lease 00432 district 02: O: not_found; G: (Ewa_1011) Invalid lease number.. Confirm lease type before concluding absence."
+      }
+    },
+    {
+      "id": "karnes-oil-fetch_drilling_permits",
+      "source": "fetch_drilling_permits",
+      "sourceUrl": "https://webapps2.rrc.texas.gov/EWA/drillingPermitsQueryAction.do",
+      "retrievedAt": "2026-09-09T15:56:59.174Z",
+      "status": "success",
+      "error": null,
+      "sha256": "e753f5c51addfd3d33e98900489d743060eb5537bf6d537c8df870da503785fd",
+      "data": {
+        "found": false,
+        "permits": [],
+        "message": "No drilling permit (W-1) on record for 42-255-00009"
+      }
+    }
+  ],
+  "limitations": [
+    "This contract exposes current pipeline evidence and gaps; it does not implement the GOLD sample's schema/ruleset 2.0.0.",
+    "Evidence hashes protect captured parsed payload integrity; they are not hashes of original county instruments or raw regulator HTML.",
+    "Source URLs are query portals; reproduce the query from the run identifiers and inspect the retained payload.",
+    "A passed schema check measures honest representation, not source availability, verified ownership or investment readiness."
+  ]
+}

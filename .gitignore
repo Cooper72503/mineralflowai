@@ -8,3 +8,9 @@ frontend/.next
 
 # Supabase CLI runtime cache/session artifacts — not source, regenerated per machine
 supabase/.temp/
+
+# Compiled worker output is not source or a second test suite.
+worker/dist/
+
+# Reproducible local audit logs and raw diagnostic HTML.
+audit-work/

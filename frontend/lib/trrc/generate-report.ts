@@ -58,12 +58,20 @@ export async function generatePdfReportForRun(
       .order("attempted_at", { ascending: true }),
   ]);
 
+  const loads = { entities: entitiesResult, findings: findingsResult, production: productionResult, attempts: attemptsResult };
+  for (const [name, result] of Object.entries(loads)) {
+    if (result.error) {
+      console.error(`[generatePdfReportForRun] ${name} load failed for ${runId}:`, result.error.message);
+      return { ok: false, error: `Report evidence could not be loaded (${name}). Retry the request.`, status: 503 };
+    }
+  }
+
   const entities: ResolvedEntity[] = (entitiesResult.data ?? []).map((e) => ({
     id: e["id"] as string,
     entity_type: e["entity_type"] as ResolvedEntity["entity_type"],
     canonical_identifier: e["canonical_identifier"] as string,
     display_name: e["display_name"] as string,
-    attributes: (e["attributes"] ?? {}) as Record<string, unknown>,
+    attributes: (e["attributes_json"] ?? {}) as Record<string, unknown>,
     confidence: e["confidence"] as number,
     resolution_method: e["resolution_method"] as string,
     is_user_selected: e["is_user_selected"] as boolean,
@@ -141,9 +149,7 @@ export async function generatePdfReportForRun(
   }));
 
   const storedCoverage = (runRaw["coverage_json"] as SourceCoverageStatus[] | null) ?? [];
-  const coverage: SourceCoverageStatus[] = storedCoverage.length > 0
-    ? storedCoverage
-    : deriveCoverageFromAttempts(sourceAttemptRows);
+  const coverage: SourceCoverageStatus[] = deriveCoverageFromAttempts(sourceAttemptRows);
 
   const scorecard: AcquisitionScorecard | null = run.scorecard ?? null;
 

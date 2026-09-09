@@ -1,0 +1,99 @@
+{
+  "case": {
+    "id": "plugged",
+    "api10": "4215100013",
+    "gis_symbol": "Plugged Oil Well",
+    "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27151_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Plugged+Oil+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+    "verified_at": "2026-09-09T04:14:18.674490+00:00",
+    "evidence": {
+      "API": "15100013",
+      "GIS_SYMBOL_DESCRIPTION": "Plugged Oil Well"
+    }
+  },
+  "started_at": "2026-09-09T15:57:51.438Z",
+  "finished_at": "2026-09-09T15:59:02.657Z",
+  "attempts": [
+    {
+      "source_id": "plugged-fetch_gis_plat",
+      "source_name": "fetch_gis_plat",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:57:51.439Z",
+      "result_data_json": {
+        "found": true,
+        "api_number": "4215100013",
+        "query_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2715100013%27&outFields=*&returnGeometry=true&outSR=4326",
+        "partial_errors": [
+          "Survey: multiple intersecting polygons; no unique survey selected"
+        ],
+        "latitude": 32.555066976626144,
+        "longitude": -100.15600135756877,
+        "well_type": "Plugged Oil Well",
+        "survey": null,
+        "alert_areas": [],
+        "message": "Partial GIS result (Survey: multiple intersecting polygons; no unique survey selected). GIS location: 32.5551\u00b0N, -100.1560\u00b0W"
+      }
+    },
+    {
+      "source_id": "plugged-search_by_api",
+      "source_name": "search_by_api",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:57:51.438Z",
+      "result_data_json": {
+        "found": true,
+        "wells": [
+          {
+            "api_no": "15100013",
+            "district": "7B",
+            "lease_no": "05942",
+            "lease_name": "SWANN, SAM B",
+            "well_no": "1B",
+            "field_name": "ADAS (CANYON REEF)",
+            "operator_name": "O'RION SERVICES",
+            "county": "FISHER",
+            "on_schedule": "N",
+            "api_depth": ""
+          }
+        ],
+        "lease_number": "05942",
+        "district": "7B",
+        "operator": "O'RION SERVICES",
+        "operator_number": null,
+        "county": "FISHER",
+        "message": "Found 1 wellbore(s) for 42-151-00013"
+      }
+    },
+    {
+      "source_id": "plugged-fetch_production",
+      "source_name": "fetch_production",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "TimeoutError: The operation was aborted due to timeout",
+      "attempted_at": "2026-09-09T15:58:07.118Z",
+      "result_data_json": {
+        "found": false,
+        "rows": [],
+        "lease_number": "05942",
+        "district": "7B",
+        "message": "Error: TimeoutError: The operation was aborted due to timeout",
+        "error": "TimeoutError: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "source_id": "plugged-fetch_drilling_permits",
+      "source_name": "fetch_drilling_permits",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:58:45.309Z",
+      "result_data_json": {
+        "found": false,
+        "permits": [],
+        "message": "No drilling permit (W-1) on record for 42-151-00013"
+      }
+    }
+  ]
+}

@@ -40,13 +40,13 @@ describe("resolveEntities — API number input", () => {
     expect(result.entities[0].attributes["api10"]).toBe("4215101734");
   });
 
-  it("also creates a lease entity when district can be inferred from API county code", async () => {
+  it("does not fabricate a lease identity from the county district hint", async () => {
     // county_code 151 → district 04 — the resolver should add a lease entity
     const result = await resolveEntities("42-151-01734", null, null, null, null, null);
 
     expect(result.error).toBeNull();
     const leaseEntity = result.entities.find((e) => e.entity_type === "lease");
-    expect(leaseEntity).toBeDefined();
+    expect(leaseEntity).toBeUndefined();
   });
 
   it("sets normalized_input to the wellbore canonical identifier", async () => {

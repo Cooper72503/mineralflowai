@@ -35,10 +35,10 @@ function extractText(html: string, maxLen = 4000): string {
 function extractTableRows(html: string, maxRows = 50): string[][] {
   const rows: string[][] = [];
   const rowMatches = html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
-  for (const row of rowMatches) {
+  for (const row of Array.from(rowMatches)) {
     const cells: string[] = [];
     const cellMatches = row[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi);
-    for (const cell of cellMatches) {
+    for (const cell of Array.from(cellMatches)) {
       cells.push(cell[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
     }
     if (cells.length > 0) rows.push(cells);

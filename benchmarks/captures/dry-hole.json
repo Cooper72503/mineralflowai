@@ -1,0 +1,86 @@
+{
+  "case": {
+    "id": "dry-hole",
+    "api10": "4216500004",
+    "gis_symbol": "Dry Hole",
+    "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27165_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Dry+Hole%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+    "verified_at": "2026-09-09T04:14:25.662243+00:00",
+    "evidence": {
+      "API": "16500004",
+      "GIS_SYMBOL_DESCRIPTION": "Dry Hole"
+    }
+  },
+  "started_at": "2026-09-09T15:59:02.658Z",
+  "finished_at": "2026-09-09T15:59:38.703Z",
+  "attempts": [
+    {
+      "source_id": "dry-hole-fetch_gis_plat",
+      "source_name": "fetch_gis_plat",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:59:02.659Z",
+      "result_data_json": {
+        "found": true,
+        "api_number": "4216500004",
+        "query_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2716500004%27&outFields=*&returnGeometry=true&outSR=4326",
+        "partial_errors": [
+          "Survey: multiple intersecting polygons; no unique survey selected"
+        ],
+        "latitude": 32.60773762704202,
+        "longitude": -102.96010895176937,
+        "well_type": "Dry Hole",
+        "survey": null,
+        "alert_areas": [],
+        "message": "Partial GIS result (Survey: multiple intersecting polygons; no unique survey selected). GIS location: 32.6077\u00b0N, -102.9601\u00b0W"
+      }
+    },
+    {
+      "source_id": "dry-hole-search_by_api",
+      "source_name": "search_by_api",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:59:02.658Z",
+      "result_data_json": {
+        "found": false,
+        "wells": [],
+        "lease_number": null,
+        "district": null,
+        "operator": null,
+        "operator_number": null,
+        "county": null,
+        "message": "42-165-00004 not found in wellbore PDQ"
+      }
+    },
+    {
+      "source_id": "dry-hole-fetch_production",
+      "source_name": "fetch_production",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Production requires lease number + district \u2014 not resolved yet",
+      "attempted_at": "2026-09-09T15:59:21.014Z",
+      "result_data_json": {
+        "found": false,
+        "rows": [],
+        "lease_number": null,
+        "district": null,
+        "message": "Production requires lease number + district \u2014 not resolved yet",
+        "error": "Production requires lease number + district \u2014 not resolved yet"
+      }
+    },
+    {
+      "source_id": "dry-hole-fetch_drilling_permits",
+      "source_name": "fetch_drilling_permits",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:59:21.015Z",
+      "result_data_json": {
+        "found": false,
+        "permits": [],
+        "message": "No drilling permit (W-1) on record for 42-165-00004"
+      }
+    }
+  ]
+}

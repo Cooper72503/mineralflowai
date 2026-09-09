@@ -15,12 +15,13 @@
  */
 
 import type { AcquisitionScorecard, ScorecardDimensionKey, ScoreDimension, AcquisitionRecommendation, SourceCoverageStatus, TrrcDDProductionRow } from "./types";
-import type { LiteSourceAttempt } from "./coverage";
+import { latestSourceAttempts, type LiteSourceAttempt } from "./coverage";
 
 function getAttempt(attempts: LiteSourceAttempt[], ...names: string[]): Record<string, unknown> | null {
   for (const name of names) {
-    const a = attempts.find(x => x.source_name === name && x.status === "success");
-    if (a?.result_data_json) return a.result_data_json;
+    const a = latestSourceAttempts(attempts).find(x => x.source_name === name);
+    const data = a?.result_data_json;
+    if (a?.status === "success" && data && !data.error && !data.data_gap && data.endpoint_available !== false) return data;
   }
   return null;
 }
@@ -53,6 +54,9 @@ export type ScorecardInputs = {
 
 export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionScorecard {
   const { attempts, coverage, criticalFlags, importantFlags } = inputs;
+  const reportedMonths = inputs.production.filter(row =>
+    [row.oil_bbl, row.gas_mcf, row.casinghead_gas_mcf, row.condensate_bbl]
+      .some(v => typeof v === "number" && Number.isFinite(v) && v >= 0));
 
   // ── record_completeness ──────────────────────────────────────────────
   // "Applicable" deliberately excludes sources already confirmed
@@ -99,7 +103,7 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
   let prodQualityScore: number;
   let prodQualityRationale: string;
   const prodQualityPoints: string[] = [];
-  if (inputs.monthsOfHistory === 0) {
+  if (reportedMonths.length === 0) {
     prodQualityScore = 0;
     prodQualityRationale = "No production history retrieved — not scored as neutral, since a mineral asset with no documented production has no confirmed royalty stream.";
   } else {
@@ -109,8 +113,9 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
       prodQualityScore += 30;
       prodQualityPoints.push(`Recent 12-mo average oil: ${inputs.recentAvgOil.toFixed(0)} BBL/mo.`);
     }
-    const zeroRatio = inputs.zeroProductionMonths / inputs.monthsOfHistory;
-    if (zeroRatio < 0.1) { prodQualityScore += 30; prodQualityPoints.push("Fewer than 10% of retrieved months show zero production."); }
+    const zeroRatio = inputs.zeroProductionMonths / reportedMonths.length;
+    if (reportedMonths.length !== inputs.monthsOfHistory) { prodQualityPoints.push("Incomplete volume reporting — consistency credit unavailable."); }
+    else if (zeroRatio < 0.1) { prodQualityScore += 30; prodQualityPoints.push("Fewer than 10% of retrieved months show zero production."); }
     else if (zeroRatio < 0.3) { prodQualityScore += 10; prodQualityPoints.push(`${inputs.zeroProductionMonths} month(s) with zero reported production.`); }
     else { prodQualityPoints.push(`${inputs.zeroProductionMonths} of ${inputs.monthsOfHistory} months show zero production — significant gap.`); }
     prodQualityRationale = "Scored on presence of recent production and consistency of monthly reporting.";
@@ -120,7 +125,7 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
   // ── production_consistency ────────────────────────────────────────────
   let consistencyScore: number;
   const consistencyPoints: string[] = [];
-  if (inputs.monthsOfHistory === 0) {
+  if (reportedMonths.length === 0) {
     consistencyScore = 0;
   } else {
     consistencyScore = 60;
@@ -135,7 +140,7 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
   }
   const production_consistency = dim(
     "Production Consistency", consistencyScore, 0.10,
-    inputs.monthsOfHistory === 0 ? "No production history to assess consistency." : "Scored on water-to-oil ratio trend and year-over-year decline rate.",
+    reportedMonths.length === 0 ? "No production history to assess consistency." : "Scored on water-to-oil ratio trend and year-over-year decline rate.",
     consistencyPoints,
   );
 
@@ -157,49 +162,55 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
     const records = Array.isArray(injection["records"]) ? injection["records"] as Record<string, unknown>[] : [];
     mechPoints.push(`${records.length} UIC/injection record(s) on file — verify MIT currency separately.`);
   }
-  const mechanical_integrity = dim("Mechanical Integrity", mechScore, 0.10, "Scored primarily on official TRRC well status.", mechPoints);
+  const mechanical_integrity = dim("Mechanical Integrity", mechScore, 0.10, "Well-status proxy only; mechanical integrity and test currency are unavailable from these signals.", mechPoints);
 
   // ── plugging_exposure (higher score = lower exposure) ─────────────────
   const orphan = getAttempt(attempts, "fetch_orphan_well");
   const inactive = getAttempt(attempts, "fetch_inactive_well_status");
   const inactiveRecords = Array.isArray(inactive?.["records"]) ? inactive!["records"] as Record<string, unknown>[] : [];
-  let plugExposureScore = 100;
+  const pluggingEvidenceComplete = orphan?.["is_orphan"] === false &&
+    (inactive?.["is_inactive"] === false || inactive?.["found"] === false) && Array.isArray(inactive?.["records"]) && inactiveRecords.length === 0;
+  let plugExposureScore = 0;
   const plugExposurePoints: string[] = [];
   if (orphan?.["is_orphan"] === true) {
     plugExposureScore = 0;
-    plugExposurePoints.push("Well is in the TRRC orphan well program — state liability for plugging.");
+    plugExposurePoints.push("Well is in the TRRC orphan well program — verify plugging responsibility separately.");
   } else if (inactiveRecords.length > 0) {
     plugExposureScore = 40;
     plugExposurePoints.push(`Well on TRRC inactive well aging report (${inactiveRecords.length} record(s)).`);
     const deadline = str(inactiveRecords[0]?.["plugging_deadline_date"] ?? inactiveRecords[0]?.["deadline"]);
     if (deadline) plugExposurePoints.push(`Plugging deadline: ${deadline}.`);
+  } else if (pluggingEvidenceComplete) {
+    plugExposureScore = 100;
+    plugExposurePoints.push("Retrieved searches reported no orphan or inactive-well record; this does not establish absence of plugging liability.");
   } else {
-    plugExposurePoints.push("Not on orphan well list or inactive well aging report.");
+    plugExposurePoints.push("Insufficient data: orphan and inactive-well checks have not both established absence. Exposure is not determined.");
   }
   const plugging_exposure = dim("Plugging Exposure", plugExposureScore, 0.10, "Higher score = lower plugging/abandonment liability exposure.", plugExposurePoints);
 
   // ── regulatory_compliance ─────────────────────────────────────────────
   const p5 = getAttempt(attempts, "search_by_operator");
   const p5Records = Array.isArray(p5?.["records"]) ? p5!["records"] as Record<string, unknown>[] : [];
-  const p5Status = str(p5Records[0]?.["p5_status"] ?? p5?.["p5_status"]);
+  const p5Record = p5?.["record"] as Record<string, unknown> | undefined;
+  const p5Status = str(p5Record?.["organization_status"] ?? p5Records[0]?.["p5_status"] ?? p5?.["p5_status"]);
   const violations = getAttempt(attempts, "fetch_compliance_violations");
-  const openViolations = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : 0;
+  const openViolations = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : null;
   let complianceScore: number;
   const compliancePoints: string[] = [];
   if (!p5Status) { complianceScore = 30; compliancePoints.push("Operator P-5 status not retrieved."); }
   else if (/^active$/i.test(p5Status)) { complianceScore = 100; compliancePoints.push(`Operator P-5 status: ${p5Status}.`); }
   else if (/inactive|revoked|delinquent|cancelled/i.test(p5Status)) { complianceScore = 0; compliancePoints.push(`Operator P-5 status: ${p5Status} — regulatory red flag.`); }
   else { complianceScore = 50; compliancePoints.push(`Operator P-5 status: ${p5Status}.`); }
-  if (openViolations > 0) {
+  if (openViolations !== null && openViolations > 0) {
     complianceScore = Math.max(0, complianceScore - openViolations * 20);
     compliancePoints.push(`${openViolations} open compliance violation(s).`);
-  } else if (violations?.["found"] === true) {
+  } else if (openViolations === 0) {
     compliancePoints.push("No open compliance violations.");
   }
   const regulatory_compliance = dim("Regulatory Compliance", complianceScore, 0.10, "Scored on operator P-5 standing and open TRRC compliance violations.", compliancePoints);
 
   // ── operator_profile ──────────────────────────────────────────────────
-  const bondAmt = str(p5Records[0]?.["bond_amount"] ?? p5?.["bond_amount"]);
+  const bondAmt = str(p5Record?.["bond_amount"] ?? p5Records[0]?.["bond_amount"] ?? p5?.["bond_amount"]);
   const bondNum = bondAmt ? parseFloat(bondAmt.replace(/[^0-9.]/g, "")) : NaN;
   let operatorScore: number;
   const operatorPoints: string[] = [];
@@ -209,7 +220,7 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
     operatorPoints.push(`P-5 status: ${p5Status}.`);
     if (!isNaN(bondNum)) {
       if (bondNum >= 25000) { operatorScore = Math.min(100, operatorScore + 20); operatorPoints.push(`Bond: $${bondNum.toLocaleString()}.`); }
-      else { operatorScore = Math.max(0, operatorScore - 20); operatorPoints.push(`Bond: $${bondNum.toLocaleString()} — below common statutory minimum.`); }
+      else { operatorScore = Math.max(0, operatorScore - 20); operatorPoints.push(`Bond: $${bondNum.toLocaleString()} — verify applicable bonding requirements.`); }
     }
   }
   const operator_profile = dim("Operator Profile", operatorScore, 0.05, "Secondary signal on operator standing — overlaps regulatory_compliance, kept at lighter weight to avoid double-counting.", operatorPoints);
@@ -222,17 +233,17 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
   if (permitRows.length > 0) {
     devScore += 20;
     devPoints.push(`${permitRows.length} drilling permit filing(s) on record.`);
-    if (permitRows.some(p => p["amend"] === "Y")) { devScore += 10; devPoints.push("Includes a recent amendment — active regulatory engagement."); }
+    if (permitRows.some(p => p["amend"] === "Y")) { devScore += 10; devPoints.push("Includes an amendment filing; recency is not established."); }
   }
-  if (inputs.hasLateralPath) { devScore += 20; devPoints.push("Horizontal wellbore — modern completion design."); }
+  if (inputs.hasLateralPath) { devScore += 20; devPoints.push("Retrieved lateral-path geometry."); }
   if (inputs.offsetWellCount > 0) {
     devScore += Math.min(30, inputs.offsetWellCount * 2);
-    devPoints.push(`${inputs.offsetWellCount} offset well(s) within 1 mile — active development area.`);
+    devPoints.push(`${inputs.offsetWellCount} offset well(s) within 1 mile; activity status is not established.`);
   }
   const development_activity = dim("Development Activity", devScore, 0.10, "Scored on permit activity, completion type, and nearby development density.", devPoints);
 
   // ── data_confidence ────────────────────────────────────────────────────
-  const totalAttempted = coverage.filter(c => c.status !== "no_applicable_record" && c.status !== "not_checked").length;
+  const totalAttempted = coverage.filter(c => c.status !== "not_checked").length;
   const solid = coverage.filter(c => c.status === "complete" || c.status === "no_applicable_record").length;
   const dataConfScore = totalAttempted > 0 ? (solid / totalAttempted) * 100 : 0;
   const data_confidence = dim(
@@ -268,7 +279,7 @@ export function buildAcquisitionScorecard(inputs: ScorecardInputs): AcquisitionS
   let recommendation: AcquisitionRecommendation;
   if (gating_conditions.length > 0) {
     recommendation = "BLOCKED";
-  } else if (overall_confidence < 30) {
+  } else if (overall_confidence < 30 || missing_critical_evidence.length > 0 || (!pluggingEvidenceComplete && !inactiveRecords.length && orphan?.["is_orphan"] !== true)) {
     recommendation = "REVIEW";
   } else if (risk_score >= 60) {
     recommendation = "PASS";

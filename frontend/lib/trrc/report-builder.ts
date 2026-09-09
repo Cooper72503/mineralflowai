@@ -1,3 +1,6 @@
+import { normalizeApiNumber } from "./normalization";
+import { productionSeries, currentProduction } from "./production-series";
+import { latestSourceAttempts } from "./coverage";
 /**
  * TRRC Due Diligence Report Builder
  *
@@ -246,7 +249,7 @@ function ProductionChart({ months, metricKey, title, unit, color }: {
 
   const known = months
     .map(m => m[metricKey] as number | null)
-    .filter((v): v is number => v !== null && v !== undefined);
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 
   if (known.length === 0) {
     return React.createElement(
@@ -331,14 +334,14 @@ function SectionTitle({ children }: { children: string }) {
 
 function getAttempt(attempts: LiteSourceAttempt[], ...names: string[]): Record<string, unknown> | null {
   for (const name of names) {
-    const a = attempts.find(x => x.source_name === name && x.status === "success");
-    if (a?.result_data_json) return a.result_data_json;
+    const a = latestSourceAttempts(attempts).find(x => x.source_name === name && x.status === "success");
+    if (a?.result_data_json && !a.result_data_json.error && !a.result_data_json.data_gap && a.result_data_json.endpoint_available !== false) return a.result_data_json;
   }
   return null;
 }
 
 function getAttemptRaw(attempts: LiteSourceAttempt[], name: string): LiteSourceAttempt | null {
-  return attempts.find(x => x.source_name === name) ?? null;
+  return latestSourceAttempts(attempts).find(x => x.source_name === name) ?? null;
 }
 
 interface WellIdentity {
@@ -364,7 +367,10 @@ function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDiligenceRun
   const records = Array.isArray(wb?.["wells"])     ? (wb!["wells"]     as Record<string, unknown>[]) :
                   Array.isArray(wb?.["wellbores"]) ? (wb!["wellbores"] as Record<string, unknown>[]) :
                   Array.isArray(wb?.["records"])   ? (wb!["records"]   as Record<string, unknown>[]) : [];
-  const first = records[0] ?? {};
+  const requested = normalizeApiNumber(run.resolved_primary_api ?? run.original_input)?.api10;
+  const matching = requested ? records.filter(r => normalizeApiNumber(str(r["api_no"]))?.api10 === requested) : records;
+  const first = matching.find(r => r["lease_no"] === run.resolved_lease_number && (r["district"] ?? r["dist_code"]) === run.resolved_district)
+    ?? matching.find(r => r["on_schedule"] === "Y") ?? matching[0] ?? {};
 
   const leaseNumbers = records.map(r => str(r["lease_no"])).filter(Boolean);
 
@@ -403,13 +409,13 @@ export function computeProductionAnalytics(production: TrrcDDProductionRow[]): P
   const sorted = [...production].sort((a, b) => a.production_month.localeCompare(b.production_month));
 
   const avg = (rows: TrrcDDProductionRow[], key: keyof TrrcDDProductionRow): number | null => {
-    const vals = rows.map(r => r[key] as number | null).filter((v): v is number => v !== null && v !== undefined);
+    const vals = rows.map(r => r[key] as number | null).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
     if (vals.length === 0) return null;
     return vals.reduce((a, b) => a + b, 0) / vals.length;
   };
 
   const sum = (rows: TrrcDDProductionRow[], key: keyof TrrcDDProductionRow): number | null => {
-    const vals = rows.map(r => r[key] as number | null).filter((v): v is number => v !== null && v !== undefined);
+    const vals = rows.map(r => r[key] as number | null).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
     if (vals.length === 0) return null;
     return vals.reduce((a, b) => a + b, 0);
   };
@@ -422,24 +428,28 @@ export function computeProductionAnalytics(production: TrrcDDProductionRow[]): P
   const recent12AvgGas = avg(recent, "gas_mcf");
 
   let yoyDeclineOil: number | null = null;
-  if (recent12AvgOil !== null && prior12AvgOil !== null && prior12AvgOil > 0) {
+  const contiguous = (rows: TrrcDDProductionRow[]) => rows.every((row, i) => i === 0 ||
+    Date.parse(row.production_month.slice(0, 7) + "-01") === Date.UTC(
+      Number(rows[i - 1].production_month.slice(0, 4)), Number(rows[i - 1].production_month.slice(5, 7)), 1));
+  const completeOil = (rows: TrrcDDProductionRow[]) => rows.every(r => typeof r.oil_bbl === "number" && Number.isFinite(r.oil_bbl));
+  if (recent.length === 12 && prior.length === 12 && contiguous(sorted.slice(-24)) && completeOil(recent) && completeOil(prior) && recent12AvgOil !== null && prior12AvgOil !== null && prior12AvgOil > 0) {
     yoyDeclineOil = ((prior12AvgOil - recent12AvgOil) / prior12AvgOil) * 100;
   }
 
   const cumulativeOil = sum(sorted, "oil_bbl");
   const cumulativeGas = sum(sorted, "gas_mcf");
 
-  // WOR on last 3 months
-  const last3 = sorted.slice(-3);
-  const last3Oil   = sum(last3, "oil_bbl") ?? 0;
-  const last3Water = sum(last3, "water_bbl") ?? 0;
-  const currentWOR = last3Oil > 0 ? last3Water / last3Oil : null;
-
-  // WOR trend: compare last 3 vs prior 3
-  const prev3 = sorted.slice(-6, -3);
-  const prev3Oil   = sum(prev3, "oil_bbl") ?? 0;
-  const prev3Water = sum(prev3, "water_bbl") ?? 0;
-  const prevWOR = prev3Oil > 0 ? prev3Water / prev3Oil : null;
+  // Both phases must be reported for all three contiguous months.
+  const wor = (rows: TrrcDDProductionRow[]): number | null => {
+    if (rows.length !== 3 || !contiguous(rows) || rows.some(r =>
+      typeof r.oil_bbl !== "number" || !Number.isFinite(r.oil_bbl) ||
+      typeof r.water_bbl !== "number" || !Number.isFinite(r.water_bbl))) return null;
+    const oil = sum(rows, "oil_bbl");
+    const water = sum(rows, "water_bbl");
+    return oil !== null && oil > 0 && water !== null ? water / oil : null;
+  };
+  const currentWOR = wor(sorted.slice(-3));
+  const prevWOR = wor(sorted.slice(-6, -3));
 
   let worTrend: "Stable" | "Rising" | "Declining" | "N/A" = "N/A";
   if (currentWOR !== null && prevWOR !== null) {
@@ -449,7 +459,10 @@ export function computeProductionAnalytics(production: TrrcDDProductionRow[]): P
     else worTrend = "Stable";
   }
 
-  const zeroMonths = sorted.filter(r => (r.oil_bbl ?? 0) === 0 && (r.gas_mcf ?? 0) === 0).length;
+  const zeroMonths = sorted.filter(r => {
+    const reported = [r.oil_bbl, r.gas_mcf, r.casinghead_gas_mcf, r.condensate_bbl].filter(v => typeof v === "number" && Number.isFinite(v));
+    return reported.length > 0 && reported.every(v => v === 0);
+  }).length;
   const declineFlagged = yoyDeclineOil !== null && yoyDeclineOil > 30;
 
   return {
@@ -574,7 +587,7 @@ export function generateFlags(
   const p4 = getAttempt(attempts, "fetch_p4_records");
   const p4Records = Array.isArray(p4?.["records"]) ? (p4!["records"] as Record<string, unknown>[]) : [];
   if (p4Records.length === 0 && p4?.["found"] === false && !p4?.["error"]) {
-    important.push("NO P-4 GATHERER/PURCHASER ON FILE — production cannot legally be sold or transported from this lease without a registered gatherer/purchaser.");
+    important.push("P-4 QUERY RETURNED NO RECORDS — verify gatherer/purchaser registration and query scope before drawing a compliance conclusion.");
   }
 
   // Oil Proration Query "FORMS LACKING" — the operator has not filed the
@@ -596,7 +609,7 @@ export function generateFlags(
   const violations = getAttempt(attempts, "fetch_compliance_violations");
   const openCount = typeof violations?.["open_count"] === "number" ? violations["open_count"] as number : 0;
   if (openCount > 0) {
-    important.push(`${openCount} OPEN COMPLIANCE VIOLATION(S) — unresolved violations are a material liability that transfers with the asset.`);
+    important.push(`${openCount} OPEN COMPLIANCE VIOLATION(S) — review record scope and asset applicability; operator-level records do not establish an asset-specific liability.`);
   }
 
   // Zero production months (within retrieved rows)
@@ -623,7 +636,7 @@ export function generateFlags(
   if (run.resolved_lease_number && run.resolved_district && analytics.months.length === 0) {
     if (productionAttempt?.status === "success") {
       critical.push(
-        `ZERO REPORTED PRODUCTION — lease ${run.resolved_lease_number} (District ${run.resolved_district}) ` +
+        `NO PRODUCTION RECORDS RETURNED — lease ${run.resolved_lease_number} (District ${run.resolved_district}) ` +
         "returned no production rows over the queryable history, despite the lease/district resolving " +
         "successfully. This means no royalty income stream is documented for this asset. Confirm whether " +
         "the well is long-idle, produced out, or reporting under a different lease ID before assigning value.",
@@ -957,7 +970,7 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
   analogWells: AnalogWell[];
   generatedAt: string;
 }) {
-  const oilSeries = analytics.months.map(m => m.oil_bbl ?? 0);
+  const oilSeries = productionSeries(analytics.months).oil;
   const fit = fitArpsDecline(oilSeries);
   const eur = fit ? estimateEur(fit, analytics.cumulativeOil ?? 0) : null;
   const comparison = eur ? compareToAnalogs(eur.eur, analogWells) : null;
@@ -1132,7 +1145,7 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
 
     !econ.sufficientData ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
       React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
-        "No economic evaluation computed — neither the oil nor gas production history had enough non-zero months to fit a decline curve (see Section 4 for detail). See Section 3 for whatever raw production history was retrieved.",
+        econ.unavailableReason ?? "Economic evaluation unavailable: production or price inputs are insufficient.",
       ),
     ) : React.createElement(View, {},
       React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, "Production Rate & Basin"),
@@ -1171,15 +1184,15 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
       React.createElement(View, { style: { flexDirection: "row", marginBottom: 10 } },
         React.createElement(View, { style: S.summaryStatBox },
           React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "LOW (STRESS PV-10)"),
-          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeLow)),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, econ.offerRangeLow === null ? "Unavailable" : fmtUsd(econ.offerRangeLow)),
         ),
         React.createElement(View, { style: S.summaryStatBox },
           React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "MID (BASE PV-10)"),
-          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeMid)),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, econ.offerRangeMid === null ? "Unavailable" : fmtUsd(econ.offerRangeMid)),
         ),
         React.createElement(View, { style: S.summaryStatBox },
           React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "HIGH (UPSIDE PV-10)"),
-          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, fmtUsd(econ.offerRangeHigh)),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, econ.offerRangeHigh === null ? "Unavailable" : fmtUsd(econ.offerRangeHigh)),
         ),
         React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
           React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "BREAKEVEN OIL PRICE"),
@@ -1622,10 +1635,11 @@ function legalDescriptionSummary(ld: LegalDescription): string {
   return "Unparsed — manual review required";
 }
 
-export function OffsetAnalyticsPage({ run, id: identity, offsetAnalytics, generatedAt }: {
+export function OffsetAnalyticsPage({ run, id: identity, offsetAnalytics, generatedAt, failureReason }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   offsetAnalytics: OffsetAnalyticsPayload | null;
+  failureReason?: string;
   generatedAt: string;
 }) {
   const notCalculated = !offsetAnalytics || offsetAnalytics.validationStatus === "INVALID";
@@ -1650,7 +1664,7 @@ export function OffsetAnalyticsPage({ run, id: identity, offsetAnalytics, genera
         "Offset Analytics not calculated: the subject tract could not be mapped with sufficient confidence or no qualified producing analogs were identified within the configured search radius.",
       ),
       React.createElement(Text, { style: [S.noteText, { marginTop: 6 }] },
-        offsetAnalytics
+        failureReason ? `Unavailable: ${failureReason}` : offsetAnalytics
           ? `Attempted using legal description "${legalDescriptionSummary(offsetAnalytics.subjectAsset.legalDescription)}" — geocode match method "${offsetAnalytics.geocode.matchMethod}", ${offsetAnalytics.search.candidatesFound} candidate well(s) found within ${offsetAnalytics.search.radiusMiles} mi.`
           : "No abstract number or survey name was retrieved for this well in Section 8 (Legal Description and Location), so no legal-description-based tract search was attempted.",
       ),
@@ -1778,10 +1792,11 @@ function GeologyFindingRow({ finding }: { finding: { classification: string; tit
   );
 }
 
-export function GeologicalDueDiligencePage({ run, id: identity, geology, generatedAt }: {
+export function GeologicalDueDiligencePage({ run, id: identity, geology, generatedAt, failureReason }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   geology: GeologicalAssessmentResult | null;
+  failureReason?: string;
   generatedAt: string;
 }) {
   if (!geology) {
@@ -1794,7 +1809,7 @@ export function GeologicalDueDiligencePage({ run, id: identity, geology, generat
       React.createElement(Text, { style: S.sectionTitle }, "SECTION 10 — GEOLOGICAL DUE DILIGENCE"),
       React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
         React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
-          "Geological due diligence not calculated: this well's location could not be resolved, or the assessment could not be run for this report.",
+          failureReason ? `Unavailable: ${failureReason}` : "Geological due diligence not calculated: location or assessment inputs were insufficient.",
         ),
       ),
       React.createElement(Footer, { generatedAt, runId: run.id }),
@@ -2258,7 +2273,7 @@ export async function buildTrrcPdfReport(
   _manifest: TrrcManifest,
   _findings: TrrcFinding[],
   _scorecardArg: AcquisitionScorecard,
-  production: TrrcDDProductionRow[],
+  persistedProduction: TrrcDDProductionRow[],
   coverage: SourceCoverageStatus[],
   sourceAttempts: LiteSourceAttempt[] = [],
   // Offset wells' OWN production history, for type-curve/analog benchmarking
@@ -2285,15 +2300,9 @@ export async function buildTrrcPdfReport(
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
 
-  // Deduplicate attempts (keep latest per source_name)
-  const seen = new Set<string>();
-  const attempts = sourceAttempts.filter(a => {
-    if (a.source_name === "submit_report") return false;
-    if (seen.has(a.source_name)) return false;
-    seen.add(a.source_name);
-    return true;
-  });
+  const attempts = latestSourceAttempts(sourceAttempts).filter(a => a.source_name !== "submit_report");
 
+  const production = isSampleReport ? persistedProduction : currentProduction(persistedProduction, attempts);
   const identity  = extractIdentity(attempts, run);
 
   // Static well-location map (TRRC's own public GIS export — no API key,
@@ -2311,8 +2320,8 @@ export async function buildTrrcPdfReport(
   const analytics = computeProductionAnalytics(production);
   const priceDeck = await getPriceDeck();
   const econ = computeEconomics(
-    analytics.months.map(m => m.oil_bbl ?? 0),
-    analytics.months.map(m => m.gas_mcf ?? 0),
+    productionSeries(analytics.months).oil,
+    productionSeries(analytics.months).gas,
     priceDeck,
     identity.field || null,
     identity.county || null,
@@ -2363,6 +2372,8 @@ export async function buildTrrcPdfReport(
   const subjectAcres = subjectAcresRaw !== undefined ? parseFloat(str(subjectAcresRaw)) : NaN;
 
   let offsetAnalytics: OffsetAnalyticsPayload | null = null;
+  let offsetFailure: string | undefined;
+  let geologyFailure: string | undefined;
   if (abstractNumber || surveyName) {
     const legalDescriptionText = [
       surveyName ? `${surveyName} Survey` : null,
@@ -2379,8 +2390,9 @@ export async function buildTrrcPdfReport(
         subjectLateralLengthFt: lateralPath?.straight_line_length_ft ?? null,
         priceDeck,
       });
-    } catch {
-      offsetAnalytics = null; // a genuine failure — renders the same "not calculated" fallback as never having attempted it
+    } catch (error) {
+      console.error("Offset analytics failed", error);
+      offsetFailure = "Offset analytics retrieval or calculation failed. Retry the report; no result is available.";
     }
   }
 
@@ -2397,21 +2409,22 @@ export async function buildTrrcPdfReport(
         resolved_primary_api: run.resolved_primary_api,
         resolved_district: run.resolved_district,
         resolved_lease_number: run.resolved_lease_number,
-        resolved_operator_number: null,
+        resolved_operator_number: run.resolved_operator_number,
       },
       extras: {
         county: identity.county || null,
         wellName: identity.wellName || null,
-        producingFormation: identity.field || null,
+        producingFormation: identity.formation || null,
         wellStatus: wellStatus || null,
       },
     });
-  } catch {
-    geology = null;
+  } catch (error) {
+    console.error("Geological assessment failed", error);
+    geologyFailure = "Geological retrieval or calculation failed. Retry the report; no result is available.";
   }
   if (geology && persistGeologyTo) {
     const { ok, error } = await persistGeologicalAssessment(persistGeologyTo.supabase, persistGeologyTo.runId, geology);
-    if (!ok) console.error(`[geology] persistence failed for run ${persistGeologyTo.runId}: ${error}`);
+    if (!ok) throw new Error(`Geological result could not be persisted: ${error}`);
   }
 
   const doc = React.createElement(
@@ -2431,8 +2444,8 @@ export async function buildTrrcPdfReport(
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),
-    React.createElement(OffsetAnalyticsPage,    { run, id: identity, offsetAnalytics, generatedAt }),
-    React.createElement(GeologicalDueDiligencePage, { run, id: identity, geology, generatedAt }),
+    React.createElement(OffsetAnalyticsPage,    { run, id: identity, offsetAnalytics, generatedAt, failureReason: offsetFailure }),
+    React.createElement(GeologicalDueDiligencePage, { run, id: identity, geology, generatedAt, failureReason: geologyFailure }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(TimelinePage,           { run, id: identity, attempts, production, generatedAt }),
     React.createElement(EvidenceIndexPage,      { run, id: identity, attempts, generatedAt }),

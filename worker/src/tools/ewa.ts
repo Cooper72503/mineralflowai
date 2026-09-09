@@ -3,6 +3,7 @@
  * No proxy needed on the droplet — Node.js OpenSSL handles RSA TLS fine.
  */
 
+import { canonicalApi10 } from "../identity.js";
 import * as cheerio from "cheerio";
 
 const EWA_BASE = "https://webapps2.rrc.texas.gov/EWA";
@@ -250,9 +251,8 @@ function rowsToObjects(header: string[], rows: string[][]): Record<string, strin
 // state.apiNumber directly, so this was a real latent bug the rewrite
 // surfaced, not one it introduced — fixing it here fixes both paths.
 function splitApi(api: string): { prefix: string; suffix: string } | null {
-  const d = api.replace(/\D/g, "");
-  if (d.length === 8) return { prefix: d.slice(0, 3), suffix: d.slice(3, 8) };
-  if (d.length < 10) return null;
+  const d = canonicalApi10(api);
+  if (!d) return null;
   return { prefix: d.slice(2, 5), suffix: d.slice(5, 10) };
 }
 
@@ -543,6 +543,7 @@ export async function getProduction(leaseNumber: string | null, district: string
   district: string | null;
   message: string;
   error?: string;
+  lease_type_attempts?: { lease_type: string; status: string; detail?: string }[];
 }> {
   if (!leaseNumber || !district) {
     // Production is the single most important data point for a buyer — a
@@ -557,14 +558,18 @@ export async function getProduction(leaseNumber: string | null, district: string
 
   const parseNum = (v: string): number | null => {
     if (!v || v === "NO RPT" || v === "-") return null;
-    const n = parseFloat(v.replace(/,/g, ""));
-    return isNaN(n) ? null : n;
+    const cleaned = v.replace(/,/g, "");
+    if (!/^\d+(?:\.\d+)?$/.test(cleaned)) throw new Error(`Invalid production volume: ${v}`);
+    const n = Number(cleaned);
+    if (!Number.isFinite(n)) throw new Error("Non-finite production volume");
+    return n;
   };
 
   type ProductionTypeResult =
     | { status: "found"; rows: ProductionRow[] }
     | { status: "not_found" }
-    | { status: "parse_failed" };
+    | { status: "parse_failed" }
+    | { status: "query_rejected"; detail: string };
 
   const MONTH_NUM: Record<string, string> = {
     Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
@@ -637,10 +642,15 @@ export async function getProduction(leaseNumber: string | null, district: string
         "pager.pageSize":             "-1",
       }),
       signal: AbortSignal.timeout(30_000),
-    }).then(r => r.text());
+    }).then(r => {
+      if (!r.ok) throw new Error(`Production POST returned HTTP ${r.status}`);
+      return r.text();
+    });
 
     assertNotTrrcApplicationError(html, "specificLeaseQueryAction.do");
 
+    const rejected = cheerio.load(html)("font[color=red]").text().trim();
+    if (/Ewa_1011|invalid lease number/i.test(rejected)) return { status: "query_rejected", detail: rejected };
     if (/no results found/i.test(html)) return { status: "not_found" };
 
     // Real table (class="DataGrid") has a two-row header via colspan, and
@@ -696,19 +706,20 @@ export async function getProduction(leaseNumber: string | null, district: string
 
   try {
     const types = leaseType ? [leaseType] : ["O", "G"];
-    let anyParseFailed = false;
+    const lease_type_attempts: { lease_type: string; status: string; detail?: string }[] = [];
     for (const lt of types) {
       const result = await tryType(lt);
+      lease_type_attempts.push({ lease_type: lt, status: result.status, ...("detail" in result ? { detail: result.detail } : {}) });
       if (result.status === "found" && result.rows.length > 0) {
-        return { found: true, rows: result.rows, lease_number: leaseNumber, district, message: `${result.rows.length} months of production history (${lt} lease)` };
+        return { found: true, lease_type_attempts, rows: result.rows, lease_number: leaseNumber, district, message: `${result.rows.length} months of production history (${lt} lease)` };
       }
-      if (result.status === "parse_failed") anyParseFailed = true;
+
     }
-    if (anyParseFailed) {
-      const msg = `Could not parse production response for lease ${leaseNumber} district ${district} on at least one lease type`;
-      return { found: false, rows: [], lease_number: leaseNumber, district, message: msg, error: msg };
+    if (lease_type_attempts.some(a => a.status === "parse_failed" || a.status === "query_rejected")) {
+      const msg = `Production lookup incomplete for lease ${leaseNumber} district ${district}: ${lease_type_attempts.map(a => `${a.lease_type}: ${a.detail ?? a.status}`).join("; ")}. Confirm lease type before concluding absence.`;
+      return { found: false, lease_type_attempts, rows: [], lease_number: leaseNumber, district, message: msg, error: msg };
     }
-    return { found: false, rows: [], lease_number: leaseNumber, district, message: `No production found for lease ${leaseNumber} district ${district}` };
+    return { found: false, lease_type_attempts, rows: [], lease_number: leaseNumber, district, message: `No production found for lease ${leaseNumber} district ${district}` };
   } catch (e) {
     return { found: false, rows: [], lease_number: leaseNumber, district, message: `Error: ${String(e)}`, error: String(e) };
   }
@@ -986,24 +997,43 @@ export async function getGisLocation(apiNumber: string): Promise<{
   alert_areas: string[];
   message: string;
   error?: string;
+  api_number?: string;
+  query_url?: string;
+  partial_errors?: string[];
 }> {
-  const digits = apiNumber.replace(/\D/g, "");
+  const digits = canonicalApi10(apiNumber);
+  if (!digits) return { found: false, latitude: null, longitude: null, well_type: null, survey: null, alert_areas: [], message: "Invalid Texas API", error: "Invalid Texas API" };
   const api8 = digits.slice(2, 10);
   const GIS_BASE = "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer";
 
   try {
     const wellQs = `f=json&where=API%3D%27${api8}%27&outFields=*&returnGeometry=true&outSR=4326`;
     const res = await fetch(`${GIS_BASE}/1/query?${wellQs}`, { signal: AbortSignal.timeout(20_000) });
-    const json = await res.json() as { features?: Array<{ geometry?: { x?: number; y?: number }; attributes?: Record<string, unknown> }> };
+    if (!res.ok) throw new Error(`GIS HTTP ${res.status}`);
+    const json = await res.json() as { error?: { message?: string }; features?: Array<{ geometry?: { x?: number; y?: number }; attributes?: Record<string, unknown> }> };
 
-    if (!json.features || json.features.length === 0) {
+    if (json.error || !Array.isArray(json.features)) throw new Error(json.error?.message ?? "Malformed GIS response: features missing");
+    if (json.features.length === 0) {
       return { found: false, latitude: null, longitude: null, well_type: null, survey: null, alert_areas: [], message: "Well not found in RRC GIS database" };
     }
 
-    const feat = json.features[0];
+    const matches = json.features.filter(f => canonicalApi10(String(f.attributes?.API ?? "")) === digits);
+    if (matches.length !== 1) throw new Error("GIS response does not uniquely match the requested API");
+    const feat = matches[0];
     const lat = feat.geometry?.y ?? null;
     const lng = feat.geometry?.x ?? null;
     const attrs = feat.attributes ?? {};
+    if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat)>90 || Math.abs(lng)>180) throw new Error("GIS coordinates missing or invalid");
+    const partialErrors: string[] = [];
+    async function polygons(url: string, label: string): Promise<Array<{attributes?: Record<string, unknown>}>> {
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const body = await response.json() as {error?: {message?: string}; features?: Array<{attributes?: Record<string, unknown>}>};
+        if (body.error || !Array.isArray(body.features)) throw new Error(body.error?.message ?? "Missing features");
+        return body.features;
+      } catch (error) { partialErrors.push(`${label}: ${String(error)}`); return []; }
+    }
 
     let alertAreas: string[] = [];
     let surveyAttrs: Record<string, unknown> | null = null;
@@ -1013,17 +1043,18 @@ export async function getGisLocation(apiNumber: string): Promise<{
 
       // Alert areas and surveys are polygon layers — find the one(s) this
       // point falls inside, not a nonexistent per-record API field.
-      const alertRes = await fetch(`${GIS_BASE}/26/query?${spatialQs}&outFields=AREA_NAME`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-      const alertJson = alertRes ? await alertRes.json() as { features?: Array<{ attributes?: { AREA_NAME?: string } }> } : null;
-      alertAreas = (alertJson?.features ?? []).map(f => f.attributes?.AREA_NAME ?? "").filter(Boolean);
-
-      const surveyRes = await fetch(`${GIS_BASE}/24/query?${spatialQs}&outFields=ABSTRACT_NUMBER,LEVEL1_SURVEY_NAME,LEVEL2_BLOCK_NUMBER,LEVEL3_SURVEY_NUMBER`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-      const surveyJson = surveyRes ? await surveyRes.json() as { features?: Array<{ attributes?: Record<string, unknown> }> } : null;
-      surveyAttrs = surveyJson?.features?.[0]?.attributes ?? null;
+      const alertFeatures = await polygons(`${GIS_BASE}/26/query?${spatialQs}&outFields=AREA_NAME`, "Alert areas");
+      alertAreas = alertFeatures.map(f => String(f.attributes?.AREA_NAME ?? "")).filter(Boolean);
+      const surveyFeatures = await polygons(`${GIS_BASE}/24/query?${spatialQs}&outFields=ABSTRACT_NUMBER,LEVEL1_SURVEY_NAME,LEVEL2_BLOCK_NUMBER,LEVEL3_SURVEY_NUMBER`, "Survey");
+      if (surveyFeatures.length > 1) partialErrors.push("Survey: multiple intersecting polygons; no unique survey selected");
+      surveyAttrs = surveyFeatures.length === 1 ? surveyFeatures[0].attributes ?? null : null;
     }
 
     return {
       found: true,
+      api_number: digits,
+      query_url: `${GIS_BASE}/1/query?${wellQs}`,
+      partial_errors: partialErrors,
       latitude: lat,
       longitude: lng,
       well_type: String(attrs["GIS_SYMBOL_DESCRIPTION"] ?? ""),
@@ -1036,7 +1067,7 @@ export async function getGisLocation(apiNumber: string): Promise<{
         section_name:    String(surveyAttrs["LEVEL3_SURVEY_NUMBER"] ?? ""),
       } : null,
       alert_areas: alertAreas,
-      message: `GIS location: ${lat?.toFixed(4)}°N, ${lng?.toFixed(4)}°W${alertAreas.length ? ` | Alerts: ${alertAreas.join(", ")}` : ""}`,
+      message: `${partialErrors.length ? `Partial GIS result (${partialErrors.join("; ")}). ` : ""}GIS location: ${lat?.toFixed(4)}°N, ${lng?.toFixed(4)}°W${alertAreas.length ? ` | Alerts: ${alertAreas.join(", ")}` : ""}`,
     };
   } catch (e) {
     return { found: false, latitude: null, longitude: null, well_type: null, survey: null, alert_areas: [], message: `GIS error: ${String(e)}`, error: String(e) };

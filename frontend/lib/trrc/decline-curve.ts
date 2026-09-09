@@ -101,13 +101,13 @@ function fitForFixedB(months: number[], rates: number[], b: number): { qi: numbe
  * qi/Di at each candidate b.
  */
 export function fitArpsDecline(monthlyOilBbl: number[]): DeclineCurveFit | null {
-  // Drop leading/trailing zero or null-equivalent months (ramp-up, reporting
-  // gaps) — Arps decline is only meaningful once a well is on a stabilized
-  // decline trend, not during flowback/ramp-up.
-  const cleaned = monthlyOilBbl.filter(v => v > 0);
-  if (cleaned.length < 6) return null; // need a real trend to fit against
-
-  const months = cleaned.map((_, i) => i);
+  // Ignore zero-rate observations in the logarithmic fit without compressing
+  // calendar time. A currently shut-in series cannot establish a restart rate.
+  if (monthlyOilBbl.some(v => !Number.isFinite(v) || v < 0) || !monthlyOilBbl.length || monthlyOilBbl[monthlyOilBbl.length - 1] === 0) return null;
+  const points = monthlyOilBbl.map((q, t) => ({q, t})).filter(p => p.q > 0);
+  const cleaned = points.map(p => p.q);
+  if (cleaned.length < 6) return null;
+  const months = points.map(p => p.t);
   const totalSumSq = cleaned.reduce((s, q) => {
     const mean = cleaned.reduce((a, b) => a + b, 0) / cleaned.length;
     return s + (q - mean) ** 2;
@@ -133,7 +133,7 @@ export function fitArpsDecline(monthlyOilBbl: number[]): DeclineCurveFit | null 
   // (exponential) these are identical, since nominal decline is constant;
   // for b>0 the curve has already flattened by the last data point, so
   // this is meaningfully lower for a mature well.
-  const lastMonthIdx = cleaned.length - 1;
+  const lastMonthIdx = monthlyOilBbl.length - 1;
   const qAt = (t: number) => best.b === 0 ? best.qi * Math.exp(-best.di * t) : best.qi * Math.pow(1 + best.b * best.di * t, -1 / best.b);
   const qNow = qAt(lastMonthIdx);
   const currentAnnualDeclinePct = qNow > 0 ? (1 - qAt(lastMonthIdx + 12) / qNow) * 100 : diAnnualPct;
@@ -146,7 +146,7 @@ export function fitArpsDecline(monthlyOilBbl: number[]): DeclineCurveFit | null 
 
   return {
     qi: best.qi, di: best.di, b: best.b, diAnnualPct, currentAnnualDeclinePct, rSquared,
-    monthsOfHistory: cleaned.length, classification,
+    monthsOfHistory: monthlyOilBbl.length, classification,
   };
 }
 

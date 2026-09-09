@@ -1,0 +1,512 @@
+{
+  "case": {
+    "id": "gaines-oil",
+    "api10": "4216502733",
+    "gis_symbol": "Oil Well",
+    "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2716502733%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+    "verified_at": "2026-09-09T04:14:04.825508+00:00",
+    "evidence": {
+      "API": "16502733",
+      "GIS_SYMBOL_DESCRIPTION": "Oil Well"
+    }
+  },
+  "started_at": "2026-09-09T15:55:00.029Z",
+  "finished_at": "2026-09-09T15:55:45.877Z",
+  "attempts": [
+    {
+      "source_id": "gaines-oil-fetch_gis_plat",
+      "source_name": "fetch_gis_plat",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:55:00.041Z",
+      "result_data_json": {
+        "found": true,
+        "api_number": "4216502733",
+        "query_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2716502733%27&outFields=*&returnGeometry=true&outSR=4326",
+        "partial_errors": [],
+        "latitude": 32.8732066614451,
+        "longitude": -102.74133639493984,
+        "well_type": "Oil Well",
+        "survey": {
+          "abstract_number": "1651891",
+          "survey_name": "WT RR CO",
+          "block_number": "G",
+          "section_name": "272"
+        },
+        "alert_areas": [],
+        "message": "GIS location: 32.8732\u00b0N, -102.7413\u00b0W"
+      }
+    },
+    {
+      "source_id": "gaines-oil-search_by_api",
+      "source_name": "search_by_api",
+      "status": "success",
+      "result_count": 2,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:55:00.030Z",
+      "result_data_json": {
+        "found": true,
+        "wells": [
+          {
+            "api_no": "16502733",
+            "district": "8A",
+            "lease_no": "10289",
+            "lease_name": "TAYLOR, W. J. \"A\"",
+            "well_no": "1",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "county": "GAINES",
+            "on_schedule": "N",
+            "api_depth": ""
+          },
+          {
+            "api_no": "16502733",
+            "district": "8A",
+            "lease_no": "10289",
+            "lease_name": "TAYLOR, W. J. \"A\"",
+            "well_no": "1D",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "county": "GAINES",
+            "on_schedule": "Y",
+            "api_depth": "12040"
+          }
+        ],
+        "lease_number": "10289",
+        "district": "8A",
+        "operator": "FUSION ENERGY HOLDINGS, LLC",
+        "operator_number": null,
+        "county": "GAINES",
+        "message": "Found 2 wellbore(s) for 42-165-02733"
+      }
+    },
+    {
+      "source_id": "gaines-oil-fetch_production",
+      "source_name": "fetch_production",
+      "status": "success",
+      "result_count": 49,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:55:15.396Z",
+      "result_data_json": {
+        "found": true,
+        "lease_type_attempts": [
+          {
+            "lease_type": "O",
+            "status": "found"
+          }
+        ],
+        "rows": [
+          {
+            "production_month": "2022-09",
+            "oil_bbl": 443,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2022-10",
+            "oil_bbl": 600,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2022-11",
+            "oil_bbl": 661,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2022-12",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-01",
+            "oil_bbl": 195,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-02",
+            "oil_bbl": 599,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-03",
+            "oil_bbl": 33,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-04",
+            "oil_bbl": 328,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-05",
+            "oil_bbl": 908,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-06",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-07",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-08",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-09",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-10",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-11",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-12",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-01",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-02",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-03",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-04",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-05",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-06",
+            "oil_bbl": 581,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-07",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-08",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-09",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-10",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-11",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-12",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-01",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-02",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-03",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-04",
+            "oil_bbl": 710,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-05",
+            "oil_bbl": 850,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-06",
+            "oil_bbl": 950,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-07",
+            "oil_bbl": 1055,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-08",
+            "oil_bbl": 950,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-09",
+            "oil_bbl": 1050,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-10",
+            "oil_bbl": 1145,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-11",
+            "oil_bbl": 1220,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-12",
+            "oil_bbl": 1220,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-01",
+            "oil_bbl": 1310,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-02",
+            "oil_bbl": 1389,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-03",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-04",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-05",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-06",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-07",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-08",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-09",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          }
+        ],
+        "lease_number": "10289",
+        "district": "8A",
+        "message": "49 months of production history (O lease)"
+      }
+    },
+    {
+      "source_id": "gaines-oil-fetch_drilling_permits",
+      "source_name": "fetch_drilling_permits",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:55:30.706Z",
+      "result_data_json": {
+        "found": false,
+        "permits": [],
+        "message": "No drilling permit (W-1) on record for 42-165-02733"
+      }
+    }
+  ]
+}

@@ -73,14 +73,15 @@ export interface ScenarioResult {
 }
 
 export interface EconomicEvaluation {
+  unavailableReason?: string;
   sufficientData: boolean; // false when neither oil nor gas had enough history for any Arps fit
   oilFit: DeclineCurveFit | null;
   gasFit: DeclineCurveFit | null;
   priceDeck: PriceDeck;
   scenarios: ScenarioResult[];
-  offerRangeLow: number;   // = stress scenario PV-10
-  offerRangeMid: number;   // = base scenario PV-10
-  offerRangeHigh: number;  // = upside scenario PV-10
+  offerRangeLow: number | null;   // = stress scenario PV-10
+  offerRangeMid: number | null;   // = base scenario PV-10
+  offerRangeHigh: number | null;  // = upside scenario PV-10
   irr: number | null; // annualized %, from monthly IRR compounded — null when no purchase price was supplied or the cash flow never recoups it
   payoutMonths: number | null; // null when no purchase price was supplied, or cumulative undiscounted net cash flow never reaches it within the forecast horizon
   irrPayoutNote: string;
@@ -349,7 +350,10 @@ export function computeEconomics(
 ): EconomicEvaluation {
   const oilFit = fitArpsDecline(monthlyOilBbl);
   const gasFit = fitArpsDecline(monthlyGasMcf);
-  const sufficientData = oilFit !== null || gasFit !== null;
+  const validPrices = priceDeck.source !== "static_fallback" && Object.values(priceDeck.scenarios).every(p => Number.isFinite(p.oilUsdBbl) && p.oilUsdBbl >= 0 && Number.isFinite(p.gasUsdMcf) && p.gasUsdMcf >= 0);
+  const sufficientData = (oilFit !== null || gasFit !== null) && validPrices;
+  const unavailableReason = !validPrices ? "Unavailable: a sourced or explicitly supplied price deck is required; placeholder fallback prices are not valued."
+    : "Insufficient data: a finite production series with at least six positive observations and a producing final month is required.";
   const hasPurchasePrice = purchasePriceUsd !== null && purchasePriceUsd > 0;
 
   const basin = classifyBasin(fieldName, county);
@@ -358,8 +362,8 @@ export function computeEconomics(
     ? `an internal reference LOE for ${basin.name} ($${basin.loeUsdPerBoeRange[0]}-$${basin.loeUsdPerBoeRange[1]}/BOE range, midpoint used) — an industry-typical range for this play, not a live-sourced or lease-specific figure`
     : `a generic LOE assumption of $${DEFAULT_LOE_USD_PER_BOE}/BOE, since this well's field/county could not be matched to a known basin`;
 
-  const knownWater = monthlyWaterBbl.filter((v): v is number => v !== null && v > 0);
-  const swdModeled = knownWater.length > 0;
+  const knownWater = monthlyWaterBbl.filter((v): v is number => v !== null && Number.isFinite(v) && v >= 0);
+  const swdModeled = knownWater.length > 0 && knownWater.length === monthlyWaterBbl.length;
   const avgMonthlyWaterBbl = swdModeled ? knownWater.reduce((a, b) => a + b, 0) / knownWater.length : null;
 
   const costAssumptionNote =
@@ -373,7 +377,7 @@ export function computeEconomics(
       : "NGL and Waha basis are not modeled for this scenario — no automated source exists for either; both are optional, user-supplied assumptions in the interactive Economics tab.");
 
   const irrPayoutNote = !sufficientData
-    ? "Not computed — no production history was available to forecast cash flows."
+    ? unavailableReason
     : hasPurchasePrice
       ? `Computed against the BASE price scenario's forecasted monthly net cash flow, using the proposed purchase price of $${Math.round(purchasePriceUsd!).toLocaleString("en-US")} as the month-0 outflow — not the PV-10 offer range above. Actual returns depend heavily on which price scenario materializes; this is a screening-grade estimate, not a certified return calculation.`
       : "Not computed — IRR and payout months both require a proposed purchase price, which was not provided for this run.";
@@ -382,8 +386,8 @@ export function computeEconomics(
 
   if (!sufficientData) {
     return {
-      sufficientData, oilFit, gasFit, priceDeck,
-      scenarios: [], offerRangeLow: 0, offerRangeMid: 0, offerRangeHigh: 0,
+      sufficientData, unavailableReason, oilFit, gasFit, priceDeck,
+      scenarios: [], offerRangeLow: null, offerRangeMid: null, offerRangeHigh: null,
       irr: null, payoutMonths: null, irrPayoutNote, costAssumptionNote,
       breakevenOilPriceUsdBbl: null, basin, loeUsdPerBoe, declineSanityCheck: null,
       stabilizedOilRateBblPerMonth, swdModeled,

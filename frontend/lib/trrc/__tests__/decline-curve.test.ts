@@ -93,3 +93,15 @@ describe("estimateEur — forecasts a sane, bounded remaining-reserves estimate"
     expect(eur.monthsToTerminal).toBeLessThan(60);
   });
 });
+
+it("preserves elapsed months across internal downtime in a decline fit", () => {
+  const curve = Array.from({length: 24}, (_, t) => 5000 * Math.exp(-0.03 * t));
+  curve[8] = 0; curve[9] = 0; curve[10] = 0;
+  const fit = fitArpsDecline(curve)!;
+  expect(fit.monthsOfHistory).toBe(24);
+  expect(fit.di).toBeCloseTo(0.03, 4);
+});
+it("withholds forecasts for a currently zero-rate or nonfinite series", () => {
+  expect(fitArpsDecline([1000,900,800,700,600,500,0])).toBeNull();
+  expect(fitArpsDecline([1000,900,800,700,600,500,Infinity])).toBeNull();
+});

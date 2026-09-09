@@ -153,6 +153,7 @@ type Phase = "form" | "running" | "selecting" | "complete" | "error";
 type TabKey = "summary" | "scorecard" | "production" | "economics" | "findings" | "coverage" | "missing" | "geology";
 
 const DOWNLOAD_PATHS = {
+  "decision-record":   (id: string) => `/api/trrc/due-diligence/${id}/decision-record`,
   report:              (id: string) => `/api/trrc/due-diligence/${id}/report`,
   archive:             (id: string) => `/api/trrc/due-diligence/${id}/archive`,
   manifest:            (id: string) => `/api/trrc/due-diligence/${id}/manifest`,
@@ -1424,6 +1425,7 @@ function ResultsDashboard({
         )}
         <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" as const }}>
           {([
+            { type: "decision-record" as const,    label: "Decision Record Evidence (JSON)" },
             { type: "report" as const,             label: "PDF Report" },
             { type: "archive" as const,             label: "ZIP Archive" },
             { type: "manifest" as const,            label: "JSON Manifest" },

@@ -584,14 +584,12 @@ describe("getGisLocation — real ArcGIS schema regression guard", () => {
     expect(result.well_type).toBe("Oil Well");
   });
 
-  it("resolves survey polygons via a spatial query, not a nonexistent API attribute filter", async () => {
+  it("withholds a unique survey when the point intersects multiple survey polygons", async () => {
     mockFetchJsonSequence([gisWellFoundJson, gisAlertAreasJson, gisSurveyJson]);
     const result = await getGisLocation("4232946771");
 
-    expect(result.survey).not.toBeNull();
-    expect(result.survey!.abstract_number).toBe("329236");
-    expect(result.survey!.survey_name).toBe("T&P RR CO");
-    expect(result.survey!.block_number).toBe("39 T4S");
+    expect(result.survey).toBeNull();
+    expect(result.partial_errors?.join(" ")).toContain("multiple intersecting polygons");
   });
 
   it("returns found:false with no fabricated coordinates on a genuine empty result", async () => {

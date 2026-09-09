@@ -1,3 +1,5 @@
+import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
+import { productionSeries, currentProduction } from "@/lib/trrc/production-series";
 /**
  * POST /api/trrc/due-diligence/[runId]/recalculate-economics
  *
@@ -97,7 +99,7 @@ export async function POST(
   // production — RLS-equivalent explicit ownership check, matching every
   // other route in this directory. No TRRC calls happen here; this is why
   // the recalculation is fast.
-  const [runResult, productionResult] = await Promise.all([
+  const [runResult, productionResult, attemptsResult] = await Promise.all([
     supabase
       .from("trrc_due_diligence_runs")
       .select("id, status, resolved_district, purchase_price")
@@ -110,6 +112,7 @@ export async function POST(
       .eq("run_id", runId)
       .order("production_month", { ascending: false })
       .limit(120),
+    supabase.from("trrc_source_attempts").select("source_id,source_name,status,result_count,result_data_json,attempted_at,error_message").eq("run_id",runId),
   ]);
 
   if (runResult.error || !runResult.data) {
@@ -119,7 +122,8 @@ export async function POST(
     return NextResponse.json({ ok: false, error: "Interactive recalculation is only available for completed runs." }, { status: 409 });
   }
 
-  const production: TrrcDDProductionRow[] = (productionResult.data ?? []).map((p) => ({
+  if(productionResult.error || attemptsResult.error) return NextResponse.json({ok:false,error:"Production evidence could not be loaded."},{status:503});
+  const persistedProduction: TrrcDDProductionRow[] = (productionResult.data ?? []).map((p) => ({
     entity_type: p["entity_type"] as "lease" | "api",
     api_number: (p["api_number"] as string | null) ?? null,
     district: (p["district"] as string) ?? "",
@@ -134,6 +138,7 @@ export async function POST(
     water_bbl: (p["water_bbl"] as number | null) ?? null,
   }));
 
+  const production = currentProduction(persistedProduction, (attemptsResult.data ?? []) as LiteSourceAttempt[]);
   if (production.length === 0) {
     return NextResponse.json({ ok: false, error: "No production history on file for this run — nothing to recalculate against." }, { status: 422 });
   }
@@ -154,14 +159,13 @@ export async function POST(
 
   let priceDeck: PriceDeck | null = null;
   if (oilPrice !== null || gasPrice !== null) {
-    // At least one override supplied — build the deck around it. Fall back
-    // to a placeholder for whichever side wasn't overridden rather than
-    // silently reusing an EIA-fetched value the caller never asked for and
-    // this endpoint never fetched (no live EIA call here, by design).
-    const oil = oilPrice ?? 70;
-    const gas = gasPrice ?? 3.0;
+    if (oilPrice === null || gasPrice === null) {
+      return NextResponse.json({ ok: false, error: "Provide both oil_usd_bbl and gas_usd_mcf; missing prices cannot be replaced with placeholders." }, { status: 422 });
+    }
+    const oil = oilPrice;
+    const gas = gasPrice;
     priceDeck = {
-      source: "static_fallback",
+      source: "user_input",
       asOf: "user-adjusted",
       wtiSpotUsdBbl: oil,
       henryHubUsdMcf: gas,
@@ -200,10 +204,10 @@ export async function POST(
   // module-level export since it's only ever called with this request's
   // data.
   const runEconomicsAt = (oil: number, gas: number) => computeEconomics(
-    analytics.months.map(m => m.oil_bbl ?? 0),
-    analytics.months.map(m => m.gas_mcf ?? 0),
+    productionSeries(analytics.months).oil,
+    productionSeries(analytics.months).gas,
     {
-      source: "static_fallback", asOf: "user-adjusted",
+      source: "user_input", asOf: "user-adjusted",
       wtiSpotUsdBbl: oil, henryHubUsdMcf: gas,
       scenarios: {
         stress: { oilUsdBbl: oil, gasUsdMcf: gas }, base: { oilUsdBbl: oil, gasUsdMcf: gas },

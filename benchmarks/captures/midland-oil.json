@@ -1,0 +1,143 @@
+{
+  "case": {
+    "id": "midland-oil",
+    "api10": "4232900028",
+    "gis_symbol": "Oil Well",
+    "lookup_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API+LIKE+%27329_____%27+AND+GIS_SYMBOL_DESCRIPTION%3D%27Oil+Well%27&outFields=API%2CGIS_SYMBOL_DESCRIPTION&returnGeometry=false&resultRecordCount=1&orderByFields=API",
+    "verified_at": "2026-09-09T04:14:11.193508+00:00",
+    "evidence": {
+      "API": "32900028",
+      "GIS_SYMBOL_DESCRIPTION": "Oil Well"
+    }
+  },
+  "started_at": "2026-09-09T15:55:45.878Z",
+  "finished_at": "2026-09-09T15:56:14.715Z",
+  "attempts": [
+    {
+      "source_id": "midland-oil-fetch_gis_plat",
+      "source_name": "fetch_gis_plat",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:55:45.879Z",
+      "result_data_json": {
+        "found": true,
+        "api_number": "4232900028",
+        "query_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2732900028%27&outFields=*&returnGeometry=true&outSR=4326",
+        "partial_errors": [],
+        "latitude": 31.983317191044602,
+        "longitude": -101.91807823049365,
+        "well_type": "Oil Well",
+        "survey": {
+          "abstract_number": "3291002",
+          "survey_name": "VEAZEY, J L",
+          "block_number": " ",
+          "section_name": "55"
+        },
+        "alert_areas": [],
+        "message": "GIS location: 31.9833\u00b0N, -101.9181\u00b0W"
+      }
+    },
+    {
+      "source_id": "midland-oil-search_by_api",
+      "source_name": "search_by_api",
+      "status": "success",
+      "result_count": 3,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:55:45.878Z",
+      "result_data_json": {
+        "found": true,
+        "wells": [
+          {
+            "api_no": "32900028",
+            "district": "08",
+            "lease_no": "019495",
+            "lease_name": "",
+            "well_no": "3",
+            "field_name": "AZALEA (DEVONIAN)",
+            "operator_name": "AMARILLO OIL CO.",
+            "county": "MIDLAND",
+            "on_schedule": "N",
+            "api_depth": ""
+          },
+          {
+            "api_no": "32900028",
+            "district": "08",
+            "lease_no": "20825",
+            "lease_name": "GOLLADAY -C-",
+            "well_no": "3",
+            "field_name": "AZALEA (BEND)",
+            "operator_name": "PARKER & PARSLEY, INC.",
+            "county": "MIDLAND",
+            "on_schedule": "N",
+            "api_depth": ""
+          },
+          {
+            "api_no": "32900028",
+            "district": "",
+            "lease_no": "",
+            "lease_name": "",
+            "well_no": "",
+            "field_name": "",
+            "operator_name": "",
+            "county": "MIDLAND",
+            "on_schedule": "N",
+            "api_depth": ""
+          }
+        ],
+        "lease_number": "019495",
+        "district": "08",
+        "operator": "AMARILLO OIL CO.",
+        "operator_number": null,
+        "county": "MIDLAND",
+        "message": "Found 3 wellbore(s) for 42-329-00028"
+      }
+    },
+    {
+      "source_id": "midland-oil-fetch_production",
+      "source_name": "fetch_production",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Production requires lease number + district \u2014 not resolved yet",
+      "attempted_at": "2026-09-09T15:56:01.634Z",
+      "result_data_json": {
+        "found": false,
+        "rows": [],
+        "lease_number": null,
+        "district": null,
+        "message": "Production requires lease number + district \u2014 not resolved yet",
+        "error": "Production requires lease number + district \u2014 not resolved yet"
+      }
+    },
+    {
+      "source_id": "midland-oil-fetch_drilling_permits",
+      "source_name": "fetch_drilling_permits",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-09T15:56:01.634Z",
+      "result_data_json": {
+        "found": true,
+        "permits": [
+          {
+            "api_no": "32900028",
+            "district": "08",
+            "lease": "GOLLADAY \"C\"",
+            "well_number": "3",
+            "permitted_operator": "PARKER & PARSLEY, INC.(640891)",
+            "county": "MIDLAND",
+            "status_date": "Submitted: 05/17/1978 Approved: 05/17/1978",
+            "status_number": "024528",
+            "wellbore_profiles": "Vertical",
+            "filing_purpose": "Recompletion",
+            "amend": "N",
+            "total_depth": "9150",
+            "stacked_lateral_parent_well_dp": "",
+            "status": "APPROVED"
+          }
+        ],
+        "message": "Found 1 drilling permit record(s) for 42-329-00028"
+      }
+    }
+  ]
+}

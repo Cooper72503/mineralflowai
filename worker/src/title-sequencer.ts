@@ -1,3 +1,5 @@
+import { checkedQuery, PipelinePersistenceError } from "./persistence.js";
+import { canonicalApi10 } from "./identity.js";
 /**
  * Title-chain research sequencer — the worker-side, network-bound half of
  * the API-number -> title-chain workflow. Polled from index.ts exactly like
@@ -98,7 +100,7 @@ function pick(obj: Record<string, unknown> | undefined, keys: string[]): string 
 }
 
 async function setJob(supabase: SupabaseClient, jobId: string, patch: Record<string, unknown>): Promise<void> {
-  const { error } = await supabase.from("title_research_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", jobId);
+  const { error } = await checkedQuery(supabase.from("title_research_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", jobId).neq("status", "cancelled"), "title_research_jobs");
   if (error) console.error(`[title ${jobId.slice(0, 8)}] job update failed:`, error.message);
 }
 
@@ -106,30 +108,30 @@ async function logSearch(supabase: SupabaseClient, jobId: string, userId: string
   provider: string; county: string | null; queryType: string; queryValue: string; status: string; resultCount: number; error?: string | null; sourceUrl?: string | null; depth?: number;
 }): Promise<boolean> {
   // unique(job, provider, query_type, query_value): a repeated query is a no-op, which is also how the bounded loop dedupes.
-  const { error } = await supabase.from("title_search_log").upsert({
+  const { error } = await checkedQuery(supabase.from("title_search_log").upsert({
     job_id: jobId, user_id: userId, provider: entry.provider, county: entry.county, query_type: entry.queryType, query_value: entry.queryValue,
     status: entry.status, result_count: entry.resultCount, error_message: entry.error ?? null, source_url: entry.sourceUrl ?? null, depth: entry.depth ?? 0, searched_at: new Date().toISOString(),
-  }, { onConflict: "job_id,provider,query_type,query_value", ignoreDuplicates: false });
+  }, { onConflict: "job_id,provider,query_type,query_value", ignoreDuplicates: false }), "title_search_log");
   if (error) console.error(`[title ${jobId.slice(0, 8)}] search log failed:`, error.message);
   return !error;
 }
 
 async function alreadySearched(supabase: SupabaseClient, jobId: string, provider: string, queryType: string, queryValue: string): Promise<boolean> {
-  const { data } = await supabase.from("title_search_log").select("id").eq("job_id", jobId).eq("provider", provider).eq("query_type", queryType).eq("query_value", queryValue).limit(1);
+  const { data } = await checkedQuery(supabase.from("title_search_log").select("id").eq("job_id", jobId).eq("provider", provider).eq("query_type", queryType).eq("query_value", queryValue).limit(1), "title_search_log");
   return !!data && data.length > 0;
 }
 
 async function addReviewItem(supabase: SupabaseClient, jobId: string, userId: string, kind: string, title: string, detail: string | null, payload: Record<string, unknown>): Promise<void> {
-  const { data } = await supabase.from("title_review_items").select("id").eq("job_id", jobId).eq("kind", kind).eq("title", title).limit(1);
+  const { data } = await checkedQuery(supabase.from("title_review_items").select("id").eq("job_id", jobId).eq("kind", kind).eq("title", title).limit(1), "title_review_items");
   if (data && data.length > 0) return;
-  await supabase.from("title_review_items").insert({ job_id: jobId, user_id: userId, kind, title, detail, payload_json: payload });
+  await checkedQuery(supabase.from("title_review_items").insert({ job_id: jobId, user_id: userId, kind, title, detail, payload_json: payload }), "title_review_items");
 }
 
 async function appendLimitation(supabase: SupabaseClient, jobId: string, limitation: string): Promise<void> {
-  const { data } = await supabase.from("title_research_jobs").select("limitations_json").eq("id", jobId).maybeSingle();
+  const { data } = await checkedQuery(supabase.from("title_research_jobs").select("limitations_json").eq("id", jobId).maybeSingle(), "title_research_jobs");
   const current = ((data?.limitations_json as string[] | null) ?? []);
   if (current.includes(limitation)) return;
-  await supabase.from("title_research_jobs").update({ limitations_json: [...current, limitation] }).eq("id", jobId);
+  await checkedQuery(supabase.from("title_research_jobs").update({ limitations_json: [...current, limitation] }).eq("id", jobId), "title_research_jobs");
 }
 
 function categoryForCodaType(docType: string): string {
@@ -155,9 +157,10 @@ export async function resolveWell(supabase: SupabaseClient, deps: TitleJobDeps, 
   const wbUrl = `${ewa.PDA_BASE}/wellboreQueryAction.do?searchArgs.apiNoPrefixArg=${api.slice(2, 5)}&searchArgs.apiNoSuffixArg=${api.slice(5, 10)}`;
   sourceUrls.push({ source: "trrc_ewa", url: wbUrl, retrievedAt: deps.now(), status: wb.error ? "failed" : wb.found ? "success" : "empty" });
   await logSearch(supabase, jobId, userId, { provider: "trrc_ewa", county: well.county_name, queryType: "api", queryValue: api, status: wb.error ? "failed" : wb.found ? "success" : "empty", resultCount: wb.wells.length, error: wb.error ?? null, sourceUrl: wbUrl });
-  if (wb.found) {
+  const matchedWell = wb.wells.find(w => canonicalApi10(w.api_no) === canonicalApi10(api));
+  if (wb.found && matchedWell) {
     found = true;
-    const first = wb.wells[0] as Record<string, unknown> | undefined;
+    const first = matchedWell as Record<string, unknown>;
     patch.well_name = pick(first, ["lease_name", "well_name"]);
     patch.well_number = pick(first, ["well_no", "well_number"]);
     patch.operator_name = wb.operator ?? pick(first, ["operator_name", "operator"]);
@@ -218,7 +221,7 @@ export async function resolveWell(supabase: SupabaseClient, deps: TitleJobDeps, 
   patch.retrieved_at = deps.now();
   patch.resolution_status = found ? "resolved" : (wb.error && gis.error) ? "error" : "not_found";
   patch.resolution_error = found ? null : (wb.error ?? gis.error ?? "Well not found in TRRC wellbore, GIS, permit, or completion records");
-  await supabase.from("title_job_wells").update(patch).eq("id", well.id);
+  await checkedQuery(supabase.from("title_job_wells").update(patch).eq("id", well.id), "title_job_wells");
 }
 
 async function storeRemoteDocument(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wellId: string | null, doc: { url: string; source: string; sourceIdentifier: string; category: string; fileName: string }): Promise<void> {
@@ -239,21 +242,21 @@ async function storeRemoteDocument(supabase: SupabaseClient, deps: TitleJobDeps,
     return;
   }
   const hash = sha256(fetched.bytes);
-  const { data: existing } = await supabase.from("title_documents").select("id").eq("job_id", jobId).eq("content_hash", hash).maybeSingle();
+  const { data: existing } = await checkedQuery(supabase.from("title_documents").select("id").eq("job_id", jobId).eq("content_hash", hash).maybeSingle(), "title_documents");
   if (existing) return; // same bytes already stored for this job (e.g. two wells sharing a unit plat)
 
   const ext = isPdf ? "pdf" : contentType.includes("tiff") ? "tif" : contentType.includes("png") ? "png" : contentType.includes("jpeg") ? "jpg" : "bin";
   const storagePath = `${userId}/${jobId}/${hash}.${ext}`;
-  const { error: upErr } = await supabase.storage.from(TITLE_DOCUMENTS_BUCKET).upload(storagePath, fetched.bytes, { contentType, upsert: true });
+  const { error: upErr } = await checkedQuery(supabase.storage.from(TITLE_DOCUMENTS_BUCKET).upload(storagePath, fetched.bytes, { contentType, upsert: true }), "title storage");
   if (upErr) {
     await logSearch(supabase, jobId, userId, { provider: doc.source, county: null, queryType: "document", queryValue: doc.url, status: "failed", resultCount: 0, error: `storage upload failed: ${upErr.message}`, sourceUrl: doc.url });
     return;
   }
-  await supabase.from("title_documents").insert({
+  await checkedQuery(supabase.from("title_documents").insert({
     job_id: jobId, user_id: userId, well_id: wellId, source: doc.source, source_identifier: doc.sourceIdentifier, source_url: doc.url, retrieved_at: deps.now(),
     document_category: doc.category, file_name: doc.fileName.replace(/\.pdf$/, `.${ext}`), mime_type: contentType, byte_size: fetched.bytes.length, storage_path: storagePath,
     content_hash: hash, ocr_status: "pending", extraction_status: "pending",
-  });
+  }), "title_documents");
   await logSearch(supabase, jobId, userId, { provider: doc.source, county: null, queryType: "document", queryValue: doc.url, status: "success", resultCount: 1, sourceUrl: doc.url });
 }
 
@@ -300,28 +303,28 @@ export async function storeIndexEntries(supabase: SupabaseClient, jobId: string,
   const grantorNames = new Set<string>();
   for (const r of entries) {
     const dedupe = createHash("sha1").update(["index", county, r.doc_number, r.recorded_date, r.grantor, r.grantee, r.doc_type].join("|")).digest("hex");
-    const { data: existing } = await supabase.from("title_instruments").select("id").eq("job_id", jobId).eq("dedupe_key", dedupe).limit(1);
+    const { data: existing } = await checkedQuery(supabase.from("title_instruments").select("id").eq("job_id", jobId).eq("dedupe_key", dedupe).limit(1), "title_instruments");
     if (existing && existing.length > 0) continue;
     const type = normalizeDocType(r.doc_type ?? "");
-    const { data: inst, error } = await supabase.from("title_instruments").insert({
+    const { data: inst, error } = await checkedQuery(supabase.from("title_instruments").insert({
       job_id: jobId, run_id: null, instrument_type: type, instrument_date: null, recorded_date: r.recorded_date || null,
       doc_number: r.doc_number || null, instrument_number: r.doc_number || null, book_volume_page: r.book_volume_page || null, county,
       source: "county_record_index", source_url_or_doc_id: sourceUrl, evidence_level: "county_index_metadata", instrument_content_verified: false,
       extraction_json: { index: r }, dedupe_key: dedupe,
-    }).select("id").single();
+    }).select("id").single(), "title_instruments");
     if (error || !inst) continue;
     inserted++;
     const parties = [
       ...splitIndexNames(r.grantor ?? "").map(n => ({ job_id: jobId, run_id: null, instrument_id: inst.id, party_name: n, party_name_verbatim: r.grantor, role: "grantor", capacity: "unknown" })),
       ...splitIndexNames(r.grantee ?? "").map(n => ({ job_id: jobId, run_id: null, instrument_id: inst.id, party_name: n, party_name_verbatim: r.grantee, role: "grantee", capacity: "unknown" })),
     ];
-    if (parties.length > 0) await supabase.from("title_instrument_parties").insert(parties);
+    if (parties.length > 0) await checkedQuery(supabase.from("title_instrument_parties").insert(parties), "title_instrument_parties");
     for (const n of splitIndexNames(r.grantor ?? "")) grantorNames.add(n);
-    const { data: tract } = await supabase.from("title_instrument_tracts").insert({
+    const { data: tract } = await checkedQuery(supabase.from("title_instrument_tracts").insert({
       job_id: jobId, run_id: null, instrument_id: inst.id, county, legal_description: r.legal_description || null, legal_description_verbatim: r.legal_description || null, interest_type: "unknown",
-    }).select("id").single();
+    }).select("id").single(), "title_instrument_tracts");
     if (tract) {
-      await supabase.from("title_claims").insert({ job_id: jobId, run_id: null, instrument_id: inst.id, instrument_tract_id: tract.id, canonical_asset_id: null, effect: effectForType(type), interest_type: "unknown", notes: "County index entry — not interpreted" });
+      await checkedQuery(supabase.from("title_claims").insert({ job_id: jobId, run_id: null, instrument_id: inst.id, instrument_tract_id: tract.id, canonical_asset_id: null, effect: effectForType(type), interest_type: "unknown", notes: "County index entry — not interpreted" }), "title_claims");
     }
   }
   return { inserted, grantorNames: Array.from(grantorNames) };
@@ -390,18 +393,18 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
 // ─── Orchestration ───────────────────────────────────────────────────────────
 
 export async function runTitleResearchJob(jobId: string, supabase: SupabaseClient, deps: TitleJobDeps = defaultDeps): Promise<void> {
-  const { data: job } = await supabase.from("title_research_jobs").select("id, user_id, status, attempt_count").eq("id", jobId).single();
+  const { data: job } = await checkedQuery(supabase.from("title_research_jobs").select("id, user_id, status, attempt_count").eq("id", jobId).single(), "title_research_jobs");
   if (!job) return;
   const userId = job.user_id as string;
 
   const isCancelled = async () => {
-    const { data } = await supabase.from("title_research_jobs").select("status").eq("id", jobId).single();
+    const { data } = await checkedQuery(supabase.from("title_research_jobs").select("status").eq("id", jobId).single(), "title_research_jobs");
     return data?.status === "cancelled";
   };
 
   await setJob(supabase, jobId, { status: "resolving_wells", stage_detail: "Resolving wells with TRRC", progress_percent: 5, attempt_count: (job.attempt_count as number) + 1, started_at: new Date().toISOString() });
 
-  const { data: wellRows } = await supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number").eq("job_id", jobId);
+  const { data: wellRows } = await checkedQuery(supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number").eq("job_id", jobId), "title_job_wells");
   const wells = ((wellRows ?? []) as JobWellRow[]).filter(w => !!w.api10);
   const pendingWells = wells.filter(w => w.resolution_status === "unresolved" || w.resolution_status === "error");
 
@@ -412,13 +415,14 @@ export async function runTitleResearchJob(jobId: string, supabase: SupabaseClien
     try {
       await resolveWell(supabase, deps, jobId, userId, w);
     } catch (e) {
-      await supabase.from("title_job_wells").update({ resolution_status: "error", resolution_error: String(e).slice(0, 300) }).eq("id", w.id);
+      if (e instanceof PipelinePersistenceError) throw e;
+      await checkedQuery(supabase.from("title_job_wells").update({ resolution_status: "error", resolution_error: String(e).slice(0, 300) }).eq("id", w.id), "title_job_wells");
     }
   }
 
   if (await isCancelled()) return;
   await setJob(supabase, jobId, { status: "searching_records", stage_detail: "Searching county records", progress_percent: 60 });
-  const { data: refreshed } = await supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number").eq("job_id", jobId);
+  const { data: refreshed } = await checkedQuery(supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number").eq("job_id", jobId), "title_job_wells");
   await searchCountyRecordsForJob(supabase, deps, jobId, userId, (refreshed ?? []) as JobWellRow[]);
 
   if (await isCancelled()) return;

@@ -14,7 +14,7 @@
  *     findings, a comparable-well production table, and TVDSS — the branch
  *     the live TRRC outage prevents exercising for real right now.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { TrrcDueDiligenceRun } from "../types";
 import type { TrrcManifest as _TrrcManifestUnused } from "../manifest-builder";
 import type { GeologicalAssessmentResult } from "../geology/types";
@@ -45,7 +45,10 @@ const run = {
   updated_at: new Date().toISOString(),
 } as unknown as TrrcDueDiligenceRun;
 
+afterEach(() => vi.unstubAllGlobals());
+
 beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("Offline regression: live network disabled"); }));
   vi.resetModules();
   vi.doUnmock("../geology");
 });
