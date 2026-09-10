@@ -5,14 +5,15 @@
  * (title_analyses) plus its findings (title_findings). The returned object
  * is the single source every report surface renders from.
  *
- * Idempotent: an input fingerprint (instrument/claim ids + review states +
+ * Idempotent: an input fingerprint (complete material inputs +
  * scope) is stored with each version; re-running on unchanged inputs
  * returns the existing latest version instead of writing another.
  */
 
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Fraction } from "./fraction";
+import {storedTitleFraction,titleInputFingerprint} from "./analysis-input";
 import { buildOwnershipGraph, type GraphClaim, type GraphInstrument, type GraphParty } from "./ownership-graph";
 import { buildCrossCuttingFindings, aggregateStatus, sortFindings } from "./chain-findings";
 import { loadJobBundle, formattedApi } from "./job-store";
@@ -58,7 +59,9 @@ export function chronologyFromBranches(events: Array<{ event: ChainEvent; tractL
 }
 
 export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: string, jobId: string): Promise<AnalysisResult> {
-  const bundle = await loadJobBundle(supabase, jobId, userId);
+  let bundle;
+  try { bundle = await loadJobBundle(supabase, jobId, userId); }
+  catch(error) { return {ok:false,status:503,error:error instanceof Error?error.message:"Title inputs could not be loaded"}; }
   if (!bundle) return { ok: false, error: "Job not found or access denied.", status: 404 };
   const { job, wells, tracts, associations, documents, reviewItems, searchLog } = bundle;
 
@@ -68,6 +71,9 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
     supabase.from("title_instrument_tracts").select("*").eq("job_id", jobId),
     supabase.from("title_claims").select("*").eq("job_id", jobId),
   ]);
+  for(const [name,result] of [["instruments",instRes],["parties",partyRes],["tracts",tractRes],["claims",claimRes]] as const){
+    if(result.error)return {ok:false,error:`Could not load title ${name}: ${result.error.message}`,status:503};
+  }
   const instRows = (instRes.data ?? []) as Record<string, unknown>[];
   const partyRows = (partyRes.data ?? []) as Record<string, unknown>[];
   const tractRows = (tractRes.data ?? []) as Record<string, unknown>[];
@@ -100,10 +106,11 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
   const tractsById = new Map(tractRows.map(r => [String(r.id), r]));
   const claims: GraphClaim[] = claimRows.map(r => {
     const t = tractsById.get(String(r.instrument_tract_id)) ?? {};
-    const num = (r.fraction_numerator ?? t.fraction_numerator) as number | string | null | undefined;
-    const den = (r.fraction_denominator ?? t.fraction_denominator) as number | string | null | undefined;
+    const fractionRow = r.fraction_numerator != null || r.fraction_denominator != null ? r : t;
+    const num = fractionRow.fraction_numerator;
+    const den = fractionRow.fraction_denominator;
     let fraction: Fraction | null = null;
-    if (num !== null && num !== undefined && den !== null && den !== undefined && Number(den) !== 0) fraction = new Fraction(BigInt(Number(num)), BigInt(Number(den)));
+    fraction = storedTitleFraction(num,den);
     return {
       id: String(r.id), instrumentId: String(r.instrument_id), instrumentTractId: String(r.instrument_tract_id), canonicalTractId: (r.canonical_asset_id as string | null) ?? null,
       effect: (r.effect as GraphClaim["effect"]) ?? "conveyance", interestType: ((r.interest_type ?? t.interest_type) as GraphClaim["interestType"]) ?? "unknown",
@@ -115,15 +122,16 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
   });
 
   // Fingerprint for idempotency.
-  const fingerprint = createHash("sha256").update(JSON.stringify({
-    scope: job.interest_scope, start: job.research_start_date, asOf: job.as_of_date,
-    instruments: instruments.map(i => i.id).sort(), claims: claims.map(c => `${c.id}:${c.canonicalTractId}:${c.reviewStatus}`).sort(),
-    parties: parties.map(p => `${p.id}:${p.canonicalPartyId}`).sort(), tracts: tracts.map(t => `${t.id}:${t.matchStatus}`).sort(),
-    associations: associations.map(a => `${a.id}:${a.reviewStatus}`).sort(), docs: documents.map(d => `${d.id}:${d.extraction_status}`).sort(),
-    schema: TITLE_CHAIN_SCHEMA_VERSION,
-  })).digest("hex");
-  const { data: latest } = await supabase.from("title_analyses").select("id, version, input_fingerprint, analysis_json").eq("job_id", jobId).order("version", { ascending: false }).limit(1).maybeSingle();
-  if (latest && latest.input_fingerprint === fingerprint) {
+  const byId=(rows:Record<string,unknown>[])=>[...rows].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+  const fingerprint = titleInputFingerprint({
+    algorithm:"complete-title-input-v1",schema:TITLE_CHAIN_SCHEMA_VERSION,
+    scope:job.interest_scope,start:job.research_start_date,asOf:job.as_of_date,limitations:job.limitations_json,
+    instruments:byId(instRows),parties:byId(partyRows),instrumentTracts:byId(tractRows),claims:byId(claimRows),
+    wells,tracts,associations,documents,reviewItems,searchLog,
+  });
+  const { data: latest, error: latestError } = await supabase.from("title_analyses").select("id, version, input_fingerprint, analysis_json").eq("job_id", jobId).order("version", { ascending: false }).limit(1).maybeSingle();
+  if(latestError)return {ok:false,error:`Could not load prior title analysis: ${latestError.message}`,status:503};
+  if (latest && latest.id === job.latest_analysis_id && latest.input_fingerprint === fingerprint) {
     return { ok: true, analysis: latest.analysis_json as TitleChainAnalysis, reused: true };
   }
 
@@ -185,30 +193,28 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
     statement: TITLE_CHAIN_REPORT_STATEMENT,
   };
 
-  const { error: insErr } = await supabase.from("title_analyses").insert({
+  const analysisRow = {
     id: analysisId, job_id: jobId, user_id: userId, version, schema_version: TITLE_CHAIN_SCHEMA_VERSION, status_classification: status, analysis_json: analysis, input_fingerprint: fingerprint,
-  });
-  if (insErr) return { ok: false, error: `Could not persist analysis: ${insErr.message}`, status: 500 };
-
-  if (findings.length > 0) {
-    await supabase.from("title_findings").insert(findings.map((f, i) => ({
+  };
+  const findingRows = findings.map((f, i) => ({
       job_id: jobId, run_id: null, analysis_id: analysisId, category: f.type === "SUCCESSION_EVIDENCE" ? "supporting" : ["OVER_CONVEYANCE", "CONFLICTING_CONVEYANCE", "FRACTION_INCONSISTENCY"].includes(f.type) ? "contradicting" : "gap",
       classification: "inferred", finding_type: f.type, title: f.title, description: f.explanation, severity: f.severity, affected_tract_id: f.affectedTractId,
       affected_interest_type: f.affectedInterestType, citations_json: f.citations, next_action: f.nextAction, display_order: i,
-    })));
-  }
-
-  // 027's title_assessments is unique on run_id (null for jobs), so replace the job's row explicitly rather than upserting.
-  await supabase.from("title_assessments").delete().eq("job_id", jobId);
-  await supabase.from("title_assessments").insert({
+    }));
+  const assessmentRow = {
     job_id: jobId, run_id: null, classification: status, confidence: verifiedOnConfirmed >= 5 ? "MODERATE" : verifiedOnConfirmed > 0 ? "LOW" : "INSUFFICIENT_DATA",
     confidence_dimensions: { verifiedInstruments: verifiedOnConfirmed, confirmedTracts: confirmedTracts.length, openReviewItems: analysis.reviewQueueOpenCount },
     diligence_implication: STATUS_DISPLAY[status], instrument_count: instruments.length, distinct_party_count: new Set(parties.map(p => p.canonicalPartyId ?? p.id)).size,
     earliest_instrument_date: chronology[0]?.sortDate ?? null, latest_instrument_date: chronology[chronology.length - 1]?.sortDate ?? null,
     unresolved_finding_count: findings.filter(f => f.severity !== "info").length, generated_at: analysis.generatedAt,
-  });
+  };
 
-  await supabase.from("title_research_jobs").update({ latest_analysis_id: analysisId, status: "complete", progress_percent: 100, completed_at: new Date().toISOString(), stage_detail: `Analysis v${version}` }).eq("id", jobId);
+  // One database transaction: any failed finding/assessment/job write rolls back the analysis.
+  const {error: publishError} = await supabase.rpc("publish_title_analysis", {
+    p_job_id:jobId, p_expected_latest:job.latest_analysis_id,
+    p_analysis:analysisRow, p_findings:findingRows, p_assessment:assessmentRow,
+  });
+  if(publishError)return {ok:false,status:503,error:`Title analysis was not published: ${publishError.message}`};
 
   return { ok: true, analysis, reused: false };
 }

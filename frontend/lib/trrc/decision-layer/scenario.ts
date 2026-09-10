@@ -11,7 +11,7 @@ export const DealAssumptionsSchema=z.object({
  from:Month,horizonMonths:z.number().int().min(1).max(600),
  oilUsdBbl:z.number().finite().nonnegative(),gasUsdMcf:z.number().finite().nonnegative(),
  revenueTaxFraction:z.number().finite().min(0).max(1),monthlyPositionDeductionsUsd:z.number().finite().nonnegative(),
- annualDiscountFraction:z.number().finite().min(0).max(1),minimumValueMarginFraction:z.number().finite().min(0).lt(1),askingPriceUsd:z.number().finite().nonnegative().nullable(),
+ annualDiscountFraction:z.number().finite().min(0).max(1),minimumValueMarginFraction:z.number().finite().min(0).lt(1).nullable(),askingPriceUsd:z.number().finite().nonnegative().nullable(),
 }).strict();
 export function evaluateRoyaltyScenario(partnerInput:unknown,assumptionInput:unknown){
  const partner=normalizePartnerInput(partnerInput),a=DealAssumptionsSchema.parse(assumptionInput);
@@ -37,8 +37,8 @@ export function evaluateRoyaltyScenario(partnerInput:unknown,assumptionInput:unk
   const y=Number(cursor.slice(0,4)),m=Number(cursor.slice(5));cursor=m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`;
  }
  if(!Number.isFinite(presentValue))throw Error("Nonfinite scenario value");
- const limit=presentValue>0?presentValue*(1-a.minimumValueMarginFraction):null;
+ const limit=presentValue>0&&a.minimumValueMarginFraction!==null?presentValue*(1-a.minimumValueMarginFraction):null;
  return {...metadata,status:"calculated" as const,reason:null,presentValueUsd:presentValue,maximumPriceUnderAssumptionsUsd:limit,
- priceComparison:a.askingPriceUsd===null?"ASKING_PRICE_UNAVAILABLE":limit===null?"NONPOSITIVE_MODELED_VALUE":a.askingPriceUsd<=limit?"WITHIN_ASSUMPTION_LIMIT":"EXCEEDS_ASSUMPTION_LIMIT",cashflows,
+ priceComparison:a.minimumValueMarginFraction===null?"BUYER_CRITERION_UNAVAILABLE":a.askingPriceUsd===null?"ASKING_PRICE_UNAVAILABLE":limit===null?"NONPOSITIVE_MODELED_VALUE":a.askingPriceUsd<=limit?"WITHIN_ASSUMPTION_LIMIT":"EXCEEDS_ASSUMPTION_LIMIT",cashflows,
  limitations:["Conditional scenario value, not evidenced ownership or an acquisition recommendation.","Minimum margin means (present value minus purchase price) divided by present value.","Oil and gas only; no NGL, additional reserves or terminal value is inferred.","Amounts use month-end discounting from the explicit scenario start; all deductions and taxes are supplied assumptions."]};
 }

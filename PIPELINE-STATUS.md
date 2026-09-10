@@ -1,8 +1,10 @@
 # MineralFlow production pipeline status
 
-**OVERALL: IN PROGRESS — production completion percentage not yet verifiable.**
+**GOLD reports validated: 0/10**
 
-A percentage will be calculated from agreed, testable GOLD Decision Record acceptance gates. Passing a schema with disclosed missing data does not establish investment readiness. The available repository does not contain the GOLD sample's complete schema/ruleset 2.0.0 implementation. This tracker uses observed results, not the example 43% or 42/50 figures.
+Latest GOLD2 cycle: all ten retained-source cases replayed; zero complete GOLD2 reports validated. Exact per-API acceptance errors are retained in `benchmarks/gold2-latest-validation.json`. This is a replay of captured retrieval, not a new live-source run. The integrated draft connects reviewed mineral ownership, partner reconciliation, royalty cashflows and decision predicates, but remains explicitly unvalidated. Forecast/geology mappings, closing-risk classification, charts and full report acceptance remain incomplete. Frontend regression and TypeScript checks pass. Migration 029 has not been tested on a running database. A transient workspace disconnection recovered; changes remain local for Claude to push.
+
+Only complete GOLD 2.0 reports that pass the executable contract and audit gates advance this count. Legitimate unavailable-data failures are recorded separately. Prior test totals, GOLD 1.0 renders and schema-only passes do not advance this metric.
 
 Updated: 2026-09-10. Working branch: `audit/decision-record-reliability`, based on `feat/title-chain-research` at `0e281837`.
 
@@ -21,9 +23,18 @@ Updated: 2026-09-10. Working branch: `audit/decision-record-reliability`, based 
 | Decision Record | IN PROGRESS | Downloadable evidence JSON added. Standalone 18-section GOLD 1.0 presentation and PDF/JSON command added. Reviewed-position handoffs and reference 2.0 rule parity remain incomplete. |
 | Benchmark regression suite | IN PROGRESS | Ten distinct real APIs, captured replay and CI added. Standalone GOLD rendering and worker handoff replay pass; broader live coverage and populated acquisition acceptance remain. |
 
-**CURRENT TASK:** Execute the Novi integration decision layer: cited partner data/forecasts + regulatory/title evidence → reconciliation → conditional deal calculations → exceptions and professional review. Production reconciliation and explicit-assumption royalty scenarios now run; the integrated acquisition decision remains incomplete.
+**CURRENT TASK:** Complete the integrated GOLD2 draft’s remaining forecast/geology fields, closing-risk classification and charts, then validate the actual exported report against the executable contract.
 
 **LAST VERIFIED:**
+
+- GOLD2 cycle: contract covers required fields, chart inputs, calculation methods, disclosures and decision predicates. Missing engine connections are acceptance failures.
+- Reviewed graph holding → exact NMA/NRI → existing partner cashflow engine → commodity price grid is tested. Synthetic fixture: 40 NMA, NRI 3/256, two-month base PV $187.50; these are test values, not actual asset values.
+- New `decision:gold2-draft` CLI recomputes its work product and rejects modified outputs. It emits an explicitly unvalidated draft, not a GOLD2-certified report.
+- Novi transport interface validates cited payloads, subject API, cancellation and timeout behavior; no live Novi mapping/credentials are configured.
+- Current frontend full run: 636 tests passed; subsequently added stale-valuation rejection and targeted handoff/ownership tests pass. TypeScript passes after the fixture correction.
+- Atomic title-publication migration 029 is written and required by the new title analysis caller; database execution remains unverified. Complete-input fingerprints and exact integer parsing prevent stale/rounded ownership reuse.
+
+Historical checks below remain diagnostic, not GOLD2 passes:
 
 - 17 partner integration regressions pass: 10 reconciliation and 7 conditional royalty-scenario cases. The CLI executes retained synthetic evidence into a cited JSON work product.
 
@@ -48,9 +59,9 @@ Updated: 2026-09-10. Working branch: `audit/decision-record-reliability`, based 
 | 42-329-01040 | Wellbore and GIS timed out; production lacked identifiers. | Separate recheck succeeded; original outage retained. Current gas lease 131160 used, not first historical oil row. |
 | 42-151-00013 | Production retrieval timed out. | Production unavailable. Earlier diagnostic responses also showed oil no-results / gas Ewa_1011 rejection. |
 
-**NEXT ACTION:** Fix title evidence read/cache/publication defects before connecting reviewed ownership/NRI. Add completion/geology/cost mappings, measured exceptions and closing rules; wire the integrated result into GOLD and bulk/UI outputs. Actual Novi field mapping awaits an agreed payload.
+**NEXT ACTION:** Connect calendar-consistent subject forecasts, completion/geology evidence, measured exceptions and independent closing rules to the integrated draft; implement and inspect GOLD2 charts, then rerun the ten-case acceptance gate. Validate migration 029 on a test database.
 
-**ACCESS / IMPLEMENTATION BLOCKERS:** Standalone public retrieval does not require Supabase. Browser installation downloads timed out; browser adapters are covered by regression tests but are not live-verified here. No actual Novi payload/credentials are configured. A MineralFlow-owned production/forecast interchange is implemented; it is not an actual Novi schema. GOLD 2.0 is represented by a sample, not complete executable predicates. Reviewed title/ownership and position-economics linkage are code gaps that remain to be implemented.
+**ACCESS / IMPLEMENTATION BLOCKERS:** Standalone public retrieval does not require Supabase. Browser installation downloads timed out; browser adapters are covered by regression tests but are not live-verified here. No actual Novi payload/credentials are configured. A MineralFlow-owned production/forecast interchange is implemented; it is not an actual Novi schema. GOLD 2.0 is represented by a sample, not complete executable predicates. Reviewed mineral-position/economics linkage is now implemented in the draft; live evidence and complete report acceptance remain unverified.
 
 See `AUDIT-DECISION-PIPELINE.md` for implementation details, validation boundaries and remaining work. See `benchmarks/README.md` for repeatable commands and retained evidence.
 

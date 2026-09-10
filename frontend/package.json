@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "gold:report": "node --import tsx scripts/gold-report.ts",
     "gold:benchmark": "node --import tsx scripts/benchmark-gold.ts",
-    "decision:reconcile": "node --import tsx scripts/reconcile-partner.ts"
+    "decision:reconcile": "node --import tsx scripts/reconcile-partner.ts",
+    "gold2:benchmark": "node --import tsx scripts/benchmark-gold2.ts",
+    "decision:gold2-draft": "node --import tsx scripts/gold2-draft.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

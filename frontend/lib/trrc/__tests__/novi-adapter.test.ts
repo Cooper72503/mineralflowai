@@ -1,0 +1,11 @@
+import {it,expect} from "vitest";
+import {createNoviAdapter,unavailableNoviAdapter} from "../decision-layer/novi-adapter";
+import {payloadHash,type PartnerInput} from "../decision-layer/partner-input";
+const api="4216502733";
+function payload(subject=api):PartnerInput{const data={kind:"well_monthly_production",api:subject,lease:"1",district:"8",month:"2026-01",oil:{value:1,unit:"bbl"},gas:{value:0,unit:"Mcf"}};return {contract:"mineralflow-partner-production-0.1",mode:"partner_export",sources:[{id:"s",provider:"test",url:"https://example.invalid/fixture",retrievedAt:"2026-09-10T00:00:00Z",sha256:payloadHash(data),data}],observations:[{sourceId:"s",pointer:""}]};}
+it("discloses an unconfigured feed without issuing a request",async()=>{expect(await unavailableNoviAdapter().readWell(api)).toMatchObject({status:"unavailable",reasonCode:"partner_feed_unavailable",retryable:false});});
+it("normalizes API before calling the injected transport and accepts cited evidence",async()=>{let requested="";const adapter=createNoviAdapter({version:"test",fetchWell:async a=>{requested=a;return payload();},mapResponse:r=>r as PartnerInput});expect((await adapter.readWell("42-165-02733")).status).toBe("available");expect(requested).toBe(api);});
+it("rejects another well's response",async()=>{const adapter=createNoviAdapter({version:"test",fetchWell:async()=>payload("4243934308"),mapResponse:r=>r as PartnerInput});expect(await adapter.readWell(api)).toMatchObject({status:"unavailable",reasonCode:"source_query_failed"});});
+it("bounds a transport that ignores cancellation",async()=>{const adapter=createNoviAdapter({version:"test",fetchWell:()=>new Promise(()=>{}),mapResponse:()=>null});expect(await adapter.readWell(api,{timeoutMs:5})).toMatchObject({status:"unavailable",reasonCode:"source_query_failed"});});
+it("does not disclose tokens in transport exceptions",async()=>{const adapter=createNoviAdapter({version:"test",fetchWell:async()=>{throw Error("token=SECRET");},mapResponse:()=>null});expect(JSON.stringify(await adapter.readWell(api))).not.toContain("SECRET");});
+it("rejects invalid API input before retrieval",async()=>{let called=false;const adapter=createNoviAdapter({version:"test",fetchWell:async()=>{called=true;},mapResponse:()=>null});await expect(adapter.readWell("123")).rejects.toThrow(/Invalid Texas/);expect(called).toBe(false);});

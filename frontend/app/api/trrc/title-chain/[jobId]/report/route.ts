@@ -23,8 +23,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const format = request.nextUrl.searchParams.get("format") ?? "view";
   const versionParam = request.nextUrl.searchParams.get("version");
 
-  let query = supabase.from("title_analyses").select("id, version, analysis_json").eq("job_id", jobId).eq("user_id", user.id).order("version", { ascending: false }).limit(1);
-  if (versionParam && /^\d+$/.test(versionParam)) query = supabase.from("title_analyses").select("id, version, analysis_json").eq("job_id", jobId).eq("user_id", user.id).eq("version", Number(versionParam)).limit(1);
+  if(versionParam!==null&&(!/^[1-9]\d*$/.test(versionParam)||!Number.isSafeInteger(Number(versionParam))))return NextResponse.json({ok:false,error:"Invalid analysis version."},{status:400});
+  const {data:job,error:jobError}=await supabase.from("title_research_jobs").select("latest_analysis_id").eq("id",jobId).eq("user_id",user.id).maybeSingle();
+  if(jobError)return NextResponse.json({ok:false,error:"Could not load published title analysis."},{status:503});
+  if(!job?.latest_analysis_id)return NextResponse.json({ok:false,error:"No published analysis for this job."},{status:404});
+  let query = supabase.from("title_analyses").select("id, version, analysis_json").eq("job_id", jobId).eq("user_id", user.id).eq("id",job.latest_analysis_id).limit(1);
+  if(versionParam)query=supabase.from("title_analyses").select("id, version, analysis_json").eq("job_id",jobId).eq("user_id",user.id).eq("version",Number(versionParam)).limit(1);
   const { data, error } = await query;
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   const row = data?.[0];

@@ -171,7 +171,8 @@ export interface JobBundle {
 
 export async function loadJobBundle(supabase: SupabaseClient, jobId: string, userId: string): Promise<JobBundle | null> {
   const { data: job, error } = await supabase.from("title_research_jobs").select("*").eq("id", jobId).eq("user_id", userId).maybeSingle();
-  if (error || !job) return null;
+  if(error)throw new Error(`Title job load failed: ${error.message}`);
+  if (!job) return null;
 
   const [wells, tracts, associations, documents, reviewItems, searchLog, analyses] = await Promise.all([
     supabase.from("title_job_wells").select("*").eq("job_id", jobId).order("created_at", { ascending: true }),
@@ -180,8 +181,12 @@ export async function loadJobBundle(supabase: SupabaseClient, jobId: string, use
     supabase.from("title_documents").select("id, job_id, user_id, well_id, source, source_identifier, source_url, retrieved_at, document_category, file_name, mime_type, byte_size, storage_path, content_hash, page_count, has_text_layer, ocr_status, extraction_status, extraction_error, created_at").eq("job_id", jobId).order("created_at", { ascending: true }),
     supabase.from("title_review_items").select("*").eq("job_id", jobId).order("created_at", { ascending: true }),
     supabase.from("title_search_log").select("*").eq("job_id", jobId).order("searched_at", { ascending: true }),
-    supabase.from("title_analyses").select("id, version, status_classification, analysis_json, created_at").eq("job_id", jobId).order("version", { ascending: false }).limit(1),
+    supabase.from("title_analyses").select("id, version, status_classification, analysis_json, created_at").eq("job_id", jobId).eq("id", job.latest_analysis_id ?? "00000000-0000-0000-0000-000000000000").limit(1),
   ]);
+
+  for(const [name,result] of [["wells",wells],["tracts",tracts],["associations",associations],["documents",documents],["review items",reviewItems],["search log",searchLog],["analyses",analyses]] as const){
+    if(result.error)throw new Error(`Title ${name} load failed: ${result.error.message}`);
+  }
 
   return {
     job: job as JobRow,

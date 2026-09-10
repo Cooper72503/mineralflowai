@@ -22,3 +22,5 @@ describe("partner forecast → explicit royalty scenario",()=>{
  it("does not mix model versions or extrapolate past the supplied horizon",()=>{const f=fixture();f.partner.sources[0].data[4].modelVersion="other";refresh(f);expect(evaluateRoyaltyScenario(f.partner,f.assumptions).reason).toMatch(/mixes model/);const g=fixture();g.assumptions.horizonMonths=3;expect(evaluateRoyaltyScenario(g.partner,g.assumptions).presentValueUsd).toBeNull();});
  it("requires gross-well volume basis to avoid applying NRI twice",()=>{const f=fixture();f.partner.sources[0].data[3].volumeBasis="net_interest";refresh(f);expect(()=>evaluateRoyaltyScenario(f.partner,f.assumptions)).toThrow();});
 });
+
+it("calculates value but withholds buy price when the buyer margin is absent",()=>{const f=fixture();const r=evaluateRoyaltyScenario(f.partner,{...f.assumptions,minimumValueMarginFraction:null});expect(r.presentValueUsd).toBe(2000);expect(r.maximumPriceUnderAssumptionsUsd).toBeNull();expect(r.priceComparison).toBe("BUYER_CRITERION_UNAVAILABLE");});

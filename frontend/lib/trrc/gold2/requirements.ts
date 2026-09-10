@@ -1,0 +1,23 @@
+/** Versioned acceptance requirements derived from sample pages, with explicit implementation methods. */
+export const GOLD2_CALCULATIONS=[
+ {id:"ownership_bridge",page:12,method:"mineral_fraction_times_reviewed_acreage_participation_times_lease_royalty_v1",inputs:["ownership.mineral_fraction","ownership.gross_acres","ownership.unit_acres","ownership.tract_participation","ownership.lease_royalty"],outputs:["ownership.net_mineral_acres","ownership.nri"]},
+ {id:"production_reconciliation",page:17,method:"same_period_complete_membership_phase_reconciliation_v1",inputs:["production.subject_monthly","production.membership_scope","production.lease_monthly","production.reporting_period","production.variance_threshold"],outputs:["production.vendor_lease_sum","production.regulator_lease_total","production.variance_pct"]},
+ {id:"commodity_scenarios",page:2,method:"partner_forecast_royalty_month_end_discount_v1",inputs:["ownership.nri","economics.price_deck","economics.costs","economics.tax_assumptions","economics.discount_rate","economics.horizon"],outputs:["economics.base_value","economics.downside_value","economics.upside_value","economics.monthly_cashflows"]},
+ {id:"evidence_waterfall",page:2,method:"base_minus_nonoverlapping_measured_exposure_v1",inputs:["economics.base_value","economics.measured_exposure"],outputs:["economics.evidence_adjusted_value"]},
+ {id:"combined_risk_scenario",page:2,method:"downside_minus_nonoverlapping_measured_exposure_v1",inputs:["economics.downside_value","economics.measured_exposure"],outputs:["economics.risk_adjusted_value"]},
+ {id:"buyer_limit",page:2,method:"positive_underwrite_value_times_one_minus_supplied_margin_v1",inputs:["economics.underwrite_basis","economics.minimum_margin"],outputs:["economics.maximum_buy_price"]},
+ {id:"sensitivity",page:3,method:"same_cashflow_engine_fixed_ownership_price_grid_v1",inputs:["economics.price_deck","ownership.nri","economics.minimum_margin"],outputs:["economics.sensitivity"]},
+ {id:"confidence",page:6,method:"minimum_decision_material_domain_v1",inputs:["decision.confidence_domains"],outputs:["decision.confidence"]},
+ {id:"posture_and_closing",page:13,method:"gold2_rules_2.0.0",inputs:["ownership.nri","economics.base_value","economics.asking_price","title.exceptions","production.variance_pct"],outputs:["decision.posture","decision.closing_readiness","decision.rule_trace","decision.closing_rule_trace"]},
+] as const;
+export const GOLD2_DISCLOSURES=[
+ {id:"evidence_scope",text:"Every source inventory distinguishes checked-found, checked-empty, failed and unsearched sources. An empty or failed search does not establish absence outside the documented search scope."},
+ {id:"ownership",text:"Apparent holdings reflect reviewed instruments and their exact stated fractions. Collective grantees are not split by assumption. The earliest evidenced holder is not an established root of title. This report is not a marketable-title opinion."},
+ {id:"production_scope",text:"Regulator lease totals are not subject-well production. Vendor/regulator comparison requires a common reporting period and complete evidenced lease membership. Missing volumes are not zero."},
+ {id:"forecast",text:"Forecast provider, model version, generation time, phase units, horizon and assumptions must be disclosed. Supplemental lease Arps screening is distinct from a cited subject-well forecast."},
+ {id:"scenario_separation",text:"Commodity-price scenarios hold ownership fixed. Ownership/evidence scenarios hold commodity inputs fixed. Any combined scenario is explicitly named, with overlapping exposures excluded from double counting."},
+ {id:"buyer_criterion",text:"Maximum buy price is withheld without a supplied underwriting basis and buyer criterion. Asking price is not inferred. Model value does not authorize closing or cure an unmeasured blocker."},
+ {id:"cost_scope",text:"Costs follow the evaluated interest type. Mineral royalty cash flows do not inherit working-interest operating costs by default. Price, differential, tax, deduction, discount and timing assumptions remain labeled assumptions."},
+ {id:"decision_scope",text:"Acquisition posture, closing readiness and evidence confidence are separate outputs. The acquisition professional reviews exceptions and makes the final decision."},
+ {id:"implementation_rules",text:"The versioned MineralFlow predicates define this implementation. They preserve the sample's stated decision behavior without claiming access to undisclosed sample source code. Missing engine connections are implementation failures, not unavailable-data conclusions."},
+] as const;

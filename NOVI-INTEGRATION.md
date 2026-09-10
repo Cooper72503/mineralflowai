@@ -41,3 +41,13 @@ Both fixture files are synthetic, explicitly marked as such; they are not live N
 | Live Novi acceptance | No actual payload, credentials or supported field mapping supplied |
 
 Before a live connection can be claimed, agree on identifier granularity, well/lease membership and effective dates, gross/net and phase/unit semantics, production revision behavior, forecast scenario/model versions, data timestamps, source attribution and access terms. This list is a technical mapping requirement, not a request to rebuild Novi’s analytics.
+
+## GOLD2 integration cycle
+
+The MineralFlow-owned `NoviAdapter` separates authenticated transport from an agreed response mapper. Unconfigured feeds, timeouts, cancellations, wrong-well responses and invalid evidence return explicit failure states. The adapter does not guess Novi endpoints or claim a live connection. Its current normalized data contract covers production, lease membership and forecasts; completion/geology/cost payload mapping remains outstanding.
+
+`linkReviewedMineralPosition` selects one canonical party/holding/tract from the existing title graph and checks confirmed API-to-tract association, reviewed source scope, document hashes and exact fraction arithmetic. This implementation supports acreage-based pooled mineral royalties. It does not infer owners from API numbers, divide collective holdings, or substitute working-interest calculations.
+
+`evaluateGold2Economics` reuses the cashflow engine with that recomputed NRI for commodity scenarios and price sensitivity. Buyer margin may be explicitly absent: modeled value can still be computed, but maximum buy price is withheld. The GOLD2 draft rejects valuation periods preceding its as-of month.
+
+Run `npm run decision:gold2-draft -- INPUT.json OUTPUT.json` from `frontend` with the `Gold2Input` payload. This is an integrated development work product, explicitly `draft_not_validated`; remaining mappings, risk review and chart acceptance must be completed before a GOLD2 report can pass. Run `npm run gold2:benchmark` to retain exact failures for all ten captured cases and update the GOLD report count in `PIPELINE-STATUS.md`.
