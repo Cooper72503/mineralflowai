@@ -1,5 +1,5 @@
 {
-  "executedAt": "2026-09-10T17:31:34.118Z",
+  "executedAt": "2026-09-10T17:35:56.219Z",
   "mode": "retained-source-end-to-end-replay",
   "fixture": "benchmarks/latest-retrieval.json",
   "goldReportsValidated": 0,

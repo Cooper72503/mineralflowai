@@ -33,3 +33,5 @@ it("integrates source, ownership, reconciliation, economics and rules, while ret
 });
 
 it("rejects an old valuation start instead of presenting its value as current",()=>{const x=fixture();x.economics.assumptions.from="2026-01";expect(()=>assembleGold2Draft({api:"4216502733",asOf:"2026-09-10T12:00:00Z",runId:"test",attempts:x.f.regulator.attempts,title:x.title,position:x.position,partner:x.f.partner,reconciliationPolicy:x.f.policy,economics:x.economics})).toThrow(/Valuation start precedes/);});
+
+it("maps a selected forecast without requiring price or buyer assumptions",()=>{const x=fixture();const r=assembleGold2Draft({api:"4216502733",asOf:"2026-09-10T12:00:00Z",runId:"test",attempts:x.f.regulator.attempts,title:null,position:null,partner:x.f.partner,reconciliationPolicy:x.f.policy,economics:null,forecastSelection:{forecastId:x.economics.assumptions.forecastId,scenario:"base",from:"2026-10"}});expect(r.fields["forecast.remaining_oil"].value).toMatchObject({value:200,unit:"bbl",basis:"provided_contiguous_forecast_horizon_only"});expect(r.fields["economics.base_value"].value).toBeNull();});

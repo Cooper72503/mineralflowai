@@ -9,11 +9,13 @@ import {reconcilePartnerProduction,type ReconciliationPolicyInput} from "../deci
 import {evaluateGold2Economics,Gold2EconomicsInputSchema} from "./economics";
 import {evaluateGold2Rules,type Gold2RuleInput} from "./rules";
 import {GOLD2_FIELDS,GOLD2_VERSION} from "./contract";
+import {subjectProductionMetrics,subjectForecastMetrics,shiftMonth} from "./production";
 import {GOLD2_DISCLOSURES} from "./requirements";
 export interface Gold2Input {
  api:string;asOf:string;runId:string;attempts:LiteSourceAttempt[];
  title:TitleChainAnalysis|null;position:unknown|null;partner:unknown|null;
  reconciliationPolicy:ReconciliationPolicyInput|null;economics:unknown|null;
+ forecastSelection?:{forecastId:string;scenario:"base"|"downside"|"upside";from:string}|null;
 }
 export interface DraftField {
  status:"observed"|"calculated"|"unavailable"|"insufficient_data";value:unknown;reason:string|null;
@@ -56,8 +58,14 @@ export function assembleGold2Draft(input:Gold2Input){
  const partner=input.partner===null?null:normalizePartnerInput(input.partner);
  if(partner){
   if(partner.bundle.sources.some(s=>Date.parse(s.retrievedAt)>Date.parse(input.asOf)))throw Error("Report predates partner evidence");
-  const monthly=partner.months.filter(m=>m.api===api);
+  const monthly=partner.months.filter(m=>m.api===api&&m.month<input.asOf.slice(0,7));
   if(monthly.length)put("production.subject_monthly",monthly,"partner_evidence","/partner/months","select_subject_api_and_normalize_phase_units_v1");
+ }
+ const productionMetrics=partner?subjectProductionMetrics(partner.bundle,api,input.asOf):null;
+ if(productionMetrics){
+  put("production.subject_ttm_oil",productionMetrics.oil.value,"partner_evidence","/productionMetrics/oil",productionMetrics.method);
+  put("production.subject_ttm_gas",productionMetrics.gas.value,"partner_evidence","/productionMetrics/gas",productionMetrics.method);
+  if(productionMetrics.yoyOilDeclinePct!==null)put("production.subject_yoy_decline",{value:productionMetrics.yoyOilDeclinePct,unit:"percent",phase:"oil",through:productionMetrics.through},"partner_evidence","/productionMetrics",productionMetrics.method);
  }
  const reconciliation=partner&&input.reconciliationPolicy?reconcilePartnerProduction(regulator,partner.bundle,input.reconciliationPolicy):null;
  if(reconciliation){
@@ -87,7 +95,19 @@ export function assembleGold2Draft(input:Gold2Input){
   const base=economics.scenarios.base.scenario;
   if(base?.status==="calculated")put("economics.monthly_cashflows",base.cashflows,"provided_assumptions","/economics/scenarios/base/scenario/cashflows",base.method);
  }
- const rulesInput:Gold2RuleInput={identityResolved:regulator.fields["identity.api10"].value===api,positionIdentified:ownership.status==="calculated",nriComputable:ownership.status==="calculated",
+ const forecastSelection=input.forecastSelection??(economics?{forecastId:economics.settings.assumptions.forecastId,scenario:economics.settings.assumptions.scenario,from:economics.settings.assumptions.from}:null);
+ const forecastMetrics=partner&&forecastSelection?subjectForecastMetrics(partner.bundle,{api,asOf:input.asOf,...forecastSelection}):null;
+ if(forecastMetrics){
+  for(const [field,key] of Object.entries({"forecast.next12_oil":"next12Oil","forecast.next12_gas":"next12Gas","forecast.remaining_oil":"remainingOil","forecast.remaining_gas":"remainingGas"})){
+   const metric=forecastMetrics[key as "next12Oil"|"next12Gas"|"remainingOil"|"remainingGas"];
+   if(metric.value!==null)put(field,{value:metric.value,unit:field.endsWith("oil")?"bbl":"Mcf",from:forecastMetrics.selection.from,through:field.includes("remaining")?forecastMetrics.through:shiftMonth(forecastMetrics.selection.from,11),basis:field.includes("remaining")?"provided_contiguous_forecast_horizon_only":"next_12_months"},"partner_evidence",`/forecastMetrics/${key}`,forecastMetrics.method);
+   else fields[field]={status:"insufficient_data",value:null,reason:metric.reason,origin:null};
+  }
+  put("forecast.model_version",forecastMetrics.modelVersion,"partner_evidence","/forecastMetrics/modelVersion");
+  put("forecast.generated_at",forecastMetrics.generatedAt,"partner_evidence","/forecastMetrics/generatedAt");
+  put("forecast.method",{method:forecastMetrics.method,disclosure:forecastMetrics.disclosure},"partner_evidence","/forecastMetrics",forecastMetrics.method);
+ }
+ const rulesInput:Gold2RuleInput={identityResolved:regulator.fields["identity.api10"].value===api,positionIdentified:input.position!==null&&input.position!==undefined,nriComputable:ownership.status==="calculated",
   baseValue:economics?.values.base??null,askingPrice:economics?.settings.assumptions.askingPriceUsd??null,measuredExposure:null,
   // Closing classification of findings is a separate unfinished handoff: title sufficiency remains false.
   exceptions:[],productionReconciled:reconciliation?reconciliation.decisionEffect==="RECONCILIATION_PASSED":null,
@@ -97,7 +117,7 @@ export function assembleGold2Draft(input:Gold2Input){
  const decision=evaluateGold2Rules(rulesInput);
  for(const [field,key] of Object.entries({"decision.posture":"posture","decision.closing_readiness":"closing","decision.confidence":"confidence","decision.rule_trace":"trace","decision.closing_rule_trace":"closing"}))put(field,decision[key as keyof typeof decision],"decision_engine",`/decision/${key}`,"gold2_rules_2.0.0");
  put("decision.confidence_domains",rulesInput.confidenceDomains,"decision_engine","/rulesInput/confidenceDomains");
- return {schemaVersion:GOLD2_VERSION,state:"draft_not_validated" as const,input,inputHash:payloadHash(input),regulator,partner,ownership,reconciliation,economics,rulesInput,decision,fields,disclosures:GOLD2_DISCLOSURES,
+ return {schemaVersion:GOLD2_VERSION,state:"draft_not_validated" as const,input,inputHash:payloadHash(input),regulator,partner,ownership,productionMetrics,forecastMetrics,reconciliation,economics,rulesInput,decision,fields,disclosures:GOLD2_DISCLOSURES,
   implementationGaps:["Closing-blocker classification and domain-confidence handoffs are incomplete.","Remaining forecast, geology and source-coverage fields must be connected.","GOLD2 chart rendering and independent field/calculation acceptance are incomplete."],
  };
 }
