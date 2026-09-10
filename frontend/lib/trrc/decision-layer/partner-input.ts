@@ -1,6 +1,7 @@
 /** MineralFlow-owned interchange contract; not Novi's API schema. */
 import {createHash} from "node:crypto";
 import {z} from "zod";
+import {WellMeasurementSchema,normalizeWellMeasurement} from "./well-measurement";
 import {normalizeApiNumber} from "../normalization";
 export const Month=z.string().regex(/^(19|20|21)\d{2}-(0[1-9]|1[0-2])$/);
 const api=z.string().transform((s,ctx)=>{const n=normalizeApiNumber(s);if(!n){ctx.addIssue({code:"custom",message:"Invalid Texas API"});return z.NEVER;}return n.api10;});
@@ -29,10 +30,15 @@ export function normalizePartnerInput(input:unknown){
  const months:{api:string;lease:string;district:string;month:string;oilBbl:number|null;gasMcf:number|null;citation:PartnerReference}[]=[];
  const forecasts:{api:string;forecastId:string;modelVersion:string;generatedAt:string;scenario:"base"|"downside"|"upside";month:string;oilBbl:number|null;gasMcf:number|null;citation:PartnerReference}[]=[];
  const leases:(z.infer<typeof membership>&{citation:PartnerReference})[]=[];
+ const measurements:(ReturnType<typeof normalizeWellMeasurement>&{citation:PartnerReference})[]=[];
  const seen=new Set<string>();
  for(const citation of bundle.observations){
   const source=sources.get(citation.sourceId);if(!source)throw Error(`Unknown partner source: ${citation.sourceId}`);
-  const r=z.discriminatedUnion("kind",[monthly,membership,forecast]).parse(pointerValue(source.data,citation.pointer));
+  const r=z.discriminatedUnion("kind",[monthly,membership,forecast,WellMeasurementSchema]).parse(pointerValue(source.data,citation.pointer));
+  if(r.kind==="well_measurement"){
+   if(Date.parse(r.measuredAt)>Date.parse(source.retrievedAt))throw Error("Measurement postdates its source retrieval");
+   measurements.push({...normalizeWellMeasurement(r),citation});continue;
+  }
   if(r.kind==="lease_membership"){
    if(r.from>r.through||new Set(r.apis).size!==r.apis.length)throw Error("Invalid lease membership period or duplicate API");
    leases.push({...r,citation});continue;
@@ -44,5 +50,5 @@ export function normalizePartnerInput(input:unknown){
   if(r.kind==="well_monthly_forecast"){forecasts.push({api:r.api,forecastId:r.forecastId,modelVersion:r.modelVersion,generatedAt:r.generatedAt,scenario:r.scenario,month:r.month,oilBbl,gasMcf,citation});continue;}
   months.push({api:r.api,lease:r.lease,district:r.district,month:r.month,oilBbl,gasMcf,citation});
  }
- return {bundle,months,leases,forecasts};
+ return {bundle,months,leases,forecasts,measurements};
 }

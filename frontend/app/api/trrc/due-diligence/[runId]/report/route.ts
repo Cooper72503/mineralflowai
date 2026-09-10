@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
+import {generateGold2ForRun} from "@/lib/trrc/gold2/generate";
 import { generatePdfReportForRun } from "@/lib/trrc/generate-report";
 
 export const runtime = "nodejs";
@@ -30,6 +31,12 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "runId is required." }, { status: 400 });
   }
 
+  const format=request.nextUrl.searchParams.get("format");
+  if(format==="gold2"||format==="gold2-json"){
+    const result=await generateGold2ForRun(supabase,runId,user.id,format==="gold2"?"pdf":"json");
+    if(!result.ok)return NextResponse.json({ok:false,error:result.error},{status:result.status});
+    return new NextResponse(new Uint8Array(result.bytes),{status:200,headers:{"Content-Type":result.contentType,"Content-Disposition":`attachment; filename="${result.filename}"`,"Cache-Control":"private, no-store"}});
+  }
   const result = await generatePdfReportForRun(supabase, runId, user.id);
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: result.status });

@@ -3,8 +3,9 @@ import {readFile,mkdir,writeFile} from "node:fs/promises";
 import {resolve,relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {assembleGold2Draft,validateGold2Draft} from "../lib/trrc/gold2/assemble";
-import {assembleGoldRecord,validateGoldRecord} from "../lib/trrc/gold/assemble";
-import {renderGoldPdf} from "../lib/trrc/gold/pdf";
+import {validateDecisionRecord} from "../lib/trrc/decision-record";
+import {evaluateGold2Rules} from "../lib/trrc/gold2/rules";
+import {renderGold2Pdf,gold2Sections} from "../lib/trrc/gold2/pdf";
 import {gold2Acceptance,type Gold2AcceptanceCandidate} from "../lib/trrc/gold2/contract";
 import {linkReviewedMineralPosition} from "../lib/trrc/decision-layer/ownership";
 import {unavailableNoviAdapter} from "../lib/trrc/decision-layer/novi-adapter";
@@ -21,25 +22,24 @@ async function main(){
    const times=c.attempts.map(a=>Date.parse(a.attempted_at));
    if(!times.length||times.some(t=>!Number.isFinite(t)))throw Error("Benchmark retrieval timestamp missing or invalid");
    const asOf=new Date(Math.max(...times)+1000).toISOString();
-   const gold=assembleGoldRecord({id:c.case.id,original_input:c.case.api10},c.attempts,asOf);
-   const legacyErrors=validateGoldRecord(gold);
-   if(legacyErrors.length)throw Error(legacyErrors.join("; "));
-   const pdf=await renderGoldPdf(gold);
    const draft=assembleGold2Draft({api:c.case.api10,runId:c.case.id,asOf,attempts:c.attempts,title:null,position:null,partner:null,reconciliationPolicy:null,economics:null});
    const draftErrors=validateGold2Draft(draft);if(draftErrors.length)throw Error(draftErrors.join("; "));
+   const pdf=await renderGold2Pdf(draft);
    await writeFile(resolve(out,c.case.api10+"-gold2-draft.json"),JSON.stringify(draft,null,2)+"\n");
    const ownership=linkReviewedMineralPosition(c.case.api10,null,null);
    const partner=await unavailableNoviAdapter().readWell(c.case.api10);
-   // This candidate represents what the production exporter actually delivers.
-   // No rename, manufactured chart or asserted audit flag upgrades a legacy export.
-   const candidate:Gold2AcceptanceCandidate={schemaVersion:gold.version,rulesetVersion:gold.version,api:c.case.api10,
-    fields:Object.fromEntries(Object.entries(gold.record.fields).map(([k,f])=>[k,{...f,validated:true}])),
-    charts:[],sections:gold.sections.map(s=>s.id),audit:{evidenceValid:true,calculationsRecomputed:false,rulesRecomputed:false,renderInspected:false,engineHandoffsComplete:false}};
+   // Gate the integrated data actually exported, never a legacy version substituted for it.
+   const candidate:Gold2AcceptanceCandidate={schemaVersion:draft.schemaVersion,rulesetVersion:draft.decision.rulesetVersion,api:c.case.api10,
+    fields:Object.fromEntries(Object.entries(draft.fields).map(([k,f])=>[k,{...f,validated:draftErrors.length===0}])),
+    charts:[],sections:gold2Sections().map(s=>s.id),disclosures:[...draft.disclosures],
+    audit:{evidenceValid:validateDecisionRecord(draft.regulator).length===0,calculationsRecomputed:draftErrors.length===0,
+     rulesRecomputed:JSON.stringify(evaluateGold2Rules(draft.rulesInput))===JSON.stringify(draft.decision),
+     renderInspected:false,engineHandoffsComplete:draft.implementationGaps.length===0}};
    const errors=gold2Acceptance(candidate);
-   const result={id:c.case.id,api:c.case.api10,status:errors.length?"implementation_failure":"validated",goldVersion:gold.version,errors,
+   const result={id:c.case.id,api:c.case.api10,status:errors.length?"implementation_failure":"validated",goldVersion:draft.schemaVersion,wellContext:draft.wellContext,errors,
     unavailableInputs:{ownership,partner},sourceFailures:c.attempts.filter(a=>a.status!=="success").map(a=>({source:a.source_name,status:a.status,reason:a.error_message}))};
    await writeFile(resolve(out,c.case.api10+"-validation.json"),JSON.stringify(result,null,2)+"\n");
-   await writeFile(resolve(out,c.case.api10+"-actual-export.json"),JSON.stringify(gold,null,2)+"\n");
+   await writeFile(resolve(out,c.case.api10+"-actual-export.json"),JSON.stringify(draft,null,2)+"\n");
    await writeFile(resolve(out,c.case.api10+"-actual-export.pdf"),pdf);
    results.push(result);
   }catch(error){results.push({id:c.case.id,api:c.case.api10,status:"execution_failure",errors:[String(error)]});}

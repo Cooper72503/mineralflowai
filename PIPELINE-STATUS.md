@@ -2,7 +2,7 @@
 
 **GOLD reports validated: 0/10**
 
-Latest GOLD2 cycle: all ten retained-source cases replayed; zero complete GOLD2 reports validated. Exact per-API acceptance errors are retained in `benchmarks/gold2-latest-validation.json`. This is a replay of captured retrieval, not a new live-source run. The integrated draft connects reviewed mineral ownership, partner reconciliation, royalty cashflows and decision predicates, but remains explicitly unvalidated. Subject production and selected forecast mappings are now connected and tested. Geology mappings, closing-risk classification, charts and full report acceptance remain incomplete. Frontend regression and TypeScript checks pass. Migration 029 has not been tested on a running database. A transient workspace disconnection recovered; changes remain local for Claude to push.
+Latest GOLD2 cycle: all ten retained-source cases replayed; zero complete GOLD2 reports validated. Exact per-API acceptance errors are retained in `benchmarks/gold2-latest-validation.json`. This is a replay of captured retrieval, not a new live-source run. The integrated draft connects reviewed mineral ownership, partner reconciliation, royalty cashflows and decision predicates, but remains explicitly unvalidated. Subject production and selected forecast mappings are now connected and tested. Geology mappings, closing-risk classification, charts and full report acceptance remain incomplete. Frontend regression and TypeScript checks pass. Migration 029 has not been tested on a running database. Current files and all five preceding audit commits were verified in the workspace before publication.
 
 Only complete GOLD 2.0 reports that pass the executable contract and audit gates advance this count. Legitimate unavailable-data failures are recorded separately. Prior test totals, GOLD 1.0 renders and schema-only passes do not advance this metric.
 
@@ -27,6 +27,7 @@ Updated: 2026-09-10. Working branch: `audit/decision-record-reliability`, based 
 
 **LAST VERIFIED:**
 
+- Publication cycle: owner-scoped published-title lookup, conflict-aware well identity/formation mappings, cited partner well measurements with explicit depth references, and integrated GOLD2 JSON/PDF delivery are implemented. The benchmark now evaluates the integrated GOLD2 draft. All ten retained-source cases remain acceptance failures (0/10); this is not live validation. Frontend: 660 tests across 69 files passed. Live title queries, migration 029, complete charts and closing rules remain unverified/incomplete.
 - Latest cycle: calendar-complete subject TTM/YoY and selected forecast totals are mapped into the draft. Seven production/forecast regressions and five integrated handoff tests pass; TypeScript passes. All ten retained-source cases reran; GOLD reports validated remains 0/10. Forecast selection is independent of economic inputs.
 - GOLD2 cycle: contract covers required fields, chart inputs, calculation methods, disclosures and decision predicates. Missing engine connections are acceptance failures.
 - Reviewed graph holding → exact NMA/NRI → existing partner cashflow engine → commodity price grid is tested. Synthetic fixture: 40 NMA, NRI 3/256, two-month base PV $187.50; these are test values, not actual asset values.
@@ -66,7 +67,7 @@ Historical checks below remain diagnostic, not GOLD2 passes:
 
 See `AUDIT-DECISION-PIPELINE.md` for implementation details, validation boundaries and remaining work. See `benchmarks/README.md` for repeatable commands and retained evidence.
 
-**PUBLICATION:** The owner authorized publication, but the push failed because this workspace has no GitHub authentication. The owner subsequently directed that work remain local and Claude will push the finished codebase. No further push is planned.
+**PUBLICATION:** The owner explicitly reauthorized publication of all appropriate audit changes to `audit/decision-record-reliability`. Publication was attempted and blocked: Git could not read a GitHub username with terminal prompts disabled; no authenticated GitHub push is available. All six local audit commits are preserved for a cumulative bundle, binary patch and verified file checkpoint for Claude. Remote publication is not verified.
 
 **STANDALONE COMMANDS:** See `STANDALONE-GOLD.md`. All changes remain local for Claude to push.
 

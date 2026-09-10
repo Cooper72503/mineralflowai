@@ -1,5 +1,5 @@
 {
-  "executedAt": "2026-09-10T17:35:56.219Z",
+  "executedAt": "2026-09-10T18:05:04.899Z",
   "mode": "retained-source-end-to-end-replay",
   "fixture": "benchmarks/latest-retrieval.json",
   "goldReportsValidated": 0,
@@ -9,11 +9,84 @@
       "id": "barnett-gas",
       "api": "4243934308",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4243934308",
+        "rowSelection": "on_schedule_matching_api",
+        "leaseName": {
+          "value": "WHIZ-Q EAST UNIT",
+          "citations": [
+            {
+              "evidenceId": "barnett-gas-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            }
+          ],
+          "reason": null
+        },
+        "wellNumber": {
+          "value": "10H",
+          "citations": [
+            {
+              "evidenceId": "barnett-gas-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ],
+          "reason": null
+        },
+        "fieldName": {
+          "value": "NEWARK, EAST (BARNETT SHALE)",
+          "citations": [
+            {
+              "evidenceId": "barnett-gas-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "reason": null
+        },
+        "formation": {
+          "value": "BARNETT SHALE",
+          "rawFieldName": "NEWARK, EAST (BARNETT SHALE)",
+          "basis": "RRC_FIELD_NAME_TEXT",
+          "method": "existing_formation_alias_normalizer_v1",
+          "citations": [
+            {
+              "evidenceId": "barnett-gas-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "disclosure": "Derived from the RRC field name, not a measured formation top or independently confirmed landing zone."
+        },
+        "reportedDepth": {
+          "value": 7344,
+          "unit": "ft",
+          "basis": "RRC_API_DEPTH_REFERENCE_UNSPECIFIED",
+          "citations": [
+            {
+              "evidenceId": "barnett-gas-search_by_api",
+              "pointer": "/wells/0/api_depth"
+            }
+          ],
+          "disclosure": "RRC API depth is retained as reported. It is not relabeled TVD, MD or TVDSS without depth-reference evidence."
+        },
+        "designation": {
+          "leaseName": "WHIZ-Q EAST UNIT",
+          "wellNumber": "10H",
+          "label": "WHIZ-Q EAST UNIT #10H",
+          "basis": "RRC_LEASE_AND_WELL_NUMBER",
+          "citations": [
+            {
+              "evidenceId": "barnett-gas-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            },
+            {
+              "evidenceId": "barnett-gas-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ]
+        }
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
-        "Unjustified unavailable field: identity.well_name",
         "Unjustified unavailable field: identity.tract",
         "Unjustified unavailable field: identity.evaluated_position",
         "Unjustified unavailable field: identity.interest_scope",
@@ -29,7 +102,6 @@
         "Unjustified unavailable field: forecast.remaining_oil",
         "Unjustified unavailable field: forecast.remaining_gas",
         "Unjustified unavailable field: forecast.method",
-        "Unjustified unavailable field: geology.formation",
         "Unjustified unavailable field: geology.tvd",
         "Unjustified unavailable field: geology.tvdss",
         "Unjustified unavailable field: geology.net_pay",
@@ -80,31 +152,23 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -125,9 +189,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -154,9 +215,30 @@
       "id": "dry-hole",
       "api": "4216500004",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4216500004",
+        "rowSelection": "all_matching_api_no_current_row",
+        "leaseName": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported lease_name is unavailable."
+        },
+        "wellNumber": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported well_no is unavailable."
+        },
+        "fieldName": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported field_name is unavailable."
+        },
+        "formation": null,
+        "reportedDepth": null,
+        "designation": null
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api10",
         "Unjustified unavailable field: identity.api14",
         "Unjustified unavailable field: identity.county",
@@ -233,31 +315,26 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: identity.lease_name",
+        "Unjustified unavailable field: identity.well_number",
+        "Unjustified unavailable field: geology.reported_api_depth",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -278,9 +355,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -313,11 +387,72 @@
       "id": "fisher",
       "api": "4215131926",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4215131926",
+        "rowSelection": "on_schedule_matching_api",
+        "leaseName": {
+          "value": "BOMAR",
+          "citations": [
+            {
+              "evidenceId": "fisher-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            }
+          ],
+          "reason": null
+        },
+        "wellNumber": {
+          "value": "1",
+          "citations": [
+            {
+              "evidenceId": "fisher-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ],
+          "reason": null
+        },
+        "fieldName": {
+          "value": "V.M. (FLIPPEN)",
+          "citations": [
+            {
+              "evidenceId": "fisher-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "reason": null
+        },
+        "formation": null,
+        "reportedDepth": {
+          "value": 3680,
+          "unit": "ft",
+          "basis": "RRC_API_DEPTH_REFERENCE_UNSPECIFIED",
+          "citations": [
+            {
+              "evidenceId": "fisher-search_by_api",
+              "pointer": "/wells/0/api_depth"
+            }
+          ],
+          "disclosure": "RRC API depth is retained as reported. It is not relabeled TVD, MD or TVDSS without depth-reference evidence."
+        },
+        "designation": {
+          "leaseName": "BOMAR",
+          "wellNumber": "1",
+          "label": "BOMAR #1",
+          "basis": "RRC_LEASE_AND_WELL_NUMBER",
+          "citations": [
+            {
+              "evidenceId": "fisher-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            },
+            {
+              "evidenceId": "fisher-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ]
+        }
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
-        "Unjustified unavailable field: identity.well_name",
         "Unjustified unavailable field: identity.tract",
         "Unjustified unavailable field: identity.evaluated_position",
         "Unjustified unavailable field: identity.interest_scope",
@@ -385,31 +520,23 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -430,9 +557,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -459,11 +583,84 @@
       "id": "gaines-oil",
       "api": "4216502733",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4216502733",
+        "rowSelection": "on_schedule_matching_api",
+        "leaseName": {
+          "value": "TAYLOR, W. J. \"A\"",
+          "citations": [
+            {
+              "evidenceId": "gaines-oil-search_by_api",
+              "pointer": "/wells/1/lease_name"
+            }
+          ],
+          "reason": null
+        },
+        "wellNumber": {
+          "value": "1D",
+          "citations": [
+            {
+              "evidenceId": "gaines-oil-search_by_api",
+              "pointer": "/wells/1/well_no"
+            }
+          ],
+          "reason": null
+        },
+        "fieldName": {
+          "value": "O D C (DEVONIAN)",
+          "citations": [
+            {
+              "evidenceId": "gaines-oil-search_by_api",
+              "pointer": "/wells/1/field_name"
+            }
+          ],
+          "reason": null
+        },
+        "formation": {
+          "value": "DEVONIAN",
+          "rawFieldName": "O D C (DEVONIAN)",
+          "basis": "RRC_FIELD_NAME_TEXT",
+          "method": "existing_formation_alias_normalizer_v1",
+          "citations": [
+            {
+              "evidenceId": "gaines-oil-search_by_api",
+              "pointer": "/wells/1/field_name"
+            }
+          ],
+          "disclosure": "Derived from the RRC field name, not a measured formation top or independently confirmed landing zone."
+        },
+        "reportedDepth": {
+          "value": 12040,
+          "unit": "ft",
+          "basis": "RRC_API_DEPTH_REFERENCE_UNSPECIFIED",
+          "citations": [
+            {
+              "evidenceId": "gaines-oil-search_by_api",
+              "pointer": "/wells/1/api_depth"
+            }
+          ],
+          "disclosure": "RRC API depth is retained as reported. It is not relabeled TVD, MD or TVDSS without depth-reference evidence."
+        },
+        "designation": {
+          "leaseName": "TAYLOR, W. J. \"A\"",
+          "wellNumber": "1D",
+          "label": "TAYLOR, W. J. \"A\" #1D",
+          "basis": "RRC_LEASE_AND_WELL_NUMBER",
+          "citations": [
+            {
+              "evidenceId": "gaines-oil-search_by_api",
+              "pointer": "/wells/1/lease_name"
+            },
+            {
+              "evidenceId": "gaines-oil-search_by_api",
+              "pointer": "/wells/1/well_no"
+            }
+          ]
+        }
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
-        "Unjustified unavailable field: identity.well_name",
         "Unjustified unavailable field: identity.tract",
         "Unjustified unavailable field: identity.evaluated_position",
         "Unjustified unavailable field: identity.interest_scope",
@@ -479,7 +676,6 @@
         "Unjustified unavailable field: forecast.remaining_oil",
         "Unjustified unavailable field: forecast.remaining_gas",
         "Unjustified unavailable field: forecast.method",
-        "Unjustified unavailable field: geology.formation",
         "Unjustified unavailable field: geology.tvd",
         "Unjustified unavailable field: geology.tvdss",
         "Unjustified unavailable field: geology.net_pay",
@@ -530,31 +726,23 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -575,9 +763,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -604,11 +789,61 @@
       "id": "karnes-oil",
       "api": "4225500009",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4225500009",
+        "rowSelection": "all_matching_api_no_current_row",
+        "leaseName": {
+          "value": "MARTINEZ, MERCANTILE",
+          "citations": [
+            {
+              "evidenceId": "karnes-oil-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            }
+          ],
+          "reason": null
+        },
+        "wellNumber": {
+          "value": "11",
+          "citations": [
+            {
+              "evidenceId": "karnes-oil-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ],
+          "reason": null
+        },
+        "fieldName": {
+          "value": "FALLS CITY",
+          "citations": [
+            {
+              "evidenceId": "karnes-oil-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "reason": null
+        },
+        "formation": null,
+        "reportedDepth": null,
+        "designation": {
+          "leaseName": "MARTINEZ, MERCANTILE",
+          "wellNumber": "11",
+          "label": "MARTINEZ, MERCANTILE #11",
+          "basis": "RRC_LEASE_AND_WELL_NUMBER",
+          "citations": [
+            {
+              "evidenceId": "karnes-oil-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            },
+            {
+              "evidenceId": "karnes-oil-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ]
+        }
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
-        "Unjustified unavailable field: identity.well_name",
         "Unjustified unavailable field: identity.tract",
         "Unjustified unavailable field: identity.evaluated_position",
         "Unjustified unavailable field: identity.interest_scope",
@@ -677,31 +912,24 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: geology.reported_api_depth",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -722,9 +950,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -757,9 +982,30 @@
       "id": "midland-oil",
       "api": "4232900028",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4232900028",
+        "rowSelection": "all_matching_api_no_current_row",
+        "leaseName": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported lease_name is unavailable."
+        },
+        "wellNumber": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported well_no is unavailable."
+        },
+        "fieldName": {
+          "value": null,
+          "citations": [],
+          "reason": "Conflicting field_name values among matching wellbore rows."
+        },
+        "formation": null,
+        "reportedDepth": null,
+        "designation": null
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
         "Unjustified unavailable field: identity.lease",
         "Unjustified unavailable field: identity.district",
@@ -833,31 +1079,26 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: identity.lease_name",
+        "Unjustified unavailable field: identity.well_number",
+        "Unjustified unavailable field: geology.reported_api_depth",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -878,9 +1119,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -913,11 +1151,72 @@
       "id": "panhandle-gas",
       "api": "4221100014",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4221100014",
+        "rowSelection": "on_schedule_matching_api",
+        "leaseName": {
+          "value": "MATHERS",
+          "citations": [
+            {
+              "evidenceId": "panhandle-gas-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            }
+          ],
+          "reason": null
+        },
+        "wellNumber": {
+          "value": "9",
+          "citations": [
+            {
+              "evidenceId": "panhandle-gas-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ],
+          "reason": null
+        },
+        "fieldName": {
+          "value": "CANADIAN, SE (DOUGLAS)",
+          "citations": [
+            {
+              "evidenceId": "panhandle-gas-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "reason": null
+        },
+        "formation": null,
+        "reportedDepth": {
+          "value": 7430,
+          "unit": "ft",
+          "basis": "RRC_API_DEPTH_REFERENCE_UNSPECIFIED",
+          "citations": [
+            {
+              "evidenceId": "panhandle-gas-search_by_api",
+              "pointer": "/wells/0/api_depth"
+            }
+          ],
+          "disclosure": "RRC API depth is retained as reported. It is not relabeled TVD, MD or TVDSS without depth-reference evidence."
+        },
+        "designation": {
+          "leaseName": "MATHERS",
+          "wellNumber": "9",
+          "label": "MATHERS #9",
+          "basis": "RRC_LEASE_AND_WELL_NUMBER",
+          "citations": [
+            {
+              "evidenceId": "panhandle-gas-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            },
+            {
+              "evidenceId": "panhandle-gas-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ]
+        }
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
-        "Unjustified unavailable field: identity.well_name",
         "Unjustified unavailable field: identity.tract",
         "Unjustified unavailable field: identity.evaluated_position",
         "Unjustified unavailable field: identity.interest_scope",
@@ -984,31 +1283,23 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -1029,9 +1320,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -1058,9 +1346,30 @@
       "id": "permit-only",
       "api": "4232901040",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4232901040",
+        "rowSelection": "all_matching_api_no_current_row",
+        "leaseName": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported lease_name is unavailable."
+        },
+        "wellNumber": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported well_no is unavailable."
+        },
+        "fieldName": {
+          "value": null,
+          "citations": [],
+          "reason": "A unique reported field_name is unavailable."
+        },
+        "formation": null,
+        "reportedDepth": null,
+        "designation": null
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api10",
         "Unjustified unavailable field: identity.api14",
         "Unjustified unavailable field: identity.county",
@@ -1140,31 +1449,26 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: identity.lease_name",
+        "Unjustified unavailable field: identity.well_number",
+        "Unjustified unavailable field: geology.reported_api_depth",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -1185,9 +1489,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -1230,11 +1531,73 @@
       "id": "plugged",
       "api": "4215100013",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4215100013",
+        "rowSelection": "all_matching_api_no_current_row",
+        "leaseName": {
+          "value": "SWANN, SAM B",
+          "citations": [
+            {
+              "evidenceId": "plugged-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            }
+          ],
+          "reason": null
+        },
+        "wellNumber": {
+          "value": "1B",
+          "citations": [
+            {
+              "evidenceId": "plugged-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ],
+          "reason": null
+        },
+        "fieldName": {
+          "value": "ADAS (CANYON REEF)",
+          "citations": [
+            {
+              "evidenceId": "plugged-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "reason": null
+        },
+        "formation": {
+          "value": "CANYON",
+          "rawFieldName": "ADAS (CANYON REEF)",
+          "basis": "RRC_FIELD_NAME_TEXT",
+          "method": "existing_formation_alias_normalizer_v1",
+          "citations": [
+            {
+              "evidenceId": "plugged-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "disclosure": "Derived from the RRC field name, not a measured formation top or independently confirmed landing zone."
+        },
+        "reportedDepth": null,
+        "designation": {
+          "leaseName": "SWANN, SAM B",
+          "wellNumber": "1B",
+          "label": "SWANN, SAM B #1B",
+          "basis": "RRC_LEASE_AND_WELL_NUMBER",
+          "citations": [
+            {
+              "evidenceId": "plugged-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            },
+            {
+              "evidenceId": "plugged-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ]
+        }
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
-        "Unjustified unavailable field: identity.well_name",
         "Unjustified unavailable field: identity.tract",
         "Unjustified unavailable field: identity.evaluated_position",
         "Unjustified unavailable field: identity.interest_scope",
@@ -1252,7 +1615,6 @@
         "Unjustified unavailable field: forecast.remaining_gas",
         "Unjustified unavailable field: forecast.method",
         "Unjustified unavailable field: geology.survey",
-        "Unjustified unavailable field: geology.formation",
         "Unjustified unavailable field: geology.tvd",
         "Unjustified unavailable field: geology.tvdss",
         "Unjustified unavailable field: geology.net_pay",
@@ -1303,31 +1665,24 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: geology.reported_api_depth",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -1348,9 +1703,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],
@@ -1383,11 +1735,72 @@
       "id": "webb-gas",
       "api": "4247900014",
       "status": "implementation_failure",
-      "goldVersion": "1.0.0",
+      "goldVersion": "2.0.0",
+      "wellContext": {
+        "api": "4247900014",
+        "rowSelection": "on_schedule_matching_api",
+        "leaseName": {
+          "value": "BOOTH, W.V. -B-",
+          "citations": [
+            {
+              "evidenceId": "webb-gas-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            }
+          ],
+          "reason": null
+        },
+        "wellNumber": {
+          "value": "4",
+          "citations": [
+            {
+              "evidenceId": "webb-gas-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ],
+          "reason": null
+        },
+        "fieldName": {
+          "value": "LAS TIENDAS (OLMOS)",
+          "citations": [
+            {
+              "evidenceId": "webb-gas-search_by_api",
+              "pointer": "/wells/0/field_name"
+            }
+          ],
+          "reason": null
+        },
+        "formation": null,
+        "reportedDepth": {
+          "value": 6875,
+          "unit": "ft",
+          "basis": "RRC_API_DEPTH_REFERENCE_UNSPECIFIED",
+          "citations": [
+            {
+              "evidenceId": "webb-gas-search_by_api",
+              "pointer": "/wells/0/api_depth"
+            }
+          ],
+          "disclosure": "RRC API depth is retained as reported. It is not relabeled TVD, MD or TVDSS without depth-reference evidence."
+        },
+        "designation": {
+          "leaseName": "BOOTH, W.V. -B-",
+          "wellNumber": "4",
+          "label": "BOOTH, W.V. -B- #4",
+          "basis": "RRC_LEASE_AND_WELL_NUMBER",
+          "citations": [
+            {
+              "evidenceId": "webb-gas-search_by_api",
+              "pointer": "/wells/0/lease_name"
+            },
+            {
+              "evidenceId": "webb-gas-search_by_api",
+              "pointer": "/wells/0/well_no"
+            }
+          ]
+        }
+      },
       "errors": [
-        "GOLD2 version contract not satisfied",
         "Unjustified unavailable field: identity.api14",
-        "Unjustified unavailable field: identity.well_name",
         "Unjustified unavailable field: identity.tract",
         "Unjustified unavailable field: identity.evaluated_position",
         "Unjustified unavailable field: identity.interest_scope",
@@ -1455,31 +1868,23 @@
         "Unjustified unavailable field: economics.horizon",
         "Unjustified unavailable field: economics.minimum_margin",
         "Unjustified unavailable field: economics.sensitivity",
-        "Unjustified unavailable field: decision.closing_readiness",
-        "Unjustified unavailable field: decision.confidence",
-        "Unjustified unavailable field: decision.rule_trace",
-        "Missing GOLD2 field: identity.as_of",
-        "Missing GOLD2 field: economics.underwrite_basis",
-        "Missing GOLD2 field: economics.cashflow_timing",
-        "Missing GOLD2 field: economics.risk_haircut",
-        "Missing GOLD2 field: economics.differentials",
-        "Missing GOLD2 field: economics.assumption_provenance",
-        "Missing GOLD2 field: economics.monthly_cashflows",
-        "Missing GOLD2 field: forecast.next12_gas",
-        "Missing GOLD2 field: forecast.model_version",
-        "Missing GOLD2 field: forecast.generated_at",
-        "Missing GOLD2 field: production.reporting_period",
-        "Missing GOLD2 field: production.membership_scope",
-        "Missing GOLD2 field: geology.reference_elevation",
-        "Missing GOLD2 field: geology.gross_interval",
-        "Missing GOLD2 field: geology.formation_tops",
-        "Missing GOLD2 field: decision.confidence_domains",
-        "Missing GOLD2 field: decision.closing_rule_trace",
-        "Missing GOLD2 field: decision.next_actions",
-        "Missing GOLD2 field: decision.supporting_reasons",
-        "Missing GOLD2 field: decision.risk_reasons",
-        "Missing GOLD2 field: evidence.source_inventory",
-        "Missing GOLD2 field: evidence.search_coverage",
+        "Unjustified unavailable field: economics.underwrite_basis",
+        "Unjustified unavailable field: economics.cashflow_timing",
+        "Unjustified unavailable field: economics.risk_haircut",
+        "Unjustified unavailable field: economics.differentials",
+        "Unjustified unavailable field: economics.assumption_provenance",
+        "Unjustified unavailable field: economics.monthly_cashflows",
+        "Unjustified unavailable field: forecast.next12_gas",
+        "Unjustified unavailable field: forecast.model_version",
+        "Unjustified unavailable field: forecast.generated_at",
+        "Unjustified unavailable field: production.reporting_period",
+        "Unjustified unavailable field: production.membership_scope",
+        "Unjustified unavailable field: geology.reference_elevation",
+        "Unjustified unavailable field: geology.gross_interval",
+        "Unjustified unavailable field: geology.formation_tops",
+        "Unjustified unavailable field: decision.next_actions",
+        "Unjustified unavailable field: decision.supporting_reasons",
+        "Unjustified unavailable field: decision.risk_reasons",
         "Missing or duplicate GOLD2 chart: value_waterfall",
         "Missing or duplicate GOLD2 chart: commodity_sensitivity",
         "Missing or duplicate GOLD2 chart: risk_map",
@@ -1500,9 +1905,6 @@
         "Missing or duplicate calculation acceptance: sensitivity",
         "Missing or duplicate calculation acceptance: confidence",
         "Missing or duplicate calculation acceptance: posture_and_closing",
-        "GOLD2 required disclosures incomplete or altered",
-        "GOLD2 audit gate failed: calculationsRecomputed",
-        "GOLD2 audit gate failed: rulesRecomputed",
         "GOLD2 audit gate failed: renderInspected",
         "GOLD2 audit gate failed: engineHandoffsComplete"
       ],

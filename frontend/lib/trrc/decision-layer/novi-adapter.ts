@@ -35,7 +35,7 @@ export function createNoviAdapter(config:{version:string;fetchWell:(api:string,s
    if(data===null)return {status:"unavailable",api,adapterVersion:this.version,reasonCode:"source_returned_no_record",reason:"The configured partner adapter returned no record for this API.",retryable:false};
    const normalized=normalizePartnerInput(data);
    if(normalized.bundle.mode==="synthetic_fixture")throw Error("Synthetic data cannot be returned by a live adapter");
-   const apis=[...normalized.months.map(r=>r.api),...normalized.forecasts.map(r=>r.api),...normalized.leases.flatMap(r=>r.apis)];
+   const apis=[...normalized.measurements.map(r=>r.api),...normalized.months.map(r=>r.api),...normalized.forecasts.map(r=>r.api),...normalized.leases.flatMap(r=>r.apis)];
    if(!apis.includes(api))throw Error("Partner response does not contain requested subject");
    return {status:"available",api,adapterVersion:this.version,data:normalized.bundle};
   }catch{

@@ -89,6 +89,10 @@ export function buildDecisionRecord(run: Pick<TrrcDueDiligenceRun,"id"|"original
     ];
     for(const [key,names] of pairs) {
       if (ambiguous && ["identity.lease","identity.district","identity.operator","identity.field"].includes(key)) continue;
+      // A matching API can have several current completions or historical rows.
+      // Populate a scalar only when all selected rows agree; never choose the first conflicting value.
+      const values=candidates.map(w=>names.map(n=>w[n]).find(v=>v!==undefined&&v!==null&&v!==""));
+      if(values.some(v=>v===undefined)||new Set(values.map(v=>JSON.stringify(v))).size!==1)continue;
       put(key,"search_by_api",names.map(n=>`/wells/${index}/${n}`));
     }
   }

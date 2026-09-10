@@ -10,9 +10,13 @@ import {evaluateGold2Economics,Gold2EconomicsInputSchema} from "./economics";
 import {evaluateGold2Rules,type Gold2RuleInput} from "./rules";
 import {GOLD2_FIELDS,GOLD2_VERSION} from "./contract";
 import {subjectProductionMetrics,subjectForecastMetrics,shiftMonth} from "./production";
+import {mapWellMeasurements} from "./measurements";
+import {retainedWellContext} from "./well-context";
+import {deriveCoverageFromAttempts} from "../coverage";
 import {GOLD2_DISCLOSURES} from "./requirements";
 export interface Gold2Input {
  api:string;asOf:string;runId:string;attempts:LiteSourceAttempt[];
+ titleLookup?:{status:"linked"|"not_found"|"ambiguous"|"query_failed";reason:string|null};
  title:TitleChainAnalysis|null;position:unknown|null;partner:unknown|null;
  reconciliationPolicy:ReconciliationPolicyInput|null;economics:unknown|null;
  forecastSelection?:{forecastId:string;scenario:"base"|"downside"|"upside";from:string}|null;
@@ -37,6 +41,12 @@ export function assembleGold2Draft(input:Gold2Input){
   fields[key]={status:method?"calculated":"observed",value,reason:null,origin:{source,pointer,...(method?{method}:{})}};
  };
  put("identity.as_of",input.asOf,"provided_assumptions","/input/asOf");
+ const wellContext=retainedWellContext(regulator);
+ put("identity.lease_name",wellContext.leaseName.value,"regulatory_evidence","/wellContext/leaseName","unique_matching_wellbore_fact_v1");
+ put("identity.well_number",wellContext.wellNumber.value,"regulatory_evidence","/wellContext/wellNumber","unique_matching_wellbore_fact_v1");
+ put("identity.well_name",wellContext.designation,"regulatory_evidence","/wellContext/designation","rrc_lease_well_designation_v1");
+ put("geology.formation",wellContext.formation,"regulatory_evidence","/wellContext/formation","existing_formation_alias_normalizer_v1");
+ put("geology.reported_api_depth",wellContext.reportedDepth,"regulatory_evidence","/wellContext/reportedDepth","strict_reported_depth_numeric_v1");
  const ownership=linkReviewedMineralPosition(api,input.title,input.position);
  if(ownership.status==="calculated"){
   for(const [field,key] of Object.entries({"ownership.mineral_fraction":"mineralFraction","ownership.gross_acres":"grossAcres","ownership.unit_acres":"unitAcres","ownership.net_mineral_acres":"netMineralAcres","ownership.tract_participation":"tractParticipation","ownership.lease_royalty":"leaseRoyalty","ownership.nri":"nri"}))put(field,ownership[key as keyof typeof ownership],"reviewed_position",`/ownership/${key}`,ownership.method);
@@ -55,11 +65,19 @@ export function assembleGold2Draft(input:Gold2Input){
   put("title.encumbrances",title.branches.flatMap(b=>b.encumbrances),"title_analysis","/input/title/branches","flatten_title_encumbrances_v1");
   put("evidence.search_coverage",title.searchCoverage,"title_analysis","/input/title/searchCoverage");
  }
+ if(!title&&input.titleLookup?.reason){
+  for(const k of ["title.instruments","title.search_scope","title.ownership_graph","title.encumbrances"]){fields[k]={status:input.titleLookup.status==="not_found"?"unavailable":"insufficient_data",value:null,reason:input.titleLookup.reason,origin:null};}
+ }
  const partner=input.partner===null?null:normalizePartnerInput(input.partner);
  if(partner){
   if(partner.bundle.sources.some(s=>Date.parse(s.retrievedAt)>Date.parse(input.asOf)))throw Error("Report predates partner evidence");
   const monthly=partner.months.filter(m=>m.api===api&&m.month<input.asOf.slice(0,7));
   if(monthly.length)put("production.subject_monthly",monthly,"partner_evidence","/partner/months","select_subject_api_and_normalize_phase_units_v1");
+ }
+ const measurements=partner?mapWellMeasurements(partner.bundle,api,input.asOf):null;
+ if(measurements){
+  for(const [key,measurement] of Object.entries(measurements.fields))put(key,measurement,"partner_evidence",`/measurements/fields/${key}`,measurement.method);
+  for(const conflict of measurements.conflicts)fields[`geology.${conflict.property}`]={status:"insufficient_data",value:null,reason:conflict.reason,origin:{source:"partner_evidence",pointer:"/measurements/conflicts"}};
  }
  const productionMetrics=partner?subjectProductionMetrics(partner.bundle,api,input.asOf):null;
  if(productionMetrics){
@@ -107,6 +125,10 @@ export function assembleGold2Draft(input:Gold2Input){
   put("forecast.generated_at",forecastMetrics.generatedAt,"partner_evidence","/forecastMetrics/generatedAt");
   put("forecast.method",{method:forecastMetrics.method,disclosure:forecastMetrics.disclosure},"partner_evidence","/forecastMetrics",forecastMetrics.method);
  }
+ const sourceInventory={regulatory:regulator.evidence.map(({data,...source})=>source),partner:partner?.bundle.sources.map(({data,...source})=>source)??[],title:title?.sourceInventory??[]};
+ const searchCoverage={regulatory:deriveCoverageFromAttempts(input.attempts),title:title?.searchCoverage??null,partner:partner?"supplied_cited_export":"not_connected",titleScope:title?"provided_analysis_only":"no_title_analysis_supplied",titleLookup:input.titleLookup??null};
+ put("evidence.source_inventory",sourceInventory,"regulatory_evidence","/sourceInventory","retained_source_inventory_v1");
+ put("evidence.search_coverage",searchCoverage,"regulatory_evidence","/searchCoverage","retained_query_coverage_v1");
  const rulesInput:Gold2RuleInput={identityResolved:regulator.fields["identity.api10"].value===api,positionIdentified:input.position!==null&&input.position!==undefined,nriComputable:ownership.status==="calculated",
   baseValue:economics?.values.base??null,askingPrice:economics?.settings.assumptions.askingPriceUsd??null,measuredExposure:null,
   // Closing classification of findings is a separate unfinished handoff: title sufficiency remains false.
@@ -117,7 +139,7 @@ export function assembleGold2Draft(input:Gold2Input){
  const decision=evaluateGold2Rules(rulesInput);
  for(const [field,key] of Object.entries({"decision.posture":"posture","decision.closing_readiness":"closing","decision.confidence":"confidence","decision.rule_trace":"trace","decision.closing_rule_trace":"closing"}))put(field,decision[key as keyof typeof decision],"decision_engine",`/decision/${key}`,"gold2_rules_2.0.0");
  put("decision.confidence_domains",rulesInput.confidenceDomains,"decision_engine","/rulesInput/confidenceDomains");
- return {schemaVersion:GOLD2_VERSION,state:"draft_not_validated" as const,input,inputHash:payloadHash(input),regulator,partner,ownership,productionMetrics,forecastMetrics,reconciliation,economics,rulesInput,decision,fields,disclosures:GOLD2_DISCLOSURES,
+ return {schemaVersion:GOLD2_VERSION,state:"draft_not_validated" as const,input,inputHash:payloadHash(input),regulator,wellContext,sourceInventory,searchCoverage,partner,measurements,ownership,productionMetrics,forecastMetrics,reconciliation,economics,rulesInput,decision,fields,disclosures:GOLD2_DISCLOSURES,
   implementationGaps:["Closing-blocker classification and domain-confidence handoffs are incomplete.","Remaining forecast, geology and source-coverage fields must be connected.","GOLD2 chart rendering and independent field/calculation acceptance are incomplete."],
  };
 }

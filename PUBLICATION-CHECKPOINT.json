@@ -1,0 +1,735 @@
+{
+  "base": "0e281837af5c98710552828d81c253a783c8b21e",
+  "verified_prior_head": "a23af9665fe831b9a08fa6fae722c8a561be8673",
+  "branch": "audit/decision-record-reliability",
+  "gold_reports_validated": "0/10",
+  "scope": "Cumulative audit changes since base, including existing commits and verified pending changes. Historical paths with no final diff listed separately. Manifest excludes itself to avoid circular hashes.",
+  "files": [
+    {
+      "path": ".github/workflows/pipeline-regression.yml",
+      "sha256": "ed5abb80cd694bb4e076658b6a764622190a1355ac5faa36580f9c3307f26d7d",
+      "bytes": 780
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "4996c983af9dcd05480e5554d652dd242df9a8c14caa5a550d0f086a41feef31",
+      "bytes": 331
+    },
+    {
+      "path": "AUDIT-DECISION-PIPELINE.md",
+      "sha256": "744872c1f92d4a35cb1cb793211c0cd160f2e63525dc371f5261724a3f0953f0",
+      "bytes": 13481
+    },
+    {
+      "path": "NOVI-INTEGRATION.md",
+      "sha256": "295e5628c2a82590b8cba69fdb5fe70350c3eb9dbb9d273f83ffddb16370b025",
+      "bytes": 6643
+    },
+    {
+      "path": "PIPELINE-STATUS.md",
+      "sha256": "a4655f5615c40c67ded37605f35b81631aef540eadf41b5fa8ca47f5cef7abc0",
+      "bytes": 10527
+    },
+    {
+      "path": "STANDALONE-GOLD.md",
+      "sha256": "2e3e54d2afe44c10ff8c20c6d65058dc292898e50ccd1688fa5b48e04edc05fb",
+      "bytes": 3579
+    },
+    {
+      "path": "benchmarks/README.md",
+      "sha256": "5d815620904489d151fb738c8611739c2a89d9c38e289276887536a717e4d4ed",
+      "bytes": 3968
+    },
+    {
+      "path": "benchmarks/captures/barnett-gas.json",
+      "sha256": "c5d9e65d8ca0869ea9ededd9a57cf427ad786ae4be64232e3e55f8d1fdcf40a9",
+      "bytes": 17291
+    },
+    {
+      "path": "benchmarks/captures/dry-hole.json",
+      "sha256": "a3fe72413d53d068fafdef8355c3fc21a2a40e88ba27d121aba25130f76e3cf4",
+      "bytes": 3144
+    },
+    {
+      "path": "benchmarks/captures/fisher.json",
+      "sha256": "39e806141edefe48d95eeee68ab2ea91d66119c934cbcbe453d195fadb9c6829",
+      "bytes": 15871
+    },
+    {
+      "path": "benchmarks/captures/gaines-oil.json",
+      "sha256": "98b80db94b776d7148d40e01edd903ddd14629f0c6c38b6c70fa1a750260adc8",
+      "bytes": 15101
+    },
+    {
+      "path": "benchmarks/captures/karnes-oil.json",
+      "sha256": "76f5fd2f6392c09e8ba897d01df17e522eed117cc0cca13f13e72bd5e463a20a",
+      "bytes": 4142
+    },
+    {
+      "path": "benchmarks/captures/midland-oil.json",
+      "sha256": "bccf5d1e805744d219b8ca7489c2dea1ca04ece096fd2a798fa0a85fc4d804af",
+      "bytes": 4857
+    },
+    {
+      "path": "benchmarks/captures/panhandle-gas.json",
+      "sha256": "599ae87d6745307d534881ad199f9e57c7ebe6ff294d12c5a48b7ebaf5d03e84",
+      "bytes": 14851
+    },
+    {
+      "path": "benchmarks/captures/permit-only.json",
+      "sha256": "8d8ae0f4513cf8fd9ae9a1c26244914ed7867322b840a8dbf596b542caa7cf63",
+      "bytes": 4285
+    },
+    {
+      "path": "benchmarks/captures/plugged.json",
+      "sha256": "d2bf56074c5aaa3b3cb44edd600515f0aff4ae67f45483b974a682885ad8cd9a",
+      "bytes": 3549
+    },
+    {
+      "path": "benchmarks/captures/webb-gas.json",
+      "sha256": "8756e0680c9d7d07a2ec861725c97dd663a7b863898ccef7df877a52ce7b69ac",
+      "bytes": 15434
+    },
+    {
+      "path": "benchmarks/decision-records/barnett-gas.json",
+      "sha256": "3d056ad3971540f47e6fd5dff0f643501ab651980ed94e50067270b44ae762dd",
+      "bytes": 51831
+    },
+    {
+      "path": "benchmarks/decision-records/dry-hole.json",
+      "sha256": "423b6d7ad2630ae54e6f7b9563dbacb81d55419453e5bca8445df99ea2c8ebbc",
+      "bytes": 24375
+    },
+    {
+      "path": "benchmarks/decision-records/fisher.json",
+      "sha256": "933fc7f4706e0b38503a62bb21a5674999d3111de5f48a2aed26ca8116fc69a1",
+      "bytes": 48579
+    },
+    {
+      "path": "benchmarks/decision-records/gaines-oil.json",
+      "sha256": "08076182126c71aa4474427ff4917414aa31c63534c8cbfdf07ca9ea7ff3cbbc",
+      "bytes": 47325
+    },
+    {
+      "path": "benchmarks/decision-records/karnes-oil.json",
+      "sha256": "b3f89504f75046112a940c8911124fa5b3c41cec59e8120d30bc0f0fa8e1d735",
+      "bytes": 25684
+    },
+    {
+      "path": "benchmarks/decision-records/midland-oil.json",
+      "sha256": "d6ac5aff2dc6eb9889dc263adc891bd7898fdd0f2d645b88befb67786a9a5e1d",
+      "bytes": 26971
+    },
+    {
+      "path": "benchmarks/decision-records/panhandle-gas.json",
+      "sha256": "5b03b103a8a1bd2744540c3c37257cdd2d80497dde23ceea7175cb326d92558c",
+      "bytes": 47019
+    },
+    {
+      "path": "benchmarks/decision-records/permit-only.json",
+      "sha256": "cb86271e875870f20aec214b6da69fd334bd7f1ddcea75d243539c2c814f75ed",
+      "bytes": 26458
+    },
+    {
+      "path": "benchmarks/decision-records/plugged.json",
+      "sha256": "788db1b58484e4dd7185d6d3228f84aa6ae3c599d4ddea96974635540878b489",
+      "bytes": 25038
+    },
+    {
+      "path": "benchmarks/decision-records/webb-gas.json",
+      "sha256": "b22f9f0ad7660d7de2b919729c3abab8b84a9198e92b248990da277fd381b42b",
+      "bytes": 47916
+    },
+    {
+      "path": "benchmarks/gold2-latest-validation.json",
+      "sha256": "6dc4f0616a47c3e8789255496856784181d8fdda832b87aaffb08df6eead5a46",
+      "bytes": 98301
+    },
+    {
+      "path": "benchmarks/latest-retrieval.json",
+      "sha256": "91fc400c5e9ed3fb13787d31464ae917152d554f25b29247dd293f0f5cd2628e",
+      "bytes": 111502
+    },
+    {
+      "path": "benchmarks/outage-retrieval.json",
+      "sha256": "91fc400c5e9ed3fb13787d31464ae917152d554f25b29247dd293f0f5cd2628e",
+      "bytes": 111502
+    },
+    {
+      "path": "benchmarks/partner-fixtures/matched.json",
+      "sha256": "30f20c63886bdd3e97059312c006531e3594cad85a7168e8a2431c69ef1810eb",
+      "bytes": 3083
+    },
+    {
+      "path": "benchmarks/partner-fixtures/scenario.json",
+      "sha256": "5bff1233910d88db7be2cb251a780f07d908d40da8822e1464940a0f9b54c173",
+      "bytes": 4868
+    },
+    {
+      "path": "benchmarks/recheck-permit-only.json",
+      "sha256": "9bd41b62c0f596ea6021b4d4681f7c5140382aeead6a30eab0470429080e6fab",
+      "bytes": 19631
+    },
+    {
+      "path": "benchmarks/rechecks/permit-only.json",
+      "sha256": "5a5a0459b475c97d8641fb663c51cabd6e4b4eae736afac660420f06e58fb413",
+      "bytes": 17072
+    },
+    {
+      "path": "benchmarks/standalone-live-gaines.json",
+      "sha256": "8529529a081410e547ae9407f6603f3a14da0c4ff50f2791d93601e7780fe065",
+      "bytes": 33356
+    },
+    {
+      "path": "benchmarks/texas-api-cases.json",
+      "sha256": "97d18d259d6ddf7bf1cfabd11396abfc2f41cfe76e119a3cfe6548a8325ac5d9",
+      "bytes": 5696
+    },
+    {
+      "path": "frontend/app/(app)/trrc-due-diligence/page.tsx",
+      "sha256": "80689a4c1b60a6f95b6458dfb7bb124c53e860f217c09e2c636cd241783ea9e5",
+      "bytes": 100984
+    },
+    {
+      "path": "frontend/app/api/trrc/due-diligence/[runId]/decision-record/route.ts",
+      "sha256": "5eb3447d53ec95da5d08dc23278e9eba45c151d11ab68f0a5590e0f54c37e701",
+      "bytes": 1769
+    },
+    {
+      "path": "frontend/app/api/trrc/due-diligence/[runId]/execute/route.ts",
+      "sha256": "fd323cd681274dca5250156a4af56d330985a2a79ff85380f5c196ef992369a1",
+      "bytes": 3320
+    },
+    {
+      "path": "frontend/app/api/trrc/due-diligence/[runId]/recalculate-economics/route.ts",
+      "sha256": "49659232b36f18152d1693b4e9ac0dba517f3f2327a05568a3dcc3e2aad3e20a",
+      "bytes": 13327
+    },
+    {
+      "path": "frontend/app/api/trrc/due-diligence/[runId]/report/route.ts",
+      "sha256": "bd598e17ed5d7b2af8f4dd569c9df6a6f9e7d7aaa166a3cf17eca3038620db6a",
+      "bytes": 2248
+    },
+    {
+      "path": "frontend/app/api/trrc/due-diligence/[runId]/route.ts",
+      "sha256": "ace3f1256f1d80aacc2484d1b2a868faf484e7e7312cef1857f015ac5b2037a6",
+      "bytes": 9060
+    },
+    {
+      "path": "frontend/app/api/trrc/title-chain/[jobId]/report/route.ts",
+      "sha256": "f4807e300b50b39921538047b62b5ecd6f2ab7ec11e3acfb85ba5f3114bae79c",
+      "bytes": 3565
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/benchmark-pdf.test.ts",
+      "sha256": "0e7e7007c67359ee38f3709b4526b14eb098234df14874499a5c67e4a5457653",
+      "bytes": 2556
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/benchmark-replay.test.ts",
+      "sha256": "6cb7c72d1496af673af43a7628b6397e19d23e8cebf372c5495c35857ed4abcf",
+      "bytes": 3565
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/coverage.test.ts",
+      "sha256": "143728f7e5b23ec4b557cd9c84cfe69e0f398b825382c64ab94f6a533d5e8295",
+      "bytes": 5587
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/decision-record.test.ts",
+      "sha256": "52a7d701ce432865000652154637a66c1bb57af18b14fce66de2b99ca162198e",
+      "bytes": 4309
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/decline-curve.test.ts",
+      "sha256": "f10bf5e964325ac52f353d3565b74759d75537d78aaed9af3614aa35660b77d5",
+      "bytes": 4886
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/economics.test.ts",
+      "sha256": "4b1809fd95f887763b2d24d54e745ad9cfcf6c83bd0ff478f2db97b6233c8f2f",
+      "bytes": 11423
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/edge-function-helpers.test.ts",
+      "sha256": "a341baa7802325be587cce00aeee38b9c81cd35572c5b8bd5e9103b49604f1a9",
+      "bytes": 18617
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/entity-resolver.test.ts",
+      "sha256": "cfba81e1440d8f694f63fca78d9e574b5adf5ad7ae746f37bc0dda3c5cbfd0c7",
+      "bytes": 7937
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/evidence-index.test.ts",
+      "sha256": "4a3d2b715c39c649aff37ebc06abb5e3e4980f06a40e2cb8b875220c99e4136f",
+      "bytes": 5335
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/fixtures/reviewed-position.ts",
+      "sha256": "6de2dd285306f338c538f98c1d3d75119edf46e8ed8ef5ea9ecbfde1068012eb",
+      "bytes": 2647
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/generate-report.test.ts",
+      "sha256": "7ccd6016fa441d6d4bd99d38cdd836ece0adf42795b20414ddc9801f32c1c6e4",
+      "bytes": 1587
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold-pipeline.test.ts",
+      "sha256": "21ee069ffeb3923e2748ead8dbc7c48624896c86dee8a00df8b5e92d90d931bf",
+      "bytes": 3743
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold-report.test.ts",
+      "sha256": "25fa9b8289bbd639ca8a1a551f1f79e4cccdb3ccb4655ef068774c8c9a09ecaf",
+      "bytes": 4550
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold2-contract.test.ts",
+      "sha256": "27c5fd173029a556078b8628e493ae70c2e19afaa134027b75a01084e8fae3e8",
+      "bytes": 3259
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold2-handoffs.test.ts",
+      "sha256": "a5bcf7ae40bb9faf553a0b6f3a3ee7e4c4adc2b2e1cdee54b357e0b59c94b7d3",
+      "bytes": 3670
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold2-measurements.test.ts",
+      "sha256": "460a1c799a901e2d845cdb6debc5480e034115cf59412bbe00aaa6e821b6014f",
+      "bytes": 2764
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold2-production.test.ts",
+      "sha256": "21e8f27e3d19607d1d12c14fa4d1e8bfa7ed86eb2a356662858175812ff1c7b4",
+      "bytes": 2985
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold2-title-link.test.ts",
+      "sha256": "c4135dc691293ec18c29b8008f258dd5b9ea05567dce2bfe37fa5186f1956807",
+      "bytes": 2276
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/gold2-well-context.test.ts",
+      "sha256": "6c4e400d6e0a8fe3c03ba39e86179ef21c915bfaa29547e3581771e046351dab",
+      "bytes": 2207
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/normalization.test.ts",
+      "sha256": "0dde3a271d902fa95163e010ac2b6ef26b504080bcf94f7c0acbe137d26ca9e0",
+      "bytes": 10510
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/novi-adapter.test.ts",
+      "sha256": "44f687325661599846ded935169e94729921f13051422a09708137dcd4878b8f",
+      "bytes": 2364
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/partner-reconciliation.test.ts",
+      "sha256": "afe8e846ae159a9f874a26c1edfda6b97543d1d7bbbfea29d19641b28ac3c44c",
+      "bytes": 3274
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/partner-scenario.test.ts",
+      "sha256": "a2aa874418c89aa09fe9260ff801715da4e69fc8b39f5573379bd4deb86afe69",
+      "bytes": 3773
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/production-series.test.ts",
+      "sha256": "33a2c25656274059a035ce68f38dc8b5f18ff5cb1381a4274dc2eff285c3660f",
+      "bytes": 1642
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/report-builder-geology-smoke.test.ts",
+      "sha256": "afa7b03a205d152566b92728a0cc13341b89a118110ff8158d40be1b55ac3e9f",
+      "bytes": 7434
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/report-builder.test.ts",
+      "sha256": "7e30e911e467e9db433e4b16fc7e95e906bc681b5b270f0cb498ecfa5b983a07",
+      "bytes": 4462
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/reviewed-ownership.test.ts",
+      "sha256": "84211d7a1935c6a6164156513d38a0bc01f2904340545e18acf6bf27752c6e4d",
+      "bytes": 2133
+    },
+    {
+      "path": "frontend/lib/trrc/__tests__/scorecard-builder.test.ts",
+      "sha256": "f8db9528a6e9f9d7f6752b3c39ab9064d1bd7e4cede6018aa96541f6d3ee7f48",
+      "bytes": 8591
+    },
+    {
+      "path": "frontend/lib/trrc/county-districts.ts",
+      "sha256": "23f381a012dda7e511fcb7e9c6713a02d4c6fc258b8b713b6c61af26ac52e31d",
+      "bytes": 12554
+    },
+    {
+      "path": "frontend/lib/trrc/coverage.ts",
+      "sha256": "06f0c1a6a56687d4001e344d6dec9d9cb96f558a3e3886baade6d16d17f75673",
+      "bytes": 8707
+    },
+    {
+      "path": "frontend/lib/trrc/create-run.ts",
+      "sha256": "c1099b4ca50257a9049b0b749513e06d59cc7a2250ccc369f57a2f0df18f895e",
+      "bytes": 4950
+    },
+    {
+      "path": "frontend/lib/trrc/decision-layer/novi-adapter.ts",
+      "sha256": "9c682846b843aabe4401d66e2f2332e431e091fa6128fe5b8091d7213aaeb9c3",
+      "bytes": 3703
+    },
+    {
+      "path": "frontend/lib/trrc/decision-layer/ownership.ts",
+      "sha256": "3e45bd164dfee1be389929b60eb6059255e54b4d7ef7e6689e504d327579f772",
+      "bytes": 7000
+    },
+    {
+      "path": "frontend/lib/trrc/decision-layer/partner-input.ts",
+      "sha256": "3ca4d586fe1903e210818e96c2164c3fba0f6e2d93b521be0a2850d4d51c342f",
+      "bytes": 5087
+    },
+    {
+      "path": "frontend/lib/trrc/decision-layer/reconcile.ts",
+      "sha256": "bf09e1aef82f853ddc92afa8d3e501138d4f8c090ec143d1f128e6faf94f3633",
+      "bytes": 5668
+    },
+    {
+      "path": "frontend/lib/trrc/decision-layer/reviewed-scenario.ts",
+      "sha256": "c835041e9347c3246adaf14cd2aa49d5be31079cd691638c8fc1d18c2bf68e68",
+      "bytes": 1547
+    },
+    {
+      "path": "frontend/lib/trrc/decision-layer/scenario.ts",
+      "sha256": "06ee3722c7c78d25f07d1ee300720fd808974a2bf0f43a2406e95fcd3f0a070b",
+      "bytes": 4710
+    },
+    {
+      "path": "frontend/lib/trrc/decision-layer/well-measurement.ts",
+      "sha256": "095c188b526ab53c08cf1f65aeaef1e4e2f0af169e173248d53bfcc9249e326a",
+      "bytes": 2508
+    },
+    {
+      "path": "frontend/lib/trrc/decision-record.ts",
+      "sha256": "57f3585d0f27af317b0c3aa8d595556d23ea11acabc85221d8b49e6aeedeff18",
+      "bytes": 14373
+    },
+    {
+      "path": "frontend/lib/trrc/decline-curve.ts",
+      "sha256": "b3b0499703be7a66fab5dbf7c53c1aae1585a0efbaaac8249eef8753c10bca5c",
+      "bytes": 11133
+    },
+    {
+      "path": "frontend/lib/trrc/economics.ts",
+      "sha256": "444bf792a4cd5c09a82b244769b9a682f7d734da6e5276c3198da9439ceb12b2",
+      "bytes": 22818
+    },
+    {
+      "path": "frontend/lib/trrc/eia-pricing.ts",
+      "sha256": "db61fb9f2df380f06cb6fc234fb009e0cefafb6a6ec3f44bf2686e6231f29000",
+      "bytes": 4437
+    },
+    {
+      "path": "frontend/lib/trrc/entity-resolver.ts",
+      "sha256": "f616e932163b3070e7f050c4877349fc5216797a0f30d5a69bcf638c21ddfe1a",
+      "bytes": 18902
+    },
+    {
+      "path": "frontend/lib/trrc/evidence-index.ts",
+      "sha256": "397df41324ec3a05fb21107a22101c8f720e539451576cb18cf62564e14990f6",
+      "bytes": 9227
+    },
+    {
+      "path": "frontend/lib/trrc/generate-report.ts",
+      "sha256": "e5351d09f6014f8024c0631c8a457fbd4c5c9478255645a2eeddc1ff983db723",
+      "bytes": 10370
+    },
+    {
+      "path": "frontend/lib/trrc/gold/assemble.ts",
+      "sha256": "1016aabba330d48fa9a479eaf519f8660dd9b590cfc3ddd8b60fd488d3f165f5",
+      "bytes": 7382
+    },
+    {
+      "path": "frontend/lib/trrc/gold/fonts/LICENSE.txt",
+      "sha256": "1315a62758a603a3e6e87a79b8389563789c59c1740b9db8bc2b20e2e2145458",
+      "bytes": 52517
+    },
+    {
+      "path": "frontend/lib/trrc/gold/fonts/NimbusSans-Bold.otf",
+      "sha256": "7f33328e6b4d4cd21b45fa625791928c9407dc702db6780e56b09ca9a3ecaa67",
+      "bytes": 83264
+    },
+    {
+      "path": "frontend/lib/trrc/gold/fonts/NimbusSans-Regular.otf",
+      "sha256": "7c25be4d78155523080ab85b10277150657ff7dabbcad7037bdd536c9b6d0d08",
+      "bytes": 82264
+    },
+    {
+      "path": "frontend/lib/trrc/gold/pdf.ts",
+      "sha256": "e7d2f72e8d4efd6173fbf78d188d758e6104108e5b406029e1afc463353776fc",
+      "bytes": 8614
+    },
+    {
+      "path": "frontend/lib/trrc/gold/sections.ts",
+      "sha256": "d142e4e998487188b9a35a16c35501ddaa13ce63911fb230f57752a077e6bf75",
+      "bytes": 5087
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/assemble.ts",
+      "sha256": "4130244b9f892215e17118e461637186ff2db71baa1c86713d7b29ab32aae580",
+      "bytes": 15539
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/contract.ts",
+      "sha256": "a4cc062999aa69e624bb352594be3c4473de0cf3a38b21556530fd0094909bea",
+      "bytes": 7184
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/economics.ts",
+      "sha256": "8c5cbac2e267f796a53c50bc79e77c6081ad0ee918c0907a6225502371df6e5a",
+      "bytes": 3268
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/generate.ts",
+      "sha256": "cb21121f4836fcc4115ae1f7f6d12ef49983dfa2f588d86d7d50575d8b67ad33",
+      "bytes": 2242
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/measurements.ts",
+      "sha256": "a8fa8397a740ffd94edcd54ebed2678dce834ee03a0f700c294a7f6e0a29327b",
+      "bytes": 2653
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/pdf.ts",
+      "sha256": "b0dbb4776e2691a45dea9ebd16b3d23b6d446af87c30500a5f9429909a0435c0",
+      "bytes": 8672
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/production.ts",
+      "sha256": "cf0de85cd25b0b826c6e818d4045c6203c4179368c27afee958f1d71b82f4492",
+      "bytes": 4313
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/requirements.ts",
+      "sha256": "792cb5dc0cca3a65ce3734aa4311fe69ee63109f1c68e444d1f750933e0be30a",
+      "bytes": 4610
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/rules.ts",
+      "sha256": "ecc0c226538f57609947511824c5cc14fafb9cfcf50f0feb9fa2a0b2afe46a8c",
+      "bytes": 3941
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/title-link.ts",
+      "sha256": "bfad777829e9c904450c4f6e53270059e2a9ffb1d8b9e7da1c409253cc632283",
+      "bytes": 2267
+    },
+    {
+      "path": "frontend/lib/trrc/gold2/well-context.ts",
+      "sha256": "a7344dd797a2182ab5c639df792b8a53891c1f60baada5faa58beeb58aa8d433",
+      "bytes": 2979
+    },
+    {
+      "path": "frontend/lib/trrc/normalization.ts",
+      "sha256": "8dbdef3aa0e1a6f65c014c765a4f8fd2a5b7d42763af704d36e167031ee11d5e",
+      "bytes": 12731
+    },
+    {
+      "path": "frontend/lib/trrc/production-series.ts",
+      "sha256": "daaf8f732c42edef4bd75ab1d7ae92a1fd0ec80fedce83d2b792c4848c2bd224",
+      "bytes": 2069
+    },
+    {
+      "path": "frontend/lib/trrc/report-builder.ts",
+      "sha256": "4e4e509328f9332df37c6e4caaba15eb6984afce00ab88485134077b8afac7a0",
+      "bytes": 154636
+    },
+    {
+      "path": "frontend/lib/trrc/scorecard-builder.ts",
+      "sha256": "aee3a07d07e348ef8cfd17f23f10bcb4c6f219ec47ff1574724805d700270dbe",
+      "bytes": 19888
+    },
+    {
+      "path": "frontend/lib/trrc/title/__tests__/analysis-input.test.ts",
+      "sha256": "0f736bd134cd279e702e5535764ef2d17e3b2bcc3efa495ab025a3fd51d9c824",
+      "bytes": 1263
+    },
+    {
+      "path": "frontend/lib/trrc/title/analysis-input.ts",
+      "sha256": "8d5246d7e81694e93ce84c5857d479d36336aff88d5fc8e28a18fd9a002c40be",
+      "bytes": 1051
+    },
+    {
+      "path": "frontend/lib/trrc/title/analysis.ts",
+      "sha256": "3bb21a0e3ff479f5b121a72597ff57b72f28aadd1933a16ca9c031ea95eae91c",
+      "bytes": 15329
+    },
+    {
+      "path": "frontend/lib/trrc/title/api-input.ts",
+      "sha256": "bc290df60a851c3f8f2dcf4aa0efbe88b8179670ae09cec0bff926a17d5fabf8",
+      "bytes": 5514
+    },
+    {
+      "path": "frontend/lib/trrc/title/job-store.ts",
+      "sha256": "36328067b5934f55cfe6b97d30c51fa08fd585bc9e386af282a801d438df4d6b",
+      "bytes": 10449
+    },
+    {
+      "path": "frontend/package-lock.json",
+      "sha256": "a30ec4c5f144afe64bb21e71190eeebb1be4f43b7408c0d8cba2ebc7f0ee226b",
+      "bytes": 339811
+    },
+    {
+      "path": "frontend/package.json",
+      "sha256": "2e2df7803e149505c92f9d1c60640a7d2f040781e5af83ce146f45d3efdc9277",
+      "bytes": 1612
+    },
+    {
+      "path": "frontend/scripts/benchmark-gold.ts",
+      "sha256": "99cad67579da6391cc8175ea10a9769bf4b1d5c9a53aec647a400961c6cb0019",
+      "bytes": 2187
+    },
+    {
+      "path": "frontend/scripts/benchmark-gold2.ts",
+      "sha256": "57a36d12ccc271f9e6438b2326f0ea97020215712dc83547524906ad82b32552",
+      "bytes": 4783
+    },
+    {
+      "path": "frontend/scripts/gold-report.ts",
+      "sha256": "365771defdff9068e6f8da88310f6c1112dad9abaacd0e14fb7bf9c7234783c9",
+      "bytes": 4078
+    },
+    {
+      "path": "frontend/scripts/gold2-draft.ts",
+      "sha256": "9abdc4568925f32af4c7a9f640511754d2c17027826886699840af8515f0e9ed",
+      "bytes": 1064
+    },
+    {
+      "path": "frontend/scripts/reconcile-partner.ts",
+      "sha256": "6d0a70c8e1f7c1906a73118afe107041b99bbf28a673368d54ad2ebd39f226e8",
+      "bytes": 2310
+    },
+    {
+      "path": "frontend/tsconfig.json",
+      "sha256": "1519b3e409b0059442adaf1c0c663021214e914c0f80b40cbba705e378aa4537",
+      "bytes": 562
+    },
+    {
+      "path": "supabase/migrations/029_atomic_title_analysis_publication.sql",
+      "sha256": "10804eca8d78a1071c8b194f06fe656e41c3b0d1985ac4c830860f9ff0683103",
+      "bytes": 3596
+    },
+    {
+      "path": "worker/scripts/benchmark-retrieval.mjs",
+      "sha256": "0121279c67773e53aebc6a9682e426ed0793e679d9c7d34691d263f028fd7940",
+      "bytes": 3435
+    },
+    {
+      "path": "worker/src/__tests__/benchmark-pipeline.test.ts",
+      "sha256": "0f044c7cdad0d1ea731e3731816928f9f002089e2f478ca08039e0cdac6c404f",
+      "bytes": 2950
+    },
+    {
+      "path": "worker/src/__tests__/local-store.test.ts",
+      "sha256": "f6af0452c7739b8e6eb4097273361b30bc0f6a414d59d004c8f36090b9bc9967",
+      "bytes": 2096
+    },
+    {
+      "path": "worker/src/__tests__/production-retrieval.test.ts",
+      "sha256": "3246372086b009984e16b37051ef5405713e3c95066fcc9061e9d5c71dc61b2c",
+      "bytes": 2618
+    },
+    {
+      "path": "worker/src/__tests__/sequencer.test.ts",
+      "sha256": "fff5319ae268556b614f13b906a04e62f5d66837c6841ad6ea1bc6451b876e14",
+      "bytes": 11267
+    },
+    {
+      "path": "worker/src/__tests__/title-sequencer.test.ts",
+      "sha256": "593bd10d765de86590a9abb4b383c835c8f725e4f618ddc00763e3b0dd9b03a4",
+      "bytes": 11126
+    },
+    {
+      "path": "worker/src/identity.ts",
+      "sha256": "c312eef63a923356a68ddb0e418b3c1ccd00d379fa1147bd205354b5cdeab819",
+      "bytes": 438
+    },
+    {
+      "path": "worker/src/index.ts",
+      "sha256": "4ae663a1f88c555a8497c59c57d27555e647e01f3b2f0d2be2fa39d934b50928",
+      "bytes": 10124
+    },
+    {
+      "path": "worker/src/local-store.ts",
+      "sha256": "562376d2d00b0cbd10e2fde9de85ef1eed5477d79babea7e1d5c371c04a4c8fd",
+      "bytes": 2773
+    },
+    {
+      "path": "worker/src/persistence.ts",
+      "sha256": "4d2e738e03ef48a6c68b0ab02441d11a13b01b82682cf2a593c0d2e209d3cbd0",
+      "bytes": 425
+    },
+    {
+      "path": "worker/src/progress.ts",
+      "sha256": "a67354a205b2e667d07d9f09259d342e32e3bbdd99906657e53967e83ae25176",
+      "bytes": 1204
+    },
+    {
+      "path": "worker/src/sequencer.ts",
+      "sha256": "96ae7f13f493b5ca95eaf66234dc18da19aa4125f3ea5ffa0cdd4722f218c145",
+      "bytes": 29875
+    },
+    {
+      "path": "worker/src/title-sequencer.ts",
+      "sha256": "189b038b0c41e178ecb635343b6b79620894305da6472a949fa6625214150af5",
+      "bytes": 29999
+    },
+    {
+      "path": "worker/src/tools/__tests__/browser.test.ts",
+      "sha256": "f3816ac6f8fa6ec54b20c3dfa2ee1f6f68f8ca0e6f491ea119c00a921b7bce3e",
+      "bytes": 4442
+    },
+    {
+      "path": "worker/src/tools/__tests__/ewa.test.ts",
+      "sha256": "7de4c4bf826c7fe20cdd1ea475d5621e95e726a373d5ff1790488d80f0c38554",
+      "bytes": 37610
+    },
+    {
+      "path": "worker/src/tools/browser-contracts.ts",
+      "sha256": "d124ec750f37e4d5bdabbe5cad2d084907b03155f665a824a1bef1809081806b",
+      "bytes": 1147
+    },
+    {
+      "path": "worker/src/tools/browser.ts",
+      "sha256": "6dfd499f86675db5fc55c2e23062e42f5140a0437fa2926760b3e8b34f948a0f",
+      "bytes": 28518
+    },
+    {
+      "path": "worker/src/tools/ewa.ts",
+      "sha256": "1fa2c374be8de683578c5c099e2d2ba56db111c798ea05ef3e7d972978c16ce9",
+      "bytes": 57274
+    },
+    {
+      "path": "worker/vitest.config.ts",
+      "sha256": "ef37271d6e36a38ac90641cb406afb1ef6e919047e5b09d08b3e0c5108a8ebc8",
+      "bytes": 120
+    }
+  ],
+  "historically_modified_without_final_diff": [],
+  "exclusions": [
+    "Secrets, credentials, .env files, customer data",
+    "Ignored dependencies, local logs, generated PDF artifacts and earlier recovery stash"
+  ],
+  "evidence_note": "Retained benchmark JSON consists of public regulatory retrieval and explicitly synthetic partner fixtures.",
+  "verification": {
+    "frontend": "660 tests across 69 files passed",
+    "typescript": "passed",
+    "gold2": "0/10 retained-source cases validated; acceptance gaps remain"
+  },
+  "publication": {
+    "push": "blocked",
+    "reason": "GitHub authentication unavailable; terminal prompts disabled",
+    "remote_verified": false
+  }
+}
