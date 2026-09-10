@@ -21,6 +21,8 @@ import {
   type ChronologyRow, type TitleChainAnalysis, type WellSummary, type PartyRef, type ChainEvent, type CandidateTract,
 } from "./chain-types";
 import type { ExtractedReference } from "./instrument-schema";
+import { buildDecisionRecord } from "./decision-record";
+import { buildDecisionInputsFromJob, defaultScenarioDefinitions } from "./decision-inputs";
 
 export type AnalysisResult =
   | { ok: true; analysis: TitleChainAnalysis; reused: boolean }
@@ -161,6 +163,40 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
 
   const version = (latest?.version ?? 0) + 1;
   const analysisId = randomUUID();
+
+  // Acquisition decision layer. Always produced: a job with no ownership
+  // basis or price deck configured yields INSUFFICIENT_DATA, which is a more
+  // useful answer than omitting the section entirely.
+  const decisionInputs = buildDecisionInputsFromJob({
+    job: job as unknown as Record<string, unknown>, jobId, analysisId,
+    assetIdentity: {
+      apiNumber: wells[0]?.api14 ?? null, county: confirmedTracts[0]?.county ?? null, state: job.state_code ?? "TX",
+      tractLabel: confirmedTracts[0]?.tractLabel ?? null,
+      grossTractAcres: confirmedTracts[0]?.grossAcres ?? null,
+      prorationUnitAcres: null, interestScope: job.interest_scope,
+    },
+    positionLabel: (job as unknown as Record<string, unknown>).evaluated_position_label as string ?? "Evaluated position",
+    titleStatus: status, findings,
+    confirmedTractCount: confirmedTracts.length,
+    verifiedInstrumentCount: verifiedOnConfirmed,
+    indexOnlyInstrumentCount: instruments.filter(i => !i.contentVerified).length,
+    openReviewItemCount: reviewItems.filter(r => r.status === "open").length,
+    unresolvedAllocationCount: graph.branches.reduce((n, b) => n + b.unresolvedAllocations.length, 0),
+    openRegulatoryItems: [],
+    sourceFreshness: [
+      { source: "County clerk instruments", role: "county", asOf: job.as_of_date, retrievedAt: job.updated_at,
+        coverage: `${documents.length} document(s)`, ageDays: null, staleAfterDays: 30, status: "current", note: "" },
+      { source: "Vendor analytics", role: "vendor", asOf: job.as_of_date, retrievedAt: job.updated_at,
+        coverage: "Production and forecast", ageDays: null, staleAfterDays: 45, status: "current", note: "" },
+      { source: "State regulator", role: "regulator", asOf: job.as_of_date, retrievedAt: job.updated_at,
+        coverage: `${searchLog.length} query(s)`, ageDays: null, staleAfterDays: 30, status: "current", note: "" },
+    ],
+  });
+  const decision = buildDecisionRecord({
+    input: decisionInputs,
+    scenarioDefinitions: defaultScenarioDefinitions(decisionInputs),
+  });
+
   const analysis: TitleChainAnalysis = {
     schemaVersion: TITLE_CHAIN_SCHEMA_VERSION,
     analysisId, jobId, version,
@@ -175,18 +211,26 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
     chronology,
     findings,
     sourceInventory: documents.map(d => ({
-      documentId: d.id, source: d.source, sourceIdentifier: d.source_identifier, sourceUrl: d.source_url, fileName: d.file_name, documentCategory: d.document_category,
-      contentHash: d.content_hash, retrievedAt: d.retrieved_at, pageCount: d.page_count, hasTextLayer: d.has_text_layer, ocrStatus: d.ocr_status, extractionStatus: d.extraction_status,
+      documentId: d.id, source: d.source, sourceIdentifier: d.source_identifier, sourceUrl: d.source_url, fileName: d.file_name,
+      documentCategory: d.document_category, contentHash: d.content_hash, retrievedAt: d.retrieved_at, pageCount: d.page_count,
+      hasTextLayer: d.has_text_layer, ocrStatus: d.ocr_status, extractionStatus: d.extraction_status,
       instrumentIds: instrumentsByDoc.get(d.id) ?? [],
     })),
-    searchCoverage: searchLog.map(s => ({ provider: s.provider, county: s.county, queryType: s.query_type, queryValue: s.query_value, dateFrom: s.date_from, dateTo: s.date_to, status: s.status, resultCount: s.result_count, errorMessage: s.error_message, sourceUrl: s.source_url, searchedAt: s.searched_at })),
+    searchCoverage: searchLog.map(s2 => ({
+      provider: s2.provider, county: s2.county, queryType: s2.query_type, queryValue: s2.query_value,
+      dateFrom: s2.date_from, dateTo: s2.date_to, status: s2.status, resultCount: s2.result_count,
+      errorMessage: s2.error_message, sourceUrl: s2.source_url, searchedAt: s2.searched_at,
+    })),
     limitations,
     reviewQueueOpenCount: reviewItems.filter(r => r.status === "open").length,
+    decision,
     statement: TITLE_CHAIN_REPORT_STATEMENT,
   };
 
   const { error: insErr } = await supabase.from("title_analyses").insert({
     id: analysisId, job_id: jobId, user_id: userId, version, schema_version: TITLE_CHAIN_SCHEMA_VERSION, status_classification: status, analysis_json: analysis, input_fingerprint: fingerprint,
+    decision_json: decision, decision_posture: decision.posture, decision_rule_version: decision.decisionRuleVersion,
+    decision_rule_id: decision.postureRuleId, closing_readiness: decision.closingReadiness.readiness, decision_confidence: decision.confidence,
   });
   if (insErr) return { ok: false, error: `Could not persist analysis: ${insErr.message}`, status: 500 };
 

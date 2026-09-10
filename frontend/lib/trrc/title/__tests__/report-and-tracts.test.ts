@@ -22,7 +22,7 @@ function makeAnalysis(): TitleChainAnalysis {
     wells: [{ wellId: "w1", originalInput: "42-317-00001", api14: "42317000010000", formatted: "42-317-00001-00-00", wellName: "DOE 1", operatorName: "ACME", countyName: "Martin", resolutionStatus: "resolved", validationError: null, resolutionError: null, associations: [] }],
     tracts: [TRACT_A], branches: graph.branches,
     chronology: chronologyFromBranches(graph.branches.flatMap(b => b.events.map(event => ({ event, tractLabel: b.tractLabel, interestType: b.interestType })))),
-    findings, sourceInventory: [], searchCoverage: [], limitations: [], reviewQueueOpenCount: 0, statement: TITLE_CHAIN_REPORT_STATEMENT,
+    findings, sourceInventory: [], searchCoverage: [], limitations: [], reviewQueueOpenCount: 0, decision: null, statement: TITLE_CHAIN_REPORT_STATEMENT,
   };
 }
 

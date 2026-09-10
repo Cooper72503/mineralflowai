@@ -9,6 +9,7 @@
  */
 
 import type { FractionJson } from "./fraction";
+import type { DecisionRecord } from "./decision-types";
 import type { TitleAssessmentClassification, MatchStatus } from "./types";
 export type { TitleAssessmentClassification, MatchStatus };
 
@@ -366,6 +367,13 @@ export interface TitleChainAnalysis {
   searchCoverage: SearchCoverageEntry[];
   limitations: string[];
   reviewQueueOpenCount: number;
+
+  /**
+   * The acquisition decision layer. Null when the job has no ownership
+   * basis or price deck configured, which is the honest state for a job
+   * that has only had title research run against it.
+   */
+  decision: DecisionRecord | null;
 
   statement: string;
 }
