@@ -75,3 +75,10 @@ New tests exercise ten real captured APIs through GOLD rendering and separately 
 Further retrieval defects found and repaired: compliance no longer reports an empty search when no form was submitted or the response was unparseable; unknown open status stays null. Operator pickers require a unique exact identity. P-5 detail identity is verified. Inactive records must match the subject API, and a shut-in date is not a plugging deadline. The Decision Record no longer relabels lease names as well names and rejects unrelated/out-of-range GIS coordinates.
 
 This is not completion of the acquisition pipeline. Reviewed title/position, ownership/NRI, subject-specific engineering/economics, Novi reconciliation, full geology handoff and web/bulk export parity remain open. `STANDALONE-GOLD.md` states the executable boundary and reproduction commands.
+
+
+## Novi decision-layer integration milestone (September 10)
+
+Added a MineralFlow-owned cited production/forecast interchange, independent same-period lease reconciliation, and conditional royalty scenarios driven by explicit deal assumptions. Existing forecast engines are preserved; supplied partner forecasts are consumed directly. Tests cover duplicate identities/months, unit conversion, null volumes, ambiguous/incomplete membership, zero denominators, contradictions, forecast version mixing, missing forecast horizons, invalid NRI, gross/net basis and price sensitivity. The CLI retains both source evidence sets and calculation inputs. The 17 integration tests pass; full suite now 607 frontend + 92 worker tests.
+
+This is preparation for the Novi integration, not a live Novi adapter or completed acquisition recommendation. Title linkage, measured exceptions, closing rules, remaining partner domains and GOLD/UI/bulk integration remain open. See NOVI-INTEGRATION.md.

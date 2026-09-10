@@ -1,0 +1,126 @@
+{
+  "partner": {
+    "contract": "mineralflow-partner-production-0.1",
+    "mode": "synthetic_fixture",
+    "sources": [
+      {
+        "id": "fixture",
+        "provider": "Synthetic test fixture - not Novi data",
+        "url": "https://example.invalid/fixture",
+        "retrievedAt": "2026-02-01T00:00:00Z",
+        "sha256": "b7cf73ae601b6b4775805c08534658959d67199daf99d4954e7fedd3a1058ffe",
+        "data": [
+          {
+            "kind": "lease_membership",
+            "lease": "10289",
+            "district": "8A",
+            "from": "2026-01",
+            "through": "2026-01",
+            "apis": [
+              "4216502733",
+              "4216502734"
+            ],
+            "completeness": "complete"
+          },
+          {
+            "kind": "well_monthly_production",
+            "api": "4216502733",
+            "lease": "10289",
+            "district": "8A",
+            "month": "2026-01",
+            "oil": {
+              "value": 0.1,
+              "unit": "Mbbl"
+            },
+            "gas": {
+              "value": 0.2,
+              "unit": "MMcf"
+            }
+          },
+          {
+            "kind": "well_monthly_production",
+            "api": "4216502734",
+            "lease": "10289",
+            "district": "8A",
+            "month": "2026-01",
+            "oil": {
+              "value": 0.1,
+              "unit": "Mbbl"
+            },
+            "gas": {
+              "value": 0.2,
+              "unit": "MMcf"
+            }
+          }
+        ]
+      }
+    ],
+    "observations": [
+      {
+        "sourceId": "fixture",
+        "pointer": "/0"
+      },
+      {
+        "sourceId": "fixture",
+        "pointer": "/1"
+      },
+      {
+        "sourceId": "fixture",
+        "pointer": "/2"
+      }
+    ]
+  },
+  "regulator": {
+    "case": {
+      "id": "synthetic-reconciliation",
+      "api10": "4216502733"
+    },
+    "attempts": [
+      {
+        "source_id": "search_by_api",
+        "source_name": "search_by_api",
+        "status": "success",
+        "result_count": 1,
+        "error_message": null,
+        "attempted_at": "2026-02-01T00:00:00Z",
+        "result_data_json": {
+          "found": true,
+          "wells": [
+            {
+              "api_no": "4216502733",
+              "lease_no": "10289",
+              "district": "8A"
+            }
+          ]
+        }
+      },
+      {
+        "source_id": "fetch_production",
+        "source_name": "fetch_production",
+        "status": "success",
+        "result_count": 1,
+        "error_message": null,
+        "attempted_at": "2026-02-01T00:00:00Z",
+        "result_data_json": {
+          "found": true,
+          "lease_number": "10289",
+          "district": "8A",
+          "rows": [
+            {
+              "production_month": "2026-01",
+              "oil_bbl": 200,
+              "gas_mcf": 400,
+              "casinghead_gas_mcf": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "policy": {
+    "from": "2026-01",
+    "through": "2026-01",
+    "thresholdPercent": 5,
+    "policyId": "explicit-synthetic-test-policy"
+  }
+}
