@@ -2,7 +2,7 @@
   "schema_version": "provenance-1.0.0",
   "run_id": "gaines-oil",
   "input": "4216502733",
-  "generated_at": "2026-09-09T12:00:00Z",
+  "generated_at": "2026-09-09T15:55:31.706Z",
   "fields": {
     "identity.api10": {
       "status": "calculated",
@@ -68,15 +68,10 @@
       "reason": null
     },
     "identity.well_name": {
-      "status": "observed",
-      "value": "TAYLOR, W. J. \"A\"",
-      "citations": [
-        {
-          "evidenceId": "gaines-oil-search_by_api",
-          "pointer": "/wells/1/lease_name"
-        }
-      ],
-      "reason": null
+      "status": "unavailable",
+      "value": null,
+      "citations": [],
+      "reason": "Required evidence was not retrieved or no validated engine handoff populates this field."
     },
     "identity.field": {
       "status": "observed",

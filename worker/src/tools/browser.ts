@@ -7,6 +7,8 @@
 
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import * as cheerio from "cheerio";
+import {canonicalApi10} from "../identity.js";
+import {selectExactOperator,confirmedOpenCount} from "./browser-contracts.js";
 
 let _browser: Browser | null = null;
 
@@ -47,7 +49,7 @@ export async function getComplianceViolations(
 ): Promise<{
   found: boolean;
   violations: Violation[];
-  open_count: number;
+  open_count: number | null;
   total_count: number;
   searched_by: string;
   message: string;
@@ -56,6 +58,8 @@ export async function getComplianceViolations(
   let context: BrowserContext | null = null;
 
   try {
+    if(!operatorNumber&&!canonicalApi10(apiNumber))throw Error("A valid API or operator number is required for compliance lookup");
+    let submitted=false;
     const browser = await getBrowser();
     context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -74,10 +78,11 @@ export async function getComplianceViolations(
         await opInput.fill(operatorNumber);
         await page.locator('input[type="submit"], button[type="submit"]').first().click();
         await page.waitForLoadState("networkidle", { timeout: 20_000 });
+        submitted=true;
       }
     } else if (apiNumber) {
       // Try by API number
-      const digits = apiNumber.replace(/\D/g, "");
+      const digits = canonicalApi10(apiNumber)!;
       const prefix = digits.slice(2, 5);
       const suffix = digits.slice(5, 10);
       const prefixInput = page.locator('input[id*="apiPrefix"], input[name*="apiPrefix"], input[id*="apiNoPrefixArg"]').first();
@@ -87,9 +92,13 @@ export async function getComplianceViolations(
         await suffixInput.fill(suffix);
         await page.locator('input[type="submit"], button[type="submit"]').first().click();
         await page.waitForLoadState("networkidle", { timeout: 20_000 });
+        submitted=true;
       }
     }
 
+    if(!submitted)throw Error("Compliance search controls were unavailable; no query was submitted");
+    const bodyText=await page.innerText("body");
+    if(/Ewa_\d+|correct the errors|access denied|validation error/i.test(bodyText))throw Error("Compliance query was rejected");
     // Wait for results table
     await page.waitForSelector('table', { timeout: 15_000 }).catch(() => null);
 
@@ -103,7 +112,7 @@ export async function getComplianceViolations(
 
       const headerCells = await rows[0].locator("th, td").allTextContents();
       const headerStr = headerCells.join(" ").toLowerCase();
-      if (!headerStr.includes("violation") && !headerStr.includes("rule") && !headerStr.includes("date")) continue;
+      if (!headerStr.includes("violation") && !headerStr.includes("rule")) continue;
 
       const keys = headerCells.map(h => h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, ""));
 
@@ -114,7 +123,7 @@ export async function getComplianceViolations(
         keys.forEach((k, i) => { obj[k] = (cells[i] ?? "").trim(); });
 
         violations.push({
-          violation_discovery_date:  obj["date"] || obj["discovery_date"] || obj["violation_date"] || "",
+          violation_discovery_date:  obj["violation_discovery_date"] || obj["date"] || obj["discovery_date"] || obj["violation_date"] || "",
           violated_rule:             obj["rule"] || obj["violated_rule"] || "",
           violated_rule_description: obj["description"] || obj["rule_description"] || obj["violated_rule_description"] || "",
           major_violation:           obj["major"] || obj["major_violation"] || "",
@@ -125,12 +134,10 @@ export async function getComplianceViolations(
       }
     }
 
-    const openCount = violations.filter(v =>
-      v.compliant_on_reinspection === "N" ||
-      /open|unresolved/i.test(v.last_enforcement_action)
-    ).length;
+    const openCount = confirmedOpenCount(violations);
 
     if (violations.length === 0) {
+      if(!/no (?:violations|results|records)(?: were)? found|no records to display/i.test(bodyText))throw Error("Compliance response contained neither recognized violation rows nor an explicit empty result");
       return { found: false, violations: [], open_count: 0, total_count: 0, searched_by: operatorNumber ? "operator_number" : "api_number", message: "No violations found" };
     }
 
@@ -140,10 +147,10 @@ export async function getComplianceViolations(
       open_count:  openCount,
       total_count: violations.length,
       searched_by: operatorNumber ? "operator_number" : "api_number",
-      message:     `${violations.length} violation(s) found, ${openCount} open`,
+      message:     `${violations.length} violation(s) found, ${openCount===null?"unknown number":openCount} open`,
     };
   } catch (e) {
-    return { found: false, violations: [], open_count: 0, total_count: 0, searched_by: "", message: `ICE portal error: ${String(e)}`, error: String(e) };
+    return { found: false, violations: [], open_count: null, total_count: 0, searched_by: "", message: `ICE portal error: ${String(e)}`, error: String(e) };
   } finally {
     await context?.close();
   }
@@ -181,17 +188,9 @@ export async function getInactiveWellStatus(
   // Accepts both the full "42-165-02733" (10+ digit) form and TRRC's own
   // short, state-prefix-less confirmed form (8 digits) — see the matching
   // comment on ewa.ts's splitApi() for why both must work here.
-  const digits = apiNumber.replace(/\D/g, "");
-  let prefix: string, suffix: string;
-  if (digits.length === 8) {
-    prefix = digits.slice(0, 3);
-    suffix = digits.slice(3, 8);
-  } else if (digits.length >= 10) {
-    prefix = digits.slice(2, 5);
-    suffix = digits.slice(5, 10);
-  } else {
-    return { is_inactive: false, records: [], plugging_deadline: null, message: "Invalid API", error: "Invalid API" };
-  }
+  const digits=canonicalApi10(apiNumber);
+  if(!digits)return {is_inactive:false,records:[],plugging_deadline:null,message:"Invalid API",error:"Invalid API"};
+  const prefix=digits.slice(2,5),suffix=digits.slice(5,10);
 
   if (!operatorNumber) {
     return { is_inactive: false, records: [], plugging_deadline: null, message: "Operator number required for inactive well lookup — not resolved yet", error: "Operator number required for inactive well lookup — not resolved yet" };
@@ -214,11 +213,8 @@ export async function getInactiveWellStatus(
     await page.locator('input[value="Search"]').nth(0).click();
     await page.waitForSelector('select[name="resultSelection"] option', { timeout: 10_000 }).catch(() => null);
 
-    const firstOption = page.locator('select[name="resultSelection"] option').first();
-    const optionValue = await firstOption.getAttribute("value").catch(() => null);
-    if (!optionValue) {
-      return { is_inactive: false, records: [], plugging_deadline: null, message: `Operator ${operatorNumber} not found for inactive well lookup`, error: `Operator ${operatorNumber} not found for inactive well lookup` };
-    }
+    const options=await page.locator('select[name="resultSelection"] option').evaluateAll(nodes=>nodes.map(n=>({value:(n as HTMLOptionElement).value,text:n.textContent??""})));
+    const optionValue=selectExactOperator(options,null,operatorNumber);
     await page.selectOption('select[name="resultSelection"]', optionValue);
     await page.locator('input[value="Add"]').click();
     await page.waitForTimeout(1_000);
@@ -286,8 +282,9 @@ export async function getInactiveWellStatus(
     if (records.length === 0) {
       return { is_inactive: false, records: [], plugging_deadline: null, message: "No inactive well data", error: "Response received but no matching results table could be parsed" };
     }
-    const deadline = records[0]?.["shut_in_date"] || null;
-    return { is_inactive: true, records, plugging_deadline: deadline, message: `INACTIVE — ${records.length} record(s)${deadline ? `, shut-in ${deadline}` : ""}` };
+    if(records.some(r=>canonicalApi10(r.api_no)!==canonicalApi10(apiNumber)))throw Error("Inactive records do not match the requested API");
+    const shutInDate = records[0]?.["shut_in_date"] || null;
+    return { is_inactive: true, records, plugging_deadline: null, message: `INACTIVE — ${records.length} record(s)${shutInDate ? `, shut-in ${shutInDate}` : ""}. Plugging deadline unavailable.` };
   } catch (e) {
     return { is_inactive: false, records: [], plugging_deadline: null, message: `Error: ${String(e)}`, error: String(e) };
   } finally {
@@ -403,12 +400,8 @@ export async function searchOperator(
     // exist instead of guessing how long the AJAX call takes.
     await page.waitForSelector('select[name="resultSelection"] option', { timeout: 10_000 }).catch(() => null);
 
-    const firstOption = await page.locator('select[name="resultSelection"] option').first();
-    const optionValue = await firstOption.getAttribute("value").catch(() => null);
-    if (!optionValue) {
-      return { found: false, record: null, p5_status: null, bond_amount: null, trrc_source_url: null, message: "Operator not found in P-5 registry" };
-    }
-
+    const options=await page.locator('select[name="resultSelection"] option').evaluateAll(nodes=>nodes.map(n=>({value:(n as HTMLOptionElement).value,text:n.textContent??""})));
+    const optionValue=selectExactOperator(options,operatorName,operatorNumber);
     await page.selectOption('select[name="resultSelection"]', optionValue);
     await page.locator('input[value="Add"]').click();
     await page.waitForTimeout(1_000);
@@ -422,7 +415,7 @@ export async function searchOperator(
 
     const drillDownLink = page.locator('a[href*="organizationResultsDrillDownAction"]').first();
     if (!(await drillDownLink.count())) {
-      return { found: false, record: null, p5_status: null, bond_amount: null, trrc_source_url: null, message: "No P-5 result row found after search" };
+      return { found: false, record: null, p5_status: null, bond_amount: null, trrc_source_url: null, message: "No P-5 result row found after search", error: "P-5 search did not produce a recognized detail link" };
     }
     await drillDownLink.click();
     await page.waitForLoadState("networkidle", { timeout: 20_000 });
@@ -464,7 +457,7 @@ export async function searchOperator(
 
     const record: P5OperatorRecord = {
       operator_number:     lv["operator_number"] || optionValue,
-      operator_name:        lv["operator_name"] || String(operatorName ?? ""),
+      operator_name:        lv["operator_name"] || "",
       organization_status: lv["organization_status"] || "",
       organization_type:   lv["organization_type"] || "",
       renewal_month:         lv["renewal_month"] || "",
@@ -477,6 +470,7 @@ export async function searchOperator(
       agent_address:         agentAddress,
     };
 
+    if(!lv["operator_number"]||lv["operator_number"]!==optionValue)throw Error("P-5 detail identity does not match the selected operator");
     return {
       found: true,
       record,

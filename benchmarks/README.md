@@ -29,7 +29,7 @@ cd frontend
 npx tsc --noEmit
 ```
 
-`MINERALFLOW_EXPORT_BENCHMARK=1 npm test --prefix frontend -- lib/trrc/__tests__/benchmark-replay.test.ts` regenerates the ten evidence JSON artifacts under `decision-records/`. These are provenance-1.0.0 outputs, not the GOLD 2.0 report. Their deterministic generation timestamp is a fixture value; source retrieval timestamps remain in the evidence entries.
+`MINERALFLOW_EXPORT_BENCHMARK=1 npm test --prefix frontend -- lib/trrc/__tests__/benchmark-replay.test.ts` regenerates the ten evidence JSON artifacts under `decision-records/`. These are provenance-1.0.0 outputs, not the GOLD 2.0 report. Their deterministic generation timestamp is one second after the latest source attempt in each case; source retrieval timestamps remain in the evidence entries.
 
 ## Live retrieval
 
@@ -54,3 +54,7 @@ Do not overwrite an outage with a successful recheck when reporting availability
 - PDF rendering compatibility uses real captured core payloads and deterministic unavailable responses for uncaptured engines. It does not certify live downstream engines, layout quality or GOLD parity.
 
 The full live run returned production for five cases. A separate failed-case recovery returned a sixth. All ten decision evidence artifacts still have insufficient acquisition data because the evaluated position, linked title, NRI, Novi reconciliation and acquisition rules are missing. See `../PIPELINE-STATUS.md` for current counts and exact failures.
+
+## Standalone GOLD path
+
+`npm run gold:benchmark --prefix frontend` exports all ten captured cases through the eighteen-section renderer, with JSON field-status counts and per-case failure reasons in `audit-work/gold-benchmark/summary.json`. `standalone-live-gaines.json` retains a complete public-worker run, including missing Chromium and public endpoint failures. See `STANDALONE-GOLD.md` for live and replay commands and the remaining acquisition-engine boundary.

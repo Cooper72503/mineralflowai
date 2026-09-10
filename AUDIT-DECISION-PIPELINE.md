@@ -64,3 +64,14 @@ The maintained counts and exact live failure table are in `PIPELINE-STATUS.md`. 
 10. **Production acceptance:** run the complete authenticated API → worker → database → linked engines → validated GOLD JSON/PDF path for the benchmark, then expand the set with long histories, horizontal/vertical wells, historical associations, gas/oil/condensate, plugged/dry/permit cases, difficult counties and valid missing-record inputs. Define latency, retry and availability thresholds. Do not count an unavailable field as retrieved data.
 
 The pipeline should not be represented as production-ready for the October 6 meeting until these gates have evidence. The tracker records progress without converting test counts into an unsupported percentage of product completion.
+
+
+## Standalone GOLD checkpoint (September 9)
+
+Added `frontend/scripts/gold-report.ts` and `gold:benchmark`. The live command runs the existing worker through a local checkpointing store, then builds one provenance record used by both the GOLD PDF and JSON. The eighteen sections cover all 84 current fields. Forecasts call the existing Arps engine with preserved calendar gaps and explicit lease scope. Derived rules, coverage, assumptions, section mappings and forecasts are revalidated before rendering. Embedded licensed Nimbus fonts make the PDF portable; production and source-inventory pagination were visually checked.
+
+New tests exercise ten real captured APIs through GOLD rendering and separately through the actual worker → local store → GOLD assembly. Local persistence tests cover cancellation, composite-key upserts, detached checkpoints and write failure. A live public-worker run is retained in `benchmarks/standalone-live-gaines.json`; its Chromium failures remain part of the evidence. Browser download retries timed out in this runtime.
+
+Further retrieval defects found and repaired: compliance no longer reports an empty search when no form was submitted or the response was unparseable; unknown open status stays null. Operator pickers require a unique exact identity. P-5 detail identity is verified. Inactive records must match the subject API, and a shut-in date is not a plugging deadline. The Decision Record no longer relabels lease names as well names and rejects unrelated/out-of-range GIS coordinates.
+
+This is not completion of the acquisition pipeline. Reviewed title/position, ownership/NRI, subject-specific engineering/economics, Novi reconciliation, full geology handoff and web/bulk export parity remain open. `STANDALONE-GOLD.md` states the executable boundary and reproduction commands.

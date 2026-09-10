@@ -18,20 +18,23 @@ Updated: 2026-09-09. Working branch: `audit/decision-record-reliability`, based 
 | Engineering | IN PROGRESS | Calendar-gap/zero-month handling and decline regressions pass. Position-specific forecasts and live full-path validation remain. |
 | Economics | IN PROGRESS | Placeholder-price valuations withheld; missing outputs null; phase handoff repaired. NRI, deal-specific assumptions and reconciliation remain. |
 | Evidence/QA | IN PROGRESS | 84-field provenance contract, evidence hashes, citation checks and stale-data guards implemented. Legacy export parity and original-document provenance remain. |
-| Decision Record | IN PROGRESS | Downloadable evidence JSON added. Full GOLD 2.0 report/schema/decision rules not implemented in this checkout. |
-| Benchmark regression suite | IN PROGRESS | Ten distinct real APIs, captured replay and CI added. Full staging pipeline and GOLD report acceptance remain. |
+| Decision Record | IN PROGRESS | Downloadable evidence JSON added. Standalone 18-section GOLD 1.0 presentation and PDF/JSON command added. Reviewed-position handoffs and reference 2.0 rule parity remain incomplete. |
+| Benchmark regression suite | IN PROGRESS | Ten distinct real APIs, captured replay and CI added. Standalone GOLD rendering and worker handoff replay pass; broader live coverage and populated acquisition acceptance remain. |
 
-**CURRENT TASK:** Save the verified engineering checkpoint and maintain the remaining release gates.
+**CURRENT TASK:** Verify the standalone report checkpoint and complete the remaining title/ownership/position-economics handoffs.
 
 **LAST VERIFIED:**
 
-- Frontend: 563 tests passed across 56 files.
-- Worker: 78 tests passed across 6 files; worker build passed.
+- Frontend: 590 tests passed across 58 files.
+- Worker: 92 tests passed across 8 files; worker build passed.
 - Frontend TypeScript check passed.
 - 10/10 captured API cases produce the complete 84-field evidence schema with valid citations/calculations or explicit gaps.
 - Full ten-case live run: GIS 9/10 found; wellbore 8/10 found, one empty and one timeout; production 5/10 returned rows; permits 10/10 queries completed, including empty results.
 - Separate permit-symbol case recheck recovered wellbore/GIS and returned 49 months for current gas association 131160. This does not replace the failed full-run capture.
-- **0/10 full GOLD 2.0 Decision Records validated.** 10/10 existing PDF benchmark render checks also pass, but are not equivalent to this gate.
+- 10/10 captured APIs validate and render through the new 18-section GOLD 1.0 PDF/JSON path. Separate worker → standalone store → GOLD handoff tests pass for all ten.
+- One full standalone public-worker run completed without a database. Its retained capture is `benchmarks/standalone-live-gaines.json`; browser-based lookups failed because Chromium was absent. A subsequent Chromium installation attempt failed after download timeouts.
+- Two real captured gas histories reach the existing decline engine; the captured oil history contains internal reporting gaps and is withheld. A separate synthetic oil-history test verifies the populated engineering handoff.
+- **0/10 populated acquisition decisions validated.** Title/position/NRI, subject-well forecasts and acquisition values remain unavailable. Rendering an honest report is a separate gate from having sufficient acquisition evidence.
 
 **FAILURES / GAPS IN THE FULL LIVE RUN:**
 
@@ -43,10 +46,12 @@ Updated: 2026-09-09. Working branch: `audit/decision-record-reliability`, based 
 | 42-329-01040 | Wellbore and GIS timed out; production lacked identifiers. | Separate recheck succeeded; original outage retained. Current gas lease 131160 used, not first historical oil row. |
 | 42-151-00013 | Production retrieval timed out. | Production unavailable. Earlier diagnostic responses also showed oil no-results / gas Ewa_1011 rejection. |
 
-**NEXT ACTION:** Complete report/export parity checks, then run the full worker → database → engines → GOLD report path in staging after the actual GOLD schema/ruleset and environment are available. Do not count missing or unconnected data as a successful acquisition decision.
+**NEXT ACTION:** Build the validated reviewed-title/evaluated-position handoff and exercise a populated ownership → NRI → position-economics path. Connect Novi and full geology outputs with provenance, then bring web and bulk exports onto the same validated record. Browser-source live validation requires a runtime with Chromium installed.
 
-**ACCESS / IMPLEMENTATION BLOCKERS:** No configured staging Supabase, EIA or Novi credentials in this environment. Credentials must be configured securely in the runtime, not pasted into chat. GOLD 2.0 is represented by a sample document, not a complete executable contract in this repository.
+**ACCESS / IMPLEMENTATION BLOCKERS:** Standalone public retrieval does not require Supabase. Browser installation downloads timed out; browser adapters are covered by regression tests but are not live-verified here. No Novi credentials or supported import contract are configured. GOLD 2.0 is represented by a sample, not complete executable predicates. Reviewed title/ownership and position-economics linkage are code gaps that remain to be implemented.
 
 See `AUDIT-DECISION-PIPELINE.md` for implementation details, validation boundaries and remaining work. See `benchmarks/README.md` for repeatable commands and retained evidence.
 
-**PUBLICATION:** Changes committed locally. GitHub push was blocked by automatic approval review because remote publication of code/retrieval artifacts was not explicitly authorized. No deployment or remote publication occurred. A reviewable checkpoint archive contains the patch and this tracker.
+**PUBLICATION:** The owner authorized publication, but the push failed because this workspace has no GitHub authentication. The owner subsequently directed that work remain local and Claude will push the finished codebase. No further push is planned.
+
+**STANDALONE COMMANDS:** See `STANDALONE-GOLD.md`. All changes remain local for Claude to push.

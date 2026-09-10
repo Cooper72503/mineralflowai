@@ -85,7 +85,7 @@ export function buildDecisionRecord(run: Pick<TrrcDueDiligenceRun,"id"|"original
     fields["identity.api10"]={status:"calculated",value:requested!.api10,citations:[{evidenceId:wb.id,pointer}],reason:null,method:"texas_api10",inputs:[]};
     const pairs: [DecisionFieldKey,string[]][]=[
       ["identity.county",["county"]],["identity.lease",["lease_no"]],["identity.district",["district","dist_code"]],
-      ["identity.operator",["operator_name"]],["identity.well_name",["lease_name"]],["identity.field",["field_name"]],
+      ["identity.operator",["operator_name"]],["identity.well_name",["well_name"]],["identity.field",["field_name"]],
     ];
     for(const [key,names] of pairs) {
       if (ambiguous && ["identity.lease","identity.district","identity.operator","identity.field"].includes(key)) continue;
@@ -101,10 +101,14 @@ export function buildDecisionRecord(run: Pick<TrrcDueDiligenceRun,"id"|"original
   } else if (prod?.data.found) {
     fields["production.lease_monthly"]={status:"insufficient_data",value:null,citations:[],reason:"Retrieved production lease/district does not match a uniquely resolved subject association."};
   }
-  put("geology.latitude","fetch_gis_plat",["/latitude"]);
-  put("geology.longitude","fetch_gis_plat",["/longitude"]);
-  put("geology.map_symbol","fetch_gis_plat",["/well_type"]);
-  put("geology.survey","fetch_gis_plat",["/survey"]);
+  const gis=usable("fetch_gis_plat");
+  const gisApi=typeof gis?.data.api_number==="string"?normalizeApiNumber(gis.data.api_number)?.api10:null;
+  if(requested&&gisApi===requested.api10){
+    if(typeof gis?.data.latitude==="number"&&gis.data.latitude>=-90&&gis.data.latitude<=90)put("geology.latitude","fetch_gis_plat",["/latitude"]);
+    if(typeof gis?.data.longitude==="number"&&gis.data.longitude>=-180&&gis.data.longitude<=180)put("geology.longitude","fetch_gis_plat",["/longitude"]);
+    put("geology.map_symbol","fetch_gis_plat",["/well_type"]);
+    put("geology.survey","fetch_gis_plat",["/survey"]);
+  }
   for(const [key,source,pointers] of [
     ["regulatory.operator_standing","search_by_operator",["/record"]],
     ["regulatory.compliance","fetch_compliance_violations",["/violations","/records"]],

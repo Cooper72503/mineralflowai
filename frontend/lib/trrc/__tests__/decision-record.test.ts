@@ -46,3 +46,19 @@ it("rejects an API derivation that matches evidence but differs from the request
   record.input="4243934308";
   expect(validateDecisionRecord(record)).toContain("Invalid API derivation identity.api10");
 });
+
+it("does not relabel a lease name as an independently evidenced well name",()=>{
+ const source=structuredClone(attempt);
+ (source.result_data_json!.wells as Record<string,unknown>[])[0].lease_name="LEASE ALPHA";
+ expect(buildDecisionRecord(run,[source]).fields["identity.well_name"].status).toBe("unavailable");
+});
+it("requires matching GIS identity before attaching coordinates or survey facts",()=>{
+ const gis={...attempt,source_id:"gis",source_name:"fetch_gis_plat",result_data_json:{found:true,api_number:"4243934308",latitude:32,longitude:-102,well_type:"Oil Well",survey:{name:"Other tract"}}};
+ const mismatch=buildDecisionRecord(run,[attempt,gis]);
+ expect(mismatch.fields["geology.latitude"].status).toBe("unavailable");
+ expect(mismatch.fields["geology.survey"].status).toBe("unavailable");
+ gis.result_data_json.api_number="4216502733";
+ expect(buildDecisionRecord(run,[attempt,gis]).fields["geology.latitude"].value).toBe(32);
+ gis.result_data_json.latitude=132;
+ expect(buildDecisionRecord(run,[attempt,gis]).fields["geology.latitude"].status).toBe("unavailable");
+});

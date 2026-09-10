@@ -15,7 +15,7 @@ describe("real Texas API benchmark — captured responses, no live network",()=>
   for(const c of captured.cases)expect(normalizeApiNumber(c.case.api10)?.api10).toBe(c.case.api10);
  });
  it.each(captured.cases)("$case.id produces all fields with valid provenance or explicit gaps",c=>{
-  const record=buildDecisionRecord({id:c.case.id,original_input:c.case.api10},c.attempts,"2026-09-09T12:00:00Z");
+  const record=buildDecisionRecord({id:c.case.id,original_input:c.case.api10},c.attempts,new Date(Math.max(...c.attempts.map(a=>Date.parse(a.attempted_at)))+1000).toISOString());
   expect(validateDecisionRecord(record)).toEqual([]);
   expect(Object.keys(record.fields)).toHaveLength(REQUIRED_DECISION_FIELDS.length);
   const gis=c.attempts.find(a=>a.source_name==="fetch_gis_plat")!;
