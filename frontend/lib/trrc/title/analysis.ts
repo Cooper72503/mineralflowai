@@ -23,6 +23,30 @@ import {
 import type { ExtractedReference } from "./instrument-schema";
 import { buildDecisionRecord } from "./decision-record";
 import { buildDecisionInputsFromJob, defaultScenarioDefinitions } from "./decision-inputs";
+import type { SourceFreshness } from "./decision-types";
+
+/** Most recent non-null timestamp in a set, or null when nothing was retrieved. */
+export function latestTimestamp(times: Array<string | null | undefined>): string | null {
+  const real = times.filter((t): t is string => !!t);
+  if (real.length === 0) return null;
+  return real.reduce((a, b) => (Date.parse(b) > Date.parse(a) ? b : a));
+}
+
+/**
+ * A freshness entry for one source. A source that was never retrieved is
+ * reported missing rather than current: a search that returned nothing and a
+ * search that never ran must not look the same on the page.
+ */
+export function freshnessOf(
+  source: string, role: SourceFreshness["role"], asOf: string | null,
+  retrievedAt: string | null, coverage: string, staleAfterDays: number, note: string,
+): SourceFreshness {
+  return {
+    source, role, asOf, retrievedAt, coverage, ageDays: null, staleAfterDays,
+    status: retrievedAt == null ? "missing" : "current",   // graded by gradeFreshness against retrievedAt
+    note,
+  };
+}
 
 export type AnalysisResult =
   | { ok: true; analysis: TitleChainAnalysis; reused: boolean }
@@ -182,14 +206,26 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
     indexOnlyInstrumentCount: instruments.filter(i => !i.contentVerified).length,
     openReviewItemCount: reviewItems.filter(r => r.status === "open").length,
     unresolvedAllocationCount: graph.branches.reduce((n, b) => n + b.unresolvedAllocations.length, 0),
+    // No regulatory-findings source is wired into this path yet, so this is an
+    // absence of data rather than an absence of items. It is left empty because
+    // the shape cannot express "unknown"; the regulator freshness entry below
+    // carries the real coverage signal.
     openRegulatoryItems: [],
     sourceFreshness: [
-      { source: "County clerk instruments", role: "county", asOf: job.as_of_date, retrievedAt: job.updated_at,
-        coverage: `${documents.length} document(s)`, ageDays: null, staleAfterDays: 30, status: "current", note: "" },
-      { source: "Vendor analytics", role: "vendor", asOf: job.as_of_date, retrievedAt: job.updated_at,
-        coverage: "Production and forecast", ageDays: null, staleAfterDays: 45, status: "current", note: "" },
-      { source: "State regulator", role: "regulator", asOf: job.as_of_date, retrievedAt: job.updated_at,
-        coverage: `${searchLog.length} query(s)`, ageDays: null, staleAfterDays: 30, status: "current", note: "" },
+      // Freshness is graded per source against that source's own retrieval
+      // time. Stamping every entry with the job's updated_at made all three
+      // sources the same age and permanently current, which defeats the whole
+      // point of grading them: a source is stale relative to when IT was
+      // fetched, not to when the job row last changed.
+      freshnessOf("County clerk instruments", "county", job.as_of_date, latestTimestamp(documents.map(d => d.retrieved_at)),
+        `${documents.length} document(s)`, 30, documents.length === 0 ? "No county document has been retrieved." : ""),
+      // There is no vendor analytics integration in this path. Reporting it as
+      // current invented a source; it is declared missing until one exists.
+      { source: "Vendor analytics", role: "vendor", asOf: job.as_of_date, retrievedAt: null,
+        coverage: "Not retrieved", ageDays: null, staleAfterDays: 45, status: "missing",
+        note: "No vendor analytics feed is connected to this job." },
+      freshnessOf("State regulator", "regulator", job.as_of_date, latestTimestamp(searchLog.map(s2 => s2.searched_at)),
+        `${searchLog.length} query(s)`, 30, searchLog.length === 0 ? "No regulatory query was run for this job." : ""),
     ],
   });
   const decision = buildDecisionRecord({
