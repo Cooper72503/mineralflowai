@@ -27,12 +27,12 @@ async function main(){
   const {db,snapshot}=createLocalStore(run,state=>save(`${api.api10}-checkpoint.json`,JSON.stringify(state,null,2)));
   await runLandmanSequencer(run.id,api.api10,db);
   Object.assign(run,snapshot.trrc_due_diligence_runs[0]);
-  if(run.status!=="complete")throw Error(`Worker did not complete (${run.status}); inspect the retained checkpoint.`);
+  if(!["complete","failed","awaiting_selection"].includes(run.status))throw Error(`Worker ended in nonterminal state (${run.status}); inspect the retained checkpoint.`);
   attempts=snapshot.trrc_source_attempts as unknown as LiteSourceAttempt[];
  }
  const now=new Date(Math.max(Date.now(),...attempts.map(a=>Date.parse(a.attempted_at)).filter(Number.isFinite))).toISOString();
  const supplements=opts["--inputs"]?JSON.parse(await readFile(resolve(opts["--inputs"]),"utf8")):{};
- const permitted=["title","position","partner","reconciliationPolicy","economics","forecastSelection"];
+ const permitted=["title","position","partner","reconciliationPolicy","economics","forecastSelection","evidenceScenarios"];
  if(Object.keys(supplements).some(k=>!permitted.includes(k)))throw Error("Supplement file contains unsupported keys; API and retrieval cannot be overridden.");
  const input:Gold2Input={title:null,position:null,partner:null,reconciliationPolicy:null,economics:null,...supplements,api:api.api10,runId:run.id,attempts,asOf:now};
  const gold=assembleGold2Draft(input);
@@ -42,6 +42,6 @@ async function main(){
  await save(`${api.api10}-gold.pdf`,pdf);
  await save(`${api.api10}-retrieval.json`,JSON.stringify({run,attempts},null,2)+"\n");
  const observed=Object.values(gold.fields).filter(f=>f.status==="observed").length;
- console.log(JSON.stringify({api:api.api10,directory:out,mode:opts["--replay"]?"captured-replay":"live-public-retrieval",reportVersion:"2.0.0",delivery:"pdf_and_json",goldAcceptance:"incomplete",observedFields:observed,totalFields:Object.keys(gold.fields).length,posture:gold.fields["decision.posture"].value},null,2));
+ console.log(JSON.stringify({api:api.api10,directory:out,mode:opts["--replay"]?"captured-replay":"live-public-retrieval",reportVersion:"2.0.0",delivery:"pdf_and_json",goldAcceptance:"not_benchmark_reviewed",observedFields:observed,totalFields:Object.keys(gold.fields).length,posture:gold.fields["decision.posture"].value},null,2));
 }
 main().catch(error=>{console.error(error instanceof Error?error.message:String(error));process.exitCode=1;}).finally(()=>closeBrowser());

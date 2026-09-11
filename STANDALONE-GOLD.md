@@ -51,3 +51,12 @@ Verified: ten captured API cases render validated reports; ten worker-to-GOLD re
 Still incomplete: linking reviewed title jobs and evaluated positions, position-specific ownership/NRI and acquisition economics, a supported Novi import/live adapter and reconciliation, full geology engine output handoff, web/export parity, and broader live acceptance across Texas. These are implementation gaps, not merely missing credentials. The report currently withholds these fields rather than asserting ownership, value or readiness.
 
 The `mineralflow-gold` 1.0.0 presentation contract is distinct from the reference sample's advertised 2.0.0 ruleset. The MF-G prerequisite checks are explicit local rules; they do not purport to recreate unpublished sample predicates. See `PIPELINE-STATUS.md` for current results and exact remaining failures.
+
+
+## GOLD2 integration update (2026-09-11)
+
+The standalone command emits the integrated 109-field GOLD2 record. `--inputs FILE.json` accepts `title`, `position`, `partner`, `reconciliationPolicy`, `economics`, `forecastSelection` and `evidenceScenarios`. API identity and retained retrieval cannot be overwritten. Each absent dependency is explicit; partial/failed retrieval does not invent results.
+
+The web report route defaults to GOLD2; `?format=gold2-json` returns the complete data record and `?format=legacy` retains the previous exporter. Authenticated POST accepts the same supplemental keys except `title`, which is loaded from the owner's published title analysis. Supplements supplied to POST apply to that report request; they are not silently persisted as a reviewed position.
+
+The benchmark's ten validated evidence reports still have INSUFFICIENT_DATA acquisition postures without actual title/position/partner/economic inputs. Synthetic populated regressions are separate. See PIPELINE-STATUS.md for exact boundaries and staging requirements.

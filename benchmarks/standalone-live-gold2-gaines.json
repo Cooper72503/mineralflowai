@@ -1,0 +1,763 @@
+{
+  "case": {
+    "id": "live-gold2-gaines",
+    "api10": "4216502733",
+    "evidence_kind": "public_regulator_live_retrieval"
+  },
+  "run": {
+    "id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+    "original_input": "42-165-02733",
+    "normalized_input": "4216502733",
+    "selected_input_type": "api_number",
+    "detected_input_type": "api_number",
+    "status": "complete",
+    "resolved_primary_api": "4216502733",
+    "started_at": "2026-09-10T20:04:58.779Z",
+    "progress_percent": 100,
+    "updated_at": "2026-09-10T20:06:48.753Z",
+    "completed_at": "2026-09-10T20:06:48.753Z",
+    "resolved_district": "8A",
+    "resolved_lease_number": "10289",
+    "resolved_operator_number": null,
+    "result_summary": "11 of 16 sources retrieved. 49 production months found.",
+    "error_summary": null
+  },
+  "attempts": [
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "search_by_api_1",
+      "source_name": "search_by_api",
+      "status": "success",
+      "result_count": 2,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:05:10.068Z",
+      "result_data_json": {
+        "found": true,
+        "wells": [
+          {
+            "api_no": "16502733",
+            "district": "8A",
+            "lease_no": "10289",
+            "lease_name": "TAYLOR, W. J. \"A\"",
+            "well_no": "1",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "county": "GAINES",
+            "on_schedule": "N",
+            "api_depth": ""
+          },
+          {
+            "api_no": "16502733",
+            "district": "8A",
+            "lease_no": "10289",
+            "lease_name": "TAYLOR, W. J. \"A\"",
+            "well_no": "1D",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "county": "GAINES",
+            "on_schedule": "Y",
+            "api_depth": "12040"
+          }
+        ],
+        "lease_number": "10289",
+        "district": "8A",
+        "operator": "FUSION ENERGY HOLDINGS, LLC",
+        "operator_number": null,
+        "county": "GAINES",
+        "message": "Found 2 wellbore(s) for 42-165-02733"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_production_2",
+      "source_name": "fetch_production",
+      "status": "success",
+      "result_count": 49,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:05:19.936Z",
+      "result_data_json": {
+        "found": true,
+        "lease_type_attempts": [
+          {
+            "lease_type": "O",
+            "status": "found"
+          }
+        ],
+        "rows": [
+          {
+            "production_month": "2022-09",
+            "oil_bbl": 443,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2022-10",
+            "oil_bbl": 600,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2022-11",
+            "oil_bbl": 661,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2022-12",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-01",
+            "oil_bbl": 195,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-02",
+            "oil_bbl": 599,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-03",
+            "oil_bbl": 33,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-04",
+            "oil_bbl": 328,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-05",
+            "oil_bbl": 908,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-06",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-07",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-08",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-09",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-10",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-11",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2023-12",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-01",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-02",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-03",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-04",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-05",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-06",
+            "oil_bbl": 581,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-07",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-08",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-09",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-10",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-11",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2024-12",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-01",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-02",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-03",
+            "oil_bbl": 0,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-04",
+            "oil_bbl": 710,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-05",
+            "oil_bbl": 850,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-06",
+            "oil_bbl": 950,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-07",
+            "oil_bbl": 1055,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-08",
+            "oil_bbl": 950,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-09",
+            "oil_bbl": 1050,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-10",
+            "oil_bbl": 1145,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-11",
+            "oil_bbl": 1220,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2025-12",
+            "oil_bbl": 1220,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-01",
+            "oil_bbl": 1310,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-02",
+            "oil_bbl": 1389,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": 0,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-03",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-04",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-05",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-06",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-07",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-08",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          },
+          {
+            "production_month": "2026-09",
+            "oil_bbl": null,
+            "gas_mcf": null,
+            "casinghead_gas_mcf": null,
+            "condensate_bbl": null,
+            "water_bbl": null
+          }
+        ],
+        "lease_number": "10289",
+        "district": "8A",
+        "message": "49 months of production history (O lease)"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_p4_records_3",
+      "source_name": "fetch_p4_records",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:05:30.964Z",
+      "result_data_json": {
+        "found": false,
+        "records": [],
+        "message": "No gatherer/purchaser (P-4) record on file for this lease"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_severance_records_4",
+      "source_name": "fetch_severance_records",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:05:40.100Z",
+      "result_data_json": {
+        "found": true,
+        "records": [
+          {
+            "district": "8A",
+            "lease_no": "10289",
+            "lease_name": "TAYLOR, W. J. \"A\"",
+            "field_no": "66373250",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_no": "102004",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "oil_gas": "Oil",
+            "on_schedule": "Y"
+          }
+        ],
+        "message": "1 severance record(s)"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_oil_proration_5",
+      "source_name": "fetch_oil_proration",
+      "status": "success",
+      "result_count": 2,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:05:50.999Z",
+      "result_data_json": {
+        "found": true,
+        "wells": [
+          {
+            "api_no": "16502733",
+            "well_no": "1D",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "potential_bbl": "0.0",
+            "gas_oil_ratio": "0",
+            "acres": "80.0",
+            "daily_allowable": "",
+            "status": "INJECTION",
+            "forms_lacking": false
+          },
+          {
+            "api_no": "16510760",
+            "well_no": "6",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "potential_bbl": "55.0",
+            "gas_oil_ratio": "0",
+            "acres": "80.77",
+            "daily_allowable": "55# / 706",
+            "status": "PRODUCING",
+            "forms_lacking": false
+          }
+        ],
+        "message": "2 well(s) on lease 10289 in Oil Proration Query"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_completion_records_6",
+      "source_name": "fetch_completion_records",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:06:04.468Z",
+      "result_data_json": {
+        "found": false,
+        "records": [],
+        "message": "No completion (W-2) records on file for this API"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_plugging_records_7",
+      "source_name": "fetch_plugging_records",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Error: EWA pluggingQueryAction.do session GET returned HTTP 500",
+      "attempted_at": "2026-09-10T20:06:09.084Z",
+      "result_data_json": {
+        "found": false,
+        "records": [],
+        "message": "Error: Error: EWA pluggingQueryAction.do session GET returned HTTP 500",
+        "error": "Error: EWA pluggingQueryAction.do session GET returned HTTP 500"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_orphan_well_8",
+      "source_name": "fetch_orphan_well",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:06:19.512Z",
+      "result_data_json": {
+        "is_orphan": false,
+        "message": "Not in orphan well program"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_injection_records_9",
+      "source_name": "fetch_injection_records",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:06:28.409Z",
+      "result_data_json": {
+        "found": true,
+        "records": [
+          {
+            "uic_no": "000042442",
+            "api_no": "16502733",
+            "district": "8A",
+            "lease_no": "10289",
+            "lease_name": "TAYLOR, W. J. \"A\"",
+            "well_no": "1D",
+            "field_name": "O D C (DEVONIAN)",
+            "operator_name": "FUSION ENERGY HOLDINGS, LLC",
+            "county": "GAINES",
+            "oil_gas": "Oil"
+          }
+        ],
+        "message": "1 UIC/injection record(s)"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_drilling_permits_10",
+      "source_name": "fetch_drilling_permits",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:06:42.729Z",
+      "result_data_json": {
+        "found": false,
+        "permits": [],
+        "message": "No drilling permit (W-1) on record for 42-165-02733"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_gis_plat_11",
+      "source_name": "fetch_gis_plat",
+      "status": "success",
+      "result_count": 1,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:06:48.695Z",
+      "result_data_json": {
+        "found": true,
+        "api_number": "4216502733",
+        "query_url": "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%2716502733%27&outFields=*&returnGeometry=true&outSR=4326",
+        "partial_errors": [],
+        "latitude": 32.8732066614451,
+        "longitude": -102.74133639493984,
+        "well_type": "Oil Well",
+        "survey": {
+          "abstract_number": "1651891",
+          "survey_name": "WT RR CO",
+          "block_number": "G",
+          "section_name": "272"
+        },
+        "alert_areas": [],
+        "message": "GIS location: 32.8732\u00b0N, -102.7413\u00b0W"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_coda_records_12",
+      "source_name": "fetch_coda_records",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551 Looks like Playwright was just installed or updated.       \u2551\n\u2551 Please run the following command to download new browsers: \u2551\n\u2551                                                            \u2551\n\u2551     npx playwright install                                 \u2551\n\u2551                                                            \u2551\n\u2551 <3 Playwright Team                                         \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d",
+      "attempted_at": "2026-09-10T20:06:48.723Z",
+      "result_data_json": {
+        "found": false,
+        "documents": [],
+        "document_types_present": [],
+        "coda_search_url": "https://webapps2.rrc.texas.gov/EWA/cogisQueryAction.do?searchArgs.apiNoPrefixArg=165&searchArgs.apiNoSuffixArg=02733&methodToCall=search",
+        "message": "CODA search failed (Error: browserType.launch: Executable doesn't exist at /root). Manual link: https://webapps2.rrc.texas.gov/EWA/cogisQueryAction.do?searchArgs.apiNoPrefixArg=165&searchArgs.apiNoSuffixArg=02733&methodToCall=search",
+        "error": "Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551 Looks like Playwright was just installed or updated.       \u2551\n\u2551 Please run the following command to download new browsers: \u2551\n\u2551                                                            \u2551\n\u2551     npx playwright install                                 \u2551\n\u2551                                                            \u2551\n\u2551 <3 Playwright Team                                         \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "search_by_operator_13",
+      "source_name": "search_by_operator",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551 Looks like Playwright was just installed or updated.       \u2551\n\u2551 Please run the following command to download new browsers: \u2551\n\u2551                                                            \u2551\n\u2551     npx playwright install                                 \u2551\n\u2551                                                            \u2551\n\u2551 <3 Playwright Team                                         \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d",
+      "attempted_at": "2026-09-10T20:06:48.730Z",
+      "result_data_json": {
+        "found": false,
+        "record": null,
+        "p5_status": null,
+        "bond_amount": null,
+        "trrc_source_url": null,
+        "message": "P-5 operator search failed: Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_",
+        "error": "Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551 Looks like Playwright was just installed or updated.       \u2551\n\u2551 Please run the following command to download new browsers: \u2551\n\u2551                                                            \u2551\n\u2551     npx playwright install                                 \u2551\n\u2551                                                            \u2551\n\u2551 <3 Playwright Team                                         \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_compliance_violations_14",
+      "source_name": "fetch_compliance_violations",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551 Looks like Playwright was just installed or updated.       \u2551\n\u2551 Please run the following command to download new browsers: \u2551\n\u2551                                                            \u2551\n\u2551     npx playwright install                                 \u2551\n\u2551                                                            \u2551\n\u2551 <3 Playwright Team                                         \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d",
+      "attempted_at": "2026-09-10T20:06:48.739Z",
+      "result_data_json": {
+        "found": false,
+        "violations": [],
+        "open_count": null,
+        "total_count": 0,
+        "searched_by": "",
+        "message": "ICE portal error: Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551 Looks like Playwright was just installed or updated.       \u2551\n\u2551 Please run the following command to download new browsers: \u2551\n\u2551                                                            \u2551\n\u2551     npx playwright install                                 \u2551\n\u2551                                                            \u2551\n\u2551 <3 Playwright Team                                         \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d",
+        "error": "Error: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551 Looks like Playwright was just installed or updated.       \u2551\n\u2551 Please run the following command to download new browsers: \u2551\n\u2551                                                            \u2551\n\u2551     npx playwright install                                 \u2551\n\u2551                                                            \u2551\n\u2551 <3 Playwright Team                                         \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d"
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_county_records_15",
+      "source_name": "fetch_county_records",
+      "status": "success",
+      "result_count": 0,
+      "error_message": null,
+      "attempted_at": "2026-09-10T20:06:48.744Z",
+      "result_data_json": {
+        "found": false,
+        "status": "manual_required",
+        "county": "GAINES",
+        "provider": "none",
+        "records": [],
+        "total_count": 0,
+        "search_url": "https://www.texasfile.com/search/texas/gaines-county/county-clerk-records/",
+        "message": "No automated county records connector for GAINES County yet \u2014 manual search required.",
+        "data_gap": true
+      }
+    },
+    {
+      "run_id": "832487c8-a6ec-4456-98fe-cb788d8bb2f1",
+      "source_id": "fetch_inactive_well_status_16",
+      "source_name": "fetch_inactive_well_status",
+      "status": "failed_transient",
+      "result_count": 0,
+      "error_message": "Operator number required for inactive well lookup \u2014 not resolved yet",
+      "attempted_at": "2026-09-10T20:06:48.749Z",
+      "result_data_json": {
+        "is_inactive": false,
+        "records": [],
+        "plugging_deadline": null,
+        "message": "Operator number required for inactive well lookup \u2014 not resolved yet",
+        "error": "Operator number required for inactive well lookup \u2014 not resolved yet"
+      }
+    }
+  ]
+}

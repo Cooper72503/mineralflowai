@@ -1,0 +1,2 @@
+# Dev-only reproducible visual acceptance, not required by gold:report.
+PyMuPDF==1.26.6

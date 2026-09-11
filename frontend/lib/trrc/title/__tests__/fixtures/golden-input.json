@@ -1,0 +1,246 @@
+{
+  "jobId": "golden-job",
+  "analysisId": "golden-analysis",
+  "asOfDate": "2026-10-01",
+  "assetIdentity": {
+    "apiNumber": "42-317-00000-00-00",
+    "county": "Martin",
+    "state": "TX",
+    "tractLabel": "A-1234, Blk 35, Sec 12",
+    "grossTractAcres": 160,
+    "prorationUnitAcres": 640,
+    "interestScope": [
+      "minerals"
+    ]
+  },
+  "positionLabel": "Boyd, one quarter of the minerals",
+  "titleStatus": "POTENTIAL_GAPS_DETECTED",
+  "findings": [
+    {
+      "findingId": "E-01",
+      "type": "UNSUPPORTED_TRANSITION",
+      "severity": "high",
+      "title": "Conveying party has no evidenced acquisition",
+      "explanation": "H. W. Stiles conveyed an undivided 1/8 mineral interest in the subject tract by the instrument recorded 2016-05-30, but no reviewed instrument vests any interest in H. W. Stiles. Admitting the claim would over-allocate the estate and dilute every reconciled holder.",
+      "affectedTractId": "t1",
+      "affectedTractLabel": "A-1234 Blk 35 Sec 12",
+      "affectedInterestType": "mineral",
+      "instrumentIds": [
+        "i-2016"
+      ],
+      "citations": [
+        {
+          "documentId": "d-2016",
+          "instrumentId": "i-2016",
+          "page": 1,
+          "excerpt": "an undivided 1/8 interest",
+          "sourceUrl": null,
+          "label": "Inst. 2016-003201"
+        }
+      ],
+      "nextAction": "Search county records 1962 to 2016 for an instrument vesting minerals in that party, examining the three index-only instruments first."
+    },
+    {
+      "findingId": "E-02",
+      "type": "ENCUMBRANCE_NO_RELEASE",
+      "severity": "medium",
+      "title": "No release located for recorded encumbrance",
+      "explanation": "The deed of trust recorded 1991-06-14 has no matching release in the records reviewed. This is a statement about the search, not a determination that the lien remains active.",
+      "affectedTractId": "t1",
+      "affectedTractLabel": "A-1234 Blk 35 Sec 12",
+      "affectedInterestType": "mineral",
+      "instrumentIds": [
+        "i-1991"
+      ],
+      "citations": [
+        {
+          "documentId": "d-1991",
+          "instrumentId": "i-1991",
+          "page": 1,
+          "excerpt": null,
+          "sourceUrl": null,
+          "label": "Vol. 431, Pg. 12"
+        }
+      ],
+      "nextAction": "Search the county grantor index under the lender for a release, partial release, or satisfaction."
+    },
+    {
+      "findingId": "E-03",
+      "type": "UNRESOLVED_ALLOCATION",
+      "severity": "medium",
+      "title": "Allocation between co-grantees not stated",
+      "explanation": "The 2004 mineral deed conveys one half of the estate to two grantees without stating each one's share. The position is carried as a single undivided holding; equal shares are not assumed.",
+      "affectedTractId": "t1",
+      "affectedTractLabel": "A-1234 Blk 35 Sec 12",
+      "affectedInterestType": "mineral",
+      "instrumentIds": [
+        "i-2004"
+      ],
+      "citations": [
+        {
+          "documentId": "d-2004",
+          "instrumentId": "i-2004",
+          "page": 2,
+          "excerpt": null,
+          "sourceUrl": null,
+          "label": "Inst. 2004-001877"
+        }
+      ],
+      "nextAction": "Obtain the recorded image to check for per-grantee fractions, or locate a later partition instrument."
+    },
+    {
+      "findingId": "E-04",
+      "type": "INDEX_ONLY_EVIDENCE",
+      "severity": "low",
+      "title": "Three instruments known from index only",
+      "explanation": "Three county index entries fall within the search period but their document text was not obtained. An index entry establishes that a record exists; it does not establish what the instrument conveyed.",
+      "affectedTractId": "t1",
+      "affectedTractLabel": "A-1234 Blk 35 Sec 12",
+      "affectedInterestType": "mineral",
+      "instrumentIds": [],
+      "citations": [],
+      "nextAction": "Order the recorded images for all three and re-run the reconstruction."
+    }
+  ],
+  "confirmedTractCount": 1,
+  "verifiedInstrumentCount": 6,
+  "indexOnlyInstrumentCount": 3,
+  "openReviewItemCount": 2,
+  "unresolvedAllocationCount": 1,
+  "basis": {
+    "grossTractAcres": 160,
+    "prorationUnitAcres": 640,
+    "mineralFraction": {
+      "n": "1",
+      "d": "4"
+    },
+    "leaseRoyaltyFraction": {
+      "n": "3",
+      "d": "16"
+    },
+    "netMineralAcres": null,
+    "netRevenueInterest": null,
+    "derivation": ""
+  },
+  "criteria": {
+    "discountRate": {
+      "value": 0.1,
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "minimumMarginPct": {
+      "value": null,
+      "source": "NOT PROVIDED",
+      "classification": "NOT_PROVIDED"
+    },
+    "underwriteAgainst": {
+      "value": "evidence_adjusted",
+      "source": "MineralFlow stated convention",
+      "classification": "SYSTEM_DEFAULT",
+      "note": "Underwrites against value after measured exposure."
+    },
+    "baseDeck": {
+      "value": {
+        "oilUsdPerBbl": 70,
+        "gasUsdPerMcf": 3.5,
+        "oilDifferentialUsdPerBbl": -1.85,
+        "gasDifferentialUsdPerMcf": -0.62
+      },
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "downsideDeck": {
+      "value": {
+        "oilUsdPerBbl": 56,
+        "gasUsdPerMcf": 2.8000000000000003,
+        "oilDifferentialUsdPerBbl": -1.85,
+        "gasDifferentialUsdPerMcf": -0.62
+      },
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT",
+      "note": "A downside deck is a buyer assumption about prices only. It carries no asset-specific risk."
+    },
+    "upsideDeck": {
+      "value": {
+        "oilUsdPerBbl": 84,
+        "gasUsdPerMcf": 4.2,
+        "oilDifferentialUsdPerBbl": -1.85,
+        "gasDifferentialUsdPerMcf": -0.62
+      },
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "forecastHorizonYears": {
+      "value": 20,
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "timingConvention": {
+      "value": "Mid-year discounting",
+      "source": "MineralFlow stated convention",
+      "classification": "SYSTEM_DEFAULT"
+    },
+    "riskHaircutPct": {
+      "value": 0,
+      "source": "No haircut applied",
+      "classification": "SYSTEM_DEFAULT",
+      "note": "Asset-specific risk is carried as measured exposure instead of a blanket haircut."
+    }
+  },
+  "remainingOilBbl": 84300,
+  "remainingGasMcf": 148000,
+  "annualDecline": 0.202,
+  "forecastBasisNote": "Vendor forecast on a child well 660 ft from a same-bench parent; the depletion interference behind the decline has not been independently confirmed.",
+  "askingPriceUsd": null,
+  "openRegulatoryItems": [
+    "Mechanical integrity test recorded as overdue against the operator."
+  ],
+  "reconciliationVariancePct": 3.98,
+  "reconciliationThresholdPct": 2,
+  "sourceFreshness": [
+    {
+      "source": "County clerk instruments",
+      "role": "county",
+      "asOf": "2026-10-01",
+      "retrievedAt": "2026-09-29",
+      "coverage": "1962-01 to 2026-09; 9 instruments, 6 read",
+      "ageDays": null,
+      "staleAfterDays": 30,
+      "status": "current",
+      "note": ""
+    },
+    {
+      "source": "Vendor analytics",
+      "role": "vendor",
+      "asOf": "2026-10-01",
+      "retrievedAt": "2026-10-01",
+      "coverage": "12 wells; production, forecast, completion, subsurface, spacing, cost",
+      "ageDays": null,
+      "staleAfterDays": 45,
+      "status": "current",
+      "note": ""
+    },
+    {
+      "source": "State regulator",
+      "role": "regulator",
+      "asOf": "2026-10-01",
+      "retrievedAt": "2026-08-04",
+      "coverage": "Operator standing, compliance, severance, orphan, plugging, injection, proration",
+      "ageDays": null,
+      "staleAfterDays": 30,
+      "status": "current",
+      "note": ""
+    },
+    {
+      "source": "County records, pre-1962",
+      "role": "county_pre1962",
+      "asOf": "2026-10-01",
+      "retrievedAt": null,
+      "coverage": "Not searched",
+      "ageDays": null,
+      "staleAfterDays": 30,
+      "status": "missing",
+      "note": "Outside the requested search period; the chain's earliest evidenced holder reflects this boundary."
+    }
+  ]
+}

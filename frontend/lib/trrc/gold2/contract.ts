@@ -33,7 +33,7 @@ export const GOLD2_ENGINE_MAP={
  evidence:"decision-record.ts + retained partner snapshots + original title documents",
  report:"gold/pdf.ts requires GOLD2 field/chart handoff",
 } as const;
-export const LEGITIMATE_UNAVAILABLE_REASONS=["source_query_failed","source_returned_no_record","not_reported_by_source","ambiguous_asset_association","reviewed_documents_insufficient","position_not_supplied","buyer_criterion_not_supplied","partner_feed_unavailable"] as const;
+export const LEGITIMATE_UNAVAILABLE_REASONS=["source_not_queried","source_query_failed","source_returned_no_record","not_reported_by_source","ambiguous_asset_association","reviewed_documents_insufficient","position_not_supplied","buyer_criterion_not_supplied","partner_feed_unavailable"] as const;
 export type UnavailableReason=typeof LEGITIMATE_UNAVAILABLE_REASONS[number];
 export interface Gold2AcceptanceCandidate {
  schemaVersion:string; rulesetVersion:string;api:string;

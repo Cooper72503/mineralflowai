@@ -17,3 +17,10 @@ describe("GOLD2 rules and acceptance",()=>{
   expect(gold2Acceptance(c).filter(e=>e.startsWith("Unjustified unavailable field"))).toHaveLength(GOLD2_FIELDS.length);
  });
 });
+it("does not advance an otherwise supported case beyond a missing or breached buyer limit",()=>{
+ const i=input();i.exceptions=[];i.productionReconciled=true;
+ expect(evaluateGold2Rules(i).matchedRule).toBe('R-12');
+ i.maximumBuyPrice=30000;i.askingPrice=35000;
+ expect(evaluateGold2Rules(i).posture).toBe('CONDITIONAL_REVIEW');
+ expect(evaluateGold2Rules(i).closing.state).toBe('READY_FOR_PROFESSIONAL_REVIEW');
+});

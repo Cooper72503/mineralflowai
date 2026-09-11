@@ -1,0 +1,791 @@
+{
+  "goldenSchemaVersion": "2.0.0",
+  "decisionSchemaVersion": "2.0.0",
+  "decisionRuleVersion": "2.0.0",
+  "generatedAt": "2026-09-08T04:18:00.209Z",
+  "asOfDate": "2026-10-01",
+  "jobId": "golden-job",
+  "analysisId": "golden-analysis",
+  "assetIdentity": {
+    "apiNumber": "42-317-00000-00-00",
+    "county": "Martin",
+    "state": "TX",
+    "tractLabel": "A-1234, Blk 35, Sec 12",
+    "grossTractAcres": 160,
+    "prorationUnitAcres": 640,
+    "interestScope": [
+      "minerals"
+    ]
+  },
+  "evaluatedPosition": {
+    "label": "Boyd, one quarter of the minerals",
+    "mineralFraction": {
+      "n": "1",
+      "d": "4"
+    },
+    "netMineralAcres": 40,
+    "netRevenueInterest": 0.01171875,
+    "derivation": "1/4 of the minerals under 160 gross acres = 40.00 net mineral acres. Over a 640-acre unit at a 3/16 royalty: 1/4 x 1/4 x 3/16 = 3/256 = 0.01171875."
+  },
+  "posture": "HOLD_FOR_DILIGENCE",
+  "postureDisplay": "Hold for diligence",
+  "postureRuleId": "R-07",
+  "rationale": "2 closing blocker(s) carry no measurable dollar impact: No release located for recorded encumbrance; Allocation between co-grantees not stated. An unpriceable blocker cannot be offset by an offer adjustment, so the deal is held rather than repriced.",
+  "investmentThesis": "Current economics model the position at $47,679, but unresolved ownership and encumbrance evidence prevents closing, at low confidence. No buyer return criterion was supplied, so no maximum acquisition price is stated. A further $5,298 of measured exposure would need to be priced into any offer.",
+  "ruleTrace": [
+    {
+      "ruleId": "R-01",
+      "matched": false,
+      "test": "No tract confirmed"
+    },
+    {
+      "ruleId": "R-02",
+      "matched": false,
+      "test": "No instrument text reviewed"
+    },
+    {
+      "ruleId": "R-03",
+      "matched": false,
+      "test": "Net revenue interest not computable"
+    },
+    {
+      "ruleId": "R-04",
+      "matched": false,
+      "test": "Base economic value not modellable"
+    },
+    {
+      "ruleId": "R-05",
+      "matched": false,
+      "test": "Base economic value not positive"
+    },
+    {
+      "ruleId": "R-06",
+      "matched": false,
+      "test": "Asking price above base economic value"
+    },
+    {
+      "ruleId": "R-07",
+      "matched": true,
+      "test": "A closing blocker exists with no measured impact"
+    }
+  ],
+  "confidence": {
+    "overall": "LOW",
+    "rule": "Overall confidence is the lowest level among the domains that can change the decision. A domain that cannot change the decision is reported but does not cap the overall figure.",
+    "cappedBy": "title_evidence",
+    "reason": "LOW because 3 indexed instrument(s) remain unread and one conveying party lacks an evidenced acquisition",
+    "components": [
+      {
+        "domain": "title_evidence",
+        "level": "LOW",
+        "canChangeDecision": true,
+        "reason": "3 indexed instrument(s) remain unread and one conveying party lacks an evidenced acquisition"
+      },
+      {
+        "domain": "ownership",
+        "level": "LOW",
+        "canChangeDecision": true,
+        "reason": "1 holding(s) have no stated allocation, and equal shares are never assumed."
+      },
+      {
+        "domain": "production",
+        "level": "LOW",
+        "canChangeDecision": true,
+        "reason": "Vendor and regulator disagree by 3.98%, above the 2.00% threshold."
+      },
+      {
+        "domain": "forecast",
+        "level": "MEDIUM",
+        "canChangeDecision": true,
+        "reason": "Vendor forecast on a child well 660 ft from a same-bench parent; the depletion interference behind the decline has not been independently confirmed."
+      },
+      {
+        "domain": "regulatory",
+        "level": "MEDIUM",
+        "canChangeDecision": false,
+        "reason": "1 open regulatory item(s): Mechanical integrity test recorded as overdue against the operator."
+      },
+      {
+        "domain": "economic_model",
+        "level": "MEDIUM",
+        "canChangeDecision": true,
+        "reason": "1 underwriting criterion(s) not provided: minimumMarginPct."
+      }
+    ]
+  },
+  "closingReadiness": {
+    "readiness": "NOT_READY",
+    "ruleId": "C-02",
+    "rationale": "2 closing blocker(s) remain unresolved and unmeasured: No release located for recorded encumbrance; Allocation between co-grantees not stated.",
+    "disclaimer": "Closing readiness describes how complete the evidence file assembled here is. It is not a statement that title is marketable, and it does not substitute for a title opinion.",
+    "independenceNote": "Acquisition posture and closing readiness are independent. Economics can support continued acquisition work while unresolved evidence still prevents closing.",
+    "unresolvedTitleIssues": [
+      "Conveying party has no evidenced acquisition",
+      "Allocation between co-grantees not stated",
+      "Three instruments known from index only"
+    ],
+    "missingInstruments": [
+      "Three instruments known from index only"
+    ],
+    "unresolvedRegulatoryIssues": [
+      "Mechanical integrity test recorded as overdue against the operator."
+    ],
+    "unresolvedEconomicAssumptions": [
+      "Vendor and regulator production differ by 3.98%, above the 2.00% threshold.",
+      "Buyer criterion \"minimumMarginPct\" is NOT PROVIDED."
+    ],
+    "requiredProfessionalReview": [
+      "Title opinion by a licensed attorney covering the instruments assembled here.",
+      "Conveying party has no evidenced acquisition: requires professional judgement rather than additional data.",
+      "No release located for recorded encumbrance: requires professional judgement rather than additional data."
+    ],
+    "actionsBeforeClosing": [
+      "Search county records 1962 to 2016 for an instrument vesting minerals in that party, examining the three index-only instruments first.",
+      "Search the county grantor index under the lender for a release, partial release, or satisfaction.",
+      "Obtain the recorded image to check for per-grantee fractions, or locate a later partition instrument."
+    ]
+  },
+  "underwritingCriteria": {
+    "discountRate": {
+      "value": 0.1,
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "minimumMarginPct": {
+      "value": null,
+      "source": "NOT PROVIDED",
+      "classification": "NOT_PROVIDED"
+    },
+    "underwriteAgainst": {
+      "value": "evidence_adjusted",
+      "source": "MineralFlow stated convention",
+      "classification": "SYSTEM_DEFAULT",
+      "note": "Underwrites against value after measured exposure."
+    },
+    "baseDeck": {
+      "value": {
+        "oilUsdPerBbl": 70,
+        "gasUsdPerMcf": 3.5,
+        "oilDifferentialUsdPerBbl": -1.85,
+        "gasDifferentialUsdPerMcf": -0.62
+      },
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "downsideDeck": {
+      "value": {
+        "oilUsdPerBbl": 56,
+        "gasUsdPerMcf": 2.8000000000000003,
+        "oilDifferentialUsdPerBbl": -1.85,
+        "gasDifferentialUsdPerMcf": -0.62
+      },
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT",
+      "note": "A downside deck is a buyer assumption about prices only. It carries no asset-specific risk."
+    },
+    "upsideDeck": {
+      "value": {
+        "oilUsdPerBbl": 84,
+        "gasUsdPerMcf": 4.2,
+        "oilDifferentialUsdPerBbl": -1.85,
+        "gasDifferentialUsdPerMcf": -0.62
+      },
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "forecastHorizonYears": {
+      "value": 20,
+      "source": "Buyer underwriting policy",
+      "classification": "USER_INPUT"
+    },
+    "timingConvention": {
+      "value": "Mid-year discounting",
+      "source": "MineralFlow stated convention",
+      "classification": "SYSTEM_DEFAULT"
+    },
+    "riskHaircutPct": {
+      "value": 0,
+      "source": "No haircut applied",
+      "classification": "SYSTEM_DEFAULT",
+      "note": "Asset-specific risk is carried as measured exposure instead of a blanket haircut."
+    }
+  },
+  "positionValue": {
+    "basis": {
+      "grossTractAcres": 160,
+      "prorationUnitAcres": 640,
+      "mineralFraction": {
+        "n": "1",
+        "d": "4"
+      },
+      "leaseRoyaltyFraction": {
+        "n": "3",
+        "d": "16"
+      },
+      "netMineralAcres": 40,
+      "netRevenueInterest": 0.01171875,
+      "derivation": "1/4 of the minerals under 160 gross acres = 40.00 net mineral acres. Over a 640-acre unit at a 3/16 royalty: 1/4 x 1/4 x 3/16 = 3/256 = 0.01171875."
+    },
+    "criteria": {
+      "discountRate": {
+        "value": 0.1,
+        "source": "Buyer underwriting policy",
+        "classification": "USER_INPUT"
+      },
+      "minimumMarginPct": {
+        "value": null,
+        "source": "NOT PROVIDED",
+        "classification": "NOT_PROVIDED"
+      },
+      "underwriteAgainst": {
+        "value": "evidence_adjusted",
+        "source": "MineralFlow stated convention",
+        "classification": "SYSTEM_DEFAULT",
+        "note": "Underwrites against value after measured exposure."
+      },
+      "baseDeck": {
+        "value": {
+          "oilUsdPerBbl": 70,
+          "gasUsdPerMcf": 3.5,
+          "oilDifferentialUsdPerBbl": -1.85,
+          "gasDifferentialUsdPerMcf": -0.62
+        },
+        "source": "Buyer underwriting policy",
+        "classification": "USER_INPUT"
+      },
+      "downsideDeck": {
+        "value": {
+          "oilUsdPerBbl": 56,
+          "gasUsdPerMcf": 2.8000000000000003,
+          "oilDifferentialUsdPerBbl": -1.85,
+          "gasDifferentialUsdPerMcf": -0.62
+        },
+        "source": "Buyer underwriting policy",
+        "classification": "USER_INPUT",
+        "note": "A downside deck is a buyer assumption about prices only. It carries no asset-specific risk."
+      },
+      "upsideDeck": {
+        "value": {
+          "oilUsdPerBbl": 84,
+          "gasUsdPerMcf": 4.2,
+          "oilDifferentialUsdPerBbl": -1.85,
+          "gasDifferentialUsdPerMcf": -0.62
+        },
+        "source": "Buyer underwriting policy",
+        "classification": "USER_INPUT"
+      },
+      "forecastHorizonYears": {
+        "value": 20,
+        "source": "Buyer underwriting policy",
+        "classification": "USER_INPUT"
+      },
+      "timingConvention": {
+        "value": "Mid-year discounting",
+        "source": "MineralFlow stated convention",
+        "classification": "SYSTEM_DEFAULT"
+      },
+      "riskHaircutPct": {
+        "value": 0,
+        "source": "No haircut applied",
+        "classification": "SYSTEM_DEFAULT",
+        "note": "Asset-specific risk is carried as measured exposure instead of a blanket haircut."
+      }
+    },
+    "cases": {
+      "baseEconomicValueUsd": 47678.911592224315,
+      "downsideCommodityValueUsd": 37763.956619802346,
+      "upsideCommodityValueUsd": 57593.8665646463,
+      "quantifiedAssetExposureUsd": 5297.656843580466,
+      "evidenceAdjustedValueUsd": 42381.25474864385,
+      "riskAdjustedValueUsd": 32466.29977622188
+    },
+    "remainingOilBbl": 84300,
+    "remainingGasMcf": 148000,
+    "pvFactor": 0.7081432979321526,
+    "annualDecline": 0.202,
+    "askingPriceUsd": null,
+    "priceToValueRatio": null,
+    "marginToBaseUsd": null,
+    "marginToEvidenceAdjustedUsd": null,
+    "marginToRiskAdjustedUsd": null,
+    "maxAcquisitionPriceUsd": null,
+    "maxPriceUnavailableReason": "DECISION THRESHOLD UNAVAILABLE — REQUIRED BUYER CRITERION NOT PROVIDED (minimum required margin).",
+    "waterfall": [
+      {
+        "label": "Base economic value",
+        "amountUsd": 47678.911592224315,
+        "runningUsd": 47678.911592224315,
+        "kind": "start",
+        "source": "Base deck, PV at 10% over 20 years"
+      },
+      {
+        "label": "Quantified ownership and title exposure",
+        "amountUsd": -5297.656843580466,
+        "runningUsd": 42381.25474864385,
+        "kind": "deduct",
+        "source": "Measured from scenario re-runs, not estimated"
+      },
+      {
+        "label": "Evidence-adjusted value",
+        "amountUsd": null,
+        "runningUsd": 42381.25474864385,
+        "kind": "subtotal",
+        "source": "Base economic value less measured asset-specific exposure"
+      },
+      {
+        "label": "Maximum acquisition price",
+        "amountUsd": null,
+        "runningUsd": null,
+        "kind": "unavailable",
+        "source": "DECISION THRESHOLD UNAVAILABLE — REQUIRED BUYER CRITERION NOT PROVIDED (minimum required margin)."
+      }
+    ],
+    "decisionMatrix": [
+      {
+        "label": "All price bands",
+        "fromUsd": null,
+        "toUsd": null,
+        "posture": "INSUFFICIENT_DATA",
+        "available": false,
+        "unavailableReason": "DECISION THRESHOLD UNAVAILABLE — REQUIRED BUYER CRITERION NOT PROVIDED (minimum required margin).",
+        "basis": "DECISION THRESHOLD UNAVAILABLE — REQUIRED BUYER CRITERION NOT PROVIDED"
+      }
+    ],
+    "breakpoints": [
+      {
+        "variable": "Seller asking price",
+        "currentValue": "NOT PROVIDED",
+        "flipsAt": "above $47,679",
+        "consequence": "Posture becomes PASS; no margin remains at the base deck.",
+        "computable": true,
+        "unavailableReason": null
+      },
+      {
+        "variable": "Seller asking price",
+        "currentValue": "NOT PROVIDED",
+        "flipsAt": "NOT PROVIDED",
+        "consequence": "DECISION THRESHOLD UNAVAILABLE — REQUIRED BUYER CRITERION NOT PROVIDED",
+        "computable": false,
+        "unavailableReason": "DECISION THRESHOLD UNAVAILABLE — REQUIRED BUYER CRITERION NOT PROVIDED (minimum required margin)."
+      },
+      {
+        "variable": "Competing ownership claim",
+        "currentValue": "excluded from the reconciled estate",
+        "flipsAt": "if admitted as valid",
+        "consequence": "Evidence-adjusted value falls to $42,381, a reduction of $5,298.",
+        "computable": true,
+        "unavailableReason": null
+      }
+    ],
+    "unavailableReasons": []
+  },
+  "exceptionImpacts": [
+    {
+      "findingId": "E-01",
+      "type": "UNSUPPORTED_TRANSITION",
+      "severity": "high",
+      "issue": "Conveying party has no evidenced acquisition",
+      "evidence": "H. W. Stiles conveyed an undivided 1/8 mineral interest in the subject tract by the instrument recorded 2016-05-30, but no reviewed instrument vests any interest in H. W. Stiles. Admitting the claim would over-allocate the estate and dilute every reconciled holder.",
+      "citations": [
+        {
+          "documentId": "d-2016",
+          "instrumentId": "i-2016",
+          "page": 1,
+          "excerpt": "an undivided 1/8 interest",
+          "sourceUrl": null,
+          "label": "Inst. 2016-003201"
+        }
+      ],
+      "affects": [
+        "ownership",
+        "nri",
+        "value"
+      ],
+      "affectsNote": "A conveying party with no evidenced acquisition puts the size of every reconciled position in question.",
+      "blocksClosing": true,
+      "decisionMaterial": true,
+      "quantifiable": true,
+      "quantifiedValueImpactUsd": -5297.656843580466,
+      "ownershipMaterial": true,
+      "requiresProfessionalReview": true,
+      "nriImpact": {
+        "from": 0.01171875,
+        "to": 0.010416666666666666
+      },
+      "unquantifiedReason": null,
+      "resolution": "Search county records 1962 to 2016 for an instrument vesting minerals in that party, examining the three index-only instruments first.",
+      "decisionEffectNote": "Measured at −$5,298, so it can be priced into an offer. Must still be cured or waived before closing; pricing it does not remove it. Can change the posture or the price a buyer would pay. Needs professional judgement rather than more data."
+    },
+    {
+      "findingId": "E-02",
+      "type": "ENCUMBRANCE_NO_RELEASE",
+      "severity": "medium",
+      "issue": "No release located for recorded encumbrance",
+      "evidence": "The deed of trust recorded 1991-06-14 has no matching release in the records reviewed. This is a statement about the search, not a determination that the lien remains active.",
+      "citations": [
+        {
+          "documentId": "d-1991",
+          "instrumentId": "i-1991",
+          "page": 1,
+          "excerpt": null,
+          "sourceUrl": null,
+          "label": "Vol. 431, Pg. 12"
+        }
+      ],
+      "affects": [
+        "timing",
+        "cost"
+      ],
+      "affectsNote": "A recorded encumbrance with no located release may require curative work before funds are released. It does not change the size of the ownership position.",
+      "blocksClosing": true,
+      "decisionMaterial": false,
+      "quantifiable": false,
+      "quantifiedValueImpactUsd": null,
+      "ownershipMaterial": false,
+      "requiresProfessionalReview": true,
+      "nriImpact": null,
+      "unquantifiedReason": "ECONOMIC IMPACT NOT YET QUANTIFIABLE. No outstanding balance is stated in the reviewed records, so the encumbrance cannot be priced.",
+      "resolution": "Search the county grantor index under the lender for a release, partial release, or satisfaction.",
+      "decisionEffectNote": "Not priceable from evidence of this kind. Must still be cured or waived before closing; pricing it does not remove it. Needs professional judgement rather than more data."
+    },
+    {
+      "findingId": "E-03",
+      "type": "UNRESOLVED_ALLOCATION",
+      "severity": "medium",
+      "issue": "Allocation between co-grantees not stated",
+      "evidence": "The 2004 mineral deed conveys one half of the estate to two grantees without stating each one's share. The position is carried as a single undivided holding; equal shares are not assumed.",
+      "citations": [
+        {
+          "documentId": "d-2004",
+          "instrumentId": "i-2004",
+          "page": 2,
+          "excerpt": null,
+          "sourceUrl": null,
+          "label": "Inst. 2004-001877"
+        }
+      ],
+      "affects": [
+        "ownership",
+        "nri"
+      ],
+      "affectsNote": "A collective holding with no stated split means an individual seller's share is unknown, so what is actually being bought is undefined.",
+      "blocksClosing": true,
+      "decisionMaterial": true,
+      "quantifiable": false,
+      "quantifiedValueImpactUsd": null,
+      "ownershipMaterial": true,
+      "requiresProfessionalReview": false,
+      "nriImpact": null,
+      "unquantifiedReason": "ECONOMIC IMPACT NOT YET QUANTIFIABLE. No split is stated in the instrument, and equal shares are never assumed.",
+      "resolution": "Obtain the recorded image to check for per-grantee fractions, or locate a later partition instrument.",
+      "decisionEffectNote": "Not priceable from evidence of this kind. Must still be cured or waived before closing; pricing it does not remove it. Can change the posture or the price a buyer would pay."
+    },
+    {
+      "findingId": "E-04",
+      "type": "INDEX_ONLY_EVIDENCE",
+      "severity": "low",
+      "issue": "Three instruments known from index only",
+      "evidence": "Three county index entries fall within the search period but their document text was not obtained. An index entry establishes that a record exists; it does not establish what the instrument conveyed.",
+      "citations": [],
+      "affects": [
+        "ownership",
+        "coverage"
+      ],
+      "affectsNote": "Instruments known only from a county index have not been read, so their effect on the estate is unknown.",
+      "blocksClosing": false,
+      "decisionMaterial": true,
+      "quantifiable": false,
+      "quantifiedValueImpactUsd": null,
+      "ownershipMaterial": true,
+      "requiresProfessionalReview": false,
+      "nriImpact": null,
+      "unquantifiedReason": "ECONOMIC IMPACT NOT YET QUANTIFIABLE. An unread instrument may convey anything or nothing; assigning it a value would be fabrication.",
+      "resolution": "Order the recorded images for all three and re-run the reconstruction.",
+      "decisionEffectNote": "Not priceable from evidence of this kind. Does not by itself prevent closing. Can change the posture or the price a buyer would pay."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "primary",
+      "label": "Record as reconciled",
+      "axis": "ownership",
+      "description": "Ownership exactly as the reviewed instruments support it, with unsupported claims excluded.",
+      "toggles": "Competing claims excluded",
+      "ownershipDescription": "1/4 of the minerals",
+      "netRevenueInterest": 0.01171875,
+      "economicValueUsd": 47678.911592224315,
+      "deltaUsd": null,
+      "deltaPct": null,
+      "posture": "HOLD_FOR_DILIGENCE",
+      "postureRuleId": "R-07",
+      "closingReadiness": "NOT_READY",
+      "isPrimary": true,
+      "supportedBy": "Reviewed instruments"
+    },
+    {
+      "id": "admit-E-01",
+      "label": "E-01 admitted",
+      "axis": "ownership",
+      "description": "Treats the competing 1/8 interest as valid, diluting every reconciled holder proportionally.",
+      "toggles": "1/8 competing claim admitted",
+      "ownershipDescription": "2/9 after dilution",
+      "netRevenueInterest": 0.010416666666666666,
+      "economicValueUsd": 42381.25474864385,
+      "deltaUsd": -5297.656843580466,
+      "deltaPct": -0.11111111111111083,
+      "posture": "HOLD_FOR_DILIGENCE",
+      "postureRuleId": "R-07",
+      "closingReadiness": "NOT_READY",
+      "isPrimary": false,
+      "supportedBy": "Instrument cited in E-01, whose stated fraction is legible"
+    },
+    {
+      "id": "deck-down",
+      "label": "Downside commodity deck",
+      "axis": "commodity",
+      "description": "Ownership unchanged; only the price deck moves to the buyer's downside case.",
+      "toggles": "Downside price deck",
+      "ownershipDescription": "1/4 of the minerals",
+      "netRevenueInterest": 0.01171875,
+      "economicValueUsd": 37763.956619802346,
+      "deltaUsd": -9914.954972421969,
+      "deltaPct": -0.20795262813924936,
+      "posture": "HOLD_FOR_DILIGENCE",
+      "postureRuleId": "R-07",
+      "closingReadiness": "NOT_READY",
+      "isPrimary": false,
+      "supportedBy": "Buyer underwriting policy"
+    },
+    {
+      "id": "deck-up",
+      "label": "Upside commodity deck",
+      "axis": "commodity",
+      "description": "Ownership unchanged; only the price deck moves to the buyer's upside case.",
+      "toggles": "Upside price deck",
+      "ownershipDescription": "1/4 of the minerals",
+      "netRevenueInterest": 0.01171875,
+      "economicValueUsd": 57593.8665646463,
+      "deltaUsd": 9914.954972421983,
+      "deltaPct": 0.20795262813924967,
+      "posture": "HOLD_FOR_DILIGENCE",
+      "postureRuleId": "R-07",
+      "closingReadiness": "NOT_READY",
+      "isPrimary": false,
+      "supportedBy": "Buyer underwriting policy"
+    }
+  ],
+  "sourceFreshness": [
+    {
+      "source": "County clerk instruments",
+      "role": "county",
+      "asOf": "2026-10-01",
+      "retrievedAt": "2026-09-29",
+      "coverage": "1962-01 to 2026-09; 9 instruments, 6 read",
+      "ageDays": 2,
+      "staleAfterDays": 30,
+      "status": "current",
+      "note": "Within the 30-day freshness window."
+    },
+    {
+      "source": "Vendor analytics",
+      "role": "vendor",
+      "asOf": "2026-10-01",
+      "retrievedAt": "2026-10-01",
+      "coverage": "12 wells; production, forecast, completion, subsurface, spacing, cost",
+      "ageDays": 0,
+      "staleAfterDays": 45,
+      "status": "current",
+      "note": "Within the 45-day freshness window."
+    },
+    {
+      "source": "State regulator",
+      "role": "regulator",
+      "asOf": "2026-10-01",
+      "retrievedAt": "2026-08-04",
+      "coverage": "Operator standing, compliance, severance, orphan, plugging, injection, proration",
+      "ageDays": 58,
+      "staleAfterDays": 30,
+      "status": "stale",
+      "note": "Retrieved 58 days before the as-of date, beyond the 30-day freshness window for this source."
+    },
+    {
+      "source": "County records, pre-1962",
+      "role": "county_pre1962",
+      "asOf": "2026-10-01",
+      "retrievedAt": null,
+      "coverage": "Not searched",
+      "ageDays": null,
+      "staleAfterDays": 30,
+      "status": "missing",
+      "note": "Outside the requested search period; the chain's earliest evidenced holder reflects this boundary."
+    }
+  ],
+  "auditTrail": [
+    {
+      "question": "Why is net revenue interest 0.01171875?",
+      "source": "County clerk instruments",
+      "sourceId": "county:title-chain",
+      "sourceTimestamp": "2026-09-29",
+      "rawFact": "Reviewed instruments place 1/4 of the minerals under 160 gross acres with the evaluated position, under a 3/16 lease royalty.",
+      "classification": "DERIVED",
+      "derivation": "1/4 of the minerals under 160 gross acres = 40.00 net mineral acres. Over a 640-acre unit at a 3/16 royalty: 1/4 x 1/4 x 3/16 = 3/256 = 0.01171875.",
+      "effect": "40.00 net mineral acres and a revenue decimal of 0.01171875.",
+      "decisionRule": "R-03 tests whether this is computable at all.",
+      "output": "Net revenue interest 0.01171875."
+    },
+    {
+      "question": "Why is base economic value $47,679?",
+      "source": "Vendor analytics",
+      "sourceId": "vendor:reserves",
+      "sourceTimestamp": "2026-10-01",
+      "rawFact": "Remaining recoverable volumes of 84,300 bbl oil and 148,000 mcf gas.",
+      "classification": "DERIVED",
+      "derivation": "Priced at the base deck, net of severance and ad valorem, multiplied by the position's 0.01171875 decimal, then discounted by a present-value factor of 0.7081 derived from a 20.2% annual decline over 20 years.",
+      "effect": "Base $47,679, downside commodity $37,764, upside commodity $57,594.",
+      "decisionRule": "R-04, R-05 and R-06 test value and the asking price against it.",
+      "output": "Base economic value $47,679."
+    },
+    {
+      "question": "Why did E-01 cost $5,298?",
+      "source": "County clerk instruments",
+      "sourceId": "E-01",
+      "sourceTimestamp": "2026-09-29",
+      "rawFact": "H. W. Stiles conveyed an undivided 1/8 mineral interest in the subject tract by the instrument recorded 2016-05-30, but no reviewed instrument vests any interest in H. W. Stiles. Admitting the claim would over-allocate the estate and dilute every reconciled holder.",
+      "classification": "DERIVED",
+      "derivation": "Measured by re-running ownership with the claim admitted: net revenue interest 0.01171875 to 0.01041667. The delta between scenarios is the impact; nothing is estimated.",
+      "effect": "Reduces evidence-adjusted value by $5,298.",
+      "decisionRule": "R-08 (measured blocker) and C-03.",
+      "output": "$5,298 of measured exposure."
+    },
+    {
+      "question": "Why can E-02 not be priced?",
+      "source": "County clerk instruments",
+      "sourceId": "E-02",
+      "sourceTimestamp": "2026-09-29",
+      "rawFact": "The deed of trust recorded 1991-06-14 has no matching release in the records reviewed. This is a statement about the search, not a determination that the lien remains active.",
+      "classification": "OBSERVED",
+      "derivation": "ECONOMIC IMPACT NOT YET QUANTIFIABLE. No outstanding balance is stated in the reviewed records, so the encumbrance cannot be priced.",
+      "effect": "Cannot be offset by an offer adjustment.",
+      "decisionRule": "R-07 holds the deal rather than repricing it.",
+      "output": "Unpriceable closing blocker."
+    },
+    {
+      "question": "Why can E-03 not be priced?",
+      "source": "County clerk instruments",
+      "sourceId": "E-03",
+      "sourceTimestamp": "2026-09-29",
+      "rawFact": "The 2004 mineral deed conveys one half of the estate to two grantees without stating each one's share. The position is carried as a single undivided holding; equal shares are not assumed.",
+      "classification": "OBSERVED",
+      "derivation": "ECONOMIC IMPACT NOT YET QUANTIFIABLE. No split is stated in the instrument, and equal shares are never assumed.",
+      "effect": "Cannot be offset by an offer adjustment.",
+      "decisionRule": "R-07 holds the deal rather than repricing it.",
+      "output": "Unpriceable closing blocker."
+    },
+    {
+      "question": "Why is the production basis flagged?",
+      "source": "Vendor versus regulator",
+      "sourceId": "reconciliation",
+      "sourceTimestamp": "2026-08-04",
+      "rawFact": "Vendor well-level volumes differ from the filed lease total by 3.98%.",
+      "classification": "DERIVED",
+      "derivation": "Compared against a 2.00% review threshold.",
+      "effect": "Exceeds threshold; the production basis is not settled.",
+      "decisionRule": "R-11.",
+      "output": "3.98% unreconciled variance."
+    },
+    {
+      "question": "Why is confidence LOW?",
+      "source": "Decision engine",
+      "sourceId": "confidence",
+      "sourceTimestamp": null,
+      "rawFact": "title_evidence=LOW, ownership=LOW, production=LOW, forecast=MEDIUM, regulatory=MEDIUM, economic_model=MEDIUM",
+      "classification": "DERIVED",
+      "derivation": "Overall confidence is the lowest level among the domains that can change the decision. A domain that cannot change the decision is reported but does not cap the overall figure.",
+      "effect": "Capped by title_evidence.",
+      "decisionRule": "Confidence decomposition rule.",
+      "output": "LOW: LOW because 3 indexed instrument(s) remain unread and one conveying party lacks an evidenced acquisition"
+    },
+    {
+      "question": "Why is closing readiness NOT_READY?",
+      "source": "Decision engine",
+      "sourceId": "readiness",
+      "sourceTimestamp": null,
+      "rawFact": "2 closing blocker(s) remain unresolved and unmeasured: No release located for recorded encumbrance; Allocation between co-grantees not stated.",
+      "classification": "DERIVED",
+      "derivation": "Readiness runs on its own ladder from closing blockers and review items, independent of the posture ladder.",
+      "effect": "Acquisition posture and closing readiness are independent. Economics can support continued acquisition work while unresolved evidence still prevents closing.",
+      "decisionRule": "C-02",
+      "output": "NOT_READY"
+    },
+    {
+      "question": "Why did the system choose Hold for diligence?",
+      "source": "Decision engine",
+      "sourceId": "posture",
+      "sourceTimestamp": null,
+      "rawFact": "R-01, R-02, R-03, R-04, R-05, R-06, R-07 matched",
+      "classification": "DERIVED",
+      "derivation": "Rules evaluated in precedence order; first match wins. R-07 matched on: A closing blocker exists with no measured impact.",
+      "effect": "2 closing blocker(s) carry no measurable dollar impact: No release located for recorded encumbrance; Allocation between co-grantees not stated. An unpriceable blocker cannot be offset by an offer adjustment, so the deal is held rather than repriced.",
+      "decisionRule": "R-07 (ruleset 2.0.0)",
+      "output": "Hold for diligence"
+    }
+  ],
+  "strongestPositives": [
+    "Position models to $47,679 at the base deck on a derived net revenue interest of 0.01171875.",
+    "6 instrument(s) were read in full rather than taken from an index."
+  ],
+  "materialRisks": [
+    "Conveying party has no evidenced acquisition — measured at $5,298, blocks closing",
+    "No release located for recorded encumbrance — not yet measurable, blocks closing",
+    "Allocation between co-grantees not stated — not yet measurable, blocks closing",
+    "Three instruments known from index only — not yet measurable"
+  ],
+  "unresolvedAssumptions": [
+    "minimumMarginPct was not provided; dependent outputs are withheld rather than defaulted.",
+    "underwriteAgainst uses a stated system convention (MineralFlow stated convention) rather than a buyer input.",
+    "timingConvention uses a stated system convention (MineralFlow stated convention) rather than a buyer input.",
+    "riskHaircutPct uses a stated system convention (No haircut applied) rather than a buyer input.",
+    "No asking price was supplied, so price comparisons are shown as thresholds rather than results.",
+    "Production basis carries a 3.98% unreconciled variance between vendor and regulator.",
+    "Present-value factor of 0.7081 derived from a 20.2% annual decline, not asserted."
+  ],
+  "conditionsToAdvance": [
+    "Search county records 1962 to 2016 for an instrument vesting minerals in that party, examining the three index-only instruments first.",
+    "Search the county grantor index under the lender for a release, partial release, or satisfaction.",
+    "Obtain the recorded image to check for per-grantee fractions, or locate a later partition instrument.",
+    "Obtain the seller's asking price and the buyer's minimum margin, neither of which is on file."
+  ],
+  "conditionsThatReverse": [
+    "Conveying party has no evidenced acquisition resolving against the buyer would remove $5,298 of value.",
+    "Allocation between co-grantees not stated resolving against the buyer would introduce an unpriced liability.",
+    "Three instruments known from index only resolving against the buyer would introduce an unpriced liability.",
+    "Seller asking price above $47,679: Posture becomes PASS; no margin remains at the base deck.",
+    "Competing ownership claim if admitted as valid: Evidence-adjusted value falls to $42,381, a reduction of $5,298."
+  ],
+  "titleStatus": "POTENTIAL_GAPS_DETECTED",
+  "inputs": {
+    "confirmedTractCount": 1,
+    "verifiedInstrumentCount": 6,
+    "indexOnlyInstrumentCount": 3,
+    "openReviewItemCount": 2,
+    "unresolvedAllocationCount": 1,
+    "annualDecline": 0.202,
+    "forecastBasisNote": "Vendor forecast on a child well 660 ft from a same-bench parent; the depletion interference behind the decline has not been independently confirmed.",
+    "remainingOilBbl": 84300,
+    "remainingGasMcf": 148000,
+    "askingPriceUsd": null,
+    "reconciliationVariancePct": 3.98,
+    "reconciliationThresholdPct": 2
+  },
+  "sourceIds": [
+    "county:title-chain",
+    "vendor:reserves",
+    "E-01",
+    "E-02",
+    "E-03",
+    "reconciliation",
+    "confidence",
+    "readiness",
+    "posture"
+  ]
+}

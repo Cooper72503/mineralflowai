@@ -153,7 +153,7 @@ type Phase = "form" | "running" | "selecting" | "complete" | "error";
 type TabKey = "summary" | "scorecard" | "production" | "economics" | "findings" | "coverage" | "missing" | "geology";
 
 const DOWNLOAD_PATHS = {
-  "decision-record":   (id: string) => `/api/trrc/due-diligence/${id}/decision-record`,
+  "decision-record":   (id: string) => `/api/trrc/due-diligence/${id}/report?format=gold2-json`,
   report:              (id: string) => `/api/trrc/due-diligence/${id}/report`,
   archive:             (id: string) => `/api/trrc/due-diligence/${id}/archive`,
   manifest:            (id: string) => `/api/trrc/due-diligence/${id}/manifest`,
@@ -297,6 +297,7 @@ export default function TrrcDueDiligencePage() {
             clearInterval(interval);
           } else if (data.data.status === "failed" || data.data.status === "cancelled") {
             terminalReachedRef.current = true;
+            setRun(data.data);
             setError(data.data.error_summary ?? "The run failed or was cancelled.");
             setPhase("error");
             clearInterval(interval);
@@ -621,6 +622,15 @@ export default function TrrcDueDiligencePage() {
             }}>
               Start Over
             </button>
+          </div>
+        )}
+
+        {phase === "error" && run?.status === "failed" && (
+          <div style={{ padding: "1rem", marginBottom: "1rem", color: COLORS.text }}>
+            <p>Retrieval did not finish successfully. You can download the retained evidence and the report's explicit data gaps.</p>
+            <button onClick={() => handleDownload("decision-record")}>Download available evidence (JSON)</button>{" "}
+            <button onClick={() => handleDownload("report")}>Download report with data gaps (PDF)</button>
+            {downloadError && <p role="alert">{downloadError}</p>}
           </div>
         )}
 

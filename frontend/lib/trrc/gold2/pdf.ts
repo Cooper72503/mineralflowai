@@ -3,7 +3,8 @@ import React from "react";
 import {fileURLToPath} from "node:url";
 import {Document,Page,Text,View,Link,StyleSheet,renderToBuffer,Font,Svg,Rect} from "@react-pdf/renderer";
 import {GOLD_SECTIONS} from "../gold/sections";
-import {GOLD2_FIELDS} from "./contract";
+import {chartSeries} from "./charts";
+import {GOLD2_FIELDS,GOLD2_CHARTS} from "./contract";
 import {validateGold2Draft,type assembleGold2Draft,type DraftField} from "./assemble";
 type Record2=ReturnType<typeof assembleGold2Draft>;
 const e=React.createElement;
@@ -53,6 +54,18 @@ function Values({report}:{report:Record2}){
 }
 function RuleTrace({report}:{report:Record2}){return e(View,{},...report.decision.trace.map(r=>e(View,{key:r.id,style:s.box,wrap:false},e(Text,{style:s.label},`${r.id} - ${r.outcome}`),e(Text,{style:s.note},r.reason))));}
 function Sources({report}:{report:Record2}){return e(View,{},...report.regulator.evidence.map(r=>e(View,{key:r.id,style:s.box,wrap:false},e(Text,{style:s.value},r.source.replace(/_/g," ")),e(Text,{style:s.note},`${r.status} | ${r.retrievedAt}\n${r.error??"See retained payload for query results and scope."}`),r.sourceUrl?e(Link,{src:r.sourceUrl,style:s.citation},r.sourceUrl):null,e(Text,{style:s.citation},`Evidence ${r.id}\nSHA-256 ${r.sha256}`))),...report.disclosures.map(d=>e(View,{key:d.id,style:s.box,wrap:false},e(Text,{style:s.label},label("d."+d.id)),e(Text,{style:s.note},d.text))));}
+function EvidenceChart({report,id}:{report:Record2;id:string}){
+ const input=report.chartInputs.find(c=>c.id===id)!;
+ const title=id.replace(/_/g," ");
+ if(input.status==="unavailable")return e(View,{style:s.box},e(Text,{style:s.section},`Chart: ${title}`),e(Missing,{reason:input.reason!}));
+ const rows=chartSeries(report,id);
+ const maximum=(unit:string)=>id==="confidence_domains"?3:Math.max(1,...rows.filter(r=>r.unit===unit).map(r=>Math.abs(r.value??0)));
+ return e(View,{},e(Text,{style:s.section},`Chart: ${title}`),e(Text,{style:s.note},"Each unit has its own scale. Missing values are not zeros. Exact inputs and citations are retained in the companion Decision Record."),
+  ...rows.map((row,i)=>e(View,{key:i,style:s.box,wrap:false},e(Text,{style:s.label},row.label),
+   row.value!==null?e(View,{style:{width:400,borderLeftWidth:1,borderColor:c.line,paddingVertical:3}},e(View,{style:{height:9,width:Math.abs(row.value)/maximum(row.unit)*380,backgroundColor:row.value<0?"#AF493A":c.teal}})):null,
+   e(Text,{style:s.note},`${row.value===null?"No numeric value":display(row.value)} | ${row.unit}${row.value!==null?` | scale 0-${display(maximum(row.unit))} in absolute magnitude`:""}`),row.note?e(Text,{style:s.note},row.note):null)),
+  rows.length===0?e(Text,{style:s.note},"No entries in the retained evaluated scope; this does not establish absence outside that scope."):null);
+}
 export function gold2Sections(){
  const used=new Set(GOLD_SECTIONS.flatMap(s=>s.fields));
  const extra=GOLD2_FIELDS.filter(k=>!used.has(k as never));
@@ -62,10 +75,11 @@ export function gold2Sections(){
 export async function renderGold2Pdf(report:Record2):Promise<Buffer>{
  const errors=validateGold2Draft(report);if(errors.length)throw Error(errors.join("; "));
  const sections=gold2Sections();
- return renderToBuffer(e(Document,{title:`MineralFlow GOLD 2.0 Decision Record - ${report.input.api}`,author:"MineralFlow AI"},...sections.map(section=>e(Page,{key:section.id,size:"LETTER",style:s.page},
+ return renderToBuffer(e(Document,{title:`MineralFlow GOLD 2.0 Decision Record - ${report.input.api}`,author:"MineralFlow AI",creationDate:new Date(report.input.asOf),modificationDate:new Date(report.input.asOf)},...sections.map((section,sectionIndex)=>e(Page,{key:section.id,size:"LETTER",style:s.page},
   e(Text,{style:s.brand},"MINERALFLOW AI | GOLD 2.0 DECISION RECORD"),e(Text,{style:s.title},`${section.id}  ${section.title}`),e(Text,{style:s.sub},section.subtitle),
-  section.id==="01"?e(View,{},e(Text,{style:s.sub},`Requested API: ${report.input.api} | As of: ${report.input.asOf}`),e(Text,{style:s.warning},`Delivery status: integrated evidence report; full GOLD2 acceptance is incomplete. Acquisition posture: ${report.decision.posture}. Closing: ${report.decision.closing.state}.\n${report.implementationGaps.join(" ")}`)):null,
+  section.id==="01"?e(View,{},e(Text,{style:s.sub},`Requested API: ${report.input.api} | As of: ${report.input.asOf}`),e(Text,{style:s.warning},`Delivery status: evidence report; unavailable inputs are disclosed. Acceptance is recorded separately. Acquisition posture: ${report.decision.posture}. Closing: ${report.decision.closing.state}.\n${report.implementationGaps.join(" ")}`)):null,
   section.id==="02"?e(Values,{report}):null,section.id==="08"?e(Production,{report}):null,
+  ...GOLD2_CHARTS.filter(chart=>chart.page===sectionIndex+1).map(chart=>e(EvidenceChart,{key:chart.id,report,id:chart.id})),
   e(View,{style:s.grid},...section.fields.map(k=>e(Field,{key:k,report,k}))),
   section.id==="15"?e(RuleTrace,{report}):null,section.id==="A2"?e(Sources,{report}):null,
   e(Text,{fixed:true,style:s.footer,render:({pageNumber,totalPages})=>`MineralFlow | ${report.input.api} | Evidence-based research, subject to professional review | ${pageNumber}/${totalPages}`})))));

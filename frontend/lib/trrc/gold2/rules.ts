@@ -4,12 +4,13 @@
 export interface Gold2RuleInput {
  identityResolved:boolean;positionIdentified:boolean;nriComputable:boolean;
  baseValue:number|null;askingPrice:number|null;measuredExposure:number|null;
+ maximumBuyPrice?:number|null;
  exceptions:{id:string;closingBlocker:boolean;resolved:boolean;measuredImpact:number|null;decisionMaterial:boolean}[];
  productionReconciled:boolean|null;reviewItemsOpen:number;titleEvidenceSufficient:boolean;
  confidenceDomains:{domain:string;level:"INSUFFICIENT_DATA"|"LOW"|"MEDIUM"|"HIGH";decisionMaterial:boolean;reason:string}[];
 }
 export function evaluateGold2Rules(input:Gold2RuleInput){
- for(const v of [input.baseValue,input.askingPrice,input.measuredExposure,...input.exceptions.map(e=>e.measuredImpact)])if(v!==null&&!Number.isFinite(v))throw Error("Nonfinite rule input");
+ for(const v of [input.baseValue,input.askingPrice,input.measuredExposure,input.maximumBuyPrice??null,...input.exceptions.map(e=>e.measuredImpact)])if(v!==null&&!Number.isFinite(v))throw Error("Nonfinite rule input");
  if(!Number.isInteger(input.reviewItemsOpen)||input.reviewItemsOpen<0)throw Error("Invalid review count");
  const blockers=input.exceptions.filter(e=>e.closingBlocker&&!e.resolved);
  const unpriced=blockers.filter(e=>e.measuredImpact===null);
@@ -25,7 +26,10 @@ export function evaluateGold2Rules(input:Gold2RuleInput){
   {id:"R-09",match:!input.titleEvidenceSufficient,posture:"HOLD_FOR_DILIGENCE",reason:"Reviewed title evidence is insufficient."},
   {id:"R-10",match:input.reviewItemsOpen>0,posture:"HOLD_FOR_DILIGENCE",reason:"Open review items require diligence."},
   {id:"R-11",match:input.productionReconciled!==true,posture:"HOLD_FOR_DILIGENCE",reason:"Production reconciliation is unresolved or exceeds its supplied threshold."},
-  {id:"R-12",match:true,posture:"PURSUE_REVIEW",reason:"Evaluated prerequisites support continued acquisition review; no closing authorization is issued."},
+  {id:"R-12",match:input.maximumBuyPrice===null||input.maximumBuyPrice===undefined,posture:"HOLD_FOR_DILIGENCE",reason:"Buyer underwriting limit is unavailable; no return criterion is inferred."},
+  {id:"R-13",match:input.askingPrice!==null&&input.maximumBuyPrice!=null&&input.askingPrice>input.maximumBuyPrice,posture:"CONDITIONAL_REVIEW",reason:"Asking price exceeds the supplied buyer underwriting limit."},
+  {id:"R-14",match:input.exceptions.some(e=>e.decisionMaterial&&!e.resolved),posture:"CONDITIONAL_REVIEW",reason:"A decision-material exception remains unresolved."},
+  {id:"R-15",match:true,posture:"PURSUE_REVIEW",reason:"Evaluated prerequisites support continued acquisition review; no closing authorization is issued."},
  ];
  const first=definitions.findIndex(r=>r.match);
  const trace=definitions.map((r,i)=>({id:r.id,outcome:i>first?"NOT_REACHED":r.match?"MATCH":"NO_MATCH",reason:r.reason}));

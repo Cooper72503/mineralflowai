@@ -51,3 +51,10 @@ The MineralFlow-owned `NoviAdapter` separates authenticated transport from an ag
 `evaluateGold2Economics` reuses the cashflow engine with that recomputed NRI for commodity scenarios and price sensitivity. Buyer margin may be explicitly absent: modeled value can still be computed, but maximum buy price is withheld. The GOLD2 draft rejects valuation periods preceding its as-of month.
 
 Run `npm run decision:gold2-draft -- INPUT.json OUTPUT.json` from `frontend` with the `Gold2Input` payload. This is an integrated development work product, explicitly `draft_not_validated`; remaining mappings, risk review and chart acceptance must be completed before a GOLD2 report can pass. Run `npm run gold2:benchmark` to retain exact failures for all ten captured cases and update the GOLD report count in `PIPELINE-STATUS.md`.
+
+
+## Executed report handoff (2026-09-11)
+
+The adapter accepts cited `well_measurement` observations as well as production, membership and forecast records. Supported measurements include formation tops, TVD/reference elevation, porosity/saturation, net/gross interval, pressure gradient, spacing density, parent/child, interference and completion quantities. Values remain provider observations, with explicit units and reference data; API depth is not substituted for TVD. This is the MineralFlow interchange, not a claimed native Novi API schema.
+
+An authenticated GOLD2 report POST can carry a reviewed position, partner bundle, reconciliation policy, explicit economics, forecast selection and reviewed evidence scenarios. API/retained sources and the account-owned title analysis cannot be replaced by the request. Reconciliation requires evidenced complete lease membership over identical reporting months. All absent inputs remain explicit.

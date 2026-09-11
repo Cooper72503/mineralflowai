@@ -58,3 +58,14 @@ The full live run returned production for five cases. A separate failed-case rec
 ## Standalone GOLD path
 
 `npm run gold:benchmark --prefix frontend` exports all ten captured cases through the eighteen-section renderer, with JSON field-status counts and per-case failure reasons in `audit-work/gold-benchmark/summary.json`. `standalone-live-gaines.json` retains a complete public-worker run, including missing Chromium and public endpoint failures. See `STANDALONE-GOLD.md` for live and replay commands and the remaining acquisition-engine boundary.
+
+
+## GOLD2 acceptance and visual review
+
+Run `npm run gold2:benchmark` from `frontend/` after installing the development-only reviewer with `python3 -m pip install -r scripts/gold2-review-requirements.txt`. The current retained-source corpus produces ten complete, auditable records with explicitly unavailable acquisition inputs. The numeric pass count does not represent ten priced acquisitions or ten live Novi integrations.
+
+`gold2-render-review.json` binds visual approval to input/record hashes and 72-dpi RGB page fingerprints produced by pinned PyMuPDF. React PDF randomizes embedded font-subset identifiers; raw PDF hashes are retained for file identity but are not treated as visual changes. Different report data, pixels, page counts or renderer versions require review.
+
+For a changed template: regenerate, render all pages, inspect contact sheets and detailed pages, and check text bounds. Place the resulting per-API structural checks in `audit-work/gold2-review/final-structural-review.json` with `{api,pageCount,outOfBoundsPages}` entries. Only after inspection run `node --import tsx scripts/record-gold2-review.ts --confirm-pages-inspected`, then rerun the benchmark. Never generate an approval merely to make CI green.
+
+`standalone-live-gold2-gaines.json` is a separate real public-source run through the full standalone sequencer. It retains all sixteen attempts and disclosed failures and does not replace the historical ten-case corpus.

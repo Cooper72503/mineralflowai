@@ -10,3 +10,13 @@ it("does not subtract mismatched depth references",()=>{const r=mapWellMeasureme
 it("withholds contradictory measurements instead of choosing a source",()=>{const r=mapWellMeasurements(bundle([row("net_pay",100,"ft"),row("net_pay",200,"ft")]),api,asOf);expect(r.fields["geology.net_pay"]).toBeUndefined();expect(r.conflicts).toHaveLength(1);});
 it("rejects unsupported units, invalid fractions and altered payloads",()=>{expect(()=>normalizePartnerInput(bundle([row("proppant",12,"m")]))).toThrow(/unit/);expect(()=>normalizePartnerInput(bundle([row("porosity",120,"percent")]))).toThrow(/exceeds one/);const b=bundle([row("tvd",10000,"ft")]);b.sources[0].sha256="0".repeat(64);expect(()=>normalizePartnerInput(b)).toThrow(/hash mismatch/);});
 it("carries cited completion data through the actual report builder",()=>{const r=assembleGold2Draft({api,runId:"test",asOf,attempts:[],title:null,position:null,partner:bundle([row("completion_stages",40,"count"),row("proppant",1000000,"lb"),row("fluid",50000,"bbl")]),reconciliationPolicy:null,economics:null});expect(r.fields["geology.completion_stages"].value).toMatchObject({value:40,unit:"count"});expect(r.fields["geology.proppant"].origin?.pointer).toBe("/measurements/fields/geology.proppant");});
+it("maps cited formation tops and provider-reported spatial assessments without inferring nearby-well properties",()=>{
+ const tops={...row("formation_tops",0,"m"),value:[{formation:"Synthetic bench",top:3048,base:3078.48}]};
+ const r=assembleGold2Draft({api,runId:"test",asOf,attempts:[],title:null,position:null,partner:bundle([tops,row("parent_child","child","classification"),row("interference","provider reports possible interference","reported_assessment"),row("wells_per_section",4,"wells/section")]),economics:null,reconciliationPolicy:null});
+ expect(r.fields['geology.formation_tops'].value).toMatchObject({value:[{formation:'Synthetic bench',top:expect.closeTo(10000,6),base:expect.closeTo(10100,6)}],unit:'ft'});
+ expect(r.fields['geology.parent_child'].value).toMatchObject({value:'child',unit:'classification'});
+});
+it("rejects reversed formation intervals and missing depth references",()=>{
+ expect(()=>normalizePartnerInput(bundle([{...row('formation_tops',0,'ft'),value:[{formation:'Synthetic',top:100,base:50}]}]))).toThrow(/base precedes/);
+ expect(()=>normalizePartnerInput(bundle([{...row('formation_tops',0,'ft'),referencePoint:null,value:[{formation:'Synthetic',top:100,base:150}]}]))).toThrow(/reference/);
+});

@@ -1,6 +1,56 @@
 # MineralFlow production pipeline status
 
-**GOLD reports validated: 0/10**
+**GOLD reports validated: 10/10**
+
+Updated: 2026-09-11. Branch: `audit/decision-record-reliability`.
+
+The full ten-case retained-source benchmark passes the GOLD2 field, calculation, rule, disclosure, chart and reviewed-render contract after regeneration. Each report contains 109 required fields, nine calculation records and eleven chart sections. Every absent field has an explicit dependency/source reason. All ten acquisition postures remain INSUFFICIENT_DATA: no real reviewed seller position/NRI, subject partner forecast or buyer economics was supplied for those cases. This count validates complete evidence-scoped work products, including honest unavailable-data outcomes; it does not establish fully populated acquisition economics or universal live-source availability.
+
+## Last verified
+
+- Frontend: 758 tests across 77 files passed. Populated synthetic handoff and API-delivery regressions pass. TypeScript passed after fixing the benchmark test's input typing.
+- All 240 benchmark PDF pages rendered; contact-sheet layout and detailed representative pages inspected; no text outside page bounds. Review is bound to the input hash, recomputed record hash and rendered-page fingerprint. Random PDF font-subset names cannot invalidate identical renders or approve changed data.
+- Independent fresh regeneration returns 10/10. Exact per-API results and unavailable-field counts: `benchmarks/gold2-latest-validation.json`. Retained visual approvals: `benchmarks/gold2-render-review.json`.
+- One live standalone API run (42-165-02733) completed with 49 months of lease production and PDF/JSON delivery. Sixteen source attempts were retained; plugging, imaged documents, operator standing, compliance and inactive-status queries failed and were disclosed. Capture: `benchmarks/standalone-live-gold2-gaines.json`.
+- Separate synthetic populated report exercises all eleven chart-data paths, exact NRI 3/256, twelve-month base PV $1,125, and cited TVDSS 7,050 ft. These are test inputs, not actual asset values, and do not contribute to the ten real-API cases.
+
+## Connected in this integration cycle
+
+- Supplied exception/decision modules and offset analytics merged without replacing audited retrieval, exact ownership arithmetic or atomic title publication. Legacy job-column valuation and narrative-derived dilution are not used as the GOLD2 acquisition basis.
+- Confirmed API/tract-scoped title branches, instruments, encumbrances and cited findings feed the decision layer. Uncited findings are withheld and block evidence sufficiency. Fraction/tract mismatches trigger review independently of price.
+- Reviewed ownership alternatives use the existing cashflow engine with unchanged commodity assumptions. Explicit hashed scenario-to-finding linkage is required. Multiple alternatives are not blindly summed.
+- Cited formation tops, TVD/reference elevation, completion measurements, parent/child, interference and spacing-density observations map through the partner interchange with unit/reference checks.
+- Acquisition posture, closing readiness, material-domain confidence, next actions and buyer-price-limit rules are connected. Missing buyer criteria never become defaults.
+- Existing report download and evidence-JSON buttons deliver GOLD2. Authenticated POST accepts explicit reviewed supplements; title remains loaded under the authenticated account. A failed retrieval run can still deliver its retained evidence and gaps; the UI exposes those downloads.
+- Incoming acquisition migration is numbered 030. Migration 031 reapplies the idempotent atomic publisher, covering databases that already used 029 for acquisition columns.
+
+## Remaining external verification and boundaries
+
+- Actual Novi schema/credentials and live payload mapping are unavailable. The tested interchange is MineralFlow-owned.
+- Live authenticated Supabase end-to-end testing and migrations 029/030/031 remain unverified against a running database. Validate them in staging before deployment.
+- Reports need reviewed position evidence to calculate real NRI. An API does not uniquely identify a seller or the offered interest. Public lease production is never allocated to a subject well by assumption.
+- Ten retained cases plus one live API are bounded coverage, not proof that every external Texas endpoint will respond. Transport, outage, scope and missing-data states remain explicit.
+- GitHub authentication was unavailable at the last push attempt. Changes are being preserved locally and in a cumulative recovery checkpoint; no deployment is claimed.
+
+## Commands
+
+From `frontend/`:
+
+```sh
+npm test
+npx tsc --noEmit --incremental false
+python3 -m pip install -r scripts/gold2-review-requirements.txt
+npm run gold2:benchmark
+npm run gold:report -- --api 42-165-02733 --out ../audit-work/live-report
+npm run gold:report -- --api 42-165-02733 --replay ../benchmarks/standalone-live-gold2-gaines.json --out ../audit-work/replay-report
+```
+
+The Python reviewer is a development/benchmark dependency only; standalone report generation uses the existing Node pipeline. Changed data or rendered pixels require renewed visual review and cannot inherit an old approval.
+
+## Prior audit history
+
+
+**Historical status before integration: 0/10**
 
 Latest GOLD2 cycle: all ten retained-source cases replayed; zero complete GOLD2 reports validated. Exact per-API acceptance errors are retained in `benchmarks/gold2-latest-validation.json`. This is a replay of captured retrieval, not a new live-source run. The integrated draft connects reviewed mineral ownership, partner reconciliation, royalty cashflows and decision predicates, but remains explicitly unvalidated. Subject production and selected forecast mappings are now connected and tested. Geology mappings, closing-risk classification, charts and full report acceptance remain incomplete. Frontend regression and TypeScript checks pass. Migration 029 has not been tested on a running database. Current files and all five preceding audit commits were verified in the workspace before publication.
 

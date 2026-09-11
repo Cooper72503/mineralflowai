@@ -32,8 +32,8 @@ export async function GET(
   }
 
   const format=request.nextUrl.searchParams.get("format");
-  if(format==="gold2"||format==="gold2-json"){
-    const result=await generateGold2ForRun(supabase,runId,user.id,format==="gold2"?"pdf":"json");
+  if(format===null||format==="gold2"||format==="gold2-json"){
+    const result=await generateGold2ForRun(supabase,runId,user.id,format==="gold2-json"?"json":"pdf");
     if(!result.ok)return NextResponse.json({ok:false,error:result.error},{status:result.status});
     return new NextResponse(new Uint8Array(result.bytes),{status:200,headers:{"Content-Type":result.contentType,"Content-Disposition":`attachment; filename="${result.filename}"`,"Cache-Control":"private, no-store"}});
   }
@@ -50,4 +50,17 @@ export async function GET(
       "Content-Length": String(result.pdfBuffer.length),
     },
   });
+}
+
+/** Generate with explicit reviewed inputs; title remains loaded under the authenticated owner. */
+export async function POST(request:NextRequest,{params}:{params:Promise<{runId:string}>}){
+ const supabase=await createSupabaseFromRouteRequest(request);
+ const {data:{user},error}=await supabase.auth.getUser();
+ if(error||!user)return NextResponse.json({ok:false,error:"Not authenticated."},{status:401});
+ let inputs:unknown;try{inputs=await request.json();}catch{return NextResponse.json({ok:false,error:"A JSON reviewed-input object is required."},{status:400});}
+ const {runId}=await params;
+ const format=request.nextUrl.searchParams.get("format")==="gold2-json"?"json":"pdf";
+ const result=await generateGold2ForRun(supabase,runId,user.id,format,inputs);
+ if(!result.ok)return NextResponse.json({ok:false,error:result.error},{status:result.status});
+ return new NextResponse(new Uint8Array(result.bytes),{status:200,headers:{"Content-Type":result.contentType,"Content-Disposition":`attachment; filename="${result.filename}"`,"Cache-Control":"private, no-store"}});
 }
