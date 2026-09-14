@@ -67,38 +67,32 @@ export default function PrivacyPage() {
         <LegalSection title="3. How We Use Your Information">
           <ul style={listStyle}>
             <li>To provide, operate, and maintain the Service.</li>
-            <li>To retrieve public regulatory records and generate AI-powered due diligence reports.</li>
+            <li>To retrieve public regulatory records and generate due diligence reports.</li>
             <li>To manage your subscription and process payments via Stripe.</li>
             <li>To send transactional emails such as account confirmations and billing receipts.</li>
             <li>To respond to your support requests and communications.</li>
             <li>To detect and prevent fraud, abuse, and security incidents.</li>
-            <li>To improve our AI models and platform using aggregated, de-identified data. We do not use your identifiable reports or search inputs to train models shared with or sold to third parties.</li>
+            <li>To improve our platform and retrieval/analysis engine using aggregated, de-identified data. We do not use your identifiable reports or search inputs to train any AI or machine-learning models, ours or a third party's.</li>
             <li>To comply with legal obligations.</li>
           </ul>
         </LegalSection>
 
-        <LegalSection title="4. AI Processing and Confidentiality">
+        <LegalSection title="4. Report Generation and Confidentiality">
           <p>
             Your search inputs and the public regulatory records we retrieve on your behalf are processed
-            to generate your due diligence report. We treat your reports and search history as
-            confidential. We do not sell, rent, or share them with third parties except as necessary to
-            operate the Service (e.g., passing search inputs and retrieved records to Anthropic's API for
-            AI processing) or as required by law.
+            entirely by MineralFlow's own deterministic retrieval and analysis engine to generate your due
+            diligence report. We treat your reports and search history as confidential. We do not sell,
+            rent, or share them with third parties except as necessary to operate the Service (e.g.,
+            storing them in our database) or as required by law.
           </p>
           <p style={{ marginTop: "0.75rem" }}>
-            <strong style={{ color: "#f8fafc" }}>Anthropic processing.</strong> Your search inputs and the
-            public regulatory records retrieved for your report are sent to Anthropic's Claude API to
-            generate the report's analysis and narrative content. Anthropic's use of this data is governed
-            by{" "}
-            <a
-              href="https://www.anthropic.com/legal/commercial-terms"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={linkStyle}
-            >
-              Anthropic's commercial terms
-            </a>. We use the API under agreements that restrict Anthropic from using your data to train
-            its models.
+            <strong style={{ color: "#f8fafc" }}>No AI vendor in the retrieval or analysis path.</strong> Your
+            search inputs and the public regulatory records retrieved for your report are never sent to
+            Anthropic, OpenAI, or any other AI provider. Which public regulatory data sources to query and
+            in what order, how results are cross-checked, and the report's financial analysis, scoring,
+            findings, and narrative content are all produced by MineralFlow's own software running on our
+            own infrastructure — no third party receives your search inputs or retrieved records for
+            processing of any kind.
           </p>
         </LegalSection>
 
@@ -107,12 +101,12 @@ export default function PrivacyPage() {
           <ul style={listStyle}>
             <li><strong style={{ color: "#f8fafc" }}>Stripe</strong> — payment processing. Receives your email and billing details to manage subscriptions.</li>
             <li><strong style={{ color: "#f8fafc" }}>Supabase</strong> — cloud database and authentication. Stores account information, search history, and generated reports in secure, encrypted databases.</li>
-            <li><strong style={{ color: "#f8fafc" }}>Anthropic</strong> — AI report generation. Receives search inputs and public regulatory records for analysis. See Section 4.</li>
             <li><strong style={{ color: "#f8fafc" }}>Vercel</strong> — hosting and CDN. Hosts the web application and processes server-side requests.</li>
             <li><strong style={{ color: "#f8fafc" }}>Texas Railroad Commission (TRRC)</strong> — the source of the public regulatory records our reports are built from. We query TRRC's public well, lease, and operator databases using the identifiers you submit; no account or personal information is sent to TRRC.</li>
           </ul>
           <p style={{ marginTop: "0.75rem" }}>
-            We do not sell your personal information to advertisers or data brokers.
+            We do not sell your personal information to advertisers or data brokers. We do not use any
+            third-party AI provider to process your search inputs or retrieved records — see Section 4.
           </p>
         </LegalSection>
 
