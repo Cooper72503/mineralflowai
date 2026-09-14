@@ -1,12 +1,21 @@
-import {fileURLToPath} from "node:url";
+import path from "node:path";
 import React from "react";
 import {Document,Page,Text,View,Link,StyleSheet,renderToBuffer,Svg,Rect,Font} from "@react-pdf/renderer";
 import type {DecisionField,DecisionFieldKey} from "../decision-record";
 import {type GoldRecord,validateGoldRecord} from "./assemble";
 
+// Fonts are resolved from the frontend package root rather than via
+// `new URL(..., import.meta.url)`: under Next's webpack server bundle that
+// URL comes from a different realm and `fileURLToPath` throws
+// ERR_INVALID_ARG_TYPE at module load, which broke `next build`'s page-data
+// collection for every route importing this file (production deploy
+// dc30fb6 failed on exactly this). `process.cwd()` is the frontend root
+// both locally (`npm run gold:report`, vitest) and in Vercel's serverless
+// runtime; next.config.js's outputFileTracingIncludes ships the .otf files.
+const FONT_DIR=path.join(process.cwd(),"lib","trrc","gold","fonts");
 Font.register({family:"GoldSans",fonts:[
- {src:fileURLToPath(new URL("./fonts/NimbusSans-Regular.otf",import.meta.url)),fontWeight:400},
- {src:fileURLToPath(new URL("./fonts/NimbusSans-Bold.otf",import.meta.url)),fontWeight:700},
+ {src:path.join(FONT_DIR,"NimbusSans-Regular.otf"),fontWeight:400},
+ {src:path.join(FONT_DIR,"NimbusSans-Bold.otf"),fontWeight:700},
 ]});
 const C={ink:"#122638",muted:"#526578",teal:"#007F78",line:"#DCE5EB",paper:"#F3F7F9",amber:"#805500"};
 const S=StyleSheet.create({page:{padding:36,paddingBottom:48,fontFamily:"GoldSans",fontSize:9,color:C.ink},brand:{fontSize:8,color:C.teal,letterSpacing:2,marginBottom:16},title:{fontFamily:"GoldSans",fontWeight:700,fontSize:24,marginBottom:6},subtitle:{fontSize:10,color:C.muted,marginBottom:18},grid:{flexDirection:"row",flexWrap:"wrap",gap:8},card:{width:"48.8%",padding:9,borderWidth:1,borderColor:C.line,borderRadius:4,marginBottom:4},label:{fontSize:8,color:C.muted,marginBottom:5},value:{fontFamily:"GoldSans",fontWeight:700,fontSize:12,marginBottom:5},note:{fontSize:7.5,color:C.muted,lineHeight:1.35},cite:{fontSize:6.5,color:C.teal,marginTop:5},rule:{padding:9,backgroundColor:C.paper,marginBottom:8},footer:{position:"absolute",bottom:22,left:36,right:36,fontSize:7,color:C.muted},row:{flexDirection:"row",paddingVertical:6,borderBottomWidth:1,borderColor:C.line},cell:{fontSize:8,paddingRight:7},warning:{padding:10,backgroundColor:"#FFF6DF",marginBottom:12,fontSize:9,color:C.amber}});

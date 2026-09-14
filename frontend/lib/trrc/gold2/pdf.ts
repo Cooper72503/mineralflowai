@@ -1,6 +1,6 @@
 /** Actual integrated GOLD2 PDF export. Certification is separate from delivery. */
 import React from "react";
-import {fileURLToPath} from "node:url";
+import path from "node:path";
 import {Document,Page,Text,View,Link,StyleSheet,renderToBuffer,Font,Svg,Rect} from "@react-pdf/renderer";
 import {GOLD_SECTIONS} from "../gold/sections";
 import {chartSeries} from "./charts";
@@ -8,7 +8,9 @@ import {GOLD2_FIELDS,GOLD2_CHARTS} from "./contract";
 import {validateGold2Draft,type assembleGold2Draft,type DraftField} from "./assemble";
 type Record2=ReturnType<typeof assembleGold2Draft>;
 const e=React.createElement;
-Font.register({family:"Gold2",fonts:[{src:fileURLToPath(new URL("../gold/fonts/NimbusSans-Regular.otf",import.meta.url)),fontWeight:400},{src:fileURLToPath(new URL("../gold/fonts/NimbusSans-Bold.otf",import.meta.url)),fontWeight:700}]});
+// See gold/pdf.ts for why fonts resolve from process.cwd() instead of import.meta.url.
+const FONT_DIR=path.join(process.cwd(),"lib","trrc","gold","fonts");
+Font.register({family:"Gold2",fonts:[{src:path.join(FONT_DIR,"NimbusSans-Regular.otf"),fontWeight:400},{src:path.join(FONT_DIR,"NimbusSans-Bold.otf"),fontWeight:700}]});
 const c={ink:"#142D3E",muted:"#526578",teal:"#087F7A",line:"#D8E3E9",paper:"#F3F7F9",warning:"#FFF3DB"};
 const s=StyleSheet.create({page:{padding:34,paddingBottom:48,fontFamily:"Gold2",fontSize:9,color:c.ink},brand:{fontSize:8,color:c.teal,letterSpacing:2,marginBottom:12},title:{fontSize:23,fontWeight:700,marginBottom:6},sub:{fontSize:9,color:c.muted,marginBottom:13},grid:{flexDirection:"row",flexWrap:"wrap",gap:7},card:{width:"48.5%",padding:9,borderWidth:1,borderColor:c.line,marginBottom:4},label:{fontSize:8,color:c.muted,marginBottom:4},value:{fontSize:12,fontWeight:700,marginBottom:5},note:{fontSize:7.5,color:c.muted,lineHeight:1.3},citation:{fontSize:6.5,color:c.teal,marginTop:4},box:{backgroundColor:c.paper,padding:9,marginBottom:8},warning:{backgroundColor:c.warning,padding:10,marginBottom:12,fontSize:8,lineHeight:1.35},footer:{position:"absolute",left:34,right:34,bottom:20,fontSize:7,color:c.muted},row:{flexDirection:"row",paddingVertical:5,borderBottomWidth:1,borderColor:c.line},cell:{fontSize:8,paddingRight:6},section:{fontSize:12,fontWeight:700,marginTop:12,marginBottom:8}});
 function label(k:string){return k.slice(k.indexOf(".")+1).replace(/_/g," ").replace(/^./,x=>x.toUpperCase());}

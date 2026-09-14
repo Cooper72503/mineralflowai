@@ -17,5 +17,20 @@
     "paths": { "@/*": ["./*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // The two files below import directly from ../worker/src (the GOLD
+  // pipeline test and the standalone gold:report CLI). frontend/ and
+  // worker/ are independent npm packages — Vercel builds with root
+  // directory "frontend" and never installs worker's dependencies, so
+  // `next build`'s type-check fails on worker's @supabase/playwright/
+  // cheerio imports (confirmed: production deploy of dc30fb6 errored with
+  // "Cannot find module '@supabase/supabase-js'" at worker/src/local-store.ts).
+  // Both files are dev-only: vitest runs the test with its own esbuild
+  // pipeline, and the CLI runs via tsx with worker's deps installed locally.
+  // Neither is part of the Next app bundle, so excluding them from the
+  // build-time type program is correct, not a suppression.
+  "exclude": [
+    "node_modules",
+    "lib/trrc/__tests__/gold-pipeline.test.ts",
+    "scripts/gold-report.ts"
+  ]
 }
