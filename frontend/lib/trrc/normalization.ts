@@ -247,10 +247,19 @@ export function normalizeApiNumber(raw: string): NormalizedApi | null {
   } else if (digits.length === 8) {
     // 8-digit TRRC form: county3 + well5 (no state prefix)
     api10 = `${TX_STATE_CODE}${digits}`;
-  } else if (digits.length >= 10 && digits.startsWith("42")) {
-    // Longer string starting with 42 — truncate to 10
+  } else if (digits.length === 12 && digits.startsWith("42")) {
+    // 12-digit form: api10 + 2-digit sidetrack code
     api10 = digits.slice(0, 10);
   } else {
+    // Anything else — including 11 and 13 digits — is rejected, never
+    // truncated. Real incident (Gaines County package, Sep 2026): 47 of 49
+    // seller-supplied numbers carried a spurious leading digit in the
+    // well sequence ("42-165-502084" for well 02084). Left-truncating
+    // 11 digits to 10 silently turned that into 4216550208 — a different
+    // well — and the run evaluated nothing without saying why. An input
+    // that cannot be an API number must fail loudly here so the caller
+    // surfaces it for correction (the title parser already rejects these
+    // lengths with "expected 8, 10, 12, or 14"; this matches it).
     return null;
   }
 
@@ -326,6 +335,13 @@ export function detectInputType(raw: string): TrrcIdentifierType {
   ) {
     const parsed = normalizeApiNumber(trimmed);
     if (parsed) return "api_number";
+    // API-shaped but unparseable (e.g. 11 or 13 digits — a malformed well
+    // sequence). Still classify as an API number so the resolver reports
+    // the parse failure with the digit-count guidance, instead of falling
+    // through to the unknown-type path, which would offer the string as an
+    // operator-name candidate. Real case: the Gaines package's
+    // "42-165-502084" was being proposed as an operator name.
+    if (digits.startsWith("42") && digits.length >= 10 && digits.length <= 14) return "api_number";
   }
 
   // 2. Gas well ID: "G" or "GW" prefix followed by digits (TRRC gas well numbering)

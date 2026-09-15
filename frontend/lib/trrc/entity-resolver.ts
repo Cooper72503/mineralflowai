@@ -587,7 +587,7 @@ export async function resolveEntities(
               ...trace,
               `API number parse failed for: "${trimmed}"`,
             ],
-            error: `Could not parse "${trimmed}" as a valid Texas API number`,
+            error: `Could not parse "${trimmed}" as a valid Texas API number: ${trimmed.replace(/\D/g, "").length} digits — expected 8, 10, 12, or 14. Check the well sequence for an extra or missing digit; it is not evaluated as a different well.`,
           };
         }
         entities = resolveApiNumber(trimmed, normalized, district, county, trace);
