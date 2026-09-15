@@ -30,6 +30,7 @@ function makeSupabase(seed: Store) {
     let op: "select" | "insert" | "update" | "upsert" = "select";
     let payload: Record<string, unknown> | Record<string, unknown>[] | null = null;
     let upsertConflict: string[] = [];
+    let ignoreDuplicates = false;
     const rows = () => (store[table] ??= []);
     const exec = () => {
       if (op === "insert") {
@@ -43,7 +44,7 @@ function makeSupabase(seed: Store) {
         const out: Record<string, unknown>[] = [];
         for (const r of list) {
           const existing = rows().find(x => upsertConflict.every(k => x[k] === r[k]));
-          if (existing) { Object.assign(existing, r); out.push(existing); } else { const ins = { id: `${table}-${++idSeq}`, ...r }; rows().push(ins); out.push(ins); }
+          if (existing) { if (!ignoreDuplicates) Object.assign(existing, r); out.push(existing); } else { const ins = { id: `${table}-${++idSeq}`, ...r }; rows().push(ins); out.push(ins); }
         }
         return { data: out, error: null };
       }
@@ -58,7 +59,7 @@ function makeSupabase(seed: Store) {
       select: () => chain,
       insert: (p: never) => { op = "insert"; payload = p; return chain; },
       update: (p: never) => { op = "update"; payload = p; return chain; },
-      upsert: (p: never, o?: { onConflict?: string }) => { op = "upsert"; payload = p; upsertConflict = (o?.onConflict ?? "id").split(","); return chain; },
+      upsert: (p: never, o?: { onConflict?: string; ignoreDuplicates?: boolean }) => { op = "upsert"; payload = p; ignoreDuplicates = o?.ignoreDuplicates ?? false; upsertConflict = (o?.onConflict ?? "id").split(","); return chain; },
       eq: (k: string, v: unknown) => { filters.push(["eq", k, v]); return chain; },
       neq: (k: string, v: unknown) => { filters.push(["neq", k, v]); return chain; },
       in: (k: string, v: unknown[]) => { filters.push(["in", k, v]); return chain; },
@@ -169,5 +170,45 @@ describe("runTitleResearchJob (FIXTURE stubs)", () => {
     await storeIndexEntries(supabase, "job-1", "Martin", "https://x", [entry]);
     await storeIndexEntries(supabase, "job-1", "Martin", "https://x", [entry]);
     expect(store.title_instruments).toHaveLength(1);
+  });
+});
+
+
+describe("title handoff regression", () => {
+  it("persists cited GIS candidates before review, without inventing acreage or title", async () => {
+    const { supabase, store } = makeSupabase(seedJob());
+    await runTitleResearchJob("job-1", supabase, deps());
+    expect(store.title_canonical_tracts).toHaveLength(1);
+    expect(store.title_canonical_tracts[0]).toMatchObject({ abstract_number: "A-1234", block_number: "35", section_name: "12", gross_acres: null, match_status: "proposed", needs_user_selection: true });
+    expect(store.title_well_tract_associations[0]).toMatchObject({ well_id: "well-1", association_type: "surface_location", review_status: "proposed" });
+    expect(store.title_research_jobs[0].status).toBe("awaiting_tract_confirmation");
+    store.title_canonical_tracts[0].match_status = "confirmed";
+    store.title_well_tract_associations[0].review_status = "confirmed";
+    store.title_research_jobs[0].status = "pending";
+    await runTitleResearchJob("job-1", supabase, deps());
+    expect(store.title_canonical_tracts).toHaveLength(1);
+    expect(store.title_well_tract_associations).toHaveLength(1);
+    expect(store.title_well_tract_associations[0].review_status).toBe("confirmed");
+  });
+  it("fails a legacy empty job explicitly instead of displaying an empty confirmation", async () => {
+    const seed = seedJob(); seed.title_job_wells = [];
+    const { supabase, store } = makeSupabase(seed); const d = deps();
+    await runTitleResearchJob("job-1", supabase, d);
+    expect(store.title_research_jobs[0].status).toBe("failed");
+    expect(d.searchWellbore).not.toHaveBeenCalled();
+  });
+  it("does not propose a tract when GIS retrieval failed", async () => {
+    const { supabase, store } = makeSupabase(seedJob());
+    const d = deps({ getGisLocation: vi.fn(async () => ({ found: false, latitude: null, longitude: null, well_type: null, survey: null, alert_areas: [], message: "network failed", error: "network failed" })) });
+    await runTitleResearchJob("job-1", supabase, d);
+    expect(store.title_canonical_tracts ?? []).toHaveLength(0);
+    expect(String(store.title_research_jobs[0].stage_detail)).toContain("no supported tract candidate");
+  });
+  it("does not restart a cancelled job", async () => {
+    const seed = seedJob(); seed.title_research_jobs[0].status = "cancelled";
+    const { supabase, store } = makeSupabase(seed); const d = deps();
+    await runTitleResearchJob("job-1", supabase, d);
+    expect(store.title_research_jobs[0].status).toBe("cancelled");
+    expect(d.searchWellbore).not.toHaveBeenCalled();
   });
 });

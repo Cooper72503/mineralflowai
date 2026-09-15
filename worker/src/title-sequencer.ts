@@ -1,3 +1,4 @@
+import { persistSurfaceTractCandidates } from "./title-tract-handoff.js";
 import { checkedQuery, PipelinePersistenceError } from "./persistence.js";
 import { canonicalApi10 } from "./identity.js";
 /**
@@ -395,6 +396,8 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
 export async function runTitleResearchJob(jobId: string, supabase: SupabaseClient, deps: TitleJobDeps = defaultDeps): Promise<void> {
   const { data: job } = await checkedQuery(supabase.from("title_research_jobs").select("id, user_id, status, attempt_count").eq("id", jobId).single(), "title_research_jobs");
   if (!job) return;
+  // Do not restart cancelled, completed, or human-review jobs on a stale poll.
+  if (!["pending", "resolving_wells", "searching_records"].includes(String(job.status))) return;
   const userId = job.user_id as string;
 
   const isCancelled = async () => {
@@ -406,6 +409,10 @@ export async function runTitleResearchJob(jobId: string, supabase: SupabaseClien
 
   const { data: wellRows } = await checkedQuery(supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number").eq("job_id", jobId), "title_job_wells");
   const wells = ((wellRows ?? []) as JobWellRow[]).filter(w => !!w.api10);
+  if (wells.length === 0) {
+    await setJob(supabase, jobId, { status: "failed", error_summary: "Title job has no valid persisted API inputs. Recreate the job after atomic job creation is deployed.", stage_detail: "Missing well inputs; research did not run" });
+    return;
+  }
   const pendingWells = wells.filter(w => w.resolution_status === "unresolved" || w.resolution_status === "error");
 
   for (let i = 0; i < pendingWells.length; i++) {
@@ -422,14 +429,15 @@ export async function runTitleResearchJob(jobId: string, supabase: SupabaseClien
 
   if (await isCancelled()) return;
   await setJob(supabase, jobId, { status: "searching_records", stage_detail: "Searching county records", progress_percent: 60 });
-  const { data: refreshed } = await checkedQuery(supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number").eq("job_id", jobId), "title_job_wells");
+  const { data: refreshed } = await checkedQuery(supabase.from("title_job_wells").select("*").eq("job_id", jobId), "title_job_wells");
+  const candidateCount = await persistSurfaceTractCandidates(supabase, jobId, userId, (refreshed ?? []) as Record<string, unknown>[]);
   await searchCountyRecordsForJob(supabase, deps, jobId, userId, (refreshed ?? []) as JobWellRow[]);
 
   if (await isCancelled()) return;
   const resolvedCount = ((refreshed ?? []) as JobWellRow[]).filter(w => w.resolution_status === "resolved").length;
   await setJob(supabase, jobId, {
     status: "awaiting_tract_confirmation",
-    stage_detail: resolvedCount > 0 ? "Review candidate tracts and confirm the subject tract(s)" : "No well could be resolved — supply a legal description or documents to continue",
+    stage_detail: candidateCount > 0 ? "Review proposed surface surveys and confirm the subject tract(s) using supporting documents" : resolvedCount > 0 ? "Well resolved, but no supported tract candidate is available — supply a legal description or documents" : "No well could be resolved — supply a legal description or documents to continue",
     progress_percent: 100,
   });
 }
