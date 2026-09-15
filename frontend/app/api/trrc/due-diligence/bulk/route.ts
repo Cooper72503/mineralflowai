@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     uniqueInputs.map(async (input) => {
       const result = await createDueDiligenceRun(supabase, user.id, { input });
       return result.ok
-        ? { original_input: input, ok: true as const, id: result.id, status: result.status, needs_user_selection: result.needs_user_selection }
+        ? { original_input: input, ok: true as const, id: result.id, status: result.status, needs_user_selection: result.needs_user_selection, title_link_warning: result.title_link_warning ?? null }
         : { original_input: input, ok: false as const, error: result.error };
     }),
   );

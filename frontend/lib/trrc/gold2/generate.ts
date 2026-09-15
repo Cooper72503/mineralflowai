@@ -20,7 +20,7 @@ export async function generateGold2ForRun(db:SupabaseClient,runId:string,userId:
  const attempts=(rows??[]) as LiteSourceAttempt[];
  try{
   const supplements=ReportSupplements.parse(supplementInput);
-  const titleLink=await loadTitleForApi(db,api,userId);
+  const titleLink=await loadTitleForApi(db,api,userId,run.title_research_job_id);
   const report=assembleGold2Draft({api,runId,asOf:new Date().toISOString(),attempts,title:titleLink.title,titleLookup:{status:titleLink.status,reason:titleLink.reason},position:null,partner:null,reconciliationPolicy:null,economics:null,...supplements} as Parameters<typeof assembleGold2Draft>[0]);
   const bytes=format==="pdf"?await renderGold2Pdf(report):Buffer.from(JSON.stringify(report,null,2)+"\n");
   return {ok:true as const,bytes,filename:`${api}-gold2.${format}`,contentType:format==="pdf"?"application/pdf":"application/json"};

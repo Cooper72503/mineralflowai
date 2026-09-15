@@ -6,3 +6,20 @@ it("links the unique published analysis with both API and owner constraints",asy
 it("does not choose the first of multiple researched positions",async()=>{const d=db({title_job_wells:{data:[{job_id:"a"},{job_id:"b"}],error:null},title_research_jobs:{data:[{id:"a",latest_analysis_id:"aa"},{id:"b",latest_analysis_id:"bb"}],error:null}});expect((await loadTitleForApi(d as never,"4216502733","owner")).status).toBe("ambiguous");});
 it("distinguishes failed lookup from no title research",async()=>{const d=db({title_job_wells:{data:null,error:{message:"offline"}}});expect((await loadTitleForApi(d as never,"4216502733","owner")).status).toBe("query_failed");const empty=db({});expect((await loadTitleForApi(empty as never,"4216502733","owner")).status).toBe("not_found");});
 it("rejects a wrong-well payload even if the database link claims a match",async()=>{const {title}=reviewedPositionFixture();title.wells[0].originalInput="4243934308";const d=db({title_job_wells:{data:[{job_id:title.jobId}],error:null},title_research_jobs:{data:[{id:title.jobId,latest_analysis_id:title.analysisId}],error:null},title_analyses:{data:{analysis_json:title},error:null}});expect((await loadTitleForApi(d as never,"4216502733","owner")).title).toBeNull();});
+it("follows the run's selected job even when another scope has a published analysis",async()=>{
+ const {title}=reviewedPositionFixture();
+ const d=db({title_job_wells:{data:[{job_id:title.jobId},{job_id:"other"}],error:null},title_research_jobs:{data:[{id:title.jobId,latest_analysis_id:title.analysisId},{id:"other",latest_analysis_id:"other-analysis"}],error:null},title_analyses:{data:{analysis_json:title},error:null}});
+ expect((await loadTitleForApi(d as never,"4216502733","owner",title.jobId)).title?.analysisId).toBe(title.analysisId);
+});
+it("never falls back to another scope when the saved link fails account/API membership",async()=>{
+ const d=db({title_job_wells:{data:[{job_id:"other"}],error:null}});
+ expect((await loadTitleForApi(d as never,"4216502733","owner","selected")).status).toBe("query_failed");
+});
+it("withholds an unselected published scope when another active research scope exists",async()=>{
+ const d=db({title_job_wells:{data:[{job_id:"a"},{job_id:"b"}],error:null},title_research_jobs:{data:[{id:"a",latest_analysis_id:"aa",status:"complete"},{id:"b",latest_analysis_id:null,status:"pending"}],error:null}});
+ expect((await loadTitleForApi(d as never,"4216502733","owner")).status).toBe("ambiguous");
+});
+it("does not reuse a cancelled selected scope's old publication",async()=>{
+ const d=db({title_job_wells:{data:[{job_id:"a"}],error:null},title_research_jobs:{data:[{id:"a",latest_analysis_id:"aa",status:"cancelled"}],error:null}});
+ expect((await loadTitleForApi(d as never,"4216502733","owner","a")).status).toBe("not_found");
+});

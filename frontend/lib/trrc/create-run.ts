@@ -33,6 +33,7 @@ export type CreateRunResult =
       input_type: TrrcIdentifierType;
       entities: ResolvedEntity[];
       original_input: string;
+      title_link_warning?: string;
     }
   | { ok: false; error: string; original_input: string };
 
@@ -131,11 +132,18 @@ export async function createDueDiligenceRun(
   // record can link title findings instead of reporting that no job
   // exists. Never fails the run — a title-side error is logged and the
   // record will disclose the missing job on its own.
+  let titleLinkWarning: string | undefined;
   if (resolution.input_type === "api_number" && !needs_user_selection) {
     try {
       const title = await ensureTitleJobForApi(supabase, userId, rawInput);
-      if (!title.ok) console.error(`[createDueDiligenceRun] title job not created for ${rawInput}: ${title.reason}`);
+      if (title.ok && title.jobId) {
+        const linked = await supabase.from("trrc_due_diligence_runs")
+          .update({ title_research_job_id: title.jobId }).eq("id", run_id).eq("user_id", userId).select("id").maybeSingle();
+        if (linked.error || !linked.data) titleLinkWarning = "Title job exists, but its link to this run could not be persisted. Retry linking after applying migration 033.";
+      } else titleLinkWarning = title.reason ?? "Title research could not be started.";
+      if (titleLinkWarning) console.error(`[createDueDiligenceRun] ${titleLinkWarning}`);
     } catch (err) {
+      titleLinkWarning = "Title research setup failed; the due-diligence run remains available.";
       console.error("[createDueDiligenceRun] title job creation threw:", err);
     }
   }
@@ -149,5 +157,6 @@ export async function createDueDiligenceRun(
     input_type: resolution.input_type,
     entities: resolution.entities,
     original_input: rawInput,
+    ...(titleLinkWarning ? {title_link_warning: titleLinkWarning} : {}),
   };
 }

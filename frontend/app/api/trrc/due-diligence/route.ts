@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
       entities: result.entities,
       normalized_input: result.normalized_input,
       input_type: result.input_type,
+      title_link_warning: result.title_link_warning ?? null,
     },
   });
 }

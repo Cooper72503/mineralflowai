@@ -407,7 +407,11 @@ export async function runLandmanSequencer(
     }
   } else if (inputType === "rrc_lease_number" && state.leaseNumber && state.district) {
     callIndex++;
-    await stepSearchLeaseWells(state, runId, supabase, callIndex);
+    try { await stepSearchLeaseWells(state, runId, supabase, callIndex); }
+    catch (err) {
+      if (err instanceof PipelinePersistenceError) throw err;
+      await persistAttempt(supabase, runId, "search_by_lease", callIndex, { error: String(err) });
+    }
     entryHandled = true;
   }
 
@@ -472,9 +476,19 @@ export async function runLandmanSequencer(
   for (const [step, sourceName] of SOURCE_NAME) {
     if (!remainingSteps.includes(step)) {
       callIndex++;
-      await persistAttempt(supabase, runId, sourceName, callIndex, {
-        found: false, data_gap: true, error: "Required asset identifiers could not be resolved; lookup unavailable.",
-      });
+      const leaseOnly = inputType === "rrc_lease_number" && !state.requestedApiNumber;
+      const leaseSteps: Step[] = [stepGetProduction, stepGetP4GathererPurchaser, stepGetSeveranceRecords, stepGetOilProration];
+      if (leaseOnly && !leaseSteps.includes(step)) {
+        await persistNotApplicable(supabase, runId, sourceName, callIndex,
+          "Outside this lease-only run's scope: no subject well API or required operator/county identity supplied. Run the individual APIs for well-level diligence.");
+      } else if (step === stepSearchOperator && state.operatorNumber) {
+        await persistNotApplicable(supabase, runId, sourceName, callIndex,
+          "Operator number already resolved; additional operator identity search is unnecessary.");
+      } else {
+        await persistAttempt(supabase, runId, sourceName, callIndex, {
+          found: false, data_gap: true, error: "Required asset identifiers could not be resolved; lookup unavailable.",
+        });
+      }
     }
   }
   const totalApplicableSteps = callIndex + remainingSteps.length;
@@ -542,7 +556,8 @@ export async function runLandmanSequencer(
 
   if (attemptsError) throw new Error(`Could not load evidence: ${attemptsError.message}`);
   const successCount = (attempts ?? []).filter(a => a["status"] === "success").length;
-  const totalCount   = (attempts ?? []).length;
+  const totalCount   = (attempts ?? []).filter(a => a["status"] !== "not_applicable").length;
+  const outOfScopeCount = (attempts ?? []).length - totalCount;
 
   const didComplete = (attempts ?? []).length > 0; // completion means research finished, not diligence sufficient
 
@@ -555,7 +570,7 @@ export async function runLandmanSequencer(
     resolved_district:        state.district,
     resolved_lease_number:    state.leaseNumber,
     resolved_operator_number: state.operatorNumber,
-    result_summary:           `${successCount} of ${totalCount} sources retrieved. ${state.production.length} production months found.`,
+    result_summary:           `${successCount} of ${totalCount} applicable sources retrieved. ${outOfScopeCount} sources not applicable. ${state.production.length} production months found.`,
     error_summary:            null,
   }).eq("id", runId).neq("status", "cancelled");
   if (completionError) throw new Error(`Run completion persistence failed: ${completionError.message}`);

@@ -244,3 +244,33 @@ describe("runLandmanSequencer — entry branches and never-stop-at-one-failure",
      expect(patches).toHaveLength(0);
    });
  });
+
+
+describe("lease-only coverage boundaries", () => {
+  beforeEach(() => vi.resetAllMocks());
+  it("records five applicable queries and eleven out-of-scope sources without inventing a well identity", async () => {
+    for (const tool of [ewa.searchLeaseWells, ewa.getProduction, ewa.getGathererPurchaser, ewa.getSeveranceRecords, ewa.getOilProration]) {
+      vi.mocked(tool).mockResolvedValue({found:false} as never);
+    }
+    const {supabase, attempts, patches} = makeMockSupabase({selected_input_type:"rrc_lease_number",resolved_lease_number:"10289",resolved_district:"8A"});
+    await runLandmanSequencer(RUN_ID,"10289",supabase);
+    expect(patches.at(-1)?.result_summary).toContain("5 of 5 applicable sources retrieved. 11 sources not applicable.");
+    expect(attempts.filter(a=>a.status === "success")).toHaveLength(5);
+    expect(attempts.filter(a=>a.status === "not_applicable")).toHaveLength(11);
+    expect(attempts.filter(a=>a.status === "failed_transient")).toHaveLength(0);
+    expect(ewa.searchWellbore).not.toHaveBeenCalled();
+  });
+  it("does not hide missing lease prerequisites as not applicable", async () => {
+    const {supabase, attempts} = makeMockSupabase({selected_input_type:"rrc_lease_number",resolved_lease_number:"10289"});
+    await runLandmanSequencer(RUN_ID,"10289",supabase);
+    expect(attempts.find(a=>a.source_name === "fetch_production")?.status).toBe("failed_transient");
+  });
+  it("continues independent lease queries after an inventory transport failure", async () => {
+    vi.mocked(ewa.searchLeaseWells).mockRejectedValue(new Error("network unavailable"));
+    vi.mocked(ewa.getSeveranceRecords).mockResolvedValue({found:false} as never);
+    const {supabase, attempts} = makeMockSupabase({selected_input_type:"rrc_lease_number",resolved_lease_number:"10289",resolved_district:"8A"});
+    await runLandmanSequencer(RUN_ID,"10289",supabase);
+    expect(attempts.find(a=>a.source_name === "search_by_lease")?.status).toBe("failed_transient");
+    expect(attempts.find(a=>a.source_name === "fetch_severance_records")?.status).toBe("success");
+  });
+});

@@ -1,3 +1,37 @@
+# Current cycle — lease coverage and explicit title scope
+
+**GOLD reports validated: 0/10.** This counts complete real acquisition records,
+not captured-source schema tests or correctly disclosed unavailable fields.
+
+- Synced with deployed audit SHA 4addf2d16815bc4a390d172ec2e143d39fbc8203,
+  preserving the previous local checkpoint and upstream intake fix.
+- Lease-only runs distinguish out-of-scope sources from unavailable prerequisites.
+  The persisted summary excludes not-applicable sources: regression case 5 of 5
+  applicable, 11 not applicable. An inventory transport failure no longer aborts
+  independent lease queries. Failed API resolution remains a retrieval gap.
+- New API runs persist their selected title job. GOLD verifies that saved link
+  against account and API, then follows only that scope. Unlinked competing live
+  scopes remain ambiguous; cancelled/failed scopes cannot supply an old analysis.
+- Added authenticated POST /api/trrc/due-diligence/[runId]/title-link with
+  {"jobId":"<full UUID>"} for deliberate selection on existing runs. This does not
+  confirm a tract, publish title, approve NRI, or cancel another job.
+- Migration 033 validates account/API membership on link writes. Apply it before
+  deploying this frontend. Title setup/link errors are returned as warnings by
+  single and bulk intake. Progress/review-item query errors are disclosed.
+- Local verification: worker 112/112 and build; frontend 789/789 and TypeScript;
+  isolated PostgreSQL migration execution, owner/API rejection and link retention.
+  These are local checks, not evidence of a deployed or authenticated production run.
+- Production acceptance still required: create through the signed-in app (not
+  service-role inserts), verify atomic title creation and saved run link, rerun
+  lease retrieval and verify applicable-source counts, then retrieve GOLD JSON.
+- The latest production results supplied by the owner remain 71 ODC association
+  rows, 3 Taylor rows, and DD 14/16 sources with 49 production months. No new live
+  worker run was possible here. Plugging and ICE retrieval remain unverified.
+- Actual Gaines title instruments, reviewed tract/interest linkage, defensible
+  production allocation, forecast and explicit economics inputs are still missing.
+  No ownership, NRI or acquisition valuation has been invented to improve the count.
+
+---
 # Current cycle — lease inventory completeness and identity reconciliation
 
 **Complete real acquisition GOLD reports independently validated: 0/10.**

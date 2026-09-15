@@ -9,10 +9,11 @@
  * workflow the user had to start by hand. The product promise is API in →
  * decision record out. This makes the title job part of that.
  *
- * Idempotent: if a live (not cancelled/failed) job already covers this
- * api10 for this user, it is reused rather than duplicated — the GOLD
- * lookup (gold2/title-link.ts) resolves by api10 + owner, so a second
- * job would only make that lookup ambiguous.
+ * Reuse a unique live (not cancelled/failed) scope for this account and API.
+ * Multiple scopes require explicit selection; recency does not establish
+ * which property interest the buyer intends to evaluate. The caller persists
+ * the selected job on the run. Concurrent first-time creations can still
+ * create distinct scopes; each run retains its own selection.
  *
  * Creation goes through the same atomic RPC the title-chain POST route
  * uses (migration 032, create_title_research_job): the job and its well
@@ -63,8 +64,10 @@ export async function ensureTitleJobForApi(
   const ids = [...new Set((existingWells.data ?? []).map(w => String(w.job_id)))];
   if (ids.length > 0) {
     const jobs = await supabase.from("title_research_jobs").select("id, status, updated_at").eq("user_id", userId).in("id", ids).order("updated_at", { ascending: false });
-    const live = (jobs.data ?? []).find(j => !LIVE_JOB_STATUSES_EXCLUDED.includes(String(j.status)));
-    if (live) return { ok: true, created: false, jobId: String(live.id), api10, reason: null };
+    if (jobs.error) return { ok: false, created: false, jobId: null, api10, reason: `Could not check title research scopes: ${jobs.error.message}` };
+    const live = (jobs.data ?? []).filter(j => !LIVE_JOB_STATUSES_EXCLUDED.includes(String(j.status)));
+    if (live.length > 1) return { ok: false, created: false, jobId: null, api10, reason: "Multiple live title research scopes match this API; select the intended scope before linking title." };
+    if (live.length === 1) return { ok: true, created: false, jobId: String(live[0].id), api10, reason: null };
   }
 
   const interestScope = opts.interestScope && opts.interestScope.length > 0 ? opts.interestScope : DEFAULT_INTEREST_SCOPE;

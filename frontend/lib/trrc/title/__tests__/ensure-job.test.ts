@@ -106,3 +106,8 @@ describe("ensureTitleJobForApi (atomic RPC path)", () => {
     expect(violations).toEqual([]);
   });
 });
+it("does not pick a scope by recency when multiple live scopes exist",async()=>{
+ const {db,rpcCalls}=makeDb({wells:[{job_id:"a",api10:"4216502733",user_id:USER},{job_id:"b",api10:"4216502733",user_id:USER}],jobs:[{id:"a",status:"pending",user_id:USER,updated_at:"2026-09-15"},{id:"b",status:"complete",user_id:USER,updated_at:"2026-09-14"}]});
+ const result=await ensureTitleJobForApi(db,USER,"4216502733");
+ expect(result).toMatchObject({ok:false,jobId:null});expect(result.reason).toContain("Multiple live");expect(rpcCalls).toEqual([]);
+});
