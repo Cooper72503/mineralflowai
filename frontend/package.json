@@ -19,7 +19,6 @@
     "decision:gold2-draft": "node --import tsx scripts/gold2-draft.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.124.0",
     "@napi-rs/canvas": "^0.1.65",
     "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.9.0",

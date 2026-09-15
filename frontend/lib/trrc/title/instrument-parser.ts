@@ -1,8 +1,9 @@
 /**
  * Deterministic instrument parser — regex/keyword extraction from document
- * text into the validated ExtractedDocument shape. Always runs; the Claude
- * extractor (claude-extractor.ts) is an optional enrichment layered on top
- * when a key is configured. Nothing here calls a model.
+ * text into the validated ExtractedDocument shape. This is the only
+ * extraction path — nothing in this engine calls a model (a model-assisted
+ * layer that shipped in the Sep 2026 audit checkpoint was removed; see
+ * ingest.ts's extractInstruments for why).
  *
  * Discipline: unknown -> null. Two plausible readings -> both recorded in
  * `alternatives`. Verbatim excerpts preserved for every material field.

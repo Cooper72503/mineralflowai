@@ -5,9 +5,8 @@ Automated due diligence for Texas oil & gas mineral and working-interest acquisi
 ## Stack
 
 - **Frontend:** Next.js 14 (App Router) + TypeScript — `frontend/`
-- **Worker:** Node/TypeScript background worker that runs the retrieval + AI agent — `worker/`
+- **Worker:** Node/TypeScript background worker that runs the deterministic TRRC retrieval sequencer and title-research retrieval — `worker/`
 - **Database & Auth:** Supabase (Postgres)
-- **AI:** Anthropic Claude
 - **Payments:** Stripe
 - **Email:** Resend
 
@@ -37,13 +36,13 @@ App: http://localhost:3000
 
 ### 3. Worker
 
-The worker polls Supabase for pending due diligence runs, retrieves TRRC records, and drives the Claude agent that assembles each report.
+The worker polls Supabase for pending due-diligence runs and title-research jobs, retrieves TRRC and county records through a fixed, deterministic sequence, and persists every source attempt. There is no LLM anywhere in the retrieval, reconciliation, or report path.
 
 ```bash
 cd worker
 npm install
 # Create .env with at least:
-#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 #   MAX_CONCURRENT, POLL_INTERVAL_MS (optional — tuning knobs, sensible defaults if unset)
 npm start
 ```

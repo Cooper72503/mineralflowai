@@ -1,6 +1,7 @@
 /**
  * Document ingestion: text extraction -> validated instrument extraction
- * (deterministic always; Claude when configured, cached by content hash)
+ * (deterministic, cached by content hash — no model-assisted path; see
+ * the removal note on extractInstruments)
  * -> persistence into 027's normalized tables (title_instruments,
  * title_instrument_parties, title_instrument_tracts, title_claims) with
  * canonical tract/party matching and review-queue entries for anything
@@ -18,7 +19,6 @@ import { createHash, randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { extractDocumentText, sha256Hex } from "./document-text";
 import { parseInstrumentText } from "./instrument-parser";
-import { extractWithClaude, claudeExtractionAvailable } from "./claude-extractor";
 import { validateExtractedDocument, type ExtractedDocument, type ExtractedInstrument, type ExtractedTract } from "./instrument-schema";
 import { EXTRACTION_SCHEMA_VERSION, type CandidateTract } from "./chain-types";
 import { proposeTracts, tractKey, tractLabelFor } from "./tract-candidates";
@@ -51,7 +51,7 @@ export function instrumentDedupeKey(inst: ExtractedInstrument): string {
   return createHash("sha1").update(raw).digest("hex");
 }
 
-async function loadCachedExtraction(supabase: SupabaseClient, userId: string, contentHash: string, extractor: "deterministic" | "claude"): Promise<ExtractedDocument | null> {
+async function loadCachedExtraction(supabase: SupabaseClient, userId: string, contentHash: string, extractor: "deterministic"): Promise<ExtractedDocument | null> {
   const { data } = await supabase.from("title_document_extractions").select("extraction_json")
     .eq("user_id", userId).eq("content_hash", contentHash).eq("schema_version", EXTRACTION_SCHEMA_VERSION).eq("extractor", extractor).maybeSingle();
   if (!data) return null;
@@ -59,48 +59,35 @@ async function loadCachedExtraction(supabase: SupabaseClient, userId: string, co
   return v.ok ? v.data : null;
 }
 
-async function cacheExtraction(supabase: SupabaseClient, userId: string, contentHash: string, extractor: "deterministic" | "claude", model: string | null, doc: ExtractedDocument): Promise<void> {
+async function cacheExtraction(supabase: SupabaseClient, userId: string, contentHash: string, extractor: "deterministic", model: string | null, doc: ExtractedDocument): Promise<void> {
   await supabase.from("title_document_extractions").upsert({
     user_id: userId, content_hash: contentHash, schema_version: EXTRACTION_SCHEMA_VERSION, extractor, model, extraction_json: doc,
   }, { onConflict: "user_id,content_hash,schema_version,extractor" });
 }
 
-/** Deterministic first; Claude layered on when available. Returns the document to persist plus which extractor produced it. */
-async function extractInstruments(supabase: SupabaseClient, userId: string, jobId: string, doc: DocumentRow, text: string): Promise<{ document: ExtractedDocument; extractor: "deterministic" | "claude"; modelUsed: boolean }> {
+/**
+ * Deterministic extraction only, cached by content hash.
+ *
+ * The audit checkpoint (Sep 2026) added an optional Claude-backed
+ * extractor layered on top of this parser, gated on ANTHROPIC_API_KEY. It
+ * was removed on 2026-09-14: the product's stated position — in the
+ * privacy policy, in the terms, and in the partner-facing material — is
+ * that no search input or retrieved/uploaded record is ever sent to a
+ * third-party AI provider, and an inert code path that would do exactly
+ * that the moment a key appeared is not consistent with that statement.
+ * Extraction quality is a parser problem to solve deterministically (and
+ * to disclose as a limitation when it falls short), not a model call.
+ */
+async function extractInstruments(supabase: SupabaseClient, userId: string, jobId: string, doc: DocumentRow, text: string): Promise<{ document: ExtractedDocument; extractor: "deterministic"; modelUsed: false }> {
   let deterministic = await loadCachedExtraction(supabase, userId, doc.content_hash, "deterministic");
   if (!deterministic) {
     deterministic = parseInstrumentText(text);
     await cacheExtraction(supabase, userId, doc.content_hash, "deterministic", null, deterministic);
   }
-
-  if (!claudeExtractionAvailable()) {
-    await appendLimitation(supabase, jobId, "Model-assisted extraction was not available (no ANTHROPIC_API_KEY); instruments were parsed by deterministic pattern matching only and should be reviewed against the images.");
-    return { document: deterministic, extractor: "deterministic", modelUsed: false };
-  }
-
-  const cachedClaude = await loadCachedExtraction(supabase, userId, doc.content_hash, "claude");
-  if (cachedClaude) return { document: mergeExtractions(cachedClaude, deterministic), extractor: "claude", modelUsed: false };
-
-  const result = await extractWithClaude(text, { fileName: doc.file_name, documentCategory: doc.document_category });
-  if (result.ok && result.document) {
-    await cacheExtraction(supabase, userId, doc.content_hash, "claude", result.model, result.document);
-    return { document: mergeExtractions(result.document, deterministic), extractor: "claude", modelUsed: true };
-  }
-  await appendLimitation(supabase, jobId, `Model-assisted extraction failed for "${doc.file_name ?? doc.id}": ${result.error ?? "unknown error"}. Deterministic parse used instead.`);
-  return { document: deterministic, extractor: "deterministic", modelUsed: result.available };
+  await appendLimitation(supabase, jobId, "Instruments were parsed by deterministic pattern matching and should be reviewed against the document images before any conclusion is drawn.");
+  return { document: deterministic, extractor: "deterministic", modelUsed: false };
 }
 
-/** The model result is primary; deterministic alternatives and notes are carried along so nothing the parser flagged is lost. */
-function mergeExtractions(primary: ExtractedDocument, secondary: ExtractedDocument): ExtractedDocument {
-  const merged: ExtractedDocument = { ...primary, notes: [...primary.notes, ...secondary.notes.map(n => `[deterministic] ${n}`)] };
-  if (merged.instruments.length === 0 && secondary.instruments.length > 0) merged.instruments = secondary.instruments;
-  else if (merged.instruments.length > 0 && secondary.instruments[0]) {
-    const detAlts = secondary.instruments[0].alternatives.filter(a => !merged.instruments[0].alternatives.some(b => b.field === a.field));
-    merged.instruments[0] = { ...merged.instruments[0], alternatives: [...merged.instruments[0].alternatives, ...detAlts] };
-  }
-  if (merged.legalDescriptions.length === 0) merged.legalDescriptions = secondary.legalDescriptions;
-  return merged;
-}
 
 async function readDocumentBytes(supabase: SupabaseClient, doc: DocumentRow): Promise<Buffer | null> {
   if (!doc.storage_path) return null;
