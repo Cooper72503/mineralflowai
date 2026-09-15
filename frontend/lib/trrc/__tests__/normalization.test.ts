@@ -79,6 +79,26 @@ describe("normalizeApiNumber — valid Texas inputs", () => {
 });
 
 describe("normalizeApiNumber — invalid / non-Texas inputs", () => {
+  it("detectInputType still classifies a malformed 11-digit API-shaped input as api_number so the resolver can report the digit count", () => {
+    expect(detectInputType("42-165-502084")).toBe("api_number");
+  });
+
+  it("rejects an 11-digit input instead of left-truncating it to a different well (Gaines package, Sep 2026)", () => {
+    // Seller-supplied "42-165-502084" was well 02084 on lease 60509 with a
+    // spurious leading 5. Truncation produced 4216550208 — a different
+    // well. Must be null so the caller surfaces it for correction.
+    expect(normalizeApiNumber("42-165-502084")).toBeNull();
+    expect(normalizeApiNumber("42165502084")).toBeNull();
+  });
+
+  it("rejects a 13-digit input for the same reason", () => {
+    expect(normalizeApiNumber("4216502733001")).toBeNull();
+  });
+
+  it("still accepts the 12-digit api10 + sidetrack form by truncating the sidetrack", () => {
+    expect(normalizeApiNumber("421650273301")?.api10).toBe("4216502733");
+  });
+
   it("returns null for non-Texas state code '12-345-67890'", () => {
     expect(normalizeApiNumber("12-345-67890")).toBeNull();
   });

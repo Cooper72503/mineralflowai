@@ -115,6 +115,13 @@ export function detectInputType(raw: string): TrrcIdentifierType {
   ) {
     const parsed = normalizeApiNumber(trimmed);
     if (parsed) return "api_number";
+    // API-shaped but unparseable (e.g. 11 or 13 digits — a malformed well
+    // sequence). Still classify as an API number so the resolver reports
+    // the parse failure with the digit-count guidance, instead of falling
+    // through to the unknown-type path, which would offer the string as an
+    // operator-name candidate. Real case: the Gaines package's
+    // "42-165-502084" was being proposed as an operator name.
+    if (digits.startsWith("42") && digits.length >= 10 && digits.length <= 14) return "api_number";
   }
 
   // 2. Gas well ID: "G" or "GW" prefix followed by digits (TRRC gas well numbering)
