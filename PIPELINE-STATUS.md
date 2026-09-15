@@ -1,3 +1,27 @@
+# Current cycle — lease inventory completeness and identity reconciliation
+
+**Complete real acquisition GOLD reports independently validated: 0/10.**
+
+- Synced to remote audit merge 203b8b4 before editing; preserved upstream fixes.
+- Lease lookup requests View All, removes the silent 50-row truncation, and fails
+  explicitly when pagination/count discrepancies remain or rows do not match the
+  requested lease/district or contain malformed API identifiers.
+- Live lease lookups now returned 71 ODC rows (47 on-schedule, 24 off-schedule)
+  and 3 Taylor rows (2 on-schedule, 1 historical). On-schedule is not a producing
+  status, ownership determination, or allocation basis.
+- Added evidence-backed offered-inventory reconciliation preserving original
+  identifiers and proposing corrections only from unique current lease/well
+  matches. Real package reconciliation is retained privately outside git.
+- Title worker selects a unique current association before historical rows,
+  avoids mixing operator/lease fields from different rows, and explicitly flags
+  ambiguity while clearing stale identity fields.
+- Verification: lease parser and matching regression tests, full worker suite,
+  worker build and frontend TypeScript. No production deployment is asserted.
+- Remaining: source instruments for ownership, reviewed tract/interest linkage,
+  production allocation and forecast/economics inputs; a real acquisition GOLD
+  report has not yet been independently validated.
+
+---
 # Production decision-record completion — September 15, 2026
 
 **Complete real acquisition GOLD reports independently validated: 0/10.**

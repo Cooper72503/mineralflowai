@@ -422,10 +422,21 @@ export async function searchLeaseWells(leaseNumber: string, district: string): P
       "searchArgs.districtCodeArg": normalizeDistrictForQuery(district),
       "searchArgs.leaseTypeArg":    lt,
       "searchArgs.scheduleTypeArg": "Both",
+      "pager.pageSize": "-1",
     });
     if (/no results found/i.test(html)) return { status: "not_found" };
     const table = findDataTable(html, 2);
     if (!table) return { status: "parse_failed" };
+    const text = cheerio.load(html).root().text().replace(/\s+/g, " ");
+    const page = text.match(/Page:\s*(\d+)\s+of\s+(\d+)/i);
+    const total = text.match(/([\d,]+)\s+results\b/i);
+    const reportedCount = total ? Number(total[1].replace(/,/g, "")) : null;
+    if ((page && (Number(page[1]) !== 1 || Number(page[2]) !== 1)) ||
+        (reportedCount !== null && reportedCount !== table.rows.length)) {
+      throw new Error(`Incomplete lease inventory: returned ${table.rows.length} rows` +
+        (reportedCount !== null ? ` of ${reportedCount} reported` : "") +
+        (page ? `; page ${page[1]} of ${page[2]}` : "") + ". View All was requested; no complete inventory can be asserted.");
+    }
     return { status: "found", table };
   };
 
@@ -434,7 +445,14 @@ export async function searchLeaseWells(leaseNumber: string, district: string): P
     for (const lt of ["O", "G", "C"]) {
       const result = await tryLeaseType(lt);
       if (result.status === "found") {
-        const wells = rowsToObjects(result.table.header, result.table.rows.slice(0, 50));
+        const wells = rowsToObjects(result.table.header, result.table.rows);
+        const normalizeLease = (v: string) => /^\d+$/.test(v.trim()) ? v.trim().replace(/^0+(?=\d)/, "") : null;
+        const normalizeDistrict = (v: string) => v.trim().toUpperCase().replace(/^0+(?=\d)/, "");
+        if (wells.some(w => !canonicalApi10(w.api_no) ||
+          normalizeLease(w.lease_no ?? "") !== normalizeLease(leaseNumber) ||
+          normalizeDistrict(w.district ?? "") !== normalizeDistrict(district))) {
+          throw new Error("Lease inventory contains invalid APIs or rows outside the requested lease/district; association requires review.");
+        }
         return { found: true, wells, message: `${wells.length} wells on lease ${leaseNumber} district ${district} (${lt})` };
       }
       if (result.status === "parse_failed") anyParseFailed = true;

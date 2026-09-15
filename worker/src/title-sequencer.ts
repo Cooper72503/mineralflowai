@@ -158,16 +158,25 @@ export async function resolveWell(supabase: SupabaseClient, deps: TitleJobDeps, 
   const wbUrl = `${ewa.PDA_BASE}/wellboreQueryAction.do?searchArgs.apiNoPrefixArg=${api.slice(2, 5)}&searchArgs.apiNoSuffixArg=${api.slice(5, 10)}`;
   sourceUrls.push({ source: "trrc_ewa", url: wbUrl, retrievedAt: deps.now(), status: wb.error ? "failed" : wb.found ? "success" : "empty" });
   await logSearch(supabase, jobId, userId, { provider: "trrc_ewa", county: well.county_name, queryType: "api", queryValue: api, status: wb.error ? "failed" : wb.found ? "success" : "empty", resultCount: wb.wells.length, error: wb.error ?? null, sourceUrl: wbUrl });
-  const matchedWell = wb.wells.find(w => canonicalApi10(w.api_no) === canonicalApi10(api));
+  const matchingWells = wb.wells.filter(w => canonicalApi10(w.api_no) === canonicalApi10(api));
+  const currentWells = matchingWells.filter(w => String(w.on_schedule ?? "").trim().toUpperCase() === "Y");
+  const matchedWell = currentWells.length === 1 ? currentWells[0]
+    : currentWells.length === 0 && matchingWells.length === 1 ? matchingWells[0] : undefined;
+  if (matchingWells.length > 1 && !matchedWell) {
+    Object.assign(patch, { well_name: null, well_number: null, lease_name: null,
+      lease_number: null, district: null, operator_name: null, operator_number: null, field_name: null });
+    await addReviewItem(supabase, jobId, userId, "well_identity_ambiguous", `Multiple wellbore associations require review: ${api}`,
+      "No unique current row exists for the API. Lease, operator and well-number fields are withheld.", { api, records: matchingWells });
+  }
   if (wb.found && matchedWell) {
     found = true;
     const first = matchedWell as Record<string, unknown>;
     patch.well_name = pick(first, ["lease_name", "well_name"]);
     patch.well_number = pick(first, ["well_no", "well_number"]);
-    patch.operator_name = wb.operator ?? pick(first, ["operator_name", "operator"]);
-    patch.operator_number = wb.operator_number ?? pick(first, ["operator_no", "operator_number"]);
-    patch.district = wb.district ?? pick(first, ["district", "dist_code"]);
-    patch.lease_number = wb.lease_number ?? pick(first, ["lease_no", "oil_lease_no"]);
+    patch.operator_name = pick(first, ["operator_name", "operator"]) ?? (matchingWells.length === 1 ? wb.operator : null);
+    patch.operator_number = pick(first, ["operator_no", "operator_number"]) ?? (matchingWells.length === 1 ? wb.operator_number : null);
+    patch.district = pick(first, ["district", "dist_code"]) ?? (matchingWells.length === 1 ? wb.district : null);
+    patch.lease_number = pick(first, ["lease_no", "oil_lease_no"]) ?? (matchingWells.length === 1 ? wb.lease_number : null);
     patch.lease_name = pick(first, ["lease_name"]);
     patch.field_name = pick(first, ["field_name"]);
     if (wb.county && !well.county_name) patch.county_name = wb.county;

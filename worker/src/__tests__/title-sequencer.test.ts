@@ -212,3 +212,24 @@ describe("title handoff regression", () => {
     expect(d.searchWellbore).not.toHaveBeenCalled();
   });
 });
+
+
+describe("title current-row selection", () => {
+  it("uses the unique current association instead of the first historical row", async () => {
+    const { supabase, store } = makeSupabase(seedJob()); const d = deps();
+    const original = await d.searchWellbore("4231700001");
+    d.searchWellbore = vi.fn(async () => ({ ...original, wells: [
+      {...original.wells[0],on_schedule:"N",well_no:"1",lease_no:"11111",operator_name:"OLD OPERATOR"},
+      {...original.wells[0],on_schedule:"Y",well_no:"1D",lease_no:"22222",district:"08",operator_name:"CURRENT OPERATOR"},
+    ] }));
+    await runTitleResearchJob("job-1",supabase,d);
+    expect(store.title_job_wells[0]).toMatchObject({well_number:"1D",lease_number:"22222",operator_name:"CURRENT OPERATOR",operator_number:null});
+  });
+  it("surfaces multiple current rows rather than choosing one", async () => {
+    const { supabase, store } = makeSupabase(seedJob()); const d = deps(); const original = await d.searchWellbore("4231700001");
+    d.searchWellbore = vi.fn(async () => ({...original,wells:[{...original.wells[0],on_schedule:"Y",well_no:"1"},{...original.wells[0],on_schedule:"Y",well_no:"1D"}]}));
+    await runTitleResearchJob("job-1",supabase,d);
+    expect(store.title_job_wells[0].well_number).toBeNull();
+    expect(store.title_review_items.some(r=>r.kind==="well_identity_ambiguous")).toBe(true);
+  });
+});

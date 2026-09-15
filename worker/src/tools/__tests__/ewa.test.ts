@@ -762,3 +762,26 @@ describe("ewaFetch — dirty JSESSIONID from TRRC's own Set-Cookie response", ()
     expect(result.found).toBe(false); // the lookup still completed and parsed a real (empty) response
   });
 });
+
+
+describe("lease inventory completeness regression", () => {
+  const table = (count: number, extra = "", lease = "01973") => `${extra}<table><tr><th>API No.</th><th>District</th><th>Lease No.</th><th>Well No.</th></tr>${Array.from({length:count}, (_,i)=>`<tr><td>151${String(i+1).padStart(5,"0")}</td><td>7B</td><td>${lease}</td><td>${i+1}</td></tr>`).join("")}</table>`;
+  it("returns every row on a complete lease inventory larger than 50 wells", async () => {
+    mockFetchSequence(["<html></html>", table(57,"57 results Page: 1 of 1")]);
+    const result = await searchLeaseWells("01973", "07B");
+    expect(result.error).toBeUndefined(); expect(result.wells).toHaveLength(57);
+  });
+  it("fails explicitly when View All is ignored and additional pages exist", async () => {
+    mockFetchSequence(["<html></html>", table(10,"57 results Page: 1 of 6")]);
+    const result = await searchLeaseWells("01973", "7B");
+    expect(result.found).toBe(false); expect(result.error).toContain("Incomplete lease inventory");
+  });
+  it("rejects a count discrepancy even on a nominal single page", async () => {
+    mockFetchSequence(["<html></html>", table(5,"6 results Page: 1 of 1")]);
+    expect((await searchLeaseWells("01973", "7B")).error).toContain("Incomplete lease inventory");
+  });
+  it("rejects records from a different lease instead of attributing them to the asset", async () => {
+    mockFetchSequence(["<html></html>", table(1,"1 results Page: 1 of 1","99999")]);
+    expect((await searchLeaseWells("01973", "7B")).error).toContain("outside the requested lease/district");
+  });
+});
