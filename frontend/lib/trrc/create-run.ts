@@ -9,6 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { detectInputType, normalizeApiNumber } from "./normalization";
 import { resolveEntities } from "./entity-resolver";
+import { ensureTitleJobForApi } from "./title/ensure-job";
 import type { TrrcIdentifierType, ResolvedEntity } from "./types";
 
 export interface CreateRunInput {
@@ -122,6 +123,20 @@ export async function createDueDiligenceRun(
     if (entityInsertError) {
       console.error("[createDueDiligenceRun] entity insert error:", entityInsertError);
       // Non-fatal — run row exists; caller can still proceed
+    }
+  }
+
+  // Title research is part of "API in": queue (or reuse) the title job for
+  // an API-number input alongside the due-diligence run, so the GOLD 2.0
+  // record can link title findings instead of reporting that no job
+  // exists. Never fails the run — a title-side error is logged and the
+  // record will disclose the missing job on its own.
+  if (resolution.input_type === "api_number" && !needs_user_selection) {
+    try {
+      const title = await ensureTitleJobForApi(supabase, userId, rawInput);
+      if (!title.ok) console.error(`[createDueDiligenceRun] title job not created for ${rawInput}: ${title.reason}`);
+    } catch (err) {
+      console.error("[createDueDiligenceRun] title job creation threw:", err);
     }
   }
 

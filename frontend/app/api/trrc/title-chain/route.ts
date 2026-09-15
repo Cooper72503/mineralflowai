@@ -56,8 +56,14 @@ export async function POST(request: NextRequest) {
   const inputText = Array.isArray(rawApis) ? rawApis.join("\n") : rawApis;
   const initialStatus = batch.validCount > 0 ? "pending" : "awaiting_tract_confirmation";
 
+  // Insert the job in a state the worker will NOT claim, attach its wells,
+  // then flip it to the real initial status. Real race, hit live on
+  // 2026-09-14: with the job inserted as "pending" first, the worker
+  // (polling every 1.5 s) claimed it between this insert and the wells
+  // insert below, saw zero wells, and finished in one second with "No well
+  // could be resolved" for a well that resolves fine.
   const { data: job, error: jobErr } = await supabase.from("title_research_jobs").insert({
-    user_id: user.id, status: initialStatus, input_text: inputText.slice(0, 20_000), interest_scope: interestScope,
+    user_id: user.id, status: "creating", input_text: inputText.slice(0, 20_000), interest_scope: interestScope,
     research_start_date: isIsoDate(body.researchStartDate) ? body.researchStartDate : null,
     as_of_date: isIsoDate(body.asOfDate) ? body.asOfDate : new Date().toISOString().slice(0, 10),
     started_at: new Date().toISOString(), stage_detail: batch.validCount > 0 ? "Queued for well resolution" : "No valid API numbers — add a tract or documents manually",
@@ -71,13 +77,18 @@ export async function POST(request: NextRequest) {
   }));
   if (wellRows.length > 0) {
     const { error: wellErr } = await supabase.from("title_job_wells").insert(wellRows);
-    if (wellErr) return NextResponse.json({ ok: false, error: `Could not record wells: ${wellErr.message}` }, { status: 500 });
+    if (wellErr) {
+      await supabase.from("title_research_jobs").update({ status: "failed", error_summary: `Could not record wells: ${wellErr.message}`, updated_at: new Date().toISOString() }).eq("id", job.id);
+      return NextResponse.json({ ok: false, error: `Could not record wells: ${wellErr.message}` }, { status: 500 });
+    }
   }
+  const { error: readyErr } = await supabase.from("title_research_jobs").update({ status: initialStatus, updated_at: new Date().toISOString() }).eq("id", job.id).eq("status", "creating");
+  if (readyErr) return NextResponse.json({ ok: false, error: `Could not queue job: ${readyErr.message}` }, { status: 500 });
 
   return NextResponse.json({
     ok: true,
     data: {
-      jobId: job.id, status: job.status,
+      jobId: job.id, status: initialStatus,
       inputs: batch.inputs, validCount: batch.validCount, invalidCount: batch.invalidCount, duplicateCount: batch.duplicateCount,
     },
   });

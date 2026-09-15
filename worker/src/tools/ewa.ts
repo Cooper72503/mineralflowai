@@ -90,15 +90,70 @@ function assertNotTrrcApplicationError(html: string, path: string): void {
   }
 }
 
+// ─── Bounded retry for TRRC's flaky EWA/PDA servers ──────────────────────────
+// Real, live-observed failure classes on 2026-09-14 alone: `TypeError: fetch
+// failed` (undici — the TCP/TLS connection itself was reset or hung up, no
+// HTTP status at all) on drillingPermitsQueryAction and the completion
+// query during a title job, and HTTP 500 on pluggingQueryAction across
+// multiple due-diligence runs the same day — all on endpoints that had
+// succeeded minutes earlier. None of these are "no records"; they are the
+// server dropping the request. A single bounded retry pass with backoff
+// turns most of them into the success the same call would have had thirty
+// seconds later, without masking a genuine outage: after the last attempt
+// the original error is rethrown and the caller records failed_transient
+// exactly as before. Never retries 4xx (a real client-side/no-such-page
+// answer) and never retries a parsed "no results found" page — this only
+// covers transport failures and 5xx.
+const EWA_RETRY_ATTEMPTS = 3;
+const EWA_RETRY_BASE_DELAY_MS = 800;
+
+function isRetryableFetchError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  // undici surfaces socket-level failures as TypeError("fetch failed");
+  // AbortSignal.timeout surfaces as a DOMException/Error named TimeoutError.
+  return err.name === "TimeoutError" || err.name === "AbortError" || /fetch failed|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|UND_ERR/i.test(err.message);
+}
+
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  opts: { attempts?: number; baseDelayMs?: number; label?: string; sleep?: (ms: number) => Promise<void>; fetchImpl?: typeof fetch } = {},
+): Promise<Response> {
+  const attempts = opts.attempts ?? EWA_RETRY_ATTEMPTS;
+  const baseDelay = opts.baseDelayMs ?? EWA_RETRY_BASE_DELAY_MS;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+  const doFetch = opts.fetchImpl ?? fetch;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await doFetch(url, init);
+      // 5xx from TRRC is routinely transient (confirmed: the same plugging
+      // query alternates between 500 and success across runs). Retry it;
+      // leave 4xx alone.
+      if (res.status >= 500 && attempt < attempts) {
+        lastErr = new Error(`HTTP ${res.status}`);
+        await sleep(baseDelay * Math.pow(2, attempt - 1));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableFetchError(err) || attempt === attempts) throw err;
+      await sleep(baseDelay * Math.pow(2, attempt - 1));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 async function ewaFetch(path: string, params?: Record<string, string>, cookies?: string): Promise<string> {
   const url = `${EWA_BASE}/${path}`;
 
   // GET-only path — no session needed
   if (!params) {
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       headers: { ...BROWSER_HEADERS },
       signal: AbortSignal.timeout(30_000),
-    });
+    }, { label: path });
     if (!res.ok) throw new Error(`EWA ${path} returned HTTP ${res.status}`);
     const html = await res.text();
     assertNotTrrcApplicationError(html, path);
@@ -110,10 +165,10 @@ async function ewaFetch(path: string, params?: Record<string, string>, cookies?:
   let viewState = "";
 
   if (!sessionCookie) {
-    const sessionRes = await fetch(url, {
+    const sessionRes = await fetchWithRetry(url, {
       headers: { ...BROWSER_HEADERS },
       signal: AbortSignal.timeout(20_000),
-    });
+    }, { label: `${path} session` });
     if (!sessionRes.ok) throw new Error(`EWA ${path} session GET returned HTTP ${sessionRes.status}`);
     const sessionHtml = await sessionRes.text();
     const jSessionMatch = sessionRes.headers.get("set-cookie")?.match(/JSESSIONID=([^;]+)/);
@@ -127,7 +182,7 @@ async function ewaFetch(path: string, params?: Record<string, string>, cookies?:
     ? `${url};jsessionid=${sessionCookie.replace("JSESSIONID=", "")}`
     : url;
 
-  const res = await fetch(postUrl, {
+  const res = await fetchWithRetry(postUrl, {
     method: "POST",
     headers: {
       ...BROWSER_HEADERS,
@@ -140,7 +195,7 @@ async function ewaFetch(path: string, params?: Record<string, string>, cookies?:
       methodToCall: "search",
     }),
     signal: AbortSignal.timeout(30_000),
-  });
+  }, { label: path });
   if (!res.ok) throw new Error(`EWA ${path} returned HTTP ${res.status}`);
   const html = await res.text();
   assertNotTrrcApplicationError(html, path);
@@ -590,10 +645,10 @@ export async function getProduction(leaseNumber: string | null, district: string
   // instead of paginating 10 at a time.
   const tryType = async (lt: string): Promise<ProductionTypeResult> => {
     const url = `${EWA_BASE}/specificLeaseQueryAction.do`;
-    const sessionRes = await fetch(url, {
+    const sessionRes = await fetchWithRetry(url, {
       headers: { ...BROWSER_HEADERS },
       signal: AbortSignal.timeout(20_000),
-    });
+    }, { label: "specificLeaseQueryAction.do session" });
     if (!sessionRes.ok) throw new Error(`EWA specificLeaseQueryAction.do session GET returned HTTP ${sessionRes.status}`);
     const jSessionMatch = sessionRes.headers.get("set-cookie")?.match(/JSESSIONID=([^;]+)/);
     const jSession = sanitizeSessionId(jSessionMatch?.[1], "specificLeaseQueryAction.do");
@@ -606,7 +661,7 @@ export async function getProduction(leaseNumber: string | null, district: string
     const startYear = String(startDate.getUTCFullYear());
     const startMonth = String(startDate.getUTCMonth() + 1).padStart(2, "0");
 
-    const html = await fetch(postUrl, {
+    const html = await fetchWithRetry(postUrl, {
       method: "POST",
       headers: {
         ...BROWSER_HEADERS,
@@ -895,10 +950,10 @@ export async function getCompletionRecords(apiNumber: string): Promise<{
       return { found: false, records: [], message: "Could not locate completion record link for this API — wellbore not found or no Completion action available", error: "No completion link found" };
     }
 
-    const res = await fetch(completionUrl, {
+    const res = await fetchWithRetry(completionUrl, {
       headers: { ...BROWSER_HEADERS },
       signal: AbortSignal.timeout(30_000),
-    });
+    }, { label: "CMPL completion search" });
     if (!res.ok) throw new Error(`CMPL completion search returned HTTP ${res.status}`);
     const html = await res.text();
     assertNotTrrcApplicationError(html, "CMPL ewaSearchAction.do");
@@ -1008,7 +1063,7 @@ export async function getGisLocation(apiNumber: string): Promise<{
 
   try {
     const wellQs = `f=json&where=API%3D%27${api8}%27&outFields=*&returnGeometry=true&outSR=4326`;
-    const res = await fetch(`${GIS_BASE}/1/query?${wellQs}`, { signal: AbortSignal.timeout(20_000) });
+    const res = await fetchWithRetry(`${GIS_BASE}/1/query?${wellQs}`, { signal: AbortSignal.timeout(20_000) }, { label: "GIS well query" });
     if (!res.ok) throw new Error(`GIS HTTP ${res.status}`);
     const json = await res.json() as { error?: { message?: string }; features?: Array<{ geometry?: { x?: number; y?: number }; attributes?: Record<string, unknown> }> };
 
@@ -1027,7 +1082,7 @@ export async function getGisLocation(apiNumber: string): Promise<{
     const partialErrors: string[] = [];
     async function polygons(url: string, label: string): Promise<Array<{attributes?: Record<string, unknown>}>> {
       try {
-        const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        const response = await fetchWithRetry(url, { signal: AbortSignal.timeout(15_000) }, { label: "GIS layer query" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const body = await response.json() as {error?: {message?: string}; features?: Array<{attributes?: Record<string, unknown>}>};
         if (body.error || !Array.isArray(body.features)) throw new Error(body.error?.message ?? "Missing features");

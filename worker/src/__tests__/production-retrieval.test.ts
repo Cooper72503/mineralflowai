@@ -22,7 +22,10 @@ describe("production source outcome classification", () => {
     expect(result.lease_type_attempts?.map(a => a.status)).toEqual(["not_found", "query_rejected"]);
   });
   it("does not turn HTTP failure into confirmed absence", async () => {
-    responses([{ text: "No results found", status: 503 }]);
+    // A 5xx is retried (bounded, see fetchWithRetry) — the mock must answer
+    // every attempt with the same 503 so the persistent failure still
+    // surfaces as an error rather than a confirmed absence.
+    responses([{ text: "No results found", status: 503 }, { text: "No results found", status: 503 }, { text: "No results found", status: 503 }]);
     expect((await getProduction("00432", "02", "O")).error).toContain("503");
   });
   it("rejects malformed volumes instead of accepting numeric prefixes", async () => {

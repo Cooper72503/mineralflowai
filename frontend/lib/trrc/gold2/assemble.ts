@@ -22,7 +22,7 @@ import {titleDecisionContext} from "./title-context";
 import {GOLD2_DISCLOSURES} from "./requirements";
 export interface Gold2Input {
  api:string;asOf:string;runId:string;attempts:LiteSourceAttempt[];
- titleLookup?:{status:"linked"|"not_found"|"ambiguous"|"query_failed";reason:string|null};
+ titleLookup?:{status:"linked"|"not_found"|"ambiguous"|"query_failed"|"in_progress";reason:string|null};
  title:TitleChainAnalysis|null;position:unknown|null;partner:unknown|null;
  reconciliationPolicy:ReconciliationPolicyInput|null;economics:unknown|null;
  evidenceScenarios?:unknown|null;
