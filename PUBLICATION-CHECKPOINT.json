@@ -2,8 +2,8 @@
   "base": "0e281837af5c98710552828d81c253a783c8b21e",
   "verified_prior_head": "354540470da7d35085e3cf7827ea492cef97aba7",
   "branch": "audit/decision-record-reliability",
-  "gold_reports_validated": "10/10",
-  "validation_scope": "Retained-source evidence reports with explicitly unavailable acquisition inputs; no live Novi or populated real acquisition claim.",
+  "gold_reports_validated": "0/10 complete real acquisition reports; prior captured-source schema cases 10/10",
+  "validation_scope": "Title orchestration local regressions and isolated SQL transaction validation; no production deployment or real ownership-backed valuation verified.",
   "files": [
     {
       "path": ".github/workflows/pipeline-regression.yml",
@@ -27,8 +27,8 @@
     },
     {
       "path": "PIPELINE-STATUS.md",
-      "sha256": "7e9b0bd78a9fb9f96f0cc817321e49b86ffdfd2abc0bd07aec5e8a627da3db23",
-      "bytes": 15727
+      "sha256": "172d441d4b287db28da7e4f03cef8d1b833f84875beee237ad36d2926bd33b57",
+      "bytes": 17869
     },
     {
       "path": "STANDALONE-GOLD.md",
@@ -249,6 +249,16 @@
       "path": "frontend/app/api/trrc/title-chain/[jobId]/report/route.ts",
       "sha256": "f4807e300b50b39921538047b62b5ecd6f2ab7ec11e3acfb85ba5f3114bae79c",
       "bytes": 3565
+    },
+    {
+      "path": "frontend/app/api/trrc/title-chain/__tests__/create.test.ts",
+      "sha256": "f8aa169499a5ff711850cf1f648bc2f6375f13ae40dd52971bd9ca92a9b31846",
+      "bytes": 1974
+    },
+    {
+      "path": "frontend/app/api/trrc/title-chain/route.ts",
+      "sha256": "31fd9334cbad4e1b0dee3d7a8293c19b2d002424d90ef2f2bc0ac987daed5a96",
+      "bytes": 5380
     },
     {
       "path": "frontend/lib/trrc/__tests__/benchmark-pdf.test.ts",
@@ -771,6 +781,11 @@
       "bytes": 562
     },
     {
+      "path": "frontend/tsconfig.tsbuildinfo",
+      "sha256": "1c63f0d81f0224a0cf1682e2d55ecebb2c1a3c25dc1db17e71820534eb9146c0",
+      "bytes": 1907594
+    },
+    {
       "path": "frontend/vitest.config.ts",
       "sha256": "a832720ffdaffe3867f780b7e5b9d964334fabd9ec738561bb77540a56e1a970",
       "bytes": 285
@@ -789,6 +804,11 @@
       "path": "supabase/migrations/031_reconcile_title_publication.sql",
       "sha256": "8043f5f0aefb7e39511037801b95d4b8e72fe2b28cdfb82a4e993633799a06fc",
       "bytes": 3799
+    },
+    {
+      "path": "supabase/migrations/032_atomic_title_job_creation.sql",
+      "sha256": "f12442aa240f9750662d974c3ee38f00152f74a30c0ea3fe5635f32740ee861d",
+      "bytes": 2451
     },
     {
       "path": "worker/scripts/benchmark-retrieval.mjs",
@@ -817,8 +837,8 @@
     },
     {
       "path": "worker/src/__tests__/title-sequencer.test.ts",
-      "sha256": "593bd10d765de86590a9abb4b383c835c8f725e4f618ddc00763e3b0dd9b03a4",
-      "bytes": 11126
+      "sha256": "1603aa81746c1b0b7ff90ab93d539cef8a25e7550c8a265e6b14c6bb9974a028",
+      "bytes": 13843
     },
     {
       "path": "worker/src/identity.ts",
@@ -852,8 +872,13 @@
     },
     {
       "path": "worker/src/title-sequencer.ts",
-      "sha256": "189b038b0c41e178ecb635343b6b79620894305da6472a949fa6625214150af5",
-      "bytes": 29999
+      "sha256": "12114cdf987be6321e65fb37db5e8d24aa03c6be21ead403931b1ba1a7156b20",
+      "bytes": 30725
+    },
+    {
+      "path": "worker/src/title-tract-handoff.ts",
+      "sha256": "4df90b74ab7b7e86c20cf75b7d4de065145223459087d5c291d3d6e67b36275d",
+      "bytes": 3224
     },
     {
       "path": "worker/src/tools/__tests__/browser.test.ts",

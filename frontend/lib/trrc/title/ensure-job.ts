@@ -14,10 +14,14 @@
  * lookup (gold2/title-link.ts) resolves by api10 + owner, so a second
  * job would only make that lookup ambiguous.
  *
- * Same claim-safe insert order as the title-chain POST route: the job row
- * is inserted as "creating" (a status the worker never claims), the well
- * row is attached, then the job flips to "pending". Inserting as
- * "pending" first was a real race, hit live the same day.
+ * Creation goes through the same atomic RPC the title-chain POST route
+ * uses (migration 032, create_title_research_job): the job and its well
+ * rows are published in one transaction, so a polling worker can never
+ * observe a pending job without inputs. This requires the caller's
+ * Supabase client to carry the user's session (auth.uid() is the owner
+ * inside the function) — which is the case from createDueDiligenceRun,
+ * invoked only by authenticated routes. There is deliberately no
+ * fallback to separate inserts.
  *
  * Never throws into the caller: the due-diligence run must still be
  * created even if the title side fails — the failure is returned so the
@@ -66,29 +70,21 @@ export async function ensureTitleJobForApi(
   const interestScope = opts.interestScope && opts.interestScope.length > 0 ? opts.interestScope : DEFAULT_INTEREST_SCOPE;
   const asOfDate = opts.asOfDate ?? new Date().toISOString().slice(0, 10);
 
-  const { data: job, error: jobErr } = await supabase.from("title_research_jobs").insert({
-    user_id: userId, status: "creating", input_text: rawInput.slice(0, 20_000), interest_scope: interestScope,
-    research_start_date: null, as_of_date: asOfDate,
-    started_at: new Date().toISOString(), stage_detail: "Queued for well resolution (created with the due-diligence run)",
-  }).select("id").single();
-  if (jobErr || !job) {
-    return { ok: false, created: false, jobId: null, api10, reason: `Could not create title job: ${jobErr?.message ?? "unknown error"}` };
-  }
-
-  const { error: wellErr } = await supabase.from("title_job_wells").insert({
-    job_id: job.id, user_id: userId, original_input: first.originalInput, api10: first.api10, api14: first.api14,
-    sidetrack_suffix: first.sidetrackSuffix, completion_suffix: first.completionSuffix,
-    state_code: first.stateCode, county_code: first.countyCode, county_name: first.countyName,
-    validation_error: null, resolution_status: "unresolved", resolution_error: null,
+  const { data: job, error: jobErr } = await supabase.rpc("create_title_research_job", {
+    p_job: {
+      input_text: rawInput.slice(0, 20_000), interest_scope: interestScope,
+      research_start_date: null, as_of_date: asOfDate,
+    },
+    p_wells: [{
+      original_input: first.originalInput, api10: first.api10, api14: first.api14,
+      sidetrack_suffix: first.sidetrackSuffix, completion_suffix: first.completionSuffix,
+      state_code: first.stateCode, county_code: first.countyCode, county_name: first.countyName,
+      validation_error: null,
+    }],
   });
-  if (wellErr) {
-    await supabase.from("title_research_jobs").update({ status: "failed", error_summary: `Could not record well: ${wellErr.message}`, updated_at: new Date().toISOString() }).eq("id", job.id);
-    return { ok: false, created: false, jobId: String(job.id), api10, reason: `Could not record well: ${wellErr.message}` };
+  const created = job as { id?: string; status?: string } | null;
+  if (jobErr || !created?.id) {
+    return { ok: false, created: false, jobId: null, api10, reason: `Could not create title job atomically: ${jobErr?.message ?? "no id returned"}` };
   }
-
-  const { error: readyErr } = await supabase.from("title_research_jobs").update({ status: "pending", updated_at: new Date().toISOString() }).eq("id", job.id).eq("status", "creating");
-  if (readyErr) {
-    return { ok: false, created: false, jobId: String(job.id), api10, reason: `Could not queue title job: ${readyErr.message}` };
-  }
-  return { ok: true, created: true, jobId: String(job.id), api10, reason: null };
+  return { ok: true, created: true, jobId: String(created.id), api10, reason: null };
 }

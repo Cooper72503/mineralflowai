@@ -54,41 +54,30 @@ export async function POST(request: NextRequest) {
   if (batch.validCount > MAX_APIS_PER_JOB) return NextResponse.json({ ok: false, error: `At most ${MAX_APIS_PER_JOB} API numbers per job (${batch.validCount} valid entries supplied).` }, { status: 400 });
 
   const inputText = Array.isArray(rawApis) ? rawApis.join("\n") : rawApis;
-  const initialStatus = batch.validCount > 0 ? "pending" : "awaiting_tract_confirmation";
-
-  // Insert the job in a state the worker will NOT claim, attach its wells,
-  // then flip it to the real initial status. Real race, hit live on
-  // 2026-09-14: with the job inserted as "pending" first, the worker
-  // (polling every 1.5 s) claimed it between this insert and the wells
-  // insert below, saw zero wells, and finished in one second with "No well
-  // could be resolved" for a well that resolves fine.
-  const { data: job, error: jobErr } = await supabase.from("title_research_jobs").insert({
-    user_id: user.id, status: "creating", input_text: inputText.slice(0, 20_000), interest_scope: interestScope,
-    research_start_date: isIsoDate(body.researchStartDate) ? body.researchStartDate : null,
-    as_of_date: isIsoDate(body.asOfDate) ? body.asOfDate : new Date().toISOString().slice(0, 10),
-    started_at: new Date().toISOString(), stage_detail: batch.validCount > 0 ? "Queued for well resolution" : "No valid API numbers — add a tract or documents manually",
-  }).select("id, status").single();
-  if (jobErr || !job) return NextResponse.json({ ok: false, error: `Could not create job: ${jobErr?.message}` }, { status: 500 });
-
   const wellRows = batch.inputs.filter(i => !i.duplicateOf).map(i => ({
-    job_id: job.id, user_id: user.id, original_input: i.originalInput, api10: i.api10, api14: i.api14, sidetrack_suffix: i.sidetrackSuffix, completion_suffix: i.completionSuffix,
-    state_code: i.stateCode, county_code: i.countyCode, county_name: i.countyName, validation_error: i.error,
-    resolution_status: i.ok ? "unresolved" : "error", resolution_error: i.ok ? null : i.error,
+    original_input: i.originalInput, api10: i.api10, api14: i.api14,
+    sidetrack_suffix: i.sidetrackSuffix, completion_suffix: i.completionSuffix,
+    state_code: i.stateCode, county_code: i.countyCode, county_name: i.countyName,
+    validation_error: i.error,
   }));
-  if (wellRows.length > 0) {
-    const { error: wellErr } = await supabase.from("title_job_wells").insert(wellRows);
-    if (wellErr) {
-      await supabase.from("title_research_jobs").update({ status: "failed", error_summary: `Could not record wells: ${wellErr.message}`, updated_at: new Date().toISOString() }).eq("id", job.id);
-      return NextResponse.json({ ok: false, error: `Could not record wells: ${wellErr.message}` }, { status: 500 });
-    }
+  // Atomic publication (migration 032): no pollable job exists until all inputs
+  // are durable. Never fall back to separate inserts if the RPC is unavailable.
+  const { data: job, error: jobErr } = await supabase.rpc("create_title_research_job", {
+    p_job: {
+      input_text: inputText.slice(0, 20_000), interest_scope: interestScope,
+      research_start_date: isIsoDate(body.researchStartDate) ? body.researchStartDate : null,
+      as_of_date: isIsoDate(body.asOfDate) ? body.asOfDate : new Date().toISOString().slice(0, 10),
+    },
+    p_wells: wellRows,
+  });
+  if (jobErr || !job?.id || !job?.status) {
+    return NextResponse.json({ ok: false, error: "Title job could not be queued atomically. Please retry or contact support." }, { status: 503 });
   }
-  const { error: readyErr } = await supabase.from("title_research_jobs").update({ status: initialStatus, updated_at: new Date().toISOString() }).eq("id", job.id).eq("status", "creating");
-  if (readyErr) return NextResponse.json({ ok: false, error: `Could not queue job: ${readyErr.message}` }, { status: 500 });
 
   return NextResponse.json({
     ok: true,
     data: {
-      jobId: job.id, status: initialStatus,
+      jobId: job.id, status: job.status,
       inputs: batch.inputs, validCount: batch.validCount, invalidCount: batch.invalidCount, duplicateCount: batch.duplicateCount,
     },
   });

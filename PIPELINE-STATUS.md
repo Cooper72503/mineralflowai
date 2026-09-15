@@ -1,3 +1,37 @@
+# Production decision-record completion — September 15, 2026
+
+**Complete real acquisition GOLD reports independently validated: 0/10.**
+The prior 10/10 below measures captured-source schema/unavailability acceptance,
+not ten populated ownership-backed decisions. It must not be used as completion proof.
+
+## Current cycle: title orchestration repairs
+- Fixed route publication race with `create_title_research_job` (migration 032):
+  jobs and wells commit atomically; missing RPC returns 503 with no unsafe fallback.
+- Worker persists cited GIS surface-survey candidate tracts and associations before
+  requesting review; never invents acreage or auto-confirms a producing/title tract.
+- Retries preserve reviewed candidates and associations. Cancelled/review-stage
+  jobs are not restarted by stale calls. Empty legacy jobs fail explicitly.
+- Verification: 3 route regression tests; worker regression suite and build;
+  frontend TypeScript; isolated PostgreSQL test of atomic rollback, auth gate,
+  valid/invalid inputs. Actual production schema/RLS and worker remain unverified.
+- Deployment order: apply migration 032, then deploy frontend and worker together.
+  Existing awaiting-review jobs need a deliberate retry to create candidates.
+
+## Outstanding blockers to the real Gaines report
+- Obtain and ingest actual Gaines ownership/lease/unit instruments; no real title
+  findings, verified NRI, or buyer-interest valuation have been validated here.
+- Confirm the actual producing tract and review its ownership position.
+- Connect due-diligence run creation to durable, account-scoped title workflow and
+  reviewed report inputs. This cycle repairs title research itself, not that link.
+- Diagnose live permit/completion transport failures with production worker logs;
+  success on an earlier run does not prove a title-specific network defect.
+- Verify lease-versus-well production, supported forecast and stated buyer inputs.
+- GitHub write connection previously returned 403; these changes are local until
+  published and deployed. No production or remote-success claim is made.
+
+---
+## Earlier captured-source validation history
+
 # MineralFlow production pipeline status
 
 **GOLD reports validated: 10/10**
