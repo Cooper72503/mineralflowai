@@ -31,6 +31,7 @@ import type { TrrcDDProductionRow } from "@/lib/trrc/types";
 import type { PriceDeck } from "@/lib/trrc/eia-pricing";
 import { computeProductionAnalytics, } from "@/lib/trrc/report-builder";
 import { computeEconomics, type NglAndBasisAssumptions } from "@/lib/trrc/economics";
+import { computeFlipAnalysis, DEFAULT_FLIP_ASSUMPTIONS } from "@/lib/trrc/flip";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +43,17 @@ interface RecalcBody {
   ngl_yield_bbl_per_mcf?: number;
   ngl_price_usd_bbl?: number;
   waha_differential_usd_mcf?: number;
+  // Buy → optimize → sell (flip.ts). All optional; every one is an explicit
+  // user assumption echoed back in the response, never inferred.
+  flip_hold_months?: number;
+  flip_entry_multiple?: number;
+  flip_exit_multiple?: number;
+  flip_capex_usd?: number;
+  flip_transaction_cost_pct?: number;
+  flip_rate_uplift_pct?: number;
+  flip_decline_reduction_pct?: number;
+  flip_loe_reduction_pct?: number;
+  flip_oil_differential_usd_bbl?: number;
 }
 
 function isFiniteNumber(v: unknown): v is number {
@@ -220,7 +232,37 @@ export async function POST(
     nglAndBasis,
   );
 
+  // Flip inputs: bounded, non-negative where a negative makes no sense;
+  // defaults model no optimization and symmetric multiples.
+  const num = (v: unknown, fallback: number, min: number, max: number) =>
+    isFiniteNumber(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  const flipAssumptions = {
+    ...DEFAULT_FLIP_ASSUMPTIONS,
+    holdMonths: Math.round(num(body.flip_hold_months, DEFAULT_FLIP_ASSUMPTIONS.holdMonths, 1, 240)),
+    entryMultipleOfPv10: num(body.flip_entry_multiple, DEFAULT_FLIP_ASSUMPTIONS.entryMultipleOfPv10, 0.01, 10),
+    exitMultipleOfPv10: num(body.flip_exit_multiple, DEFAULT_FLIP_ASSUMPTIONS.exitMultipleOfPv10, 0, 10),
+    optimizationCapexUsd: num(body.flip_capex_usd, 0, 0, 1e9),
+    transactionCostPct: num(body.flip_transaction_cost_pct, 0, 0, 0.5),
+    levers: {
+      rateUpliftPct: num(body.flip_rate_uplift_pct, 0, 0, 200),
+      declineReductionPct: num(body.flip_decline_reduction_pct, 0, 0, 90),
+      loeReductionPct: num(body.flip_loe_reduction_pct, 0, 0, 90),
+      oilDifferentialImprovementUsdBbl: num(body.flip_oil_differential_usd_bbl, 0, 0, 50),
+    },
+  };
+
   const econ = runEconomicsAt(priceDeck.wtiSpotUsdBbl, priceDeck.henryHubUsdMcf);
+  const flip = computeFlipAnalysis(
+    {
+      monthlyOilBbl: productionSeries(analytics.months).oil,
+      monthlyGasMcf: productionSeries(analytics.months).gas,
+      monthlyWaterBbl: analytics.months.map(m => m.water_bbl),
+      nglAndBasis,
+    },
+    priceDeck,
+    purchasePrice,
+    flipAssumptions,
+  );
   const result = econ.scenarios.find(s => s.scenario === "base") ?? econ.scenarios[0] ?? null;
 
   // Price-sensitivity grid — $7 increments around the requested oil price,
@@ -271,6 +313,18 @@ export async function POST(
       // instead of a wall of unexplained "—" that reads as broken.
       sufficientData: econ.sufficientData,
       sensitivityGrid,
+      // Buy → optimize → sell under the SAME user-supplied price (every
+      // scenario in this deck is the caller's single price, so the four
+      // rows collapse to one; the base row is what the panel shows).
+      flip: {
+        sufficientData: flip.sufficientData,
+        unavailableReason: flip.unavailableReason ?? null,
+        entryBasis: flip.entryBasis,
+        assumptions: flip.assumptions,
+        base: flip.scenarios.find(s => s.scenario === "base") ?? null,
+        leverSensitivity: flip.leverSensitivity,
+        notes: flip.notes,
+      },
     },
   });
 }

@@ -59,6 +59,7 @@ import { fitArpsDecline, estimateEur } from "./decline-curve";
 import { compareToAnalogs, type AnalogWell } from "./type-curve-comparison";
 import { getPriceDeck } from "./eia-pricing";
 import { computeEconomics, WORKOVER_RESERVE_USD_PER_BOE, SWD_DISPOSAL_USD_PER_BBL_WATER, type EconomicEvaluation } from "./economics";
+import { computeFlipAnalysis, type FlipAnalysis } from "./flip";
 import { runOffsetAnalytics, type OffsetAnalyticsPayload, type LegalDescription } from "./offset-analytics";
 import { runGeologicalDueDiligence, persistGeologicalAssessment } from "./geology";
 import type { GeologicalAssessmentResult } from "./geology/types";
@@ -1264,6 +1265,128 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
   );
 }
 
+// ─── Section 5 (continued) — Buy · Optimize · Sell ───────────────────────────
+//
+// Client-requested: buy an asset, improve production or cost, sell for
+// more. Built as a difference between two runs of the SAME cash-flow model
+// Section 5 uses (flip.ts) — nothing new is estimated. With the default
+// assumptions no optimization is modeled at all, so the page is honest by
+// construction: the lever-sensitivity table says what each improvement
+// WOULD be worth; it never asserts the operator will achieve it. Same
+// data gates as Section 5: withheld on a placeholder price deck or an
+// unfittable production series.
+
+// ASCII hyphen-minus on purpose: react-pdf's built-in Helvetica has no
+// glyph for U+2212 (or for Δ), and silently drops it — a negative profit
+// rendered as a positive one. Caught in visual QA of this page.
+function fmtUsdSigned(v: number): string {
+  const s = fmtUsd(Math.abs(v));
+  return v < 0 ? `-${s}` : s;
+}
+
+export function FlipAnalysisPage({ run, id: identity, flip, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  flip: FlipAnalysis;
+  generatedAt: string;
+}) {
+  const base = flip.scenarios.find(s => s.scenario === "base") ?? null;
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 5 (CONTINUED) — BUY · OPTIMIZE · SELL"),
+
+    React.createElement(Text, { style: S.noteText },
+      "What a hold-and-resell position returns under each price scenario, and what each operational lever would be worth in PV-10 terms. Same decline forecast and cost model as Section 5; every multiple and lever is a stated assumption printed below, never an estimate of what an operator will achieve.",
+    ),
+
+    !flip.sufficientData ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
+        flip.unavailableReason ?? "Buy/optimize/sell analysis unavailable: production or price inputs are insufficient.",
+      ),
+    ) : React.createElement(View, {},
+      React.createElement(Text, { style: [S.subTitle, { marginTop: 10 }] }, `Position summary - base scenario, ${flip.assumptions.holdMonths}-month hold`),
+      React.createElement(View, { style: { flexDirection: "row", marginBottom: 8 } },
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, flip.entryBasis === "purchase_price" ? "ENTRY (PURCHASE PRICE)" : "ENTRY (AS-IS PV-10 × MULTIPLE)"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, base ? fmtUsd(base.entryUsd) : "—"),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "HOLD NET CASH FLOW"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, base ? fmtUsdSigned(base.holdNetCashFlowUsd) : "—"),
+        ),
+        React.createElement(View, { style: S.summaryStatBox },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "EXIT PROCEEDS"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, base ? fmtUsd(base.exitProceedsUsd) : "—"),
+        ),
+        React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+          React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "PROFIT · MOIC · IRR"),
+          React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: base && base.profitUsd < 0 ? C.red : C.navy } },
+            base ? `${fmtUsdSigned(base.profitUsd)} · ${base.moic !== null ? base.moic.toFixed(2) + "x" : "—"} · ${base.irrAnnualPct !== null ? base.irrAnnualPct.toFixed(1) + "%" : "n/a"}` : "—"),
+        ),
+      ),
+      base && base.holdCoversFullForecast ? React.createElement(Text, { style: S.noteText },
+        `The forecast reaches its economic limit within the ${flip.assumptions.holdMonths}-month hold, so exit value is zero: the position's return is the hold cash flow alone.`) : null,
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "By price scenario"),
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%" }] }, "Scenario"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "As-is PV-10"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "13%", textAlign: "right" }] }, "Uplift"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "Hold CF"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "Exit"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%", textAlign: "right" }] }, "Profit"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "7%", textAlign: "right" }] }, "MOIC"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "7%", textAlign: "right" }] }, "IRR"),
+      ),
+      ...flip.scenarios.map((sc, i) => React.createElement(
+        View, { key: sc.scenario, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCell, { width: "17%" }] }, SCENARIO_LABELS[sc.scenario] ?? sc.scenario),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsd(sc.pv10AsIsUsd)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "13%", textAlign: "right" }] }, fmtUsdSigned(sc.upliftPv10Usd)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsdSigned(sc.holdNetCashFlowUsd)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsd(sc.exitProceedsUsd)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "14%", textAlign: "right" }] }, fmtUsdSigned(sc.profitUsd)),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "7%", textAlign: "right" }] }, sc.moic !== null ? `${sc.moic.toFixed(2)}x` : "—"),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "7%", textAlign: "right" }] }, sc.irrAnnualPct !== null ? `${sc.irrAnnualPct.toFixed(0)}%` : "n/a"),
+      )),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: S.subTitle }, "What each lever is worth - base scenario, full forecast, one lever at a time"),
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "34%" }] }, "Lever"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "33%" }] }, "Unit step"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "33%", textAlign: "right" }] }, "Change in PV-10 today"),
+      ),
+      ...flip.leverSensitivity.map((l, i) => React.createElement(
+        View, { key: l.lever, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCell, { width: "34%" }] }, l.label),
+        React.createElement(Text, { style: [S.tableCell, { width: "33%" }] }, l.step),
+        React.createElement(Text, { style: [S.tableCellMono, { width: "33%", textAlign: "right" }] }, fmtUsdSigned(l.deltaPv10Usd)),
+      )),
+      React.createElement(Text, { style: [S.noteText, { marginTop: 6 }] },
+        "Read as: if this improvement were actually achieved, the asset's PV-10 today would change by this amount. Whether it can be achieved is an engineering and operating question this report does not answer.",
+      ),
+
+      React.createElement(View, { style: S.divider }),
+
+      React.createElement(Text, { style: [S.bodyText, { color: C.gray } ] }, flip.notes.assumptions),
+      React.createElement(Text, { style: [S.bodyText, { color: C.gray } ] }, flip.notes.ownership),
+      React.createElement(Text, { style: [S.bodyText, { color: C.gray } ] }, flip.notes.disclaimer),
+    ),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
 // ─── Section 6 — Well Construction ───────────────────────────────────────────
 
 function WellConstructionPage({ run, id: identity, attempts, generatedAt }: {
@@ -2328,6 +2451,17 @@ export async function buildTrrcPdfReport(
     analytics.months.map(m => m.water_bbl),
     run.purchase_price,
   );
+  const flip = computeFlipAnalysis(
+    {
+      monthlyOilBbl: productionSeries(analytics.months).oil,
+      monthlyGasMcf: productionSeries(analytics.months).gas,
+      fieldName: identity.field || null,
+      county: identity.county || null,
+      monthlyWaterBbl: analytics.months.map(m => m.water_bbl),
+    },
+    priceDeck,
+    run.purchase_price,
+  );
   const flags     = generateFlags(attempts, analytics, run);
   const scorecard = buildAcquisitionScorecard({
     attempts, production, coverage,
@@ -2441,6 +2575,7 @@ export async function buildTrrcPdfReport(
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
     React.createElement(EngineeringAnalysisPage,{ run, id: identity, analytics, analogWells, generatedAt }),
     React.createElement(EconomicEvaluationPage, { run, id: identity, econ, generatedAt }),
+    React.createElement(FlipAnalysisPage,       { run, id: identity, flip, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),

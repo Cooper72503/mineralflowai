@@ -1605,7 +1605,23 @@ interface SensitivityRow {
   isCurrent: boolean;
 }
 
+interface FlipBase {
+  entryUsd: number; holdNetCashFlowUsd: number; exitRemainingPv10Usd: number; exitProceedsUsd: number;
+  upliftPv10Usd: number; pv10AsIsUsd: number; profitUsd: number; moic: number | null; irrAnnualPct: number | null;
+  payoutMonths: number | null; holdCoversFullForecast: boolean;
+}
+interface FlipBlock {
+  sufficientData: boolean;
+  unavailableReason: string | null;
+  entryBasis: "purchase_price" | "multiple_of_base_pv10";
+  assumptions: { holdMonths: number; entryMultipleOfPv10: number; exitMultipleOfPv10: number; optimizationCapexUsd: number; transactionCostPct: number };
+  base: FlipBase | null;
+  leverSensitivity: Array<{ lever: string; label: string; step: string; deltaPv10Usd: number }>;
+  notes: { assumptions: string; ownership: string; disclaimer: string };
+}
+
 interface RecalcResult {
+  flip?: FlipBlock;
   pv10: number | null;
   pv15: number | null;
   netCashFlow: number | null;
@@ -1643,6 +1659,17 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
   const [result, setResult] = useState<RecalcResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Buy → optimize → sell inputs. Every one is an explicit assumption the
+  // engine echoes back and the PDF prints; defaults model no optimization
+  // and symmetric multiples, so an untouched panel asserts nothing.
+  const [holdMonths, setHoldMonths] = useState("24");
+  const [exitMultiple, setExitMultiple] = useState("1.0");
+  const [flipCapex, setFlipCapex] = useState("");
+  const [txnCostPct, setTxnCostPct] = useState("");
+  const [rateUplift, setRateUplift] = useState("");
+  const [declineReduction, setDeclineReduction] = useState("");
+  const [loeReduction, setLoeReduction] = useState("");
+  const [diffImprovement, setDiffImprovement] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -1667,6 +1694,14 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
             ...(ny !== undefined && Number.isFinite(ny) && ny >= 0 ? { ngl_yield_bbl_per_mcf: ny } : {}),
             ...(np !== undefined && Number.isFinite(np) && np >= 0 ? { ngl_price_usd_bbl: np } : {}),
             ...(wd !== undefined && Number.isFinite(wd) ? { waha_differential_usd_mcf: wd } : {}),
+            ...(Number.isFinite(Number(holdMonths)) && Number(holdMonths) > 0 ? { flip_hold_months: Number(holdMonths) } : {}),
+            ...(Number.isFinite(Number(exitMultiple)) && exitMultiple.trim() ? { flip_exit_multiple: Number(exitMultiple) } : {}),
+            ...(flipCapex.trim() && Number.isFinite(Number(flipCapex)) ? { flip_capex_usd: Number(flipCapex) } : {}),
+            ...(txnCostPct.trim() && Number.isFinite(Number(txnCostPct)) ? { flip_transaction_cost_pct: Number(txnCostPct) / 100 } : {}),
+            ...(rateUplift.trim() && Number.isFinite(Number(rateUplift)) ? { flip_rate_uplift_pct: Number(rateUplift) } : {}),
+            ...(declineReduction.trim() && Number.isFinite(Number(declineReduction)) ? { flip_decline_reduction_pct: Number(declineReduction) } : {}),
+            ...(loeReduction.trim() && Number.isFinite(Number(loeReduction)) ? { flip_loe_reduction_pct: Number(loeReduction) } : {}),
+            ...(diffImprovement.trim() && Number.isFinite(Number(diffImprovement)) ? { flip_oil_differential_usd_bbl: Number(diffImprovement) } : {}),
           }),
         });
         const data = await res.json();
@@ -1684,7 +1719,7 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
       }
     }, 400);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [oilPrice, gasPrice, purchasePrice, nglYield, nglPrice, wahaDiff, runId, apiFetch]);
+  }, [oilPrice, gasPrice, purchasePrice, nglYield, nglPrice, wahaDiff, holdMonths, exitMultiple, flipCapex, txnCostPct, rateUplift, declineReduction, loeReduction, diffImprovement, runId, apiFetch]);
 
   const inputStyle = {
     width: "100%", background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`,
@@ -1815,6 +1850,67 @@ function EconomicsTab({ runId, defaultPurchasePrice, apiFetch }: {
           </table>
         </div>
       )}
+
+      {/* Buy → optimize → sell — same cash-flow model, run twice (as-is vs. with the levers below). */}
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "1.25rem", marginBottom: "1rem" }}>
+        <div style={{ fontSize: "0.7rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.06em", marginBottom: "0.75rem" }}>
+          Buy · Optimize · Sell
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "0.75rem", marginBottom: "0.75rem" }}>
+          <div><label style={labelStyle}>Hold (months)</label><input style={inputStyle} inputMode="numeric" value={holdMonths} onChange={e => setHoldMonths(e.target.value)} /></div>
+          <div><label style={labelStyle}>Exit multiple of PV-10</label><input style={inputStyle} inputMode="decimal" value={exitMultiple} onChange={e => setExitMultiple(e.target.value)} /></div>
+          <div><label style={labelStyle}>Optimization capex ($)</label><input style={inputStyle} inputMode="numeric" placeholder="0" value={flipCapex} onChange={e => setFlipCapex(e.target.value)} /></div>
+          <div><label style={labelStyle}>Transaction cost (%)</label><input style={inputStyle} inputMode="decimal" placeholder="0" value={txnCostPct} onChange={e => setTxnCostPct(e.target.value)} /></div>
+          <div><label style={labelStyle}>Rate uplift (%)</label><input style={inputStyle} inputMode="decimal" placeholder="0" value={rateUplift} onChange={e => setRateUplift(e.target.value)} /></div>
+          <div><label style={labelStyle}>Decline reduction (%)</label><input style={inputStyle} inputMode="decimal" placeholder="0" value={declineReduction} onChange={e => setDeclineReduction(e.target.value)} /></div>
+          <div><label style={labelStyle}>LOE reduction (%)</label><input style={inputStyle} inputMode="decimal" placeholder="0" value={loeReduction} onChange={e => setLoeReduction(e.target.value)} /></div>
+          <div><label style={labelStyle}>Oil differential (+$/BBL)</label><input style={inputStyle} inputMode="decimal" placeholder="0" value={diffImprovement} onChange={e => setDiffImprovement(e.target.value)} /></div>
+        </div>
+
+        {result?.flip && !result.flip.sufficientData && (
+          <div style={{ fontSize: "0.8rem", color: COLORS.textMuted, padding: "0.5rem 0" }}>{result.flip.unavailableReason ?? "Not available for this run."}</div>
+        )}
+
+        {result?.flip?.sufficientData && result.flip.base && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "0.75rem", marginBottom: "0.75rem" }}>
+              {[
+                { label: result.flip.entryBasis === "purchase_price" ? "Entry (purchase price)" : "Entry (as-is PV-10 × multiple)", value: fmtUsd(result.flip.base.entryUsd) },
+                { label: "Hold net cash flow", value: fmtUsd(result.flip.base.holdNetCashFlowUsd) },
+                { label: "Exit proceeds", value: fmtUsd(result.flip.base.exitProceedsUsd) },
+                { label: "Profit", value: fmtUsd(result.flip.base.profitUsd), color: result.flip.base.profitUsd < 0 ? COLORS.red : COLORS.accent },
+                { label: "PV-10 uplift from levers", value: fmtUsd(result.flip.base.upliftPv10Usd) },
+                { label: "MOIC", value: result.flip.base.moic !== null ? `${result.flip.base.moic.toFixed(2)}x` : "—" },
+                { label: "IRR (annualized)", value: result.flip.base.irrAnnualPct !== null ? `${result.flip.base.irrAnnualPct.toFixed(1)}%` : "n/a — never recoups" },
+                { label: "Payout", value: result.flip.base.payoutMonths !== null ? `${result.flip.base.payoutMonths} mo` : "not within hold" },
+              ].map(card => (
+                <div key={card.label} style={{ background: COLORS.surfaceAlt, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "0.7rem 0.85rem" }}>
+                  <div style={{ fontSize: "0.65rem", color: COLORS.textMuted, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", marginBottom: 4 }}>{card.label}</div>
+                  <div style={{ fontSize: "1.05rem", fontWeight: 700, color: card.color ?? COLORS.text }}>{card.value}</div>
+                </div>
+              ))}
+            </div>
+            {result.flip.base.holdCoversFullForecast && (
+              <div style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: "0.5rem" }}>The forecast reaches its economic limit within the hold, so exit value is zero — the return is the hold cash flow alone.</div>
+            )}
+            <div style={{ fontSize: "0.7rem", fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase" as const, letterSpacing: "0.06em", margin: "0.5rem 0 0.4rem" }}>What each lever is worth (Δ PV-10 today, one lever at a time)</div>
+            <table style={{ width: "100%", borderCollapse: "collapse" as const, fontSize: "0.8rem" }}>
+              <tbody>
+                {result.flip.leverSensitivity.map(l => (
+                  <tr key={l.lever} style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                    <td style={{ padding: "0.45rem 0.3rem", color: COLORS.text }}>{l.label}</td>
+                    <td style={{ padding: "0.45rem 0.3rem", color: COLORS.textMuted }}>{l.step}</td>
+                    <td style={{ padding: "0.45rem 0.3rem", textAlign: "right" as const, fontWeight: 600, color: COLORS.text }}>{fmtUsd(l.deltaPv10Usd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, lineHeight: 1.5, marginTop: "0.6rem" }}>
+              {result.flip.notes.ownership} {result.flip.notes.assumptions}
+            </div>
+          </>
+        )}
+      </div>
 
       {result && (
         <div style={{ fontSize: "0.72rem", color: COLORS.textFaint, lineHeight: 1.5 }}>

@@ -324,6 +324,76 @@ function solveBreakevenOilPrice(
   return (totalCosts - gasRevenueNetOfTaxes) / oilCoefficient;
 }
 
+// ─── Cash-flow series with optional optimization adjustments ────────────────
+//
+// Exposed for the buy → optimize → sell module (flip.ts). It runs the SAME
+// forecast and per-month cash-flow model computeEconomics uses — same Arps
+// fits, same terminal-rate switch, same severance/ad valorem/LOE/workover/
+// SWD formulas — with four explicitly-supplied adjustments layered on:
+// a uniform rate uplift, a decline-rate multiplier, an LOE multiplier and
+// an oil-price adder (a better differential). All default to "no change".
+// Nothing here estimates what an operator could achieve; the levers are
+// inputs the user states and the report prints.
+export interface ForecastAdjustment {
+  rateMultiplier?: number;        // 1.10 = +10% to every forecast month's rate (workover / artificial lift)
+  declineMultiplier?: number;     // 0.90 = nominal decline rate reduced 10%
+  loeMultiplier?: number;         // 0.90 = LOE $/BOE reduced 10%
+  oilPriceAdderUsdBbl?: number;   // +1 = realized oil price improved by $1/BBL (differential)
+}
+
+export interface CashFlowSeriesInput {
+  monthlyOilBbl: number[];
+  monthlyGasMcf: number[];
+  fieldName?: string | null;
+  county?: string | null;
+  monthlyWaterBbl?: (number | null)[];
+  nglAndBasis?: NglAndBasisAssumptions | null;
+}
+
+export interface CashFlowSeries {
+  sufficientData: boolean;
+  unavailableReason?: string;
+  netCashFlowByMonth: number[];   // month 1..N ahead of the last reported month
+  loeUsdPerBoe: number;
+  oilFit: DeclineCurveFit | null;
+  gasFit: DeclineCurveFit | null;
+}
+
+export function forecastNetCashFlowSeries(
+  input: CashFlowSeriesInput,
+  price: ScenarioPrice,
+  adjust: ForecastAdjustment = {},
+): CashFlowSeries {
+  const rateMultiplier = adjust.rateMultiplier ?? 1;
+  const declineMultiplier = adjust.declineMultiplier ?? 1;
+  const loeMultiplier = adjust.loeMultiplier ?? 1;
+  const oilPriceAdder = adjust.oilPriceAdderUsdBbl ?? 0;
+
+  const baseOilFit = fitArpsDecline(input.monthlyOilBbl);
+  const baseGasFit = fitArpsDecline(input.monthlyGasMcf);
+  const basin = classifyBasin(input.fieldName ?? null, input.county ?? null);
+  const loeUsdPerBoe = (basin ? loeMidpoint(basin) : DEFAULT_LOE_USD_PER_BOE) * loeMultiplier;
+
+  if (!baseOilFit && !baseGasFit) {
+    return { sufficientData: false, unavailableReason: "Insufficient data: a finite production series with at least six positive observations and a producing final month is required.", netCashFlowByMonth: [], loeUsdPerBoe, oilFit: null, gasFit: null };
+  }
+
+  const adjustFit = (fit: DeclineCurveFit | null): DeclineCurveFit | null => fit ? { ...fit, di: fit.di * declineMultiplier } : null;
+  const oilFit = adjustFit(baseOilFit);
+  const gasFit = adjustFit(baseGasFit);
+  const oilForecast = oilFit ? forecastToTerminalRate(oilFit).map(p => ({ rate: p.rate * rateMultiplier })) : [];
+  const gasForecast = gasFit ? forecastToTerminalRate(gasFit, GAS_TERMINAL_RATE_MCF_PER_MONTH).map(p => ({ rate: p.rate * rateMultiplier })) : [];
+
+  const water = input.monthlyWaterBbl ?? [];
+  const knownWater = water.filter((v): v is number => v !== null && Number.isFinite(v) && v >= 0);
+  const swdModeled = knownWater.length > 0 && knownWater.length === water.length;
+  const avgMonthlyWaterBbl = swdModeled ? knownWater.reduce((a, b) => a + b, 0) / knownWater.length : null;
+
+  const adjustedPrice: ScenarioPrice = { ...price, oilUsdBbl: price.oilUsdBbl + oilPriceAdder };
+  const months = computeMonthlyEconomics(adjustedPrice, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, input.nglAndBasis ?? null);
+  return { sufficientData: true, netCashFlowByMonth: months.map(m => m.netCashFlow), loeUsdPerBoe, oilFit, gasFit };
+}
+
 export function computeEconomics(
   monthlyOilBbl: number[],
   monthlyGasMcf: number[],
