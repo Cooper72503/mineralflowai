@@ -1,3 +1,33 @@
+# Current cycle — package evidence and shared-production reconciliation
+
+**GOLD reports validated: 0/10.** Complete real acquisition decisions only.
+
+- Synced to deployed d069fcdd412abe9b699b79de8215a168b3992364; retained prior fixes.
+- Added an authenticated 1–100 entry portfolio record and integrated review controls
+  in the existing portfolio page. Failed intake entries remain visible.
+- Reconciles gross production by Texas/district/oil-gas query type/lease/month/phase.
+  Identical observations across wells count once; conflicting values and conflicting
+  API-to-stream assignments block totals. Missing phases/months never become zero.
+- Reports submitted/stated inventory discrepancies and preserves all original inputs.
+  No API corrections, seller interests, allocation, reserves or values are invented.
+- Saves account-scoped immutable snapshots, reopenable by record URL after refresh.
+  Migration 034 is required before frontend deployment. Worker engines are unchanged.
+- New loader pages retained evidence, rejects missing/inaccessible requested runs,
+  and checks for run changes during reading instead of silently emitting a subset.
+- The 49-entry synthetic regression verifies two shared leases are counted twice
+  total, not 49 times. It is not a real acquisition or live-production acceptance test.
+- Local verification: 24 new regressions; full frontend suite 813/813;
+  TypeScript and Next production build clean; isolated PostgreSQL owner/cross-account/anonymous/immutability
+  policy checks passed. Deployment and signed-in production checks remain outstanding.
+- Critical remaining implementation: portfolio title/interest linkage, operated-asset
+  cash-flow handoff, package forecast/recoverable-volume handoff and exit valuation.
+  They are explicitly labeled portfolio_engine_not_connected in the saved record.
+- Actual source documents, reviewed sale scope/WI/NRI, supported waterflood forecast,
+  operating/capital/plugging obligations and buyer criteria are still required.
+  This cycle creates a usable package evidence review, not a buy/price recommendation.
+- Deployment and real-run acceptance instructions: docs/portfolio-evidence-deployment.md.
+
+---
 # Current cycle — lease coverage and explicit title scope
 
 **GOLD reports validated: 0/10.** This counts complete real acquisition records,

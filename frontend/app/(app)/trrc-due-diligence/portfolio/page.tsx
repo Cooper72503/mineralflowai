@@ -8,20 +8,17 @@
  * those?" Paste a list of wells, submit them all at once, watch each one
  * complete, jump into any individual report.
  *
- * V1 scope, deliberately: the batch (list of run ids) lives in this page's
- * React state, not a persisted "batch" table — a reload mid-batch loses
- * the grouping (each individual run is still safe and resumable from its
- * own report link, exactly like the single-run page). A real portfolio
- * table that survives a refresh, and an aggregate rollup (summed
- * portfolio value, not just per-well numbers), are real fast-follows —
- * see MineralFlow_Decision_Pipeline build notes — not shipped half-done
- * here the night before a demo.
+ * Batch submission state is local to this page. The portfolio evidence review
+ * below can persist the complete submitted membership and retained evidence as
+ * an account-scoped snapshot, reopenable through its record URL. It reconciles
+ * shared lease production; operated-asset valuation is still a separate handoff.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useApiFetch } from "@/lib/trrc/use-api-fetch";
 import { COLORS } from "../colors";
+import { PortfolioReview } from "./portfolio-review";
 
 type RowStatus = "creating" | "create_failed" | "pending" | "running" | "complete" | "failed" | "cancelled" | "awaiting_selection" | string;
 
@@ -304,6 +301,8 @@ export default function PortfolioPage() {
             )}
           </div>
         )}
+
+        <PortfolioReview members={rows.map(r=>({input:r.input,runId:r.runId}))} />
 
         {rows.length > 0 && (
           <>
