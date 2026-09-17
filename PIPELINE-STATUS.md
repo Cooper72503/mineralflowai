@@ -1,3 +1,22 @@
+# Current cycle — atomic worker intake
+
+**GOLD reports validated: 0/10.** No new complete acquisition pass claimed.
+
+- Fixed the pending-run race: authenticated RPC now commits run, resolved entities,
+  and explicit title linkage together before workers can claim the row.
+- Entity persistence errors roll back run creation instead of silently proceeding.
+- Title setup failures/ambiguity are retained as warnings on the run.
+- Bulk intake is limited to three concurrent creators; a thrown failure leaves
+  other entries' results intact and in submitted order. Malformed non-string
+  entries are rejected rather than silently removed.
+- Frontend 845/845 tests; isolated PostgreSQL transaction and access checks pass.
+- Migration 035 must precede frontend deployment. No worker code change.
+- Not yet verified: signed-in production intake and complete worker-to-GOLD flow.
+- Remaining software work includes durable package scheduling/recovery, automated
+  final record persistence, and reviewed title/interest handoff to valuation.
+- Detailed deployment checks: docs/atomic-intake-deployment.md.
+
+---
 # Current cycle — existing engines connected to package scenarios
 
 **GOLD reports validated: 0/10.** Complete real acquisition decisions only.

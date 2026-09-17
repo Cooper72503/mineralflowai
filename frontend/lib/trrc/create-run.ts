@@ -42,7 +42,8 @@ export async function createDueDiligenceRun(
   userId: string,
   body: CreateRunInput,
 ): Promise<CreateRunResult> {
-  const rawInput = body.input?.trim() ?? "";
+  if (!body || typeof body.input !== "string") return {ok: false, error: "input must be a string.", original_input: ""};
+  const rawInput = body.input.trim();
   if (!rawInput) return { ok: false, error: "input is required.", original_input: rawInput };
   if (rawInput.length > 500) return { ok: false, error: "input must be 500 characters or fewer.", original_input: rawInput };
   if (body.purchase_price !== undefined && (typeof body.purchase_price !== "number" || !Number.isFinite(body.purchase_price) || body.purchase_price <= 0)) {
@@ -70,44 +71,40 @@ export async function createDueDiligenceRun(
   const needs_user_selection = resolution.needs_user_selection;
   const status = needs_user_selection ? "awaiting_selection" : "pending";
 
-  const { data: runRow, error: runInsertError } = await supabase
-    .from("trrc_due_diligence_runs")
-    .insert({
-      user_id: userId,
+  // Resolve the title scope before publishing a runnable row. Its optional
+  // failure is retained on the run; workers must never see a half-created input.
+  let titleLinkWarning: string | undefined;
+  let titleJobId: string | null = null;
+  if (resolution.input_type === "api_number" && !needs_user_selection) {
+    try {
+      const title = await ensureTitleJobForApi(supabase, userId, rawInput);
+      if (title.ok && title.jobId) titleJobId = title.jobId;
+      else titleLinkWarning = title.reason ?? "Title research could not be started.";
+    } catch (err) {
+      titleLinkWarning = "Title research setup failed; retry title linking from this run.";
+      console.error("[createDueDiligenceRun] title job creation threw:", err);
+    }
+  }
+
+  // One transaction commits the run, candidate entities, and title association.
+  // No non-atomic fallback: failed persistence must not queue incomplete work.
+  const { data: runRow, error: runInsertError } = await supabase.rpc("create_due_diligence_run", {
+    p_run: {
       original_input: rawInput,
       detected_input_type,
       selected_input_type: resolution.input_type,
       normalized_input: resolution.normalized_input ?? normalized_input,
       status,
-      started_at: new Date().toISOString(),
-      progress_percent: 0,
-      result_summary: null,
-      error_summary: null,
       resolved_primary_api: normalizedApi?.api10 ?? null,
       resolved_district: body.district ?? null,
       resolved_lease_number: body.lease_number?.trim() ?? null,
-      resolved_gas_id: null,
-      operator_name:            body.operator_name?.trim() ?? null,
-      resolved_operator_number: null,
+      operator_name: body.operator_name?.trim() ?? null,
       purchase_price: body.purchase_price ?? null,
-      report_storage_path: null,
-      archive_storage_path: null,
-      manifest_storage_path: null,
-    })
-    .select("id, status")
-    .single();
-
-  if (runInsertError || !runRow) {
-    console.error("[createDueDiligenceRun] run insert error:", runInsertError);
-    return { ok: false, error: "Failed to create due diligence run.", original_input: rawInput };
-  }
-
-  const run_id = runRow.id as string;
-
-  if (resolution.entities.length > 0) {
-    const entityRows = resolution.entities.map((e) => ({
+      title_research_job_id: titleJobId,
+      title_setup_warning: titleLinkWarning ?? null,
+    },
+    p_entities: resolution.entities.map(e => ({
       id: e.id,
-      run_id,
       entity_type: e.entity_type,
       canonical_identifier: e.canonical_identifier,
       display_name: e.display_name,
@@ -115,38 +112,13 @@ export async function createDueDiligenceRun(
       confidence: e.confidence,
       resolution_method: e.resolution_method,
       is_user_selected: e.is_user_selected,
-    }));
-
-    const { error: entityInsertError } = await supabase
-      .from("trrc_resolved_entities")
-      .insert(entityRows);
-
-    if (entityInsertError) {
-      console.error("[createDueDiligenceRun] entity insert error:", entityInsertError);
-      // Non-fatal — run row exists; caller can still proceed
-    }
+    })),
+  });
+  if (runInsertError || !runRow?.id) {
+    console.error("[createDueDiligenceRun] atomic run creation failed:", runInsertError);
+    return { ok: false, error: "Failed to create due diligence run.", original_input: rawInput };
   }
-
-  // Title research is part of "API in": queue (or reuse) the title job for
-  // an API-number input alongside the due-diligence run, so the GOLD 2.0
-  // record can link title findings instead of reporting that no job
-  // exists. Never fails the run — a title-side error is logged and the
-  // record will disclose the missing job on its own.
-  let titleLinkWarning: string | undefined;
-  if (resolution.input_type === "api_number" && !needs_user_selection) {
-    try {
-      const title = await ensureTitleJobForApi(supabase, userId, rawInput);
-      if (title.ok && title.jobId) {
-        const linked = await supabase.from("trrc_due_diligence_runs")
-          .update({ title_research_job_id: title.jobId }).eq("id", run_id).eq("user_id", userId).select("id").maybeSingle();
-        if (linked.error || !linked.data) titleLinkWarning = "Title job exists, but its link to this run could not be persisted. Retry linking after applying migration 033.";
-      } else titleLinkWarning = title.reason ?? "Title research could not be started.";
-      if (titleLinkWarning) console.error(`[createDueDiligenceRun] ${titleLinkWarning}`);
-    } catch (err) {
-      titleLinkWarning = "Title research setup failed; the due-diligence run remains available.";
-      console.error("[createDueDiligenceRun] title job creation threw:", err);
-    }
-  }
+  const run_id = runRow.id as string;
 
   return {
     ok: true,

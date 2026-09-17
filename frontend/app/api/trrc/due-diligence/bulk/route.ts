@@ -23,7 +23,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { isTrrcDdEnabled } from "@/lib/trrc/source-registry";
-import { createDueDiligenceRun } from "@/lib/trrc/create-run";
+import { createDueDiligenceBatch } from "@/lib/trrc/create-batch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
   }
 
-  if (!Array.isArray(body.inputs)) {
+  if (!body || !Array.isArray(body.inputs) || body.inputs.some(v => typeof v !== "string")) {
     return NextResponse.json({ ok: false, error: "inputs must be an array of strings." }, { status: 400 });
   }
 
@@ -79,16 +79,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Independent creates, run concurrently — one bad input (unresolvable,
-  // malformed) must not block or fail the rest of the batch.
-  const results = await Promise.all(
-    uniqueInputs.map(async (input) => {
-      const result = await createDueDiligenceRun(supabase, user.id, { input });
-      return result.ok
-        ? { original_input: input, ok: true as const, id: result.id, status: result.status, needs_user_selection: result.needs_user_selection, title_link_warning: result.title_link_warning ?? null }
-        : { original_input: input, ok: false as const, error: result.error };
-    }),
-  );
+  // Bound remote intake and retain successes even when one entry throws.
+  const results = await createDueDiligenceBatch(supabase, user.id, uniqueInputs);
 
   const succeeded = results.filter(r => r.ok).length;
 

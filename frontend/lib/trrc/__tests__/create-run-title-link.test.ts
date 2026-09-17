@@ -1,27 +1,44 @@
 import {it,expect,vi,beforeEach} from "vitest";
 import {createDueDiligenceRun} from "../create-run";
 import {ensureTitleJobForApi} from "../title/ensure-job";
-vi.mock("../entity-resolver",()=>({resolveEntities:vi.fn(async()=>({input_type:"api_number",normalized_input:"4216502733",entities:[],needs_user_selection:false}))}));
+import {resolveEntities} from "../entity-resolver";
+vi.mock("../entity-resolver",()=>({resolveEntities:vi.fn()}));
 vi.mock("../title/ensure-job",()=>({ensureTitleJobForApi:vi.fn()}));
-beforeEach(()=>vi.clearAllMocks());
-function db(failLink=false){
- const updates:unknown[]=[];const filters:unknown[]=[];
- return {updates,filters,from:()=>({insert:()=>({select:()=>({single:async()=>({data:{id:"run",status:"pending"},error:null})})}),update:(patch:unknown)=>{
-   updates.push(patch);const q:any={eq:(...args:unknown[])=>{filters.push(args);return q;},select:()=>q,maybeSingle:async()=>({data:failLink?null:{id:"run"},error:failLink?{message:"column missing"}:null})};return q;
- }})};
-}
-it("persists the auto-created title scope on the authenticated run",async()=>{
+beforeEach(()=>{
+ vi.resetAllMocks();
+ vi.mocked(resolveEntities).mockResolvedValue({input_type:"api_number",normalized_input:"4216502733",entities:[],needs_user_selection:false} as never);
  vi.mocked(ensureTitleJobForApi).mockResolvedValue({ok:true,created:true,jobId:"title",api10:"4216502733",reason:null});
+});
+function db(fail=false){return {rpc:vi.fn(async()=>({data:fail?null:{id:"run",status:"pending"},error:fail?{message:"transaction failed"}:null})),from:vi.fn(()=>{throw Error("Non-atomic write forbidden");})};}
+it("publishes title link and candidate entities in one authenticated RPC",async()=>{
+ const entity={id:"candidate",entity_type:"wellbore",canonical_identifier:"4216502733",attributes:{well:"1D"}};
+ vi.mocked(resolveEntities).mockResolvedValue({input_type:"api_number",normalized_input:"4216502733",entities:[entity],needs_user_selection:false} as never);
  const d=db();const r=await createDueDiligenceRun(d as never,"owner",{input:"4216502733"});
- expect(r).toMatchObject({ok:true,id:"run"});expect(d.updates).toEqual([{title_research_job_id:"title"}]);expect(d.filters).toContainEqual(["user_id","owner"]);
+ expect(r).toMatchObject({ok:true,id:"run"});
+ expect(d.rpc).toHaveBeenCalledWith("create_due_diligence_run",expect.objectContaining({p_run:expect.objectContaining({title_research_job_id:"title",status:"pending"}),p_entities:[expect.objectContaining({id:"candidate",attributes_json:{well:"1D"}})]}));
+ expect(d.from).not.toHaveBeenCalled();
+ expect(vi.mocked(ensureTitleJobForApi).mock.invocationCallOrder[0]).toBeLessThan(d.rpc.mock.invocationCallOrder[0]);
 });
-it("returns a warning when the run-title link cannot be persisted",async()=>{
- vi.mocked(ensureTitleJobForApi).mockResolvedValue({ok:true,created:true,jobId:"title",api10:"4216502733",reason:null});
- const r=await createDueDiligenceRun(db(true) as never,"owner",{input:"4216502733"});
- expect(r).toMatchObject({ok:true,title_link_warning:expect.stringContaining("could not be persisted")});
+it("fails closed when atomic persistence fails; never queues via separate writes",async()=>{
+ const d=db(true);const r=await createDueDiligenceRun(d as never,"owner",{input:"4216502733"});
+ expect(r).toMatchObject({ok:false,error:"Failed to create due diligence run."});expect(d.from).not.toHaveBeenCalled();
 });
-it("does not bind an ambiguous scope",async()=>{
+it("persists an ambiguous title warning without binding an arbitrary scope",async()=>{
  vi.mocked(ensureTitleJobForApi).mockResolvedValue({ok:false,created:false,jobId:null,api10:"4216502733",reason:"Multiple live scopes"});
  const d=db();const r=await createDueDiligenceRun(d as never,"owner",{input:"4216502733"});
- expect(r).toMatchObject({ok:true,title_link_warning:"Multiple live scopes"});expect(d.updates).toEqual([]);
+ expect(r).toMatchObject({ok:true,title_link_warning:"Multiple live scopes"});
+ expect(d.rpc.mock.calls[0]).toEqual(["create_due_diligence_run",expect.objectContaining({p_run:expect.objectContaining({title_research_job_id:null,title_setup_warning:"Multiple live scopes"})})]);
+});
+it("records thrown title setup failures while allowing regulatory retrieval",async()=>{
+ vi.mocked(ensureTitleJobForApi).mockRejectedValue(Error("fetch failed"));
+ const d=db();expect(await createDueDiligenceRun(d as never,"owner",{input:"4216502733"})).toMatchObject({ok:true,title_link_warning:expect.stringContaining("setup failed")});
+});
+it("keeps ambiguous asset resolution out of the worker queue",async()=>{
+ vi.mocked(resolveEntities).mockResolvedValue({input_type:"api_number",normalized_input:"4216502733",entities:[],needs_user_selection:true} as never);
+ const d=db();expect(await createDueDiligenceRun(d as never,"owner",{input:"4216502733"})).toMatchObject({ok:true,status:"awaiting_selection"});
+ expect(ensureTitleJobForApi).not.toHaveBeenCalled();
+ expect(d.rpc.mock.calls[0]).toEqual(["create_due_diligence_run",expect.objectContaining({p_run:expect.objectContaining({status:"awaiting_selection"})})]);
+});
+it.each([null,{}, {input:42}])("rejects malformed intake before queueing: %j",async body=>{
+ const d=db();expect(await createDueDiligenceRun(d as never,"owner",body as never)).toMatchObject({ok:false});expect(d.rpc).not.toHaveBeenCalled();
 });
