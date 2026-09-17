@@ -1,3 +1,38 @@
+# Current cycle — existing engines connected to package scenarios
+
+**GOLD reports validated: 0/10.** Complete real acquisition decisions only.
+
+- Synced deployed 0fe8ce7509da584c7067f23161ed5af5edbec6b1, preserving the upstream
+  entry/exit implementation and its tests.
+- Connected unique portfolio lease streams to the existing Arps/cash-flow engines
+  and shared existing flip arithmetic. Package entry price, fixed expenses, initial
+  capital and terminal liability are applied once, not per submitted API.
+- Optional operating inputs separate NRI revenues from WI costs; prior gross
+  screening callers retain their existing defaults. Scenario inputs are explicit,
+  persisted and labeled conditional; reviewed ownership is never inferred.
+- Added price scenarios, buyer-return maximum entry, remaining model volumes,
+  conditional exit proceeds/profit/IRR, and source/input pointers to portfolio JSON/UI.
+- Fixed current-month rows invalidating all earlier history. Original rows remain
+  in evidence; complete-month exclusions are disclosed. Forecast preparation uses
+  the complete contiguous suffix and never converts unreported volumes to zero.
+- Added forecast readiness before price entry, reporting last observed volumes,
+  history lag and inability to establish a producing/restart forecast.
+- Withheld ambiguous IRRs and prevented negative exit proceeds from creating a
+  selling-fee credit. Existing positive-exit engine behavior is regression-covered.
+- Real standalone capture: 49/49 API identity queries succeeded and two unique
+  lease-production streams were retained. Generated the portfolio evidence record
+  plus 49 structurally valid GOLD2 drafts. This was not a signed-in production run
+  and did not rerun the other diligence sources or authenticated title lookups.
+- Private source captures, inventory correction evidence and report outputs remain
+  outside Git. Their specific data gaps prevent a supported acquisition valuation.
+- Local checks: frontend 839/839; TypeScript and production build passed.
+- Deploy frontend only; no new migration beyond existing 034 and no worker change.
+  Acceptance steps: docs/portfolio-scenario-deployment.md.
+- Remaining: actual reviewed title/sale scope, updated production/injection and
+  evidenced forecast/restart assumptions, costs/liabilities and buyer criteria;
+  authenticated end-to-end acceptance and full acquisition GOLD validation.
+
+---
 # Current cycle — package evidence and shared-production reconciliation
 
 **GOLD reports validated: 0/10.** Complete real acquisition decisions only.

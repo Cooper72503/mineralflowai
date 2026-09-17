@@ -73,3 +73,13 @@ it("every aggregate volume citation resolves to its retained, hashed source row"
   const value=c.pointer.slice(1).split("/").reduce((v:any,key)=>v[key],evidence.data);expect(typeof value).toBe("number");
  }
 });
+it("connects an explicit package scenario to the existing engines without claiming verified acquisition value",()=>{
+ const run=fixture(1);run.attempts[1].result_data_json!.rows=Array.from({length:12},(_,i)=>({production_month:new Date(Date.UTC(2025,8+i,1)).toISOString().slice(0,7),oil_bbl:3000*Math.exp(-.02*i),gas_mcf:null,casinghead_gas_mcf:0,condensate_bbl:null,water_bbl:null}));
+ const scenario={basis:"conditional_assumptions_not_verified_ownership" as const,prices:{base:{oilUsdBbl:65,gasUsdMcf:0},downside:{oilUsdBbl:50,gasUsdMcf:0},upside:{oilUsdBbl:80,gasUsdMcf:0}},workingInterest:1,netRevenueInterest:.8,variableLoeUsdPerBoe:0,workoverReserveUsdPerBoe:0,fixedMonthlyCostsUsd:10000,oilSeveranceFraction:.046,gasSeveranceFraction:.075,adValoremFraction:.02,initialCapexUsd:0,terminalLiabilityUsd:10000,holdMonths:24,exitMultipleOfPv10:1,sellingCostFraction:.05,requiredAnnualReturn:.15,maxHistoryAgeMonths:6,productionScope:"oil_only" as const,fixedCostsIncludeWaterHandling:true as const};
+ const r=buildPortfolioRecord(input([run],{scenario}),[run],asOf);
+ expect(r.conditionalEconomics?.status).toBe("calculated_conditional");expect(r.conditionalEconomics?.scenarios).toHaveLength(3);expect(r.economics.maximumBuyPriceUsd.value).toBeNull();expect(r.decision.goldValidated).toBe(false);
+});
+it("retains current-month source rows but excludes them from completed-month aggregation",()=>{
+ const run=fixture(1);(run.attempts[1].result_data_json!.rows as any[]).push({production_month:"2026-09",oil_bbl:null,gas_mcf:null,casinghead_gas_mcf:null});
+ const r=buildPortfolioRecord(input([run]),[run],asOf);expect(oil(r)).toBe(100);expect(r.production.excludedProductionRows).toHaveLength(1);expect(r.production.leaseStreams[0].months).toHaveLength(1);
+});

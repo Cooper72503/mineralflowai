@@ -35,7 +35,8 @@ It does not change the existing decline, title, royalty economics or worker engi
 - Totals are gross regulatory streams, not acquired-interest production. Seller
   ownership of all production in a lease is not inferred from the submitted well list.
 - Asking price must not populate maximum offer, remaining reserves or exit value.
-  Those handoffs are explicitly `portfolio_engine_not_connected` in this version.
+  Explicit conditional scenarios are now available separately; verified acquisition
+  values remain `reviewed_acquisition_scope_missing`. See portfolio-scenario-deployment.md.
 - Missing or inaccessible requested runs and failed evidence pagination must fail
   the request rather than quietly produce a report for only the accessible subset.
 
@@ -72,10 +73,9 @@ and lack of update/delete privileges. It does not prove production auth/session 
 
 ## Next engine handoffs
 
-Connect actual title/interest evidence to package sale scope, reconcile lease
-participation, then connect operated-asset forecasts and cash flows (including
-waterflood costs/injection, capital, taxes and plugging). Add buyer return criteria
-and conditional exit valuation. The existing reviewed royalty engine cannot be
-silently reused as an operated working-interest acquisition engine.
+Conditional package cash-flow and exit handoffs are now implemented using the
+existing operating engines. Connect actual title/interest evidence to sale scope
+and lease participation, plus evidenced waterflood/restart forecasts and documented
+costs/liabilities. Conditional inputs must not be mistaken for reviewed ownership.
 
 Complete real acquisition GOLD records validated remains **0/10**.

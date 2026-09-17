@@ -102,6 +102,19 @@ export function monthlyDiscountRate(annualRate: number): number {
   return Math.pow(1 + annualRate, 1 / 12) - 1;
 }
 
+/** Explicit conditional operating inputs. WI bears costs; NRI receives revenue.
+ * Omission preserves the existing gross screening model exactly.
+ */
+export interface OperatingCashFlowAssumptions {
+  workingInterest: number;
+  netRevenueInterest: number;
+  variableLoeUsdPerBoe: number;
+  workoverReserveUsdPerBoe: number;
+  adValoremFraction: number;
+  oilSeveranceFraction: number;
+  gasSeveranceFraction: number;
+}
+
 interface MonthlyEconomics {
   grossRevenue: number; severanceTax: number; adValorem: number;
   loe: number; workoverReserve: number; swdDisposal: number; netCashFlow: number;
@@ -153,6 +166,7 @@ function computeMonthlyEconomics(
   loeUsdPerBoe: number,
   avgMonthlyWaterBbl: number | null,
   nglAndBasis: NglAndBasisAssumptions | null = null,
+  operating: OperatingCashFlowAssumptions | null = null,
 ): MonthlyEconomics[] {
   const effectiveGasPriceUsdMcf = price.gasUsdMcf - (nglAndBasis?.wahaDifferentialUsdMcf ?? 0);
   const horizon = Math.max(oilForecast.length, gasForecast.length);
@@ -161,20 +175,20 @@ function computeMonthlyEconomics(
     const oilRate = oilForecast[i]?.rate ?? 0;
     const gasRate = gasForecast[i]?.rate ?? 0;
 
-    const oilRevenue = oilRate * price.oilUsdBbl;
+    const oilRevenue = oilRate * price.oilUsdBbl * (operating?.netRevenueInterest ?? 1);
     const nglRevenue = nglAndBasis ? gasRate * nglAndBasis.nglYieldBblPerMcf * nglAndBasis.nglPriceUsdBbl : 0;
-    const gasRevenue = gasRate * effectiveGasPriceUsdMcf + nglRevenue;
+    const gasRevenue = (gasRate * effectiveGasPriceUsdMcf + nglRevenue) * (operating?.netRevenueInterest ?? 1);
     const grossRevenue = oilRevenue + gasRevenue;
-    const severanceTax = oilRevenue * TX_SEVERANCE_TAX_OIL + gasRevenue * TX_SEVERANCE_TAX_GAS;
-    const adValorem = grossRevenue * AD_VALOREM_PCT_OF_REVENUE;
+    const severanceTax = oilRevenue * (operating?.oilSeveranceFraction ?? TX_SEVERANCE_TAX_OIL) + gasRevenue * (operating?.gasSeveranceFraction ?? TX_SEVERANCE_TAX_GAS);
+    const adValorem = grossRevenue * (operating?.adValoremFraction ?? AD_VALOREM_PCT_OF_REVENUE);
     const boe = oilRate + gasRate / MCF_PER_BOE;
-    const loe = boe * loeUsdPerBoe;
-    const workoverReserve = boe * WORKOVER_RESERVE_USD_PER_BOE;
+    const loe = boe * loeUsdPerBoe * (operating?.workingInterest ?? 1);
+    const workoverReserve = boe * (operating?.workoverReserveUsdPerBoe ?? WORKOVER_RESERVE_USD_PER_BOE) * (operating?.workingInterest ?? 1);
     // Held constant at the historical average water rate for the whole
     // forecast — water cut isn't decline-curve-forecastable the way
     // oil/gas volumes are, and this is a minor line item; only applied at
     // all when real water production data exists (see computeEconomics).
-    const swdDisposal = avgMonthlyWaterBbl !== null ? avgMonthlyWaterBbl * SWD_DISPOSAL_USD_PER_BBL_WATER : 0;
+    const swdDisposal = avgMonthlyWaterBbl !== null ? avgMonthlyWaterBbl * SWD_DISPOSAL_USD_PER_BBL_WATER * (operating?.workingInterest ?? 1) : 0;
     const netCashFlow = grossRevenue - severanceTax - adValorem - loe - workoverReserve - swdDisposal;
 
     months.push({ grossRevenue, severanceTax, adValorem, loe, workoverReserve, swdDisposal, netCashFlow });
@@ -348,11 +362,14 @@ export interface CashFlowSeriesInput {
   county?: string | null;
   monthlyWaterBbl?: (number | null)[];
   nglAndBasis?: NglAndBasisAssumptions | null;
+  operating?: OperatingCashFlowAssumptions;
 }
 
 export interface CashFlowSeries {
   sufficientData: boolean;
   unavailableReason?: string;
+  forecastOilByMonth: number[];
+  forecastGasByMonth: number[];
   netCashFlowByMonth: number[];   // month 1..N ahead of the last reported month
   loeUsdPerBoe: number;
   oilFit: DeclineCurveFit | null;
@@ -364,6 +381,10 @@ export function forecastNetCashFlowSeries(
   price: ScenarioPrice,
   adjust: ForecastAdjustment = {},
 ): CashFlowSeries {
+  if (input.operating) {
+    const a=input.operating;
+    if(Object.values(a).some(v=>!Number.isFinite(v)||v<0)||a.workingInterest>1||a.netRevenueInterest>a.workingInterest||[a.adValoremFraction,a.oilSeveranceFraction,a.gasSeveranceFraction].some(v=>v>1))throw Error("Invalid explicit operating assumptions");
+  }
   const rateMultiplier = adjust.rateMultiplier ?? 1;
   const declineMultiplier = adjust.declineMultiplier ?? 1;
   const loeMultiplier = adjust.loeMultiplier ?? 1;
@@ -372,10 +393,10 @@ export function forecastNetCashFlowSeries(
   const baseOilFit = fitArpsDecline(input.monthlyOilBbl);
   const baseGasFit = fitArpsDecline(input.monthlyGasMcf);
   const basin = classifyBasin(input.fieldName ?? null, input.county ?? null);
-  const loeUsdPerBoe = (basin ? loeMidpoint(basin) : DEFAULT_LOE_USD_PER_BOE) * loeMultiplier;
+  const loeUsdPerBoe = (input.operating?.variableLoeUsdPerBoe ?? (basin ? loeMidpoint(basin) : DEFAULT_LOE_USD_PER_BOE)) * loeMultiplier;
 
   if (!baseOilFit && !baseGasFit) {
-    return { sufficientData: false, unavailableReason: "Insufficient data: a finite production series with at least six positive observations and a producing final month is required.", netCashFlowByMonth: [], loeUsdPerBoe, oilFit: null, gasFit: null };
+    return { sufficientData: false, unavailableReason: "Insufficient data: a finite production series with at least six positive observations and a producing final month is required.", forecastOilByMonth: [], forecastGasByMonth: [], netCashFlowByMonth: [], loeUsdPerBoe, oilFit: null, gasFit: null };
   }
 
   const adjustFit = (fit: DeclineCurveFit | null): DeclineCurveFit | null => fit ? { ...fit, di: fit.di * declineMultiplier } : null;
@@ -390,8 +411,8 @@ export function forecastNetCashFlowSeries(
   const avgMonthlyWaterBbl = swdModeled ? knownWater.reduce((a, b) => a + b, 0) / knownWater.length : null;
 
   const adjustedPrice: ScenarioPrice = { ...price, oilUsdBbl: price.oilUsdBbl + oilPriceAdder };
-  const months = computeMonthlyEconomics(adjustedPrice, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, input.nglAndBasis ?? null);
-  return { sufficientData: true, netCashFlowByMonth: months.map(m => m.netCashFlow), loeUsdPerBoe, oilFit, gasFit };
+  const months = computeMonthlyEconomics(adjustedPrice, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, input.nglAndBasis ?? null, input.operating ?? null);
+  return { sufficientData: true, forecastOilByMonth: oilForecast.map(p=>p.rate), forecastGasByMonth: gasForecast.map(p=>p.rate), netCashFlowByMonth: months.map(m => m.netCashFlow), loeUsdPerBoe, oilFit, gasFit };
 }
 
 export function computeEconomics(

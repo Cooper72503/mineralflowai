@@ -179,26 +179,7 @@ export function computeFlipAnalysis(
     const price = priceDeck.scenarios[scenario];
     const asIs = forecastNetCashFlowSeries(input, price).netCashFlowByMonth;
     const opt = forecastNetCashFlowSeries(input, price, adjustment).netCashFlowByMonth;
-    const pv10AsIsUsd = pv10Slice(asIs, 0, Infinity);
-    const pv10OptimizedUsd = pv10Slice(opt, 0, Infinity);
-    const holdNetCashFlowUsd = sum(opt, 0, H);
-    const exitRemainingPv10Usd = pv10Slice(opt, H, Infinity);
-    const exitProceedsUsd = exitRemainingPv10Usd * a.exitMultipleOfPv10 * (1 - a.transactionCostPct);
-    const outlay = entryUsd + a.optimizationCapexUsd;
-    const profitUsd = exitProceedsUsd + holdNetCashFlowUsd - outlay;
-    const moic = outlay > 0 ? (exitProceedsUsd + holdNetCashFlowUsd) / outlay : null;
-    const holdSeries = opt.slice(0, H);
-    while (holdSeries.length < H) holdSeries.push(0);
-    holdSeries[H - 1] += exitProceedsUsd;
-    const irrAnnualPct = solveIrrAnnualPct([-outlay, ...holdSeries]);
-    let payoutMonths: number | null = null;
-    let cum = 0;
-    for (let t = 0; t < H; t++) { cum += holdSeries[t]; if (cum >= outlay) { payoutMonths = t + 1; break; } }
-    return {
-      scenario, pv10AsIsUsd, pv10OptimizedUsd, upliftPv10Usd: pv10OptimizedUsd - pv10AsIsUsd,
-      entryUsd, holdNetCashFlowUsd, exitRemainingPv10Usd, exitProceedsUsd, capexUsd: a.optimizationCapexUsd,
-      profitUsd, moic, irrAnnualPct, payoutMonths, forecastMonths: opt.length, holdCoversFullForecast: opt.length <= H,
-    };
+    return evaluateFlipCashFlows(asIs, opt, scenario, entryUsd, a);
   });
 
   // Each lever alone, at a disclosed unit step, base scenario, full horizon.
@@ -214,4 +195,35 @@ export function computeFlipAnalysis(
   }));
 
   return { schemaVersion: FLIP_SCHEMA_VERSION, sufficientData: true, entryBasis, assumptions: a, scenarios, leverSensitivity, notes };
+}
+
+/** Shared package/single-asset arithmetic. Inputs are already aligned net cash flows. */
+export function evaluateFlipCashFlows(asIs:number[],opt:number[],scenario:Scenario,entryUsd:number,a:FlipAssumptions):FlipScenarioResult {
+ const H=Math.max(1,Math.round(a.holdMonths));
+    const pv10AsIsUsd = pv10Slice(asIs, 0, Infinity);
+    const pv10OptimizedUsd = pv10Slice(opt, 0, Infinity);
+    const holdNetCashFlowUsd = sum(opt, 0, H);
+    const exitRemainingPv10Usd = pv10Slice(opt, H, Infinity);
+    const grossExitUsd = exitRemainingPv10Usd * a.exitMultipleOfPv10;
+    const exitProceedsUsd = grossExitUsd - Math.max(0,grossExitUsd) * a.transactionCostPct;
+    const outlay = entryUsd + a.optimizationCapexUsd;
+    const profitUsd = exitProceedsUsd + holdNetCashFlowUsd - outlay;
+    const moic = outlay > 0 ? (exitProceedsUsd + holdNetCashFlowUsd) / outlay : null;
+    const holdSeries = opt.slice(0, H);
+    while (holdSeries.length < H) holdSeries.push(0);
+    holdSeries[H - 1] += exitProceedsUsd;
+    const irrSeries=[-outlay,...holdSeries];
+    const signs=irrSeries.filter(v=>v!==0).map(v=>Math.sign(v));
+    const signChanges=signs.slice(1).filter((sign,i)=>sign!==signs[i]).length;
+    // Multiple sign changes can imply multiple IRRs; the existing bisection
+    // solver does not establish uniqueness, so do not publish an arbitrary root.
+    const irrAnnualPct = signChanges===1 ? solveIrrAnnualPct(irrSeries) : null;
+    let payoutMonths: number | null = null;
+    let cum = 0;
+    for (let t = 0; t < H; t++) { cum += holdSeries[t]; if (cum >= outlay) { payoutMonths = t + 1; break; } }
+    return {
+      scenario, pv10AsIsUsd, pv10OptimizedUsd, upliftPv10Usd: pv10OptimizedUsd - pv10AsIsUsd,
+      entryUsd, holdNetCashFlowUsd, exitRemainingPv10Usd, exitProceedsUsd, capexUsd: a.optimizationCapexUsd,
+      profitUsd, moic, irrAnnualPct, payoutMonths, forecastMonths: opt.length, holdCoversFullForecast: opt.length <= H,
+    };
 }

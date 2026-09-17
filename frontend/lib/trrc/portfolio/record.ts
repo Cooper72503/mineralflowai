@@ -1,11 +1,13 @@
 /** Portfolio evidence reconciliation. Gross lease production is never seller net production. */
 import {z} from "zod";
+import {PortfolioScenarioSchema,evaluatePortfolioScenario,assessPortfolioForecastReadiness} from "./scenario";
 import {buildDecisionRecord,validateDecisionRecord,type DecisionRecord} from "../decision-record";
 import {normalizeApiNumber} from "../normalization";
 import type {LiteSourceAttempt} from "../coverage";
 export const PortfolioRequest=z.object({
  members:z.array(z.object({input:z.string().trim().min(1).max(500),runId:z.string().uuid().nullable()}).strict()).min(1).max(100),
  askingPriceUsd:z.number().finite().positive().nullable().default(null),
+ scenario:PortfolioScenarioSchema.optional(),
  claimedWellCount:z.number().int().positive().max(10000).nullable().default(null),
 }).strict();
 export type PortfolioInput=z.infer<typeof PortfolioRequest>;
@@ -26,6 +28,7 @@ export function buildPortfolioRecord(raw:PortfolioInput,runs:RetainedRun[],asOf=
  const records:Record<string,DecisionRecord>={};
  const blockers:string[]=[];
  const groups=new Map<string,{key:string;district:string;leaseNumber:string;leaseType:string;apis:Set<string>;observations:Observation[]}>();
+ const excludedProductionRows:{runId:string;row:number;reason:string}[]=[];
  const parsedRuns=new Map<string,{groupKey:string|null;reason:string|null}>();
  for(const run of runs){
   const api=normalizeApiNumber(run.original_input)?.api10;
@@ -55,9 +58,14 @@ export function buildPortfolioRecord(raw:PortfolioInput,runs:RetainedRun[],asOf=
      const observations:Observation[]=[];
      for(let i=0;i<rows.length;i++){
       const row=rows[i] as Record<string,unknown>|null;
-      if(!row||typeof row!=="object"||typeof row.production_month!=="string"||!/^\d{4}-(0[1-9]|1[0-2])(?:-01)?$/.test(row.production_month)||row.production_month.slice(0,7)>=asOf.slice(0,7)||PHASES.some(p=>row[p]!==null&&row[p]!==undefined&&(typeof row[p]!=="number"||!Number.isFinite(row[p])||(row[p] as number)<0))){reason="Production contains invalid volumes, dates, or a current/future incomplete month.";break;}
+      if(!row||typeof row!=="object"||typeof row.production_month!=="string"||!/^\d{4}-(0[1-9]|1[0-2])(?:-01)?$/.test(row.production_month)||PHASES.some(p=>row[p]!==null&&row[p]!==undefined&&(typeof row[p]!=="number"||!Number.isFinite(row[p])||(row[p] as number)<0))){reason="Production contains invalid volumes, dates, or a current/future incomplete month.";break;}
+      if(row.production_month.slice(0,7)>=asOf.slice(0,7)){
+       excludedProductionRows.push({runId:run.id,row:i,reason:"Current/future month excluded from completed-month aggregation; original row retained in source evidence."});
+       continue;
+      }
       observations.push({month:row.production_month.slice(0,7),values:Object.fromEntries(PHASES.map(p=>[p,row[p]??null])) as Record<Phase,number|null>,citations:[{runId:run.id,evidenceId:prod.id,pointer:`/rows/${i}`}]});
      }
+     if(!reason&&!observations.length)reason="No completed production months available.";
      if(!reason){
       groupKey=`TX:${district}:${leaseType}:${lease}`;
       const group=groups.get(groupKey)??{key:groupKey,district,leaseNumber:lease,leaseType,apis:new Set<string>(),observations:[]};
@@ -116,12 +124,22 @@ export function buildPortfolioRecord(raw:PortfolioInput,runs:RetainedRun[],asOf=
   return [phase,{status:complete?"calculated":"insufficient_data",value:complete?sum:null,reason:complete?null:"A stream/month/phase or confirmation of the offered inventory count is missing or conflicting.",citations:cells.flatMap(c=>c?.citations??[])} satisfies Volume];
  })) as Record<Phase,Volume>}));
  if(input.claimedWellCount===null)blockers.push("Offered well count has not been supplied; package inventory completeness is unverified.");
- blockers.push("Portfolio title/ownership and operated-asset valuation handoffs are not connected in this evidence record; it cannot produce a buy recommendation yet.","Reviewed seller WI/NRI, title, lease participation and sale scope are required before gross lease production can be treated as acquired production.","Operating costs, injection history, capital/plugging obligations, supported forecasts and buyer return criteria are required for an operated-asset acquisition decision.");
+ blockers.push("Reviewed title/ownership has not been linked to the portfolio sale scope; conditional economics are not an acquisition approval.","Reviewed seller WI/NRI, title, lease participation and sale scope are required before gross lease production can be treated as acquired production.","Operating costs, injection history, capital/plugging obligations, supported forecasts and buyer return criteria are required for an operated-asset acquisition decision.");
+ const forecastReadiness=assessPortfolioForecastReadiness(leaseStreams,asOf);
+ for(const readiness of forecastReadiness){
+  if(readiness.reason)blockers.push(`${readiness.streamKey}: ${readiness.reason}`);
+  if(readiness.trailingUnreportedMonths>0)blockers.push(`${readiness.streamKey}: ${readiness.trailingUnreportedMonths} trailing completed months have no reported oil volumes; latest reported month ${readiness.latestReportedOilMonth??"unavailable"}.`);
+ }
+ const conditionalEconomics=input.scenario ? inventoryComplete
+  ? evaluatePortfolioScenario(leaseStreams,input.scenario,input.askingPriceUsd,asOf)
+  : {status:"insufficient_data",settings:input.scenario,reasons:["Inventory/production reconciliation must be complete before running a package scenario."],scenarios:[],valuationMonth:asOf.slice(0,7),method:"existing_arps_and_cashflow_engines_sum_unique_streams_then_shared_flip_v1",disclosures:[]}
+  : null;
  return {
+  conditionalEconomics,forecastReadiness,
   schemaVersion:"mineralflow-portfolio-evidence-1.0.0",generatedAt:asOf,input,
   inventory:{submittedEntries:members.length,distinctValidApis:distinctApis.size,claimedWellCount:input.claimedWellCount,duplicateApiEntries,members},
-  production:{basis:"gross_regulatory_lease_streams_not_acquired_interest",method:"unique_texas_district_lease_type_lease_month_phase_v1",leaseStreams,grossMonthly},
-  economics:{askingPriceUsd:input.askingPriceUsd===null?unavailable("No asking price supplied."):{status:"provided_assumption",value:input.askingPriceUsd,origin:"/input/askingPriceUsd"},maximumBuyPriceUsd:unavailable("Operated-asset cash-flow handoff is not connected to this portfolio record. Reviewed acquired interests, costs, forecasts and buyer return criteria are required; royalty values are not substituted.","portfolio_engine_not_connected"),remainingRecoverableVolumes:unavailable("Package forecast handoff is not connected; historical production is not reserves.","portfolio_engine_not_connected"),exitValueUsd:unavailable("Portfolio exit valuation handoff is not connected. Holding period, remaining cash flows, exit valuation basis and selling costs are required.","portfolio_engine_not_connected")},
+  production:{excludedProductionRows,basis:"gross_regulatory_lease_streams_not_acquired_interest",method:"unique_texas_district_lease_type_lease_month_phase_v1",leaseStreams,grossMonthly},
+  economics:{askingPriceUsd:input.askingPriceUsd===null?unavailable("No asking price supplied."):{status:"provided_assumption",value:input.askingPriceUsd,origin:"/input/askingPriceUsd"},maximumBuyPriceUsd:unavailable("Verified acquired-interest valuation requires title linkage. Explicit conditional cash-flow scenarios are available separately under conditionalEconomics.","reviewed_acquisition_scope_missing"),remainingRecoverableVolumes:unavailable("Existing Arps forecast volumes are available within a supplied conditional scenario; certified reserves are not established.","reviewed_acquisition_scope_missing"),exitValueUsd:unavailable("Conditional exit values are calculated in conditionalEconomics; verified acquired-interest exit valuation remains withheld.","reviewed_acquisition_scope_missing")},
   decision:{posture:"INSUFFICIENT_DATA",goldValidated:false,blockers:[...new Set(blockers)]},
   retainedRunRecords:records,
   disclosures:["Identical lease-month observations across wells or repeated runs count once. Conflicting phase values are withheld.","Null or absent phase volumes are not zero. Streams with different oil/gas lease types are distinct.","Totals cover the identified regulatory streams, not proven ownership of all their production. No well-level allocation is inferred.","Source hashes cover retained parsed responses, not independently archived original source pages.","This portfolio evidence record is not a completed acquisition GOLD Decision Record."]
