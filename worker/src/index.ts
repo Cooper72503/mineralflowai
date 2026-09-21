@@ -26,6 +26,7 @@ import { checkedQuery } from "./persistence.js";
 import { createClient } from "@supabase/supabase-js";
 import { runLandmanSequencer } from "./sequencer.js";
 import { runTitleResearchJob } from "./title-sequencer.js";
+import {processPackages} from "./package-jobs.js";
 import { closeBrowser } from "./tools/browser.js";
 
 const SUPABASE_URL             = process.env.SUPABASE_URL             ?? "";
@@ -215,6 +216,13 @@ async function recoverStaleRuns(): Promise<void> {
   }
 }
 
+let packagePollActive=false;
+async function pollPackages(){
+ if(packagePollActive)return;
+ packagePollActive=true;
+ try{await processPackages(supabase);}finally{packagePollActive=false;}
+}
+
 async function main() {
   console.log(`[worker] MineralFlow TRRC Worker starting — max ${MAX_CONCURRENT} concurrent runs — standalone sequencer, no LLM dependency`);
   console.log(`[worker] polling every ${POLL_INTERVAL_MS}ms`);
@@ -238,6 +246,8 @@ async function main() {
   setInterval(() => { poll().catch(console.error); pollTitleJobs().catch(console.error); }, POLL_INTERVAL_MS);
   await poll(); // immediate first poll
   await pollTitleJobs();
+  setInterval(()=>{pollPackages().catch(console.error);},POLL_INTERVAL_MS);
+  await pollPackages().catch(console.error);
 }
 
 main().catch(err => {

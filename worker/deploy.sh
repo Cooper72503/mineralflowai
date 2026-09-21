@@ -22,7 +22,13 @@ npm install
 npx playwright install chromium
 npx playwright install-deps chromium
 
-# 4. Build TypeScript
+# 4. Build TypeScript and bundle the existing GOLD/portfolio engines.
+# Requires a full repository checkout, with worker/ beside frontend/.
+if [ ! -f ../frontend/package-lock.json ]; then
+  echo "Build requires the full repository (worker/ and frontend/). Alternatively build in CI and deploy the complete worker/dist directory."
+  exit 1
+fi
+npm ci --prefix ../frontend --include=dev
 npm run build
 
 # 5. Install pm2 for process management

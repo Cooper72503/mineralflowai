@@ -1,3 +1,28 @@
+# Current cycle — durable package orchestration and automatic records
+
+**GOLD reports validated: 0/10.** Complete acquisition acceptance remains unproven.
+
+- The package page now atomically queues 1–50 API entries with persistent membership,
+  regulatory runs and linked title jobs. Invalid entries remain in the work product.
+- Request keys protect against duplicate submissions after a lost response. Package
+  URLs restore status after refresh; retrieval and assembly continue without a tab.
+- Worker finalization reuses bundled existing portfolio/GOLD engines, saves an
+  immutable evidence snapshot and per-run GOLD drafts, and makes them downloadable.
+- Title review and missing ownership/forecast/economic inputs remain explicit;
+  evidence_ready is not a completed acquisition recommendation.
+- Expired generation claims are recoverable. Claim tokens and run/title versions
+  prevent stale workers from publishing. Failures are retained and retried, with
+  a manual retry after five generation failures.
+- Verified 849 frontend tests, 119 worker tests, TypeScript/build checks, and an
+  isolated PostgreSQL test running the compiled worker and real bundled engines.
+  The integration fixture is synthetic, not an authenticated production run.
+- Deploy migration 036, full worker dist (including report-engine.mjs), then frontend.
+  See docs/durable-packages-deployment.md. Remote intake base verified as c430dee.
+- Remaining: signed-in production acceptance, reviewed ownership/sale-scope handoff,
+  partner/forecast inputs, and complete benchmark acquisition reports. The legacy
+  single-run endpoint does not yet automatically create a package snapshot.
+
+---
 # Current cycle — atomic worker intake
 
 **GOLD reports validated: 0/10.** No new complete acquisition pass claimed.

@@ -8,7 +8,7 @@
  * those?" Paste a list of wells, submit them all at once, watch each one
  * complete, jump into any individual report.
  *
- * Batch submission state is local to this page. The portfolio evidence review
+ * API package submission is persisted before workers begin retrieval. The portfolio evidence review
  * below can persist the complete submitted membership and retained evidence as
  * an account-scoped snapshot, reopenable through its record URL. It reconciles
  * shared lease production; operated-asset valuation is still a separate handoff.
@@ -90,43 +90,76 @@ export default function PortfolioPage() {
 
   const inputCount = parseInputs(rawText).length;
 
+  const [packageId,setPackageId]=useState<string|null>(null);
+  const [packageStatus,setPackageStatus]=useState<string|null>(null);
+  const [savedRecordId,setSavedRecordId]=useState<string|null>(null);
+  const requestRef=useRef<{inputs:string;key:string}|null>(null);
+  useEffect(()=>{
+    const url=new URL(window.location.href);
+    setPackageId(url.searchParams.get("package"));
+    setSavedRecordId(url.searchParams.get("record"));
+  },[]);
   const handleSubmit = useCallback(async () => {
-    const inputs = parseInputs(rawText);
-    if (inputs.length === 0) return;
-    setSubmitting(true);
-    setSubmitError(null);
-    setRows(inputs.map(input => ({ input, runId: null, status: "creating", progress: 0, error: null })));
-
+    const inputs=parseInputs(rawText);if(!inputs.length)return;
+    setSubmitting(true);setSubmitError(null);
     try {
-      const res = await apiFetch("/api/trrc/due-diligence/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputs }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        setSubmitError(data.error ?? "Failed to submit batch.");
-        setRows([]);
-        return;
+      const signature=JSON.stringify(inputs);
+      if(!requestRef.current||requestRef.current.inputs!==signature){
+        const stored=sessionStorage.getItem("mineralflow-package-submission");
+        const prior=stored?JSON.parse(stored):null;
+        requestRef.current=prior?.inputs===signature?prior:{inputs:signature,key:crypto.randomUUID()};
+        sessionStorage.setItem("mineralflow-package-submission",JSON.stringify(requestRef.current));
       }
-      const results = data.data.results as Array<{ original_input: string; ok: boolean; id?: string; status?: string; needs_user_selection?: boolean; error?: string }>;
-      setRows(results.map(r => ({
-        input: r.original_input,
-        runId: r.ok ? r.id ?? null : null,
-        status: r.ok ? (r.needs_user_selection ? "awaiting_selection" : (r.status ?? "pending")) : "create_failed",
-        progress: 0,
-        error: r.ok ? null : (r.error ?? "Failed to create run"),
-      })));
-    } catch {
-      setSubmitError("Lost connection while submitting the batch.");
-      setRows([]);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [rawText, apiFetch, parseInputs]);
+      const response=await apiFetch("/api/trrc/due-diligence/packages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requestKey:requestRef.current!.key,inputs})});
+      const result=await response.json();if(!result.ok)throw Error(result.error??"Package submission failed.");
+      setPackageId(result.data.id);setSavedRecordId(null);setPackageStatus("queued");
+      const url=new URL(window.location.href);url.searchParams.set("package",result.data.id);url.searchParams.delete("record");window.history.replaceState(null,"",url);
+    }catch(error){setSubmitError(error instanceof Error?error.message:"Connection lost. Retry this submission to recover the same package.");}
+    finally{setSubmitting(false);}
+  },[rawText,apiFetch,parseInputs]);
+  useEffect(()=>{
+    if(!packageId)return;
+    let stopped=false,inFlight=false;
+    const refresh=async()=>{
+      if(inFlight)return;inFlight=true;
+      try{
+        const result=await apiFetch(`/api/trrc/due-diligence/packages/${packageId}`).then(r=>r.json());
+        if(stopped)return;
+        if(!result.ok)throw Error(result.error??"Package refresh failed.");
+        const pkg=result.data;
+        setPackageStatus(pkg.status);setSubmitError(pkg.error_summary??null);
+        setRows(pkg.members_json.map((m:{input:string;runId:string|null;error:string|null})=>{
+          const run=pkg.runs.find((r:{id:string})=>r.id===m.runId);
+          return {input:m.input,runId:m.runId,status:run?.status??"create_failed",progress:run?.progress_percent??0,error:run?.error_summary??run?.title_setup_warning??m.error};
+        }));
+        if(pkg.record_id){setSavedRecordId(pkg.record_id);const url=new URL(window.location.href);url.searchParams.set("record",pkg.record_id);window.history.replaceState(null,"",url);}
+      }catch(error){if(!stopped)setSubmitError(error instanceof Error?error.message:"Package refresh failed; saved work continues.");}
+      finally{inFlight=false;}
+    };
+    void refresh();const timer=setInterval(refresh,POLL_MS);
+    return ()=>{stopped=true;clearInterval(timer);};
+  },[packageId,apiFetch]);
+
+  const newReview=()=>{
+    requestRef.current=null;sessionStorage.removeItem("mineralflow-package-submission");
+    setPackageId(null);setPackageStatus(null);setSavedRecordId(null);setRows([]);setSubmitError(null);
+    const url=new URL(window.location.href);url.searchParams.delete("package");url.searchParams.delete("record");window.history.replaceState(null,"",url);
+  };
+  const downloadGold=async()=>{
+    try{
+      const res=await apiFetch(`/api/trrc/due-diligence/packages/${packageId}?format=gold2-json`);
+      if(!res.ok)throw Error("Saved GOLD drafts could not be downloaded.");
+      const url=URL.createObjectURL(await res.blob());const a=document.createElement("a");a.href=url;a.download=`MineralFlow-${packageId}-GOLD-drafts.json`;a.click();URL.revokeObjectURL(url);
+    }catch(error){setSubmitError(error instanceof Error?error.message:"Download failed.");}
+  };
+  const retryPackage=async()=>{
+    try{const res=await apiFetch(`/api/trrc/due-diligence/packages/${packageId}`,{method:"POST"});const body=await res.json();if(!body.ok)throw Error(body.error);setSubmitError(null);setPackageStatus("queued");}
+    catch(error){setSubmitError(error instanceof Error?error.message:"Retry failed.");}
+  };
 
   // Poll every run in the batch that isn't in a terminal state yet.
   useEffect(() => {
+    if(packageId)return;
     const hasActive = rows.some(r => r.runId && !["complete", "failed", "cancelled", "create_failed"].includes(r.status));
     if (!hasActive) {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -157,7 +190,7 @@ export default function PortfolioPage() {
     pollRef.current = interval;
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows.map(r => `${r.runId}:${r.status}`).join(","), apiFetch]);
+  }, [rows.map(r => `${r.runId}:${r.status}`).join(","), apiFetch, packageId]);
 
   const [bundling, setBundling] = useState(false);
   const [bundleError, setBundleError] = useState<string | null>(null);
@@ -302,7 +335,11 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        <PortfolioReview members={rows.map(r=>({input:r.input,runId:r.runId}))} />
+        {packageId&&<p style={{color:COLORS.textMuted}}>Saved package: {packageStatus??"loading"}. Retrieval continues when this page is closed. A saved evidence record will appear automatically; title review and missing data remain explicit.</p>}
+        {packageId&&<button onClick={newReview}>Start a new package review</button>}
+        {packageStatus==="evidence_ready"&&<button onClick={downloadGold}>Download saved GOLD drafts (JSON)</button>}
+        {packageStatus==="failed"&&<button onClick={retryPackage}>Retry package report generation</button>}
+        <PortfolioReview key={savedRecordId??"new"} members={rows.map(r=>({input:r.input,runId:r.runId}))} />
 
         {rows.length > 0 && (
           <>

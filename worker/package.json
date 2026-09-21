@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node --loader ts-node/esm src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/build-report-engine.mjs",
     "start:prod": "node dist/index.js",
     "test": "vitest run"
   },
