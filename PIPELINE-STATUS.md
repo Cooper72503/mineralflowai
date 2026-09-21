@@ -1,3 +1,39 @@
+# Current cycle — retrieve exposed county document previews
+
+**GOLD reports validated: 0/10.** No acquisition acceptance added.
+
+- Live Midland browser inspection found a public three-page document preview for
+  MASK instrument 2019-34704; image access is not categorically purchase-only.
+- Added worker retrieval of exposed publicsearch previews for exact unit-name
+  index matches. All pages retained together; partial downloads fail; no ownership
+  verification or tract confirmation inferred. Source links/hashes retained.
+- Retrieval failures and unprocessed previews produce specific review items.
+- Worker 134/134 tests and full build pass (fixture execution). Live deployed-worker
+  retrieval/storage/OCR not verified: local Chromium installation was blocked.
+- No migration. Runtime dependency pdf-lib added; worker dependencies must ship.
+- Instructions and remaining limitations: docs/county-preview-retrieval.md.
+
+---
+# Current cycle — Midland search must prove an empty result
+
+**GOLD reports validated: 0/10.** No new complete acquisition decision.
+
+- Verified remote audit branch cb9bcde matches the local pre-change source tree.
+- Audited publicsearch.us retrieval: it previously interpreted an unloaded or
+  unrecognized page as a successful empty search. Now requires an explicit
+  no-results message and no unparsed table cells; otherwise returns a retrieval
+  error, which the title sequencer logs as failed.
+- Worker regression: 127/127 tests pass, including loading/login/challenge,
+  changed-layout, explicit-empty and populated-result cases. Browser behavior is
+  mocked for these regressions; this is not a live county acceptance test.
+- Midland connector still retrieves index metadata only. County instrument-image
+  retrieval, extraction against real instruments, tract linkage and supported
+  ownership remain the immediate end-to-end blockers. Index metadata is not title.
+- Buttercup 59990 / 08 is the selected 12-API pilot; no report accepted yet.
+- Deployment: worker code only, no migration. Ship the complete worker dist using
+  the established full-repository build procedure. Frontend unchanged.
+
+---
 # Current cycle — saved reviewed mineral positions reach GOLD
 
 **GOLD reports validated: 0/10.** No real acquisition acceptance added.

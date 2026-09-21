@@ -46,6 +46,7 @@ import { getBrowser } from "./browser.js";
 import type { BrowserContext } from "playwright";
 
 export type CountyRecordEntry = {
+  document_url?: string;
   grantor: string;
   grantee: string;
   doc_type: string;
@@ -181,14 +182,21 @@ const publicSearchUsProvider: CountyRecordsProvider = {
         page.waitForTimeout(8_000),
       ]);
 
-      const rawRows = await page.evaluate(() => {
+      const snapshot = await page.evaluate(() => {
         const trs = Array.from(document.querySelectorAll('table tr[role="row"]'));
-        return trs.map(tr => Array.from(tr.querySelectorAll("td")).map(td => (td.textContent ?? "").trim()));
+        return {
+          rows: trs.map(tr => Array.from(tr.querySelectorAll("td")).map(td => (td.textContent ?? "").trim())),
+          text: document.body.innerText,
+          documentIds: trs.map(tr => tr.querySelector('input[type="checkbox"]')?.getAttribute("aria-label")?.match(/Document (\d+),/)?.[1] ?? null),
+        };
       });
+      const rawRows = snapshot.rows;
+      const links = new Map(rawRows.map((r, i) => [r, snapshot.documentIds?.[i] ? `https://${slug}.tx.publicsearch.us/doc/${snapshot.documentIds[i]}` : undefined]));
 
       const records: CountyRecordEntry[] = rawRows
         .filter(r => r.length >= 10)
         .map(r => ({
+          document_url: links.get(r),
           grantor: r[3] ?? "",
           grantee: r[4] ?? "",
           doc_type: r[5] ?? "",
@@ -198,6 +206,17 @@ const publicSearchUsProvider: CountyRecordsProvider = {
           legal_description: r[9] ?? "",
         }))
         .filter(r => r.grantor || r.grantee);
+
+      // An empty DOM is not evidence of an empty search. Loading pages,
+      // login/challenge pages and changed table layouts must remain failures.
+      // Require an explicit rendered no-results message for a confirmed empty.
+      if (records.length === 0) {
+        const hasDataCells = rawRows.some(row => row.length > 0);
+        const explicitEmpty = /\bno (?:search )?results(?: found)?\b|\bno records found\b|\b0 results\b/i.test(snapshot.text);
+        if (hasDataCells || !explicitEmpty) {
+          throw new Error("County search outcome unverified: no parseable records and no unambiguous empty result. The page may not have loaded or its layout may have changed.");
+        }
+      }
 
       return {
         found: records.length > 0,

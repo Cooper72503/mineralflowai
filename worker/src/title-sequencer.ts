@@ -36,6 +36,8 @@ import * as ewa from "./tools/ewa.js";
 import * as browser from "./tools/browser.js";
 import * as countyRecords from "./tools/county-records.js";
 
+import { getCountyDocument } from "./tools/county-documents.js";
+
 export const TITLE_DOCUMENTS_BUCKET = "title-documents";
 export const MAX_CODA_DOCS_PER_WELL = 8;
 export const MAX_COUNTY_QUERIES_PER_JOB = 12;
@@ -63,6 +65,7 @@ export interface TitleJobDeps {
   getCountyRecords: typeof countyRecords.getCountyRecords;
   findProvider: typeof countyRecords.findProvider;
   fetchBytes: (url: string) => Promise<{ ok: boolean; bytes: Buffer; contentType: string | null; error?: string }>;
+  getCountyDocument?: typeof getCountyDocument;
   now: () => string;
 }
 
@@ -84,6 +87,7 @@ export const defaultDeps: TitleJobDeps = {
       return { ok: false, bytes: Buffer.alloc(0), contentType: null, error: String(e) };
     }
   },
+  getCountyDocument,
   now: () => new Date().toISOString(),
 };
 
@@ -342,6 +346,7 @@ export async function storeIndexEntries(supabase: SupabaseClient, jobId: string,
 
 export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[]): Promise<void> {
   let queries = 0;
+  const downloaded = new Set<string>();
   const followups: Array<{ county: string; name: string }> = [];
   const unavailable = new Set<string>();
 
@@ -369,7 +374,7 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
         await logSearch(supabase, jobId, userId, { provider: providerId, county, queryType: q.type, queryValue: q.value, status: "skipped_bounded", resultCount: 0, error: `Query budget of ${MAX_COUNTY_QUERIES_PER_JOB} reached` });
         continue;
       }
-      if (await alreadySearched(supabase, jobId, providerId, q.type, q.value)) continue;
+      if (q.type !== "lease_name" && await alreadySearched(supabase, jobId, providerId, q.type, q.value)) continue;
       queries++;
       const r = await deps.getCountyRecords(county, q.value).catch(e => ({ found: false, status: "automated" as const, county, provider: provider.provider.id, records: [] as IndexEntry[], total_count: 0, search_url: "", message: String(e), error: String(e) }));
       const status = r.error ? "failed" : r.status === "manual_required" ? "provider_unavailable" : r.records.length > 0 ? "success" : "empty";
@@ -377,6 +382,38 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
       if (r.records.length > 0) {
         const stored = await storeIndexEntries(supabase, jobId, county, r.search_url, r.records);
         for (const n of stored.grantorNames) followups.push({ county, name: n });
+        // Exact normalized unit-name match is a discovery filter, not tract proof.
+        // Broad operator/party results must never trigger indiscriminate downloads.
+        if (q.type === "lease_name" && deps.getCountyDocument) {
+          const normalize = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, "");
+          for (const entry of r.records) {
+            if (normalize(entry.legal_description) !== normalize(q.value)) continue;
+            if (!entry.document_url) {
+              await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} has no retrieval link`, "The index matched the unit name but did not expose a supported document link. Document retrieval is incomplete.", { county, sourceUrl: r.search_url });
+              continue;
+            }
+            if (downloaded.has(entry.document_url)) continue;
+            if (downloaded.size >= 8) {
+              await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", "More unit-name candidates exist than the eight-document automatic retrieval limit. Coverage is incomplete.", { county });
+              break;
+            }
+            downloaded.add(entry.document_url);
+            const { data: savedPreview } = await checkedQuery(supabase.from("title_documents").select("id").eq("job_id", jobId).eq("source_url", entry.document_url).eq("source", "county_public_preview").limit(1), "title_documents");
+            if (savedPreview?.length) continue;
+            const document = await deps.getCountyDocument(entry.document_url);
+            if (!document.ok) {
+              await logSearch(supabase, jobId, userId, { provider: "county_public_preview", county, queryType: "document", queryValue: entry.document_url, status: "failed", resultCount: 0, error: document.error, sourceUrl: entry.document_url });
+              await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} could not be retrieved`, document.error, { county, sourceUrl: entry.document_url });
+              continue;
+            }
+            await storeRemoteDocument(supabase, { ...deps, fetchBytes: async () => ({ ok: true, bytes: document.bytes, contentType: "application/pdf" }) }, jobId, userId, null, {
+              url: entry.document_url, source: "county_public_preview", sourceIdentifier: `${county}:${entry.doc_number}:public-preview:${document.pageCount}-pages`, category: "other", fileName: `${entry.doc_number.replace(/[^a-z0-9-]/gi, "_")}-public-preview.pdf`,
+            });
+            await addReviewItem(supabase, jobId, userId, "document_review", `County preview ${entry.doc_number}: extraction and tract review required`, "Public preview retrieved. Check the document storage/search log, process ingestion, and review its legal description before using it in ownership analysis.", { county, sourceUrl: entry.document_url, pageCount: document.pageCount });
+            await appendLimitation(supabase, jobId, "County public preview images were retrieved automatically. They are not certified copies; unit-name matching does not establish tract scope. Extraction and review remain required.");
+          }
+        }
+
       }
     }
   }

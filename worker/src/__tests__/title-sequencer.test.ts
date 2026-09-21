@@ -233,3 +233,23 @@ describe("title current-row selection", () => {
     expect(store.title_review_items.some(r=>r.kind==="well_identity_ambiguous")).toBe(true);
   });
 });
+
+describe("automatic county previews", () => {
+ it("retrieves unit-name candidates, excludes unrelated records, and leaves instruments unverified", async () => {
+  const {supabase, store} = makeSupabase(seedJob());
+  const doc = {grantor:"A",grantee:"B",doc_type:"MINERAL DEED",recorded_date:"2020-01-01",doc_number:"123",book_volume_page:"",legal_description:"DOE UNIT",document_url:"https://midland.tx.publicsearch.us/doc/1"};
+  const getDocument = vi.fn(async () => ({ok:true as const,bytes:Buffer.from("%PDF-county-preview"),pageCount:3,sourceUrl:doc.document_url}));
+  const d = deps({
+   findProvider: vi.fn(() => ({provider:{id:"publicsearch_us",name:"x",counties:{},search:vi.fn()},identifier:"midland",displayName:"Midland"})),
+   getCountyRecords: vi.fn(async () => ({found:true,status:"automated" as const,county:"Midland",provider:"publicsearch.us",records:[doc,{...doc,doc_number:"124",document_url:"https://midland.tx.publicsearch.us/doc/2",legal_description:"RESIDENTIAL SUBDIVISION"}],total_count:2,search_url:"https://midland.tx.publicsearch.us/",message:"ok"})),
+   getCountyDocument:getDocument,
+  });
+  await runTitleResearchJob("job-1",supabase,d);
+  expect(getDocument).toHaveBeenCalledTimes(1);
+  expect(store.title_documents.filter(x=>x.source==="county_public_preview")).toHaveLength(1);
+  expect(store.title_instruments.every(x=>x.instrument_content_verified===false)).toBe(true);
+  store.title_research_jobs[0].status="pending";
+  await runTitleResearchJob("job-1",supabase,d);
+  expect(getDocument).toHaveBeenCalledTimes(1);
+ });
+});

@@ -12,7 +12,9 @@
  * isn't suitable for the regular test suite.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { getBrowser } from "../browser.js";
+vi.mock("../browser.js", () => ({ getBrowser: vi.fn() }));
 import { getCountyRecords, getAutomatedCounties, findProvider } from "../county-records.js";
 
 describe("getAutomatedCounties", () => {
@@ -90,5 +92,49 @@ describe("findProvider — case-insensitive county matching (pure, no network)",
     expect(match?.displayName).toBe("Ector");
     expect(match?.provider.id).toBe("tyler_technologies");
     expect(match?.identifier).toBe("ectorcountytx-web");
+  });
+});
+
+
+describe("publicsearch search outcome evidence", () => {
+  async function searchSnapshot(rows: string[][], text: string, documentIds: Array<string | null> = []) {
+    const close = vi.fn().mockResolvedValue(undefined);
+    const page = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      evaluate: vi.fn().mockResolvedValue({ rows, text, documentIds }),
+    };
+    vi.mocked(getBrowser).mockResolvedValue({
+      newContext: async () => ({ newPage: async () => page, close }),
+    } as unknown as Awaited<ReturnType<typeof getBrowser>>);
+    const result = await getCountyRecords("Midland", "BUTTERCUP");
+    expect(close).toHaveBeenCalledOnce();
+    return result;
+  }
+
+  it.each(["Loading...", "Sign in to continue", "Verify you are human", "", "Search unavailable"])(
+    "does not turn an unverified page into a no-records finding: %s", async text => {
+      const result = await searchSnapshot([], text);
+      expect(result.error).toContain("outcome unverified");
+      expect(result.found).toBe(false);
+    },
+  );
+
+  it("accepts an explicitly rendered empty search", async () => {
+    const result = await searchSnapshot([[]], "No results found");
+    expect(result.error).toBeUndefined();
+    expect(result.records).toEqual([]);
+  });
+
+  it("rejects an unrecognized table even if no-results text also appears", async () => {
+    const result = await searchSnapshot([["changed", "layout"]], "No results found");
+    expect(result.error).toContain("outcome unverified");
+  });
+
+  it("preserves retrieved index entries", async () => {
+    const result = await searchSnapshot([["", "", "", "A", "B", "DEED", "2020-01-01", "123", "1/2", "Section 25"]], "1 result", ["39265019"]);
+    expect(result.error).toBeUndefined();
+    expect(result.records[0]).toMatchObject({ grantor: "A", grantee: "B", doc_number: "123", document_url: "https://midland.tx.publicsearch.us/doc/39265019" });
   });
 });
