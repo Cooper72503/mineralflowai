@@ -4,6 +4,7 @@ import {loadPortfolioInputs} from "./load";
 import {buildPortfolioRecord} from "./record";
 import {assembleGold2Draft,validateGold2Draft} from "../gold2/assemble";
 import {loadTitleForApi} from "../gold2/title-link";
+import {loadReviewedPosition} from "../gold2/position-link";
 import {normalizeApiNumber} from "../normalization";
 export async function assemblePackage(db:SupabaseClient,userId:string,raw:unknown){
  const {input,runs}=await loadPortfolioInputs(db,userId,raw);
@@ -25,9 +26,10 @@ export async function assemblePackage(db:SupabaseClient,userId:string,raw:unknow
   if(run.resolved_primary_api&&normalizeApiNumber(run.resolved_primary_api)?.api10!==api)throw Error("Resolved API conflicts with package input");
   const title=await loadTitleForApi(db,api,userId,run.title_research_job_id);
   if(title.status==="query_failed")throw Error("Title evidence query failed; retry package generation");
-  const draft=assembleGold2Draft({api,runId:run.id,asOf,attempts:run.attempts,title:title.title,titleLookup:{status:title.status,reason:title.reason},position:null,partner:null,reconciliationPolicy:null,economics:null});
+  const selectedPosition=await loadReviewedPosition(db,userId,api,title.title);
+  const draft=assembleGold2Draft({api,runId:run.id,asOf,attempts:run.attempts,title:title.title,titleLookup:{status:title.status,reason:title.reason},position:selectedPosition.position,positionLookupReason:selectedPosition.reason,partner:null,reconciliationPolicy:null,economics:null});
   if(validateGold2Draft(draft).length)throw Error("GOLD draft failed validation");
-  goldRecords.push({runId:run.id,retrievalStatus:run.status,draft});
+  goldRecords.push({runId:run.id,retrievalStatus:run.status,positionSelectionReason:selectedPosition.reason,draft});
  }
  return {input,record,goldRecords,versions};
 }

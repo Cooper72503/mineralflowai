@@ -1,3 +1,25 @@
+# Current cycle — saved reviewed mineral positions reach GOLD
+
+**GOLD reports validated: 0/10.** No real acquisition acceptance added.
+
+- Reused the existing exact mineral-position validator/calculator; automatic reports
+  no longer always pass position=null when an explicit supported selection exists.
+- Added immutable review history, exact API/title-scope selection, authenticated
+  review import, and current-analysis guards. Selection changes revise the title job
+  so package publication detects concurrent changes.
+- Single reports and automatic package drafts load and revalidate the saved position.
+  Old-analysis selections are withheld with a re-review reason; query failures are
+  errors, not evidence that ownership does not exist.
+- Regression proves exact NRI reaches the worker GOLD draft, with source scope intact.
+  Frontend 855/855 and isolated database guards pass; worker bundle rebuilt and
+  compiled-worker package integration passes.
+- Deploy migration 037, rebuilt worker report-engine bundle, then frontend.
+  Instructions: docs/reviewed-mineral-position-deployment.md.
+- Mineral royalty only. Operated WI/NRI/sale allocation, generalized extraction of
+  reviewed terms, production verification, partner/forecast inputs and full GOLD
+  acquisition acceptance remain outstanding. Existing snapshots stay immutable.
+
+---
 # Current cycle — durable package orchestration and automatic records
 
 **GOLD reports validated: 0/10.** Complete acquisition acceptance remains unproven.

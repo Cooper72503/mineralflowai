@@ -21,6 +21,7 @@ import type {UnavailableReason} from "./contract";
 import {titleDecisionContext} from "./title-context";
 import {GOLD2_DISCLOSURES} from "./requirements";
 export interface Gold2Input {
+ positionLookupReason?:string|null;
  api:string;asOf:string;runId:string;attempts:LiteSourceAttempt[];
  titleLookup?:{status:"linked"|"not_found"|"ambiguous"|"query_failed"|"in_progress";reason:string|null};
  title:TitleChainAnalysis|null;position:unknown|null;partner:unknown|null;
@@ -56,6 +57,7 @@ export function assembleGold2Draft(input:Gold2Input){
  put("geology.formation",wellContext.formation,"regulatory_evidence","/wellContext/formation","existing_formation_alias_normalizer_v1");
  put("geology.reported_api_depth",wellContext.reportedDepth,"regulatory_evidence","/wellContext/reportedDepth","strict_reported_depth_numeric_v1");
  const ownership=linkReviewedMineralPosition(api,input.title,input.position);
+ if(ownership.status==="insufficient_data"&&!input.position&&input.positionLookupReason)ownership.reason=input.positionLookupReason;
  if(ownership.status==="calculated"){
   for(const [field,key] of Object.entries({"ownership.mineral_fraction":"mineralFraction","ownership.gross_acres":"grossAcres","ownership.unit_acres":"unitAcres","ownership.net_mineral_acres":"netMineralAcres","ownership.tract_participation":"tractParticipation","ownership.lease_royalty":"leaseRoyalty","ownership.nri":"nri"}))put(field,ownership[key as keyof typeof ownership],"reviewed_position",`/ownership/${key}`,ownership.method);
   put("identity.evaluated_position",ownership.position,"reviewed_position","/ownership/position");
@@ -181,6 +183,9 @@ export function assembleGold2Draft(input:Gold2Input){
  put("decision.risk_reasons",decision.trace.filter(r=>r.outcome==="MATCH"),"decision_engine","/decision/trace","matched_decision_conditions_v1");
  put("decision.confidence_domains",rulesInput.confidenceDomains,"decision_engine","/rulesInput/confidenceDomains");
  explainFieldGaps(fields,input,regulator);
+ if(!input.position&&input.positionLookupReason)for(const [key,field] of Object.entries(fields)){
+  if((key.startsWith("ownership.")||key==="identity.evaluated_position")&&field.value===null)field.reason=input.positionLookupReason;
+ }
  const chartInputs=buildChartInputs(fields);
  const calculations=GOLD2_CALCULATIONS.map(c=>({...c,status:c.outputs.every(k=>fields[k].value===null)?"unavailable" as const:"recomputed" as const,
   reason:c.outputs.every(k=>fields[k].value===null)?c.outputs.map(k=>`${k}: ${fields[k].reason}`).join("; "):null,

@@ -4,6 +4,7 @@ import {normalizeApiNumber} from "../normalization";
 import type {LiteSourceAttempt} from "../coverage";
 import {z} from "zod";
 import {assembleGold2Draft} from "./assemble";
+import {loadReviewedPosition} from "./position-link";
 import {loadTitleForApi} from "./title-link";
 import {renderGold2Pdf} from "./pdf";
 export const ReportSupplements=z.object({evidenceScenarios:z.unknown().optional(),position:z.unknown().optional(),partner:z.unknown().optional(),reconciliationPolicy:z.unknown().optional(),economics:z.unknown().optional(),forecastSelection:z.unknown().optional()}).strict();
@@ -21,7 +22,8 @@ export async function generateGold2ForRun(db:SupabaseClient,runId:string,userId:
  try{
   const supplements=ReportSupplements.parse(supplementInput);
   const titleLink=await loadTitleForApi(db,api,userId,run.title_research_job_id);
-  const report=assembleGold2Draft({api,runId,asOf:new Date().toISOString(),attempts,title:titleLink.title,titleLookup:{status:titleLink.status,reason:titleLink.reason},position:null,partner:null,reconciliationPolicy:null,economics:null,...supplements} as Parameters<typeof assembleGold2Draft>[0]);
+  const selectedPosition=Object.prototype.hasOwnProperty.call(supplements,"position")?null:await loadReviewedPosition(db,userId,api,titleLink.title);
+  const report=assembleGold2Draft({api,runId,asOf:new Date().toISOString(),attempts,title:titleLink.title,titleLookup:{status:titleLink.status,reason:titleLink.reason},position:selectedPosition?.position??null,positionLookupReason:selectedPosition?.reason??null,partner:null,reconciliationPolicy:null,economics:null,...supplements} as Parameters<typeof assembleGold2Draft>[0]);
   const bytes=format==="pdf"?await renderGold2Pdf(report):Buffer.from(JSON.stringify(report,null,2)+"\n");
   return {ok:true as const,bytes,filename:`${api}-gold2.${format}`,contentType:format==="pdf"?"application/pdf":"application/json"};
  }catch{return {ok:false as const,status:422,error:"Retained inputs failed report validation; no report containing unvalidated values was delivered."};}

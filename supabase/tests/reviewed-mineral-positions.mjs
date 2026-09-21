@@ -1,0 +1,36 @@
+import {readFileSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
+import assert from 'node:assert/strict';
+const {PGlite}=await import(pathToFileURL(process.argv[2]).href);const db=new PGlite();
+const owner='00000000-0000-4000-8000-000000000001',other='00000000-0000-4000-8000-000000000002',job='00000000-0000-4000-8000-000000000003',analysis='00000000-0000-4000-8000-000000000004';
+try{
+ await db.exec(`create role authenticated;create role anon;create role service_role;create schema auth;create table auth.users(id uuid primary key);insert into auth.users values('${owner}'),('${other}');
+ create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+ grant usage on schema auth to authenticated;alter default privileges in schema public grant execute on functions to anon,authenticated;
+ create table title_research_jobs(id uuid primary key,user_id uuid,latest_analysis_id uuid,updated_at timestamptz default '2000-01-01');
+ create table title_analyses(id uuid primary key,job_id uuid,user_id uuid);
+ create table title_job_wells(job_id uuid,user_id uuid,api10 text);
+ insert into title_research_jobs(id,user_id,latest_analysis_id) values('${job}','${owner}','${analysis}');
+ insert into title_analyses values('${analysis}','${job}','${owner}');
+ insert into title_job_wells values('${job}','${owner}','4216502733');`);
+ await db.exec(readFileSync(new URL('../migrations/037_reviewed_mineral_positions.sql',import.meta.url),'utf8'));
+ await db.exec(`set role authenticated;set request.jwt.claim.sub='${owner}'`);
+ const position={contract:'mineralflow-reviewed-mineral-position-1.0',api:'4216502733',analysisId:analysis,reviewedBy:owner};
+ const save=(p=position,a=analysis,api='4216502733')=>db.query('select save_reviewed_mineral_position($1,$2,$3,$4::jsonb) id',[job,api,a,JSON.stringify(p)]);
+ const first=(await save()).rows[0].id,second=(await save()).rows[0].id;assert.notEqual(first,second);
+ assert.equal((await db.query('select count(*)::int n from trrc_mineral_position_reviews')).rows[0].n,2);
+ await assert.rejects(db.exec('delete from trrc_mineral_position_reviews'),/permission denied/);
+ await assert.rejects(save({...position,reviewedBy:other}),/reviewer mismatch/);
+ await assert.rejects(save(position,analysis,'4216500004'),/API outside/);
+ await db.exec(`set request.jwt.claim.sub='${other}'`);
+ assert.equal((await db.query('select count(*)::int n from trrc_mineral_position_reviews')).rows[0].n,0);
+ await assert.rejects(save(),/Title scope unavailable/);
+ await db.exec('reset role');
+ const persisted=(await db.query('select * from title_research_jobs')).rows[0];
+ assert.equal(persisted.reviewed_position_ids['4216502733'],second);
+ assert(Date.parse(persisted.updated_at)>Date.parse('2000-01-01'));
+ await db.exec(`update title_research_jobs set latest_analysis_id=null;set role authenticated;set request.jwt.claim.sub='${owner}'`);
+ await assert.rejects(save(),/analysis changed/);
+ await db.exec('reset role;set role anon');await assert.rejects(save(),/permission denied/);
+ console.log('PASS: immutable review history, exact selected pointer, job revision update, account/API/reviewer guards, stale-analysis rejection and anonymous denial. Content validation covered by existing ownership engine tests.');
+}finally{await db.close();}

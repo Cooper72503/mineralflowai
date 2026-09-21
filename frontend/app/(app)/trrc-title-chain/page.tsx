@@ -13,6 +13,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApiFetch } from "@/lib/trrc/use-api-fetch";
+import {ReviewedPositionImport} from "./reviewed-position";
 import { COLORS as C } from "./colors";
 import type { CandidateTract, JobWell, WellTractAssociation, InterestScope } from "@/lib/trrc/title/chain-types";
 import type { TitleChainReport } from "@/lib/trrc/title/report";
@@ -273,6 +274,8 @@ function TitleChainPageInner() {
                 <ul style={{ margin: "10px 0 0 0", paddingLeft: 18, color: C.textMuted, fontSize: 12 }}>{bundle.job.limitations_json.map((l, i) => <li key={i}>{l}</li>)}</ul>
               )}
             </Card>
+
+            <ReviewedPositionImport jobId={jobId}/>
 
             <Card title="2. Wells">
               <div style={{ overflowX: "auto" }}>

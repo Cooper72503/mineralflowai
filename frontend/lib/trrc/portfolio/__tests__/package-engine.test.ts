@@ -34,3 +34,19 @@ it("preserves invalid submitted members without invented GOLD records",async()=>
  expect(output.record.inventory.submittedEntries).toBe(1);expect(output.goldRecords).toEqual([]);
  expect(output.record.decision.blockers.length).toBeGreaterThan(0);
 });
+it("automatically carries a selected reviewed mineral position into a worker GOLD draft",async()=>{
+ const {reviewedPositionFixture}=await import("../../__tests__/fixtures/reviewed-position");
+ const {title,position}=reviewedPositionFixture();
+ const value=await vi.mocked(loadPortfolioInputs)({} as never,"owner",{});
+ value.runs[0].title_research_job_id=title.jobId;
+ vi.mocked(loadTitleForApi).mockResolvedValue({title,status:"linked",reason:null});
+ const db={from:(table:string)=>{
+  const job={id:title.jobId,status:"complete",updated_at:"2026-09-10T00:00:00Z",latest_analysis_id:title.analysisId,reviewed_position_ids:{4216502733:"selected"}};
+  const data=table==="title_research_jobs"?job:{analysis_id:title.analysisId,position_json:position};
+  const q:any={select:()=>q,eq:()=>q,in:()=>q,maybeSingle:async()=>({data,error:null}),then:(f:any)=>Promise.resolve({data:[data],error:null}).then(f)};return q;
+ }};
+ const output=await assemblePackage(db as never,"owner",{});
+ expect(output.goldRecords[0].draft.fields['ownership.nri'].value).toEqual({n:"3",d:"256"});
+ expect(output.goldRecords[0].draft.fields['identity.interest_scope'].value).toBe('mineral_royalty');
+ expect(output.versions).toContainEqual({kind:"title",id:title.jobId,status:"complete",updated_at:"2026-09-10T00:00:00Z"});
+});
