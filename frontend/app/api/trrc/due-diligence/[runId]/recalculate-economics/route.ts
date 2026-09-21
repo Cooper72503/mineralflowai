@@ -1,5 +1,5 @@
 import type { LiteSourceAttempt } from "@/lib/trrc/coverage";
-import { productionSeries, currentProduction } from "@/lib/trrc/production-series";
+import { reportedProductionSeries, currentProduction } from "@/lib/trrc/production-series";
 /**
  * POST /api/trrc/due-diligence/[runId]/recalculate-economics
  *
@@ -168,6 +168,7 @@ export async function POST(
   // falls back to the generic LOE default in that case, same documented
   // behavior computeEconomics already has for a null fieldName/county.
   const analytics = computeProductionAnalytics(production);
+  const reported = reportedProductionSeries(analytics.months);
 
   let priceDeck: PriceDeck | null = null;
   if (oilPrice !== null || gasPrice !== null) {
@@ -216,8 +217,8 @@ export async function POST(
   // module-level export since it's only ever called with this request's
   // data.
   const runEconomicsAt = (oil: number, gas: number) => computeEconomics(
-    productionSeries(analytics.months).oil,
-    productionSeries(analytics.months).gas,
+    reported.oil,
+    reported.gas,
     {
       source: "user_input", asOf: "user-adjusted",
       wtiSpotUsdBbl: oil, henryHubUsdMcf: gas,
@@ -254,8 +255,8 @@ export async function POST(
   const econ = runEconomicsAt(priceDeck.wtiSpotUsdBbl, priceDeck.henryHubUsdMcf);
   const flip = computeFlipAnalysis(
     {
-      monthlyOilBbl: productionSeries(analytics.months).oil,
-      monthlyGasMcf: productionSeries(analytics.months).gas,
+      monthlyOilBbl: reported.oil,
+      monthlyGasMcf: reported.gas,
       monthlyWaterBbl: analytics.months.map(m => m.water_bbl),
       nglAndBasis,
     },

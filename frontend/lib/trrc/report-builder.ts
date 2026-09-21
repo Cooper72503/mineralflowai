@@ -1,5 +1,5 @@
 import { normalizeApiNumber } from "./normalization";
-import { productionSeries, currentProduction } from "./production-series";
+import { productionSeries, reportedProductionSeries, currentProduction } from "./production-series";
 import { latestSourceAttempts } from "./coverage";
 /**
  * TRRC Due Diligence Report Builder
@@ -971,7 +971,7 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
   analogWells: AnalogWell[];
   generatedAt: string;
 }) {
-  const oilSeries = productionSeries(analytics.months).oil;
+  const oilSeries = reportedProductionSeries(analytics.months).oil;
   const fit = fitArpsDecline(oilSeries);
   const eur = fit ? estimateEur(fit, analytics.cumulativeOil ?? 0) : null;
   const comparison = eur ? compareToAnalogs(eur.eur, analogWells) : null;
@@ -1124,11 +1124,12 @@ const SCENARIO_LABELS: Record<string, string> = {
   stress: "Stress", base: "Base", strip: "Strip (trailing 12-mo avg)", upside: "Upside",
 };
 
-function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
+function EconomicEvaluationPage({ run, id: identity, econ, generatedAt, reportingLag }: {
   run: TrrcDueDiligenceRun;
   id: WellIdentity;
   econ: EconomicEvaluation;
   generatedAt: string;
+  reportingLag?: { lastReportedMonth: string | null; trailingUnreportedMonths: number };
 }) {
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
@@ -1143,6 +1144,9 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt }: {
     React.createElement(Text, { style: S.noteText },
       "Discounted cash flow (PV-10, PV-15) computed from the Arps decline-curve forecasts in Section 4, under four price scenarios. Screening-grade analysis from public regulatory data and generic cost assumptions — not a certified reserves report. A reservoir engineer and landman should verify before any transaction relies on it.",
     ),
+    reportingLag && reportingLag.trailingUnreportedMonths > 0 ? React.createElement(Text, { style: S.noteText },
+      `Forecast is anchored at the latest month TRRC has reported (${reportingLag.lastReportedMonth ?? "unknown"}); the ${reportingLag.trailingUnreportedMonths} more recent month(s) have not been reported by the regulator yet and are excluded, not treated as zero.`,
+    ) : null,
 
     !econ.sufficientData ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
       React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] },
@@ -2442,9 +2446,10 @@ export async function buildTrrcPdfReport(
     : null;
   const analytics = computeProductionAnalytics(production);
   const priceDeck = await getPriceDeck();
+  const reported = reportedProductionSeries(analytics.months);
   const econ = computeEconomics(
-    productionSeries(analytics.months).oil,
-    productionSeries(analytics.months).gas,
+    reported.oil,
+    reported.gas,
     priceDeck,
     identity.field || null,
     identity.county || null,
@@ -2453,8 +2458,8 @@ export async function buildTrrcPdfReport(
   );
   const flip = computeFlipAnalysis(
     {
-      monthlyOilBbl: productionSeries(analytics.months).oil,
-      monthlyGasMcf: productionSeries(analytics.months).gas,
+      monthlyOilBbl: reported.oil,
+      monthlyGasMcf: reported.gas,
       fieldName: identity.field || null,
       county: identity.county || null,
       monthlyWaterBbl: analytics.months.map(m => m.water_bbl),
@@ -2574,7 +2579,7 @@ export async function buildTrrcPdfReport(
     React.createElement(OperatorStandingPage,   { run, id: identity, attempts, flags, generatedAt }),
     React.createElement(ProductionPage,         { run, id: identity, analytics, generatedAt }),
     React.createElement(EngineeringAnalysisPage,{ run, id: identity, analytics, analogWells, generatedAt }),
-    React.createElement(EconomicEvaluationPage, { run, id: identity, econ, generatedAt }),
+    React.createElement(EconomicEvaluationPage, { run, id: identity, econ, generatedAt, reportingLag: { lastReportedMonth: reported.oilLastReportedMonth, trailingUnreportedMonths: reported.trailingUnreportedOilMonths } }),
     React.createElement(FlipAnalysisPage,       { run, id: identity, flip, generatedAt }),
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),

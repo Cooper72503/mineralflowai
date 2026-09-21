@@ -14,6 +14,45 @@ export function productionSeries(rows: TrrcDDProductionRow[]) {
   return { oil: complete(sorted.map(r => r.oil_bbl)), gas: complete(gas), contiguous };
 }
 
+
+/**
+ * Per-phase series over the REPORTED window only: leading and trailing months
+ * with no reported volume for that phase are trimmed before the strict
+ * productionSeries() contiguity/completeness check runs. TRRC posts lease
+ * production with a 2–3 month lag, so a fresh run always ends in null rows;
+ * productionSeries() correctly refuses to treat those as zero, but discarding
+ * the whole series for it meant Section 5 and the interactive economics were
+ * "insufficient data" on every current well (live-observed 2026-09-21 on
+ * 42-329-42230: 46 reported months, 3 trailing nulls, no fit). Interior
+ * gaps stay fatal exactly as before. This is the same trimming the GOLD
+ * production contract (gold/assemble.ts) already applies; the two must not
+ * drift.
+ */
+export function reportedProductionSeries(rows: TrrcDDProductionRow[]) {
+  const sorted = [...rows].sort((a, b) => a.production_month.localeCompare(b.production_month));
+  const window = (phase: "oil" | "gas") => {
+    const reported = (r: TrrcDDProductionRow) => phase === "oil"
+      ? typeof r.oil_bbl === "number"
+      : typeof r.gas_mcf === "number" || typeof r.casinghead_gas_mcf === "number";
+    let trimmed = sorted;
+    let leading = 0, trailing = 0;
+    while (trimmed.length && !reported(trimmed[0])) { trimmed = trimmed.slice(1); leading++; }
+    while (trimmed.length && !reported(trimmed[trimmed.length - 1])) { trimmed = trimmed.slice(0, -1); trailing++; }
+    return {
+      series: productionSeries(trimmed)[phase],
+      lastReportedMonth: trimmed.length ? trimmed[trimmed.length - 1].production_month.slice(0, 7) : null,
+      leadingUnreportedMonths: leading,
+      trailingUnreportedMonths: trailing,
+    };
+  };
+  const oil = window("oil"), gas = window("gas");
+  return {
+    oil: oil.series, gas: gas.series,
+    oilLastReportedMonth: oil.lastReportedMonth, gasLastReportedMonth: gas.lastReportedMonth,
+    trailingUnreportedOilMonths: oil.trailingUnreportedMonths, trailingUnreportedGasMonths: gas.trailingUnreportedMonths,
+  };
+}
+
 import { latestSourceAttempts, type LiteSourceAttempt } from "./coverage";
 /** Read models must not resurrect stale rows after a failed refresh. */
 export function currentProduction(rows: TrrcDDProductionRow[], attempts: LiteSourceAttempt[]): TrrcDDProductionRow[] {
