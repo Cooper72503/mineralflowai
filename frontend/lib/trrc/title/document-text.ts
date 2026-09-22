@@ -58,9 +58,18 @@ async function pdfTextLayer(buffer: Buffer): Promise<{ text: string; pageCount: 
   return { text, pageCount: parsed.numpages ?? (pages.length || null) };
 }
 
+// tesseract.js caches its language data (eng.traineddata, ~5 MB) to the
+// process working directory by default. On Vercel that is /var/task, which
+// is read-only — the download fails and OCR dies after the pdfjs worker is
+// already fixed. /tmp is the only writable path in the serverless runtime
+// and is reused across warm invocations, so the data downloads once per
+// container rather than once per page.
+const OCR_CACHE_PATH = process.env.OCR_CACHE_PATH ?? (process.env.VERCEL ? "/tmp" : undefined);
+const ocrWorkerOptions = OCR_CACHE_PATH ? { cachePath: OCR_CACHE_PATH } : undefined;
+
 async function ocrImageBuffer(buffer: Buffer): Promise<string> {
   const tesseract = await import("tesseract.js");
-  const worker = await tesseract.createWorker("eng");
+  const worker = await tesseract.createWorker("eng", undefined, ocrWorkerOptions);
   try {
     const { data } = await worker.recognize(buffer);
     return data.text ?? "";
@@ -79,7 +88,7 @@ async function ocrPdfPages(buffer: Buffer, maxPages: number): Promise<{ text: st
     throw new Error(`Document has ${pageCount} pages; exceeds ${maxPages}-page OCR limit. No partial extraction accepted.`);
   }
   const tesseract = await import("tesseract.js");
-  const worker = await tesseract.createWorker("eng");
+  const worker = await tesseract.createWorker("eng", undefined, ocrWorkerOptions);
   const pages: string[] = [];
   try {
     for (let i = 1; i <= Math.min(pageCount, maxPages); i++) {
