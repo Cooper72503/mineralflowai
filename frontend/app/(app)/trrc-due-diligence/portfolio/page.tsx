@@ -309,7 +309,7 @@ export default function PortfolioPage() {
                 {extractNote}
               </div>
             )}
-            <div><label>Seller-stated offered well count<input type="number" min="1" step="1" value={claimedCount} onChange={e=>setClaimedCount(e.target.value)}/></label><label>Package asking price ($; optional)<input type="number" min="0" value={askingPrice} onChange={e=>setAskingPrice(e.target.value)}/></label><ScenarioControls onChange={setScenario}/></div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"0.7rem",marginBottom:"0.75rem"}}><div><label style={{display:"block",fontSize:"0.68rem",color:COLORS.text,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:5}}>Seller-stated offered well count</label><input type="number" min="1" step="1" value={claimedCount} onChange={e=>setClaimedCount(e.target.value)} style={{width:"100%",background:COLORS.surfaceAlt,color:COLORS.text,border:`1px solid ${COLORS.border}`,borderRadius:7,fontSize:"0.9rem",padding:"0.5rem 0.7rem"}}/></div><div><label style={{display:"block",fontSize:"0.68rem",color:COLORS.text,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:5}}>Package asking price ($; optional)</label><input type="number" min="0" value={askingPrice} onChange={e=>setAskingPrice(e.target.value)} style={{width:"100%",background:COLORS.surfaceAlt,color:COLORS.text,border:`1px solid ${COLORS.border}`,borderRadius:7,fontSize:"0.9rem",padding:"0.5rem 0.7rem"}}/></div><ScenarioControls onChange={setScenario}/></div>
           <textarea
               value={rawText}
               onChange={e => setRawText(e.target.value)}
