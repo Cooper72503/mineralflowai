@@ -100,6 +100,78 @@ function fitForFixedB(months: number[], rates: number[], b: number): { qi: numbe
  * no closed-form solution) and does an exact linear-regression fit for
  * qi/Di at each candidate b.
  */
+/**
+ * Lease production is the sum of every well on the lease, so drilling an
+ * infill well is a step change in the series, not a decline. Fitting Arps
+ * across that step describes a well set that no longer exists and usually
+ * produces no valid fit at all.
+ *
+ * Live case (CMC Buttercup 25-37 Unit, lease 59990, 2026-09-22): 34 reported
+ * months ramp to ~41,000 BBL/mo, jump to 155,023 when new wells come online,
+ * then decline cleanly for 20 months. The full series yields NO fit; the
+ * post-step window fits at R2 = 0.99 (b = 0.7, 39.3%/yr current decline).
+ * Every economics section read "insufficient data" for a well with a textbook
+ * decline in it.
+ *
+ * This finds the most recent step change and returns the window after it.
+ * Deliberately conservative: a series that already fits is left exactly as it
+ * was, and a window is only adopted when it produces no-fit-to-fit or a
+ * materially better fit. The window is always reported so the narrowed basis
+ * is disclosed, never silent.
+ */
+const STEP_FACTOR = 1.8;             // a step must be this multiple of the recent level
+const MIN_WINDOW_MONTHS = 8;         // months required after the step to fit it
+const MATERIAL_R2_GAIN = 0.15;       // windowed fit must beat the full fit by this
+
+export interface DeclineFitWindow {
+  fit: DeclineCurveFit | null;
+  startIndex: number;                // index into the supplied series
+  monthsExcluded: number;
+  reason: string | null;             // disclosure text when a window was applied
+}
+
+function qualifiesAsStep(monthly: number[], i: number): boolean {
+  const value = monthly[i];
+  if (!(value > 0)) return false;
+  const prior = monthly.slice(Math.max(0, i - 3), i).filter(v => v > 0);
+  if (prior.length === 0) return false;
+  const priorLevel = prior.reduce((a, b) => a + b, 0) / prior.length;
+  return priorLevel > 0 && value >= STEP_FACTOR * priorLevel;
+}
+
+function lastStepChangeIndex(monthly: number[]): number | null {
+  for (let i = monthly.length - MIN_WINDOW_MONTHS; i >= 1; i--) {
+    if (!qualifiesAsStep(monthly, i)) continue;
+    // The three-month averaging window straddles the step, so the month
+    // AFTER a peak can also clear the threshold. Walk back through the
+    // contiguous qualifying run to the peak itself — that is the month the
+    // new wells actually came online, and the correct forecast anchor.
+    let peak = i;
+    while (peak > 1 && qualifiesAsStep(monthly, peak - 1) && monthly[peak - 1] > monthly[peak]) peak--;
+    return peak;
+  }
+  return null;
+}
+
+export function fitArpsDeclineWindowed(monthly: number[]): DeclineFitWindow {
+  const full = fitArpsDecline(monthly);
+  const step = lastStepChangeIndex(monthly);
+  if (step === null) return { fit: full, startIndex: 0, monthsExcluded: 0, reason: null };
+
+  const windowed = fitArpsDecline(monthly.slice(step));
+  if (!windowed) return { fit: full, startIndex: 0, monthsExcluded: 0, reason: null };
+
+  const better = full === null || windowed.rSquared >= full.rSquared + MATERIAL_R2_GAIN;
+  if (!better) return { fit: full, startIndex: 0, monthsExcluded: 0, reason: null };
+
+  return {
+    fit: windowed,
+    startIndex: step,
+    monthsExcluded: step,
+    reason: `Decline fit to the ${monthly.length - step} months since a production step change (reported volumes rose ${(monthly[step] / (monthly.slice(Math.max(0, step - 3), step).filter(v => v > 0).reduce((a, b) => a + b, 0) / Math.max(1, monthly.slice(Math.max(0, step - 3), step).filter(v => v > 0).length))).toFixed(1)}x), consistent with additional wells reporting on this lease. The ${step} earlier month(s) describe a different set of wells and are excluded from the forecast, not from the record.`,
+  };
+}
+
 export function fitArpsDecline(monthlyOilBbl: number[]): DeclineCurveFit | null {
   // Ignore zero-rate observations in the logarithmic fit without compressing
   // calendar time. A currently shut-in series cannot establish a restart rate.

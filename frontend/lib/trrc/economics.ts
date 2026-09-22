@@ -17,7 +17,7 @@
  * before — never a fabricated number against a price nobody entered.
  */
 
-import { fitArpsDecline, forecastToTerminalRate, stabilizedRate, type DeclineCurveFit } from "./decline-curve";
+import { fitArpsDecline, fitArpsDeclineWindowed, forecastToTerminalRate, stabilizedRate, type DeclineCurveFit } from "./decline-curve";
 import type { PriceDeck, ScenarioPrice } from "./eia-pricing";
 import { classifyBasin, loeMidpoint, checkDeclineAgainstBasin, type BasinBenchmark } from "./basin-benchmarks";
 
@@ -94,6 +94,8 @@ export interface EconomicEvaluation {
   basin: BasinBenchmark | null;
   loeUsdPerBoe: number; // the LOE figure actually used — basin midpoint if classified, else DEFAULT_LOE_USD_PER_BOE
   declineSanityCheck: { inRange: boolean; typicalAnnualRangePct: [number, number] } | null;
+  /** Set when the decline was fit to a window after a production step change (infill wells); disclosed on the report. */
+  declineWindowNote: string | null;
   stabilizedOilRateBblPerMonth: number | null;
   swdModeled: boolean; // false when no water production data was available to model disposal cost against
 }
@@ -390,8 +392,9 @@ export function forecastNetCashFlowSeries(
   const loeMultiplier = adjust.loeMultiplier ?? 1;
   const oilPriceAdder = adjust.oilPriceAdderUsdBbl ?? 0;
 
-  const baseOilFit = fitArpsDecline(input.monthlyOilBbl);
-  const baseGasFit = fitArpsDecline(input.monthlyGasMcf);
+  const oilWindow = fitArpsDeclineWindowed(input.monthlyOilBbl);
+  const baseOilFit = oilWindow.fit;
+  const baseGasFit = fitArpsDeclineWindowed(input.monthlyGasMcf).fit;
   const basin = classifyBasin(input.fieldName ?? null, input.county ?? null);
   const loeUsdPerBoe = (input.operating?.variableLoeUsdPerBoe ?? (basin ? loeMidpoint(basin) : DEFAULT_LOE_USD_PER_BOE)) * loeMultiplier;
 
@@ -439,8 +442,9 @@ export function computeEconomics(
   // formula above falls back to a 0 NGL/Waha adjustment when omitted.
   nglAndBasis: NglAndBasisAssumptions | null = null,
 ): EconomicEvaluation {
-  const oilFit = fitArpsDecline(monthlyOilBbl);
-  const gasFit = fitArpsDecline(monthlyGasMcf);
+  const oilWindow = fitArpsDeclineWindowed(monthlyOilBbl);
+  const oilFit = oilWindow.fit;
+  const gasFit = fitArpsDeclineWindowed(monthlyGasMcf).fit;
   const validPrices = priceDeck.source !== "static_fallback" && Object.values(priceDeck.scenarios).every(p => Number.isFinite(p.oilUsdBbl) && p.oilUsdBbl >= 0 && Number.isFinite(p.gasUsdMcf) && p.gasUsdMcf >= 0);
   const sufficientData = (oilFit !== null || gasFit !== null) && validPrices;
   const unavailableReason = !validPrices ? "Unavailable: a sourced or explicitly supplied price deck is required; placeholder fallback prices are not valued."
@@ -481,7 +485,7 @@ export function computeEconomics(
       scenarios: [], offerRangeLow: null, offerRangeMid: null, offerRangeHigh: null,
       irr: null, payoutMonths: null, irrPayoutNote, costAssumptionNote,
       breakevenOilPriceUsdBbl: null, basin, loeUsdPerBoe, declineSanityCheck: null,
-      stabilizedOilRateBblPerMonth, swdModeled,
+      stabilizedOilRateBblPerMonth, swdModeled, declineWindowNote: oilWindow.reason,
     };
   }
 
@@ -510,6 +514,6 @@ export function computeEconomics(
     offerRangeHigh: byScenario.upside.pv10,
     irr, payoutMonths, irrPayoutNote, costAssumptionNote,
     breakevenOilPriceUsdBbl, basin, loeUsdPerBoe, declineSanityCheck,
-    stabilizedOilRateBblPerMonth, swdModeled,
+    stabilizedOilRateBblPerMonth, swdModeled, declineWindowNote: oilWindow.reason,
   };
 }

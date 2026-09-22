@@ -55,7 +55,7 @@ import { fetchStaticMapImage } from "./maps-builder";
 import { fetchOffsetWells, type OffsetWell } from "./offset-wells";
 import { fetchLateralPath, type LateralPath } from "./lateral-path";
 import { buildAcquisitionScorecard } from "./scorecard-builder";
-import { fitArpsDecline, estimateEur } from "./decline-curve";
+import { fitArpsDecline, fitArpsDeclineWindowed, estimateEur } from "./decline-curve";
 import { compareToAnalogs, type AnalogWell } from "./type-curve-comparison";
 import { getPriceDeck } from "./eia-pricing";
 import { computeEconomics, WORKOVER_RESERVE_USD_PER_BOE, SWD_DISPOSAL_USD_PER_BBL_WATER, type EconomicEvaluation } from "./economics";
@@ -972,7 +972,8 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
   generatedAt: string;
 }) {
   const oilSeries = reportedProductionSeries(analytics.months).oil;
-  const fit = fitArpsDecline(oilSeries);
+  const declineWindow = fitArpsDeclineWindowed(oilSeries);
+  const fit = declineWindow.fit;
   const eur = fit ? estimateEur(fit, analytics.cumulativeOil ?? 0) : null;
   const comparison = eur ? compareToAnalogs(eur.eur, analogWells) : null;
   // fitArpsDecline can return null for two genuinely different reasons: too
@@ -1003,6 +1004,8 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
     React.createElement(Text, { style: S.noteText },
       "Arps decline-curve analysis fitted to the monthly production history in Section 3 — a hyperbolic-to-exponential model (industry-standard for unconventional wells) is regressed against actual reported volumes to estimate EUR and remaining reserves. Production here is LEASE-level, not certified single-well data; treat this as a screening-grade estimate, not a reserves report prepared under SEC/SPE definitions. A reservoir engineer should verify before any transaction relies on it.",
     ),
+
+    declineWindow.reason ? React.createElement(Text, { style: S.noteText }, declineWindow.reason) : null,
 
     !fit || !eur ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 10 }] },
       React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, noFitReason),
@@ -1144,6 +1147,7 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt, reportin
     React.createElement(Text, { style: S.noteText },
       "Discounted cash flow (PV-10, PV-15) computed from the Arps decline-curve forecasts in Section 4, under four price scenarios. Screening-grade analysis from public regulatory data and generic cost assumptions — not a certified reserves report. A reservoir engineer and landman should verify before any transaction relies on it.",
     ),
+    econ.declineWindowNote ? React.createElement(Text, { style: S.noteText }, econ.declineWindowNote) : null,
     reportingLag && reportingLag.trailingUnreportedMonths > 0 ? React.createElement(Text, { style: S.noteText },
       `Forecast is anchored at the latest month TRRC has reported (${reportingLag.lastReportedMonth ?? "unknown"}); the ${reportingLag.trailingUnreportedMonths} more recent month(s) have not been reported by the regulator yet and are excluded, not treated as zero.`,
     ) : null,
