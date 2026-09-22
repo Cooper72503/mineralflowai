@@ -27,6 +27,12 @@ import { matchParties } from "./asset-matching";
 import { findIdentityCandidates } from "./chain-findings";
 import type { TitleInstrumentParty } from "./types";
 
+async function checkedIngestionQuery<T extends { error?: { message: string } | null }>(query: PromiseLike<T>): Promise<T> {
+  const result = await query;
+  if (result.error) throw new Error('Title ingestion database operation failed: ' + result.error.message);
+  return result;
+}
+
 export const TITLE_DOCUMENTS_BUCKET = "title-documents";
 
 export interface IngestResult {
@@ -52,17 +58,17 @@ export function instrumentDedupeKey(inst: ExtractedInstrument): string {
 }
 
 async function loadCachedExtraction(supabase: SupabaseClient, userId: string, contentHash: string, extractor: "deterministic"): Promise<ExtractedDocument | null> {
-  const { data } = await supabase.from("title_document_extractions").select("extraction_json")
-    .eq("user_id", userId).eq("content_hash", contentHash).eq("schema_version", EXTRACTION_SCHEMA_VERSION).eq("extractor", extractor).maybeSingle();
+  const { data } = await checkedIngestionQuery(supabase.from("title_document_extractions").select("extraction_json")
+    .eq("user_id", userId).eq("content_hash", contentHash).eq("schema_version", EXTRACTION_SCHEMA_VERSION).eq("extractor", extractor).maybeSingle());
   if (!data) return null;
   const v = validateExtractedDocument(data.extraction_json);
   return v.ok ? v.data : null;
 }
 
 async function cacheExtraction(supabase: SupabaseClient, userId: string, contentHash: string, extractor: "deterministic", model: string | null, doc: ExtractedDocument): Promise<void> {
-  await supabase.from("title_document_extractions").upsert({
+  await checkedIngestionQuery(supabase.from("title_document_extractions").upsert({
     user_id: userId, content_hash: contentHash, schema_version: EXTRACTION_SCHEMA_VERSION, extractor, model, extraction_json: doc,
-  }, { onConflict: "user_id,content_hash,schema_version,extractor" });
+  }, { onConflict: "user_id,content_hash,schema_version,extractor" }));
 }
 
 /**
@@ -124,10 +130,11 @@ function matchCanonicalTract(t: ExtractedTract, tracts: CandidateTract[]): { tra
 }
 
 export async function ingestPendingDocuments(supabase: SupabaseClient, userId: string, jobId: string, opts: { limit?: number } = {}): Promise<IngestResult> {
-  const limit = Math.max(1, Math.min(opts.limit ?? 3, 10));
+  const requestedLimit = opts.limit ?? 3;
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 10)) : 3;
   const result: IngestResult = { processed: 0, remaining: 0, instrumentsCreated: 0, duplicatesSkipped: 0, errors: [], modelUsed: false };
 
-  const { data: pending } = await supabase.from("title_documents").select("*").eq("job_id", jobId).eq("user_id", userId).eq("extraction_status", "pending").order("created_at", { ascending: true }).limit(limit + 1);
+  const { data: pending } = await checkedIngestionQuery(supabase.from("title_documents").select("*").eq("job_id", jobId).eq("user_id", userId).eq("extraction_status", "pending").order("created_at", { ascending: true }).limit(limit + 1));
   const docs = ((pending ?? []) as DocumentRow[]);
   const batch = docs.slice(0, limit);
   result.remaining = Math.max(0, docs.length - batch.length);
@@ -135,8 +142,8 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
   if (batch.length === 0) return result;
 
   const [{ data: tractRows }, { data: wellRows }] = await Promise.all([
-    supabase.from("title_canonical_tracts").select("*").eq("job_id", jobId),
-    supabase.from("title_job_wells").select("*").eq("job_id", jobId),
+    checkedIngestionQuery(supabase.from("title_canonical_tracts").select("*").eq("job_id", jobId)),
+    checkedIngestionQuery(supabase.from("title_job_wells").select("*").eq("job_id", jobId)),
   ]);
   const tracts = ((tractRows ?? []) as Record<string, unknown>[]).map(mapTractRow);
   const wells = ((wellRows ?? []) as Record<string, unknown>[]).map(mapWellRow);
@@ -144,16 +151,16 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
   for (const doc of batch) {
     try {
       // 1. Text.
-      let text = doc.extracted_text ?? "";
+      let text = doc.ocr_status === "failed" ? "" : doc.extracted_text ?? "";
       if (!text.trim()) {
         const bytes = await readDocumentBytes(supabase, doc);
         if (!bytes) throw new Error("Stored document bytes could not be read");
         const extracted = await extractDocumentText(bytes, doc.mime_type, doc.file_name);
-        await supabase.from("title_documents").update({
+        await checkedIngestionQuery(supabase.from("title_documents").update({
           extracted_text: extracted.text || null, page_count: extracted.pageCount, has_text_layer: extracted.hasTextLayer, ocr_status: extracted.ocrStatus,
-        }).eq("id", doc.id);
+        }).eq("id", doc.id));
         if (extracted.ocrStatus === "failed" || !extracted.text.trim()) {
-          await supabase.from("title_documents").update({ extraction_status: "failed", extraction_error: extracted.error ?? "No text could be extracted" }).eq("id", doc.id);
+          await checkedIngestionQuery(supabase.from("title_documents").update({ extraction_status: "failed", extraction_error: extracted.error ?? "No text could be extracted" }).eq("id", doc.id));
           await addReviewItem(supabase, jobId, userId, { kind: "ocr_failed", title: `Could not read "${doc.file_name ?? doc.id}"`, detail: extracted.error, payload: { documentId: doc.id } });
           result.errors.push({ documentId: doc.id, error: extracted.error ?? "No text" });
           result.processed++;
@@ -165,6 +172,7 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
       // 2. Extraction (cached by hash).
       const { document: extractedDoc, extractor, modelUsed } = await extractInstruments(supabase, userId, jobId, doc, text);
       if (modelUsed) result.modelUsed = true;
+      if (extractedDoc.instruments.length === 0 && extractedDoc.legalDescriptions.length === 0) throw new Error("No instrument or legal description could be extracted; document interpretation requires review");
 
       // 3. Non-instrument legal descriptions -> tract candidates + well associations.
       if (extractedDoc.legalDescriptions.length > 0) {
@@ -174,22 +182,23 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
           existingTracts: tracts,
         });
         for (const t of proposal.tracts) {
-          if (!tracts.some(x => x.id === t.id)) { tracts.push(t); await supabase.from("title_canonical_tracts").insert(tractToRow(t, jobId)); }
-          else await supabase.from("title_canonical_tracts").update({ resolution_trace: t.resolutionTrace, confidence: t.confidence, gross_acres: t.grossAcres }).eq("id", t.id);
+          if (!tracts.some(x => x.id === t.id)) { tracts.push(t); await checkedIngestionQuery(supabase.from("title_canonical_tracts").insert(tractToRow(t, jobId))); }
+          else await checkedIngestionQuery(supabase.from("title_canonical_tracts").update({ resolution_trace: t.resolutionTrace, confidence: t.confidence, gross_acres: t.grossAcres }).eq("id", t.id));
         }
         for (const a of proposal.associations) {
-          await supabase.from("title_well_tract_associations").upsert({
+          await checkedIngestionQuery(supabase.from("title_well_tract_associations").upsert({
             job_id: jobId, user_id: userId, well_id: a.wellId, canonical_tract_id: a.canonicalTractId, association_type: a.associationType,
             confidence: a.confidence, evidence_json: a.evidence, review_status: "proposed",
-          }, { onConflict: "well_id,canonical_tract_id,association_type", ignoreDuplicates: true });
+          }, { onConflict: "well_id,canonical_tract_id,association_type", ignoreDuplicates: true }));
         }
       }
 
       // 4. Instruments.
       for (const inst of extractedDoc.instruments) {
         const dedupeKey = instrumentDedupeKey(inst);
-        const { data: existing } = await supabase.from("title_instruments").select("id, document_id").eq("job_id", jobId).eq("dedupe_key", dedupeKey).limit(1);
+        const { data: existing } = await checkedIngestionQuery(supabase.from("title_instruments").select("id, document_id, instrument_content_verified").eq("job_id", jobId).eq("dedupe_key", dedupeKey).limit(1));
         if (existing && existing.length > 0) {
+          if (existing[0].instrument_content_verified !== true) throw new Error("An incomplete prior instrument extraction exists; repair is required before retrying this document");
           result.duplicatesSkipped++;
           if (existing[0].document_id !== doc.id) {
             await addReviewItem(supabase, jobId, userId, { kind: "extraction_ambiguity", title: `Duplicate instrument in "${doc.file_name ?? doc.id}"`, detail: "This document contains an instrument already ingested from another document (same type, recording reference, dates, and parties). It was not stored twice.", payload: { documentId: doc.id, existingInstrumentId: existing[0].id } });
@@ -197,37 +206,37 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
           continue;
         }
 
-        const { data: instRow, error: instErr } = await supabase.from("title_instruments").insert({
+        const { data: instRow, error: instErr } = await checkedIngestionQuery(supabase.from("title_instruments").insert({
           job_id: jobId, run_id: null, document_id: doc.id,
           instrument_type: inst.instrumentType, instrument_date: inst.executionDate.iso, execution_date: inst.executionDate.iso, effective_date: inst.effectiveDate.iso, recorded_date: inst.recordingDate.iso,
           doc_number: inst.instrumentNumber, instrument_number: inst.instrumentNumber, book_volume_page: inst.bookVolumePage, county: inst.county,
           source: doc.source, source_url_or_doc_id: doc.source_url ?? doc.source_identifier, source_doc_id: doc.id,
           source_page: inst.verbatimExcerpts[0]?.page ?? 1, source_exact_language: inst.verbatimExcerpts[0]?.text ?? null,
-          extraction_confidence: inst.confidence, evidence_level: "instrument_verified", instrument_content_verified: true,
+          extraction_confidence: inst.confidence, evidence_level: "extraction_pending", instrument_content_verified: false,
           referenced_instruments_json: inst.references, signature_observations_json: inst.signatureObservations, acknowledgment_observations_json: inst.acknowledgmentObservations,
           extraction_json: { ...inst, extractor }, dedupe_key: dedupeKey,
-        }).select("id").single();
+        }).select("id").single());
         if (instErr || !instRow) throw new Error(`Instrument insert failed: ${instErr?.message}`);
         const instrumentId = instRow.id as string;
         result.instrumentsCreated++;
 
         if (inst.parties.length > 0) {
-          await supabase.from("title_instrument_parties").insert(inst.parties.map(p => ({
+          await checkedIngestionQuery(supabase.from("title_instrument_parties").insert(inst.parties.map(p => ({
             job_id: jobId, run_id: null, instrument_id: instrumentId, party_name: p.name, party_name_verbatim: p.nameVerbatim, role: p.role, capacity: p.capacity,
             capacity_detail: p.capacityDetail, source_page: p.page, source_excerpt: p.excerpt,
-          })));
+          }))));
         }
 
         for (const t of inst.tracts) {
           const match = matchCanonicalTract(t, tracts);
           if (match.created) {
             tracts.push(match.created);
-            await supabase.from("title_canonical_tracts").insert(tractToRow(match.created, jobId));
+            await checkedIngestionQuery(supabase.from("title_canonical_tracts").insert(tractToRow(match.created, jobId)));
             await addReviewItem(supabase, jobId, userId, { kind: "tract_match", title: `Instrument describes a tract not yet linked to a well: ${match.created.tractLabel}`, detail: `From "${doc.file_name ?? doc.id}". Confirm whether this is one of the subject tracts, or reject it.`, payload: { canonicalTractId: match.created.id, documentId: doc.id, instrumentId } });
           } else if (!match.tractId) {
             await addReviewItem(supabase, jobId, userId, { kind: "tract_match", title: `Instrument tract could not be matched (${inst.instrumentType.replace(/_/g, " ")} in "${doc.file_name ?? doc.id}")`, detail: match.reason, payload: { documentId: doc.id, instrumentId } });
           }
-          const { data: tractRow, error: tractErr } = await supabase.from("title_instrument_tracts").insert({
+          const { data: tractRow, error: tractErr } = await checkedIngestionQuery(supabase.from("title_instrument_tracts").insert({
             job_id: jobId, run_id: null, instrument_id: instrumentId, county: t.county, legal_description: t.legalDescriptionVerbatim, legal_description_verbatim: t.legalDescriptionVerbatim,
             abstract_number: t.abstractNumber, survey_name: t.surveyName, block_number: t.blockNumber, section_name: t.sectionName, gross_acres: t.grossAcres,
             interest_type: t.interestType, fraction_numerator: t.fraction?.numerator ?? null, fraction_denominator: t.fraction?.denominator ?? null,
@@ -235,25 +244,27 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
             interest_conveyed_fraction: t.fraction?.numerator != null && t.fraction?.denominator ? t.fraction.numerator / t.fraction.denominator : null,
             reservation_text: t.reservationText, exceptions_text: t.exceptionsText, depth_or_formation_limit: t.depthOrFormationLimit,
             source_page: t.page, source_excerpt: t.excerpt, canonical_tract_id: match.tractId,
-          }).select("id").single();
+          }).select("id").single());
           if (tractErr || !tractRow) throw new Error(`Instrument tract insert failed: ${tractErr?.message}`);
-          await supabase.from("title_claims").insert({
+          await checkedIngestionQuery(supabase.from("title_claims").insert({
             job_id: jobId, run_id: null, instrument_id: instrumentId, instrument_tract_id: tractRow.id, canonical_asset_id: match.tractId,
             effect: t.effect, interest_type: t.interestType, fraction_numerator: t.fraction?.numerator ?? null, fraction_denominator: t.fraction?.denominator ?? null,
             fraction_basis: t.fraction?.basis ?? null, notes: match.reason,
-          });
+          }));
         }
 
         for (const alt of inst.alternatives) {
           await addReviewItem(supabase, jobId, userId, { kind: "extraction_ambiguity", title: `Ambiguous ${alt.field.replace(/_/g, " ")} in ${inst.instrumentType.replace(/_/g, " ")} (${inst.instrumentNumber ?? inst.bookVolumePage ?? doc.file_name ?? doc.id})`, detail: `${alt.reason} Readings: ${alt.interpretations.join(" | ")}`, payload: { instrumentId, documentId: doc.id, field: alt.field, interpretations: alt.interpretations } });
         }
+        await checkedIngestionQuery(supabase.from("title_instruments").update({ evidence_level: "instrument_verified", instrument_content_verified: true }).eq("id", instrumentId));
       }
 
-      await supabase.from("title_documents").update({ extraction_status: "done", extraction_error: null }).eq("id", doc.id);
+      await checkedIngestionQuery(supabase.from("title_documents").update({ extraction_status: "done", extraction_error: null }).eq("id", doc.id));
       result.processed++;
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e).slice(0, 400);
-      await supabase.from("title_documents").update({ extraction_status: "failed", extraction_error: msg }).eq("id", doc.id);
+      await checkedIngestionQuery(supabase.from("title_documents").update({ extraction_status: "failed", extraction_error: msg }).eq("id", doc.id));
+      await addReviewItem(supabase, jobId, userId, { kind: "extraction_ambiguity", title: `Extraction failed for "${doc.file_name ?? doc.id}"`, detail: msg, payload: { documentId: doc.id } });
       result.errors.push({ documentId: doc.id, error: msg });
       result.processed++;
     }
@@ -265,11 +276,11 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
 
 /** Exact normalized-name grouping -> canonical parties; similar-but-different names -> review items only. */
 export async function canonicalizeParties(supabase: SupabaseClient, userId: string, jobId: string): Promise<void> {
-  const { data: partyRows } = await supabase.from("title_instrument_parties").select("id, instrument_id, party_name, role, capacity, canonical_party_id, capacity_detail, source_page, source_excerpt").eq("job_id", jobId);
+  const { data: partyRows } = await checkedIngestionQuery(supabase.from("title_instrument_parties").select("id, instrument_id, party_name, role, capacity, canonical_party_id, capacity_detail, source_page, source_excerpt").eq("job_id", jobId));
   const parties = ((partyRows ?? []) as Record<string, unknown>[]);
   if (parties.length === 0) return;
 
-  const { data: existingCanon } = await supabase.from("title_canonical_parties").select("id, normalized_name").eq("job_id", jobId);
+  const { data: existingCanon } = await checkedIngestionQuery(supabase.from("title_canonical_parties").select("id, normalized_name").eq("job_id", jobId));
   const canonByNorm = new Map<string, string>(((existingCanon ?? []) as Array<{ id: string; normalized_name: string }>).map(c => [c.normalized_name, c.id]));
 
   const asInstrumentParties: TitleInstrumentParty[] = parties.map(p => ({
@@ -280,17 +291,17 @@ export async function canonicalizeParties(supabase: SupabaseClient, userId: stri
   for (const cp of matched.parties) {
     let id = canonByNorm.get(cp.normalizedName);
     if (!id) {
-      const { data } = await supabase.from("title_canonical_parties").insert({
+      const { data } = await checkedIngestionQuery(supabase.from("title_canonical_parties").insert({
         id: cp.id, job_id: jobId, run_id: null, display_name: cp.displayName, normalized_name: cp.normalizedName, confidence: cp.confidence,
         resolution_method: cp.resolutionMethod, resolution_trace: cp.resolutionTrace, needs_user_selection: false, match_status: "proposed",
-      }).select("id").single();
+      }).select("id").single());
       id = (data?.id as string | undefined) ?? cp.id;
       canonByNorm.set(cp.normalizedName, id);
     }
     const memberIds = Object.entries(matched.partyIdByInstrumentPartyId).filter(([, cid]) => cid === cp.id).map(([pid]) => pid);
     for (const pid of memberIds) {
       const row = parties.find(p => String(p.id) === pid);
-      if (row && row.canonical_party_id !== id) await supabase.from("title_instrument_parties").update({ canonical_party_id: id }).eq("id", pid);
+      if (row && row.canonical_party_id !== id) await checkedIngestionQuery(supabase.from("title_instrument_parties").update({ canonical_party_id: id }).eq("id", pid));
     }
   }
 
@@ -314,7 +325,7 @@ export async function storeUserDocument(supabase: SupabaseClient, userId: string
   if (content.length === 0) return { ok: false, error: "Empty document." };
   const hash = sha256Hex(content);
 
-  const { data: existing } = await supabase.from("title_documents").select("id").eq("job_id", jobId).eq("content_hash", hash).maybeSingle();
+  const { data: existing } = await checkedIngestionQuery(supabase.from("title_documents").select("id").eq("job_id", jobId).eq("content_hash", hash).maybeSingle());
   if (existing) return { ok: true, documentId: existing.id as string, duplicate: true };
 
   let storagePath: string | null = null;
@@ -325,12 +336,12 @@ export async function storeUserDocument(supabase: SupabaseClient, userId: string
     if (upErr) return { ok: false, error: `Storage upload failed: ${upErr.message}` };
   }
 
-  const { data, error } = await supabase.from("title_documents").insert({
+  const { data, error } = await checkedIngestionQuery(supabase.from("title_documents").insert({
     job_id: jobId, user_id: userId, well_id: input.wellId, source: input.bytes ? "user_upload" : "pasted_text", source_identifier: input.label ?? input.fileName,
     source_url: null, document_category: input.documentCategory, file_name: input.fileName ?? (input.label ? `${input.label}.txt` : "pasted.txt"), mime_type: input.mimeType ?? "text/plain",
     byte_size: content.length, storage_path: storagePath, content_hash: hash, extracted_text: input.bytes ? null : input.pastedText, has_text_layer: input.bytes ? null : true,
     ocr_status: input.bytes ? "pending" : "not_needed", extraction_status: "pending",
-  }).select("id").single();
+  }).select("id").single());
   if (error || !data) return { ok: false, error: `Document insert failed: ${error?.message}` };
   return { ok: true, documentId: data.id as string, duplicate: false };
 }

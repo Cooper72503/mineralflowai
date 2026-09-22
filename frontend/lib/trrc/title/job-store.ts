@@ -202,16 +202,20 @@ export async function loadJobBundle(supabase: SupabaseClient, jobId: string, use
 
 export async function addReviewItem(supabase: SupabaseClient, jobId: string, userId: string, item: { kind: string; title: string; detail?: string | null; payload?: Record<string, unknown> }): Promise<void> {
   // Idempotent on (job, kind, title): re-running ingestion or analysis never duplicates a queue entry.
-  const { data: existing } = await supabase.from("title_review_items").select("id").eq("job_id", jobId).eq("kind", item.kind).eq("title", item.title).limit(1);
+  const { data: existing, error: lookupError } = await supabase.from("title_review_items").select("id").eq("job_id", jobId).eq("kind", item.kind).eq("title", item.title).limit(1);
+  if (lookupError) throw new Error(`Review queue lookup failed: ${lookupError.message}`);
   if (existing && existing.length > 0) return;
-  await supabase.from("title_review_items").insert({ job_id: jobId, user_id: userId, kind: item.kind, title: item.title, detail: item.detail ?? null, payload_json: item.payload ?? {} });
+  const { error: insertError } = await supabase.from("title_review_items").insert({ job_id: jobId, user_id: userId, kind: item.kind, title: item.title, detail: item.detail ?? null, payload_json: item.payload ?? {} });
+  if (insertError) throw new Error(`Review queue insert failed: ${insertError.message}`);
 }
 
 export async function appendLimitation(supabase: SupabaseClient, jobId: string, limitation: string): Promise<void> {
-  const { data } = await supabase.from("title_research_jobs").select("limitations_json").eq("id", jobId).maybeSingle();
+  const { data, error: readError } = await supabase.from("title_research_jobs").select("limitations_json").eq("id", jobId).maybeSingle();
+  if (readError) throw new Error(`Title limitations lookup failed: ${readError.message}`);
   const current = ((data?.limitations_json as string[] | null) ?? []);
   if (current.includes(limitation)) return;
-  await supabase.from("title_research_jobs").update({ limitations_json: [...current, limitation] }).eq("id", jobId);
+  const { error: writeError } = await supabase.from("title_research_jobs").update({ limitations_json: [...current, limitation] }).eq("id", jobId);
+  if (writeError) throw new Error(`Title limitations update failed: ${writeError.message}`);
 }
 
 export function formattedApi(w: JobWell): string | null {

@@ -3,8 +3,8 @@ import type {SupabaseClient} from "@supabase/supabase-js";
 import {normalizeApiNumber} from "../normalization";
 import type {LiteSourceAttempt} from "../coverage";
 import {z} from "zod";
-import {assembleGold2Draft} from "./assemble";
-import {loadReviewedPosition} from "./position-link";
+import {assembleGold2Draft,validateGold2Draft} from "./assemble";
+import {loadReviewedPosition,PositionLoadError} from "./position-link";
 import {loadTitleForApi} from "./title-link";
 import {renderGold2Pdf} from "./pdf";
 export const ReportSupplements=z.object({evidenceScenarios:z.unknown().optional(),position:z.unknown().optional(),partner:z.unknown().optional(),reconciliationPolicy:z.unknown().optional(),economics:z.unknown().optional(),forecastSelection:z.unknown().optional()}).strict();
@@ -22,9 +22,11 @@ export async function generateGold2ForRun(db:SupabaseClient,runId:string,userId:
  try{
   const supplements=ReportSupplements.parse(supplementInput);
   const titleLink=await loadTitleForApi(db,api,userId,run.title_research_job_id);
+  if(titleLink.status==="query_failed")return {ok:false as const,status:503,error:"Title evidence could not be verified. Retry the request; no report was delivered."};
   const selectedPosition=Object.prototype.hasOwnProperty.call(supplements,"position")?null:await loadReviewedPosition(db,userId,api,titleLink.title);
   const report=assembleGold2Draft({api,runId,asOf:new Date().toISOString(),attempts,title:titleLink.title,titleLookup:{status:titleLink.status,reason:titleLink.reason},position:selectedPosition?.position??null,positionLookupReason:selectedPosition?.reason??null,partner:null,reconciliationPolicy:null,economics:null,...supplements} as Parameters<typeof assembleGold2Draft>[0]);
+  if(validateGold2Draft(report).length)throw Error("GOLD report failed deterministic validation");
   const bytes=format==="pdf"?await renderGold2Pdf(report):Buffer.from(JSON.stringify(report,null,2)+"\n");
   return {ok:true as const,bytes,filename:`${api}-gold2.${format}`,contentType:format==="pdf"?"application/pdf":"application/json"};
- }catch{return {ok:false as const,status:422,error:"Retained inputs failed report validation; no report containing unvalidated values was delivered."};}
+ }catch(error){if(error instanceof PositionLoadError)return {ok:false as const,status:error.status,error:error.message+". Retry the report request."};return {ok:false as const,status:422,error:"Retained inputs failed report validation; no report containing unvalidated values was delivered."};}
 }

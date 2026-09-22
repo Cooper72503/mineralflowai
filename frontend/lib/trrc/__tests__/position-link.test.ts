@@ -5,7 +5,7 @@ import {reviewedPositionFixture} from "./fixtures/reviewed-position";
 function database(mode="selected"){
  const {title,position}=reviewedPositionFixture();const calls:unknown[]=[];
  const db={from:(table:string)=>{
-  const data=table==="title_research_jobs"?{latest_analysis_id:title.analysisId,reviewed_position_ids:mode==="absent"?{}:{4216502733:"selection"}}:{analysis_id:mode==="stale"?"old":title.analysisId,position_json:mode==="corrupt"?{...position,holdingId:"unresolved"}:position};
+  const data=table==="title_research_jobs"?{latest_analysis_id:mode==="changed"?"new-analysis":title.analysisId,reviewed_position_ids:mode==="absent"?{}:{4216502733:"selection"}}:{analysis_id:mode==="stale"?"old":title.analysisId,position_json:mode==="corrupt"?{...position,holdingId:"unresolved"}:position};
   const q:any={select:()=>q,eq:(...args:unknown[])=>{calls.push([table,...args]);return q;},maybeSingle:async()=>({data,error:mode==="query_failed"?{message:"offline"}:null})};return q;
  }};return {db,title,calls};
 }
@@ -21,4 +21,13 @@ it.each(["absent","stale","corrupt"])("withholds missing/stale/unsupported selec
 });
 it("does not silently convert query failure to absent ownership",async()=>{
  const {db,title}=database("query_failed");await expect(loadReviewedPosition(db as never,"owner","4216502733",title)).rejects.toThrow("could not be loaded");
+});
+
+it("distinguishes a concurrent title version change from invalid valuation inputs",async()=>{
+ const {db,title}=database("changed");
+ await expect(loadReviewedPosition(db as never,"owner","4216502733",title)).rejects.toMatchObject({status:409});
+});
+it("classifies position database outages as retryable service failures",async()=>{
+ const {db,title}=database("query_failed");
+ await expect(loadReviewedPosition(db as never,"owner","4216502733",title)).rejects.toMatchObject({status:503});
 });

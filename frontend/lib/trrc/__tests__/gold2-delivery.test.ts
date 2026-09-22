@@ -4,10 +4,10 @@ import {generateGold2ForRun} from "../gold2/generate";
 import {assembleGold2Draft,validateGold2Draft} from "../gold2/assemble";
 import {GOLD2_FIELDS} from "../gold2/contract";
 import {reviewedPositionFixture} from "./fixtures/reviewed-position";
-function database(status="failed",resolved:string|null=null){
+function database(status="failed",resolved:string|null=null,failedTable?:string){
  const calls:{table:string;column:string;value:unknown}[]=[];
  const db={from:(table:string)=>{
-  const response=table==="trrc_due_diligence_runs"?{data:{id:"run",original_input:"4216502733",resolved_primary_api:resolved,status},error:null}:{data:[],error:null};
+  const response=table===failedTable?{data:null,error:{message:"database offline"}}:table==="trrc_due_diligence_runs"?{data:{id:"run",original_input:"4216502733",resolved_primary_api:resolved,status},error:null}:{data:[],error:null};
   const q:any={}; for(const m of ['select','order'])q[m]=()=>q;
   q.eq=(column:string,value:unknown)=>{calls.push({table,column,value});return q};
   q.maybeSingle=()=>Promise.resolve(response);q.then=(f:unknown)=>Promise.resolve(response).then(f as any);return q;
@@ -55,4 +55,9 @@ it("treats cited fraction and tract mismatches as independent review blockers",(
  for(const type of ['FRACTION_INCONSISTENCY','TRACT_INTEREST_MISMATCH'] as const)title.findings.push({findingId:type,type,severity:'critical',title:'Synthetic mismatch',explanation:'Test evidence mismatch.',affectedTractId:position.tractId,affectedTractLabel:null,affectedInterestType:'mineral',instrumentIds:['deed'],citations:[{documentId:'doc-deed',instrumentId:'deed',page:1,excerpt:null,sourceUrl:null,label:'Test'}],nextAction:'Review mismatch.'});
  const r=assembleGold2Draft({api:'4216502733',runId:'run',asOf:'2026-09-10T12:00:00Z',attempts:[],title,position,partner:null,economics:null,reconciliationPolicy:null});
  for(const id of ['FRACTION_INCONSISTENCY','TRACT_INTEREST_MISMATCH'])expect(r.rulesInput.exceptions.find(x=>x.id===id)).toMatchObject({closingBlocker:true,decisionMaterial:true,measuredImpact:null});
+});
+
+it("withholds delivery on title lookup outage instead of reporting missing evidence",async()=>{
+ const {db}=database("complete",null,"title_job_wells");
+ expect(await generateGold2ForRun(db,"run","owner","json")).toMatchObject({ok:false,status:503});
 });

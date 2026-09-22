@@ -23,3 +23,13 @@ it("does not reuse a cancelled selected scope's old publication",async()=>{
  const d=db({title_job_wells:{data:[{job_id:"a"}],error:null},title_research_jobs:{data:[{id:"a",latest_analysis_id:"aa",status:"cancelled"}],error:null}});
  expect((await loadTitleForApi(d as never,"4216502733","owner","a")).status).toBe("not_found");
 });
+
+it("withholds old publications during every active title processing stage",async()=>{
+ const {title}=reviewedPositionFixture();
+ for(const status of ["pending","resolving_wells","searching_records","ingesting","analyzing"]){
+  const d=db({title_job_wells:{data:[{job_id:title.jobId}],error:null},title_research_jobs:{data:[{id:title.jobId,latest_analysis_id:title.analysisId,status}],error:null},title_analyses:{data:{analysis_json:title},error:null}});
+  const result=await loadTitleForApi(d as never,"4216502733","owner");
+  expect(result).toMatchObject({title:null,status:"in_progress"});
+  expect(d.filters.some((f:any)=>f[0]==="title_analyses")).toBe(false);
+ }
+});

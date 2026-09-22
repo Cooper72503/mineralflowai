@@ -17,6 +17,8 @@ export async function loadTitleForApi(db:SupabaseClient,input:string,userId:stri
  if(selectedJobId&&!eligible.some(j=>j.id===selectedJobId))return unavailable("The selected title job is unavailable, failed, or cancelled; select an active research scope.","not_found");
  if(eligible.length>1)return unavailable("Multiple title research scopes match this API; a specific analysis/position must be selected.","ambiguous");
  if(!eligible.length)return unavailable("No active title research scope matches this API.","not_found");
+ const active=eligible.find(j=>["pending","resolving_wells","searching_records","ingesting","analyzing"].includes(String(j.status)));
+ if(active)return unavailable(`Title research job ${String(active.id).slice(0,8)} is ${String(active.status)}; any previous publication is withheld until processing finishes.`,"in_progress");
  const published=eligible.filter(j=>j.latest_analysis_id);
  if(!published.length){
   // A job exists but nothing is published yet. Say WHERE it is — the stage

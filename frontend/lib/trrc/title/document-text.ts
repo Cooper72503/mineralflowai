@@ -74,6 +74,10 @@ async function ocrPdfPages(buffer: Buffer, maxPages: number): Promise<{ text: st
   const canvasMod = await import("@napi-rs/canvas");
   const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer), disableFontFace: true, useSystemFonts: false }).promise;
   const pageCount = doc.numPages;
+  if (pageCount > maxPages) {
+    await doc.destroy();
+    throw new Error(`Document has ${pageCount} pages; exceeds ${maxPages}-page OCR limit. No partial extraction accepted.`);
+  }
   const tesseract = await import("tesseract.js");
   const worker = await tesseract.createWorker("eng");
   const pages: string[] = [];
@@ -87,12 +91,15 @@ async function ocrPdfPages(buffer: Buffer, maxPages: number): Promise<{ text: st
       await page.render(renderParams).promise;
       const png = canvas.toBuffer("image/png");
       const { data } = await worker.recognize(png);
-      pages.push(data.text ?? "");
+      const text = data.text ?? "";
+      if (text.replace(/\s+/g, " ").trim().length < 40) throw new Error(`Page ${i} of ${pageCount} yielded insufficient text; complete document review required`);
+      pages.push(text);
     }
   } finally {
     await worker.terminate();
+    await doc.destroy();
   }
-  if (pageCount > maxPages) pages.push(`[OCR stopped after ${maxPages} of ${pageCount} pages]`);
+
   return { text: pages.join("\f"), pageCount };
 }
 
@@ -104,7 +111,8 @@ export async function extractDocumentText(buffer: Buffer, mime: string | null, f
     } catch (e) {
       return { text: "", pageCount: null, hasTextLayer: null, ocrStatus: "failed", error: `PDF could not be parsed: ${String(e).slice(0, 200)}` };
     }
-    const meaningful = layer.text.replace(/\s+/g, " ").trim().length >= 40;
+    const textPages = layer.text.split("\f");
+    const meaningful = layer.pageCount !== null && textPages.length === layer.pageCount && textPages.every(text => text.replace(/\s+/g, " ").trim().length >= 40);
     if (meaningful) return { text: layer.text, pageCount: layer.pageCount, hasTextLayer: true, ocrStatus: "not_needed", error: null };
     try {
       const ocr = await ocrPdfPages(buffer, MAX_OCR_PAGES);

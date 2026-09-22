@@ -1,3 +1,36 @@
+# Current cycle — GOLD delivery evidence integrity
+
+**GOLD reports validated: 0/10.** No new real acquisition acceptance.
+
+- Individual delivery now refuses failed title lookups, matching package delivery.
+- Active title processing withholds previous publications instead of reusing them.
+- Ownership lookup outages return 503; concurrent analysis changes return 409.
+- Individual JSON/PDF delivery recomputes and validates the assembled draft.
+- Frontend: 867/867 tests passed. Live production acceptance not performed here.
+- Remaining: real MASK extraction/review, durable background ingestion, internal
+  forecast into GOLD economics, and complete live acquisition benchmark.
+- Deploy both frontend and rebuilt worker report bundle; no migration.
+  See docs/gold-delivery-integrity.md.
+
+---
+# Current cycle — real-document ingestion integrity
+
+**GOLD reports validated: 0/10.** No complete acquisition acceptance added.
+
+- Synced remote dc2bcab, preserving deployed production-series improvements.
+- Automatic ingestion audit exposed silent database-error paths, premature
+  instrument verification, and partial-page OCR acceptance. Fixed these before
+  adding an unattended scheduler.
+- No parsed instrument/legal description now creates a failed extraction/review
+  item. Partial instrument writes stay unverified; incomplete retries require
+  repair. Review/limitation persistence failures propagate.
+- Ingestion route rejects overlapping processing, reports failed reads/writes,
+  and preserves cancellation during completion updates.
+- No new migration; frontend deployment. See docs/title-ingestion-hardening.md.
+- Real MASK OCR/extraction acceptance, transaction/recovery support and automatic
+  post-retrieval ingestion remain outstanding. No production changes made here.
+
+---
 # Current cycle — retrieve exposed county document previews
 
 **GOLD reports validated: 0/10.** No acquisition acceptance added.
