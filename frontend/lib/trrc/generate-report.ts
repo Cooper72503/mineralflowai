@@ -200,6 +200,7 @@ export async function generatePdfReportForRun(
     analogWells?: never[],
     isSampleReport?: boolean,
     persistGeologyTo?: { supabase: SupabaseClient; runId: string },
+    titleScope?: { jobId: string | null; setupWarning: string | null },
   ) => Promise<Buffer>;
 
   try {
@@ -214,6 +215,14 @@ export async function generatePdfReportForRun(
     pdfBuffer = await buildTrrcPdfReport(
       run, manifest, findings, scorecard ?? {} as AcquisitionScorecard, production, coverage, sourceAttemptRows,
       undefined, false, { supabase, runId },
+      // Migration 033's explicit run -> title-job link. Deliberately the only
+      // source: the report never guesses a title scope from the API number,
+      // because an unselected or ambiguous scope must read as "no reviewed
+      // title", not as somebody else's chain attached to this well.
+      {
+        jobId: (runRaw["title_research_job_id"] as string | null) ?? null,
+        setupWarning: (runRaw["title_setup_warning"] as string | null) ?? null,
+      },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

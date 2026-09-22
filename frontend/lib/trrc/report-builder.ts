@@ -62,6 +62,7 @@ import { computeEconomics, WORKOVER_RESERVE_USD_PER_BOE, SWD_DISPOSAL_USD_PER_BB
 import { computeFlipAnalysis, type FlipAnalysis } from "./flip";
 import { runOffsetAnalytics, type OffsetAnalyticsPayload, type LegalDescription } from "./offset-analytics";
 import { runGeologicalDueDiligence, persistGeologicalAssessment } from "./geology";
+import { loadTitleForReport, type TitleReportInput } from "./title/report-input";
 import type { GeologicalAssessmentResult } from "./geology/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -1677,7 +1678,12 @@ function LegalDescriptionPage({ run, id: identity, attempts, mapImage, offsetWel
       kv("Block Number",     str(survey["block_number"] ?? glo?.["block"])),
       kv("Section",          str(survey["section_name"] ?? glo?.["section"])),
       kv("County",           identity.county),
-      kv("Mineral Ownership", str(glo?.["mineral_ownership"]) || "Texas GLO survey records not retrieved (no automated connector yet)"),
+      // This field is the GLO survey record's own state/private mineral
+      // classification, NOT who owns the minerals — that is Section 8
+      // (continued), which reports the title research record. Said plainly
+      // here so this line is never read as the report's ownership answer.
+      kv("GLO Mineral Classification", str(glo?.["mineral_ownership"]) || "Texas GLO survey records not retrieved (no automated connector yet)"),
+      kv("Mineral Ownership", "See Section 8 (continued) — Title Chain and Ownership"),
     ),
 
     React.createElement(View, { style: S.divider }),
@@ -1764,6 +1770,245 @@ function legalDescriptionSummary(ld: LegalDescription): string {
     return `T${ld.townshipNumber}${ld.townshipDirection}-R${ld.rangeNumber}${ld.rangeDirection}-Sec${ld.section}${ld.principalMeridian ? ` (${ld.principalMeridian})` : ""}`;
   }
   return "Unparsed — manual review required";
+}
+
+// ─── Section 8 (continued): Title chain and ownership ────────────────────────
+// Section 8 above describes WHERE the well is. It has never said who owns the
+// minerals under it — the one line it printed ("Texas GLO survey records not
+// retrieved") is about a surface-survey connector, not title. Meanwhile the
+// title research workflow persists county search coverage, index leads,
+// retrieved instrument images, tract candidates, a review queue, a published
+// analysis and a reviewed mineral position, none of which reached this PDF.
+//
+// This page reports that evidence WITHOUT interpreting it. Three rules it
+// must never break, because they are what separates this from a title
+// opinion the company is not licensed to give:
+//   1. A county index entry proves a record exists. It does not prove what
+//      the instrument conveyed. Only an instrument whose text was read and
+//      extracted (instrument_content_verified) is shown as verified.
+//   2. Ownership and NRI appear only when a reviewed position was explicitly
+//      selected against the CURRENT analysis version. Otherwise the page
+//      prints why it is withheld.
+//   3. "No title job" and "job still running" are distinct, stated states —
+//      never a blank field that reads like a clean chain.
+
+function titleStatusBadge(status: TitleReportInput["status"]): { text: string; color: string; bg: string } {
+  switch (status) {
+    case "analyzed":        return { text: "Analysis published", color: C.blue,   bg: C.blueBg };
+    case "in_progress":     return { text: "Research running",   color: C.yellow, bg: C.yellowBg };
+    case "awaiting_review": return { text: "Awaiting review",    color: C.yellow, bg: C.yellowBg };
+    case "no_job":          return { text: "Not researched",     color: C.gray,   bg: C.offWhite };
+    default:                return { text: "Unavailable",        color: C.red,    bg: C.redBg };
+  }
+}
+
+export function TitleChainPage({ run, id: identity, title, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  title: TitleReportInput;
+  generatedAt: string;
+}) {
+  const badge = titleStatusBadge(title.status);
+  const unverified = title.totalIndexRows - title.verifiedInstrumentCount;
+
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 (CONTINUED) — TITLE CHAIN AND OWNERSHIP"),
+
+    React.createElement(View, { style: { flexDirection: "row", alignItems: "center", marginBottom: 8 } },
+      React.createElement(Text, { style: [S.badge, { backgroundColor: badge.bg, color: badge.color, marginRight: 6 }] }, badge.text),
+      React.createElement(Text, { style: { fontSize: 8, color: C.dark, fontFamily: "Helvetica", flex: 1 } }, title.headline),
+    ),
+
+    title.stageDetail ? kv("Current stage", title.stageDetail) : null,
+    title.jobId ? kv("Title research scope", title.jobId.slice(0, 8)) : null,
+
+    React.createElement(Text, { style: S.noteText },
+      "This section reports retrieved title evidence. It is not a title opinion and does not certify ownership. " +
+      "A county clerk index entry proves that a record exists; it does not establish what the instrument conveyed, " +
+      "what was reserved or excepted, or who owns the minerals today. Only instruments whose recorded text has been " +
+      "read and extracted are marked verified below.",
+    ),
+
+    // ── Ownership: the single field a buyer looks for first. It is stated or
+    // it is explicitly withheld with a reason. There is no third option.
+    React.createElement(Text, { style: S.subTitle }, "Mineral Ownership Position"),
+    title.ownership
+      ? React.createElement(View, { style: { marginBottom: 6 } },
+          kv("Reviewed position", title.ownership.described),
+          kv("Net revenue interest", title.ownership.nri),
+          React.createElement(Text, { style: S.noteText }, title.ownershipReason),
+        )
+      : React.createElement(View, { style: [S.flagBox, { backgroundColor: C.offWhite, marginBottom: 6 }] },
+          React.createElement(Text, { style: [S.flagItem, { color: C.dark }] }, title.ownershipReason),
+        ),
+
+    title.analysis ? React.createElement(View, { style: { marginBottom: 6 } },
+      kv("Analysis classification", title.analysis.classification.replace(/_/g, " ")),
+      kv("Analysis version", String(title.analysis.version)),
+      kv("Findings recorded", String(title.analysis.findings)),
+    ) : null,
+
+    React.createElement(View, { style: S.divider }),
+
+    // ── Evidence retrieved, stated as counts before any table, so the reader
+    // sees the ratio of "records found" to "records actually read".
+    React.createElement(Text, { style: S.subTitle }, "Evidence Retrieved"),
+    React.createElement(View, { style: { flexDirection: "row", marginBottom: 8 } },
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "RECORDS INDEXED"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, String(title.totalIndexRows)),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "INSTRUMENTS READ"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: title.verifiedInstrumentCount > 0 ? C.green : C.red } }, String(title.verifiedInstrumentCount)),
+      ),
+      React.createElement(View, { style: S.summaryStatBox },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "UNVERIFIED LEADS"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, String(Math.max(0, unverified))),
+      ),
+      React.createElement(View, { style: [S.summaryStatBox, { marginRight: 0 }] },
+        React.createElement(Text, { style: { fontSize: 7, color: C.gray, fontFamily: "Helvetica-Bold", marginBottom: 2 } }, "DOCUMENTS RETRIEVED"),
+        React.createElement(Text, { style: { fontSize: 11, fontFamily: "Helvetica-Bold", color: C.navy } }, String(title.documents.length)),
+      ),
+    ),
+
+    title.subjectLeads.length > 0 ? React.createElement(View, {},
+      React.createElement(Text, { style: S.noteText },
+        title.subjectMatchedCount > 0
+          ? `${title.subjectMatchedCount} of these records carry a legal description matching the subject lease name and are listed first. The remainder were recorded against the operator or a party to those records and are shown for review; they are not asserted to affect this tract.`
+          : "None of the retrieved records carry a legal description matching the subject lease name. They were recorded against the operator or a party and are shown for review; they are not asserted to affect this tract.",
+      ),
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "12%" }] }, "Recorded"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "Type"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "21%" }] }, "Grantor"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "21%" }] }, "Grantee"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "20%" }] }, "Legal (as indexed)"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "10%" }] }, "Evidence"),
+      ),
+      ...title.subjectLeads.map((l, i) => React.createElement(
+        View, { key: `lead-${i}`, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCell, { width: "12%" }] }, l.recordedDate ?? "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "16%" }] }, l.instrumentType.replace(/_/g, " ")),
+        React.createElement(Text, { style: [S.tableCell, { width: "21%" }] }, l.grantor ?? "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "21%" }] }, l.grantee ?? "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "20%" }] }, l.legalDescription ?? "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "10%", color: l.contentVerified ? C.green : C.gray }] }, l.contentVerified ? "Read" : "Index only"),
+      )),
+      title.totalIndexRows > title.subjectLeads.length ? React.createElement(Text, { style: [S.noteText, { marginTop: 4 }] },
+        `${title.totalIndexRows - title.subjectLeads.length} further indexed records are held in the title research record and are not printed here.`,
+      ) : null,
+    ) : React.createElement(Text, { style: S.bodyText }, "No county records have been retrieved for this scope."),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
+}
+
+export function TitleEvidenceDetailPage({ run, id: identity, title, generatedAt }: {
+  run: TrrcDueDiligenceRun;
+  id: WellIdentity;
+  title: TitleReportInput;
+  generatedAt: string;
+}) {
+  return React.createElement(
+    Page, { size: "LETTER", style: S.page },
+
+    React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border } },
+      React.createElement(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "TRRC Due Diligence — MineralFlow AI"),
+      React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
+    ),
+
+    React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 (CONTINUED) — TITLE SEARCH COVERAGE AND OPEN ITEMS"),
+
+    React.createElement(Text, { style: S.noteText },
+      "What was searched, what was retrieved, and what a person still has to resolve. A source that was not searched is " +
+      "listed as not searched, not as returning nothing — the two mean different things to a buyer.",
+    ),
+
+    React.createElement(Text, { style: S.subTitle }, "County Search Coverage"),
+    title.countyCoverage.length > 0 ? React.createElement(View, {},
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "22%" }] }, "Provider"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "16%" }] }, "County"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "18%" }] }, "Query type"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "26%" }] }, "Query"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "10%" }] }, "Status"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "8%" }] }, "Hits"),
+      ),
+      ...title.countyCoverage.map((c, i) => React.createElement(
+        View, { key: `cov-${i}`, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCell, { width: "22%" }] }, c.provider),
+        React.createElement(Text, { style: [S.tableCell, { width: "16%" }] }, c.county ?? "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "18%" }] }, c.queryType.replace(/_/g, " ")),
+        React.createElement(Text, { style: [S.tableCell, { width: "26%" }] }, c.queryValue),
+        React.createElement(Text, { style: [S.tableCell, { width: "10%", color: c.status === "ok" ? C.green : C.red }] }, c.status),
+        React.createElement(Text, { style: [S.tableCell, { width: "8%" }] }, String(c.resultCount)),
+      )),
+    ) : React.createElement(Text, { style: S.bodyText }, "No county record search has been logged for this scope."),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Instrument Documents Retrieved"),
+    title.documents.length > 0 ? React.createElement(View, {},
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "48%" }] }, "Document"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "12%" }] }, "Pages"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "20%" }] }, "Text capture"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "20%" }] }, "Extraction"),
+      ),
+      ...title.documents.map((d, i) => React.createElement(
+        View, { key: `doc-${i}`, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCell, { width: "48%" }] }, d.fileName),
+        React.createElement(Text, { style: [S.tableCell, { width: "12%" }] }, d.pages !== null ? String(d.pages) : "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "20%" }] }, d.ocrStatus.replace(/_/g, " ")),
+        React.createElement(Text, { style: [S.tableCell, { width: "20%", color: d.extractionStatus === "done" ? C.green : C.yellow }] }, d.extractionStatus.replace(/_/g, " ")),
+      )),
+    ) : React.createElement(Text, { style: S.bodyText }, "No instrument images have been retrieved or uploaded for this scope."),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Candidate Tracts"),
+    title.tracts.length > 0 ? React.createElement(View, {},
+      React.createElement(Text, { style: S.noteText }, "A candidate tract is a proposed land description for the subject well. Confirmation is a human step; an unconfirmed candidate is not evidence of what this well produces from."),
+      React.createElement(View, { style: S.tableHeader },
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "52%" }] }, "Tract"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "14%" }] }, "Confidence"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%" }] }, "Match status"),
+        React.createElement(Text, { style: [S.tableHeaderCell, { width: "17%" }] }, "Association"),
+      ),
+      ...title.tracts.map((t, i) => React.createElement(
+        View, { key: `tract-${i}`, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
+        React.createElement(Text, { style: [S.tableCell, { width: "52%" }] }, t.label || "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "14%" }] }, t.confidence !== null ? `${Math.round(t.confidence * 100)}%` : "—"),
+        React.createElement(Text, { style: [S.tableCell, { width: "17%" }] }, t.matchStatus.replace(/_/g, " ")),
+        React.createElement(Text, { style: [S.tableCell, { width: "17%" }] }, t.associationType ? t.associationType.replace(/_/g, " ") : "not associated"),
+      )),
+    ) : React.createElement(Text, { style: S.bodyText }, "No candidate tracts have been proposed for this well."),
+
+    React.createElement(View, { style: S.divider }),
+
+    React.createElement(Text, { style: S.subTitle }, "Open Title Review Items"),
+    title.openReviewItems.length > 0 ? React.createElement(View, {},
+      ...title.openReviewItems.map((r, i) => React.createElement(
+        View, { key: `rev-${i}`, style: [S.flagBox, { backgroundColor: C.yellowBg, marginBottom: 4 }] },
+        React.createElement(Text, { style: [S.flagLabel, { color: C.yellow }] }, r.title),
+        r.detail ? React.createElement(Text, { style: [S.flagItem, { color: C.dark }] }, r.detail) : null,
+      )),
+    ) : React.createElement(Text, { style: S.bodyText },
+      title.status === "no_job"
+        ? "No title research scope exists for this run, so no review queue has been created."
+        : "No open review items remain in the title research queue.",
+    ),
+
+    React.createElement(Footer, { generatedAt, runId: run.id }),
+  );
 }
 
 export function OffsetAnalyticsPage({ run, id: identity, offsetAnalytics, generatedAt, failureReason }: {
@@ -2428,6 +2673,13 @@ export async function buildTrrcPdfReport(
   // persistence failure is logged and never fails report generation — the
   // PDF the user is downloading right now already has the real result.
   persistGeologyTo?: { supabase: SupabaseClient; runId: string },
+  // Optional — the run's linked title research scope (migration 033's
+  // title_research_job_id, plus the create-run warning explaining why the
+  // link is absent when it is). Passing it renders the two title pages from
+  // real persisted evidence; omitting it renders the honest "no title
+  // research scope is linked" state. Requires persistGeologyTo's Supabase
+  // client and run.user_id, because every title read is owner-scoped.
+  titleScope?: { jobId: string | null; setupWarning: string | null },
 ): Promise<Buffer> {
   const generatedAt = new Date().toISOString();
 
@@ -2570,6 +2822,26 @@ export async function buildTrrcPdfReport(
     if (!ok) throw new Error(`Geological result could not be persisted: ${error}`);
   }
 
+  // ── Title (Section 8 continued). loadTitleForReport never throws — every
+  // failure comes back as a status the page states — so this cannot break
+  // report generation. Without a Supabase client (the sample generator) the
+  // pages render the same "not researched" state a real unlinked run gets.
+  const title: TitleReportInput = persistGeologyTo?.supabase && run.user_id
+    ? await loadTitleForReport(
+        persistGeologyTo.supabase,
+        run.user_id,
+        titleScope?.jobId ?? null,
+        identity.wellName || null,
+        titleScope?.setupWarning ?? null,
+      )
+    : {
+        status: "no_job", headline: "No title research has been run for this well.",
+        jobId: null, stageDetail: null, subjectLeads: [], subjectMatchedCount: 0,
+        totalIndexRows: 0, verifiedInstrumentCount: 0, documents: [], tracts: [],
+        openReviewItems: [], countyCoverage: [], analysis: null, ownership: null,
+        ownershipReason: "Ownership is not established: no title research scope is linked to this run.",
+      };
+
   const doc = React.createElement(
     Document,
     {
@@ -2588,6 +2860,8 @@ export async function buildTrrcPdfReport(
     React.createElement(WellConstructionPage,   { run, id: identity, attempts, generatedAt }),
     React.createElement(CompliancePage,         { run, id: identity, attempts, generatedAt }),
     React.createElement(LegalDescriptionPage,   { run, id: identity, attempts, mapImage, offsetWells, lateralPath, generatedAt }),
+    React.createElement(TitleChainPage,         { run, id: identity, title, generatedAt }),
+    React.createElement(TitleEvidenceDetailPage,{ run, id: identity, title, generatedAt }),
     React.createElement(OffsetAnalyticsPage,    { run, id: identity, offsetAnalytics, generatedAt, failureReason: offsetFailure }),
     React.createElement(GeologicalDueDiligencePage, { run, id: identity, geology, generatedAt, failureReason: geologyFailure }),
     React.createElement(MissingDocumentsPage,   { run, id: identity, attempts, generatedAt }),
