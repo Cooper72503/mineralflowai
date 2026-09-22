@@ -1,5 +1,7 @@
 "use client";
 
+import {ScenarioControls} from "./portfolio/scenario-controls";
+
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -507,10 +509,10 @@ export default function TrrcDueDiligencePage() {
     router.replace("/trrc-due-diligence", { scroll: false });
   }, [router]);
 
-  const handleDownload = useCallback(async (type: keyof typeof DOWNLOAD_PATHS) => {
+  const handleDownload = useCallback(async (type: keyof typeof DOWNLOAD_PATHS, internalLeaseSettings?:unknown) => {
     if (!runId) return;
     setDownloadError(null);
-    const res = await apiFetch(DOWNLOAD_PATHS[type](runId));
+    const res = await apiFetch(DOWNLOAD_PATHS[type](runId),type==="report"&&internalLeaseSettings?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({internalLeaseSettings})}:undefined);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Download failed" }));
       setDownloadError((err as { error?: string }).error ?? "Download failed");
@@ -976,6 +978,9 @@ function SearchForm({
 // ─── Progress UI ───────────────────────────────────────────────────────────────
 
 function ProgressUI({ run, onCancel }: { run: TrrcDueDiligenceRun; onCancel: () => void }) {
+  const [leaseScenario,setLeaseScenario]=useState<Record<string,unknown>|null|undefined>(undefined);
+  const [leaseAsking,setLeaseAsking]=useState("");
+  const validAsking=!leaseAsking.trim()||Number.isFinite(Number(leaseAsking))&&Number(leaseAsking)>0;
   const rawAttempts = run.source_attempts ?? [];
   // Same dedup as ResultsDashboard — the agent can retry a tool call while
   // reasoning, which would otherwise double-count these live progress tiles.
@@ -1250,11 +1255,14 @@ function ResultsDashboard({
   activeTab: TabKey;
   setActiveTab: (t: TabKey) => void;
   onReset: () => void;
-  onDownload: (type: keyof typeof DOWNLOAD_PATHS) => void;
+  onDownload: (type: keyof typeof DOWNLOAD_PATHS, internalLeaseSettings?:unknown) => void;
   apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
   downloadError: string | null;
   onDismissDownloadError: () => void;
 }) {
+  const [leaseScenario,setLeaseScenario]=useState<Record<string,unknown>|null|undefined>(undefined);
+  const [leaseAsking,setLeaseAsking]=useState("");
+  const validAsking=!leaseAsking.trim()||Number.isFinite(Number(leaseAsking))&&Number(leaseAsking)>0;
   const rawAttempts = run.source_attempts ?? [];
   // The agent can call the same tool more than once while reasoning (e.g.
   // retrying search_by_operator) — without this, a single source shows up
@@ -1433,6 +1441,7 @@ function ResultsDashboard({
             </button>
           </div>
         )}
+        <div><label>Lease asking price ($; optional)<input type="number" min="0" value={leaseAsking} onChange={e=>setLeaseAsking(e.target.value)}/></label><ScenarioControls onChange={setLeaseScenario}/></div>
         <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" as const }}>
           {([
             { type: "decision-record" as const,    label: "Decision Record Evidence (JSON)" },
@@ -1448,7 +1457,7 @@ function ResultsDashboard({
             { type: "export-lateral" as const,      label: "Lateral Path CSV" },
             { type: "export-county" as const,       label: "County Records CSV" },
           ]).map(({ type, label }) => (
-            <button key={type} onClick={() => onDownload(type)} style={{
+            <button key={type} disabled={type==="report"&&(leaseScenario===null||!validAsking)} onClick={() => onDownload(type,type==="report"&&leaseScenario?{scenario:leaseScenario,askingPriceUsd:leaseAsking.trim()?Number(leaseAsking):null}:undefined)} style={{
               background: COLORS.surfaceAlt, border: `1px solid ${COLORS.borderStrong}`,
               borderRadius: 7, color: COLORS.text, fontSize: "0.8rem", fontWeight: 500,
               padding: "0.5rem 1rem", cursor: "pointer",

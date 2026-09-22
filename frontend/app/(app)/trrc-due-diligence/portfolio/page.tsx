@@ -18,6 +18,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useApiFetch } from "@/lib/trrc/use-api-fetch";
 import { COLORS } from "../colors";
+import {ScenarioControls} from "./scenario-controls";
 import { PortfolioReview } from "./portfolio-review";
 
 type RowStatus = "creating" | "create_failed" | "pending" | "running" | "complete" | "failed" | "cancelled" | "awaiting_selection" | string;
@@ -90,6 +91,9 @@ export default function PortfolioPage() {
 
   const inputCount = parseInputs(rawText).length;
 
+  const [scenario,setScenario]=useState<Record<string,unknown>|null|undefined>(undefined);
+  const [askingPrice,setAskingPrice]=useState("");
+  const [claimedCount,setClaimedCount]=useState("");
   const [packageId,setPackageId]=useState<string|null>(null);
   const [packageStatus,setPackageStatus]=useState<string|null>(null);
   const [savedRecordId,setSavedRecordId]=useState<string|null>(null);
@@ -103,20 +107,26 @@ export default function PortfolioPage() {
     const inputs=parseInputs(rawText);if(!inputs.length)return;
     setSubmitting(true);setSubmitError(null);
     try {
-      const signature=JSON.stringify(inputs);
+      if(scenario===null)throw Error("Complete the enabled economic assumptions before submitting.");
+      const asking=askingPrice.trim()?Number(askingPrice):null;
+      if(asking!==null&&(!Number.isFinite(asking)||asking<=0))throw Error("Asking price must be positive.");
+      const count=claimedCount.trim()?Number(claimedCount):null;
+      if(count!==null&&(!Number.isInteger(count)||count<1))throw Error("Offered well count must be a positive integer.");
+      const options={askingPriceUsd:asking,claimedWellCount:count,...(scenario?{scenario}:{})};
+      const signature=JSON.stringify({inputs,options});
       if(!requestRef.current||requestRef.current.inputs!==signature){
         const stored=sessionStorage.getItem("mineralflow-package-submission");
         const prior=stored?JSON.parse(stored):null;
         requestRef.current=prior?.inputs===signature?prior:{inputs:signature,key:crypto.randomUUID()};
         sessionStorage.setItem("mineralflow-package-submission",JSON.stringify(requestRef.current));
       }
-      const response=await apiFetch("/api/trrc/due-diligence/packages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requestKey:requestRef.current!.key,inputs})});
+      const response=await apiFetch("/api/trrc/due-diligence/packages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requestKey:requestRef.current!.key,inputs,options})});
       const result=await response.json();if(!result.ok)throw Error(result.error??"Package submission failed.");
       setPackageId(result.data.id);setSavedRecordId(null);setPackageStatus("queued");
       const url=new URL(window.location.href);url.searchParams.set("package",result.data.id);url.searchParams.delete("record");window.history.replaceState(null,"",url);
     }catch(error){setSubmitError(error instanceof Error?error.message:"Connection lost. Retry this submission to recover the same package.");}
     finally{setSubmitting(false);}
-  },[rawText,apiFetch,parseInputs]);
+  },[rawText,apiFetch,parseInputs,scenario,askingPrice,claimedCount]);
   useEffect(()=>{
     if(!packageId)return;
     let stopped=false,inFlight=false;
@@ -147,9 +157,9 @@ export default function PortfolioPage() {
   };
   const downloadGold=async()=>{
     try{
-      const res=await apiFetch(`/api/trrc/due-diligence/packages/${packageId}?format=gold2-json`);
-      if(!res.ok)throw Error("Saved GOLD drafts could not be downloaded.");
-      const url=URL.createObjectURL(await res.blob());const a=document.createElement("a");a.href=url;a.download=`MineralFlow-${packageId}-GOLD-drafts.json`;a.click();URL.revokeObjectURL(url);
+      const res=await apiFetch(`/api/trrc/due-diligence/packages/${packageId}?format=decision-json`);
+      if(!res.ok){const error=await res.json().catch(()=>null);throw Error(error?.error??"Saved GOLD Decision Record could not be downloaded.");}
+      const url=URL.createObjectURL(await res.blob());const a=document.createElement("a");a.href=url;a.download=`MineralFlow-${packageId}-GOLD-Decision-Record.json`;a.click();URL.revokeObjectURL(url);
     }catch(error){setSubmitError(error instanceof Error?error.message:"Download failed.");}
   };
   const retryPackage=async()=>{
@@ -299,7 +309,8 @@ export default function PortfolioPage() {
                 {extractNote}
               </div>
             )}
-            <textarea
+            <div><label>Seller-stated offered well count<input type="number" min="1" step="1" value={claimedCount} onChange={e=>setClaimedCount(e.target.value)}/></label><label>Package asking price ($; optional)<input type="number" min="0" value={askingPrice} onChange={e=>setAskingPrice(e.target.value)}/></label><ScenarioControls onChange={setScenario}/></div>
+          <textarea
               value={rawText}
               onChange={e => setRawText(e.target.value)}
               placeholder={"42-329-42230\n42-165-02733\n42-165-10760\n..."}
@@ -337,7 +348,7 @@ export default function PortfolioPage() {
 
         {packageId&&<p style={{color:COLORS.textMuted}}>Saved package: {packageStatus??"loading"}. Retrieval continues when this page is closed. A saved evidence record will appear automatically; title review and missing data remain explicit.</p>}
         {packageId&&<button onClick={newReview}>Start a new package review</button>}
-        {packageStatus==="evidence_ready"&&<button onClick={downloadGold}>Download saved GOLD drafts (JSON)</button>}
+        {packageStatus==="evidence_ready"&&<button onClick={downloadGold}>Download GOLD Decision Record (JSON)</button>}
         {packageStatus==="failed"&&<button onClick={retryPackage}>Retry package report generation</button>}
         <PortfolioReview key={savedRecordId??"new"} members={rows.map(r=>({input:r.input,runId:r.runId}))} />
 

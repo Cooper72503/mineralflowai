@@ -48,6 +48,19 @@ function Production({report}:{report:Record2}){
   e(Svg,{width,height:120},...rows.map((r,i)=>e(Rect,{key:i,x:i*step+1,y:105-(r.oil??0)/max*95,width:Math.max(1,step-2),height:r.oil===null?3:r.oil/max*95,fill:r.oil===null?"#B5C1CA":c.teal}))),
   e(Text,{style:s.note},`${rows[0].month} to ${rows[rows.length-1].month} | Scale 0-${display(max)} bbl/month. Gray marks are missing observations, not zeros. Forecast totals below are separate calculations.`));
 }
+function LeaseAnalysis({report}:{report:Record2}){
+ const lease=report.internalLease;
+ if(!lease.record)return e(Missing,{reason:lease.reason??"Lease evidence unavailable."});
+ const record=lease.record, economics=record.conditionalEconomics;
+ return e(View,{},e(Text,{style:s.section},"MineralFlow lease forecast and entry / exit"),
+  e(Text,{style:s.warning},"RRC lease-wide production. These volumes and values are not allocated to the requested well or established as the seller's interest. Conditional WI/NRI does not clear title."),
+  ...record.forecastReadiness.map(r=>e(View,{key:r.streamKey,style:s.box},e(Text,{style:s.label},r.streamKey),e(Text,{style:s.note},`Latest oil: ${r.latestReportedOilMonth??"unavailable"}; ${r.latestReportedOilBbl??"unavailable"} bbl. Reporting lag: ${r.reportingLagMonths??"unknown"} months. ${r.reason??"Existing Arps fit available; forecast is screening, not certified reserves."}`))),
+  ...lease.oilForecasts.map(m=>{
+   const points=m.months.slice(0,60),max=Math.max(1,...points.map(p=>p.oilBbl)),step=500/Math.max(1,points.length);
+   return e(View,{key:m.streamKey,wrap:false},e(Text,{style:s.label},`${m.streamKey}: remaining modeled oil ${m.remainingOilBbl===null?"unavailable":display(m.remainingOilBbl)+" bbl"}`),e(Svg,{width:510,height:110},...points.map((p,i)=>e(Rect,{key:i,x:i*step,y:100-p.oilBbl/max*95,width:Math.max(1,step-1),height:p.oilBbl/max*95,fill:c.teal}))),e(Text,{style:s.note},m.reason??`First ${points.length} forecast months; scale 0-${display(max)} bbl/month.`),e(Text,{style:s.note},m.disclosure),e(Text,{style:s.citation},"/internalLease/oilForecasts; evidence: /internalLease/record/production/leaseStreams"));
+  }),
+  economics?e(View,{},...economics.scenarios.map(x=>e(View,{key:x.name,style:s.box,wrap:false},e(Text,{style:s.value},`${x.name}: maximum entry $${display(x.maximumEntryUsd)}`),e(Text,{style:s.note},`Net modeled exit: $${display(x.entryExit.exitProceedsUsd)} | Remaining modeled oil: ${display(x.remainingGrossOilBbl)} bbl | Required return: ${display(economics.settings.requiredAnnualReturn*100)}% | Hold: ${economics.settings.holdMonths} months`),e(Text,{style:s.citation},`/internalLease/record/conditionalEconomics/scenarios/${x.name}; cited lease months in /internalLease/record/production/leaseStreams`))),...economics.reasons.map((r,i)=>e(Missing,{key:i,reason:r})),...economics.disclosures.map((r,i)=>e(Text,{key:i,style:s.note},r))):e(Missing,{reason:report.fields["economics.lease_scenarios"].reason??"Explicit operating and purchase assumptions are required."}));
+}
 function Values({report}:{report:Record2}){
  const points=["downside","base","upside"].map(name=>({name,value:report.fields[`economics.${name}_value`].value}));
  if(!points.some(p=>typeof p.value==="number"))return e(Missing,{reason:report.fields["economics.base_value"].reason??"Evidenced ownership and forecast plus supplied economics inputs are required."});
@@ -80,7 +93,7 @@ export async function renderGold2Pdf(report:Record2):Promise<Buffer>{
  return renderToBuffer(e(Document,{title:`MineralFlow GOLD 2.0 Decision Record - ${report.input.api}`,author:"MineralFlow AI",creationDate:new Date(report.input.asOf),modificationDate:new Date(report.input.asOf)},...sections.map((section,sectionIndex)=>e(Page,{key:section.id,size:"LETTER",style:s.page},
   e(Text,{style:s.brand},"MINERALFLOW AI | GOLD 2.0 DECISION RECORD"),e(Text,{style:s.title},`${section.id}  ${section.title}`),e(Text,{style:s.sub},section.subtitle),
   section.id==="01"?e(View,{},e(Text,{style:s.sub},`Requested API: ${report.input.api} | As of: ${report.input.asOf}`),e(Text,{style:s.warning},`Delivery status: evidence report; unavailable inputs are disclosed. Acceptance is recorded separately. Acquisition posture: ${report.decision.posture}. Closing: ${report.decision.closing.state}.\n${report.implementationGaps.join(" ")}`)):null,
-  section.id==="02"?e(Values,{report}):null,section.id==="08"?e(Production,{report}):null,
+  section.id==="02"?e(View,{},e(Values,{report}),e(LeaseAnalysis,{report})):null,section.id==="08"?e(Production,{report}):null,
   ...GOLD2_CHARTS.filter(chart=>chart.page===sectionIndex+1).map(chart=>e(EvidenceChart,{key:chart.id,report,id:chart.id})),
   e(View,{style:s.grid},...section.fields.map(k=>e(Field,{key:k,report,k}))),
   section.id==="15"?e(RuleTrace,{report}):null,section.id==="A2"?e(Sources,{report}):null,

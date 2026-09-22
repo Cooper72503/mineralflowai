@@ -1,3 +1,24 @@
+# Current cycle — internal engines in one GOLD work product
+
+**GOLD reports validated: 0/10.** Synthetic integration is not live acceptance.
+
+- Merged Claude's deployed 9008c0c without conflicts.
+- Single GOLD now runs existing Arps lease screening without Novi and retains
+  dated gross oil forecasts. Supplied scenario settings connect the existing
+  cash-flow and exit engines directly into the same PDF/JSON.
+- Package intake now persists economic options with the initial submission.
+  Consolidated Decision Record JSON joins title and shared-lease economics;
+  duplicate API lease volumes are not multiplied.
+- New tests cover own-engine execution, duplicate streams, missing title,
+  modified/incomplete snapshots, zero-production refusal and actual PDF rendering.
+- Verification: 873 frontend tests passed; TypeScript, clean Next production
+  build and rebuilt worker bundle passed. No live acquisition acceptance.
+- Remaining: live MASK document ingestion/tract/ownership acceptance; durable
+  automatic ingestion; operated-interest evidence linkage; combined package PDF.
+- Deploy frontend + rebuilt full-repo worker dist. No migration.
+  See docs/unified-internal-gold.md for acceptance and limitations.
+
+---
 # Current cycle — GOLD delivery evidence integrity
 
 **GOLD reports validated: 0/10.** No new real acquisition acceptance.

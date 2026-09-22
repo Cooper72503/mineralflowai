@@ -7,7 +7,7 @@ import {assembleGold2Draft,validateGold2Draft} from "./assemble";
 import {loadReviewedPosition,PositionLoadError} from "./position-link";
 import {loadTitleForApi} from "./title-link";
 import {renderGold2Pdf} from "./pdf";
-export const ReportSupplements=z.object({evidenceScenarios:z.unknown().optional(),position:z.unknown().optional(),partner:z.unknown().optional(),reconciliationPolicy:z.unknown().optional(),economics:z.unknown().optional(),forecastSelection:z.unknown().optional()}).strict();
+export const ReportSupplements=z.object({internalLeaseSettings:z.unknown().optional(),evidenceScenarios:z.unknown().optional(),position:z.unknown().optional(),partner:z.unknown().optional(),reconciliationPolicy:z.unknown().optional(),economics:z.unknown().optional(),forecastSelection:z.unknown().optional()}).strict();
 export async function generateGold2ForRun(db:SupabaseClient,runId:string,userId:string,format:"pdf"|"json",supplementInput:unknown={}){
  const {data:run,error}=await db.from("trrc_due_diligence_runs").select("*").eq("id",runId).eq("user_id",userId).maybeSingle();
  if(error)return {ok:false as const,status:503,error:"Report run could not be loaded. Retry the request."};

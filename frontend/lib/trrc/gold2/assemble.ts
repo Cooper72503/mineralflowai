@@ -1,3 +1,4 @@
+import {buildInternalLeaseAnalysis} from "./internal-lease";
 /** Integrated GOLD2 work product. A draft is not an accepted/rendered Decision Record. */
 import {buildDecisionRecord,validateDecisionRecord,type DecisionRecord} from "../decision-record";
 import type {LiteSourceAttempt} from "../coverage";
@@ -21,6 +22,7 @@ import type {UnavailableReason} from "./contract";
 import {titleDecisionContext} from "./title-context";
 import {GOLD2_DISCLOSURES} from "./requirements";
 export interface Gold2Input {
+ internalLeaseSettings?:unknown;
  positionLookupReason?:string|null;
  api:string;asOf:string;runId:string;attempts:LiteSourceAttempt[];
  titleLookup?:{status:"linked"|"not_found"|"ambiguous"|"query_failed"|"in_progress";reason:string|null};
@@ -186,11 +188,17 @@ export function assembleGold2Draft(input:Gold2Input){
  if(!input.position&&input.positionLookupReason)for(const [key,field] of Object.entries(fields)){
   if((key.startsWith("ownership.")||key==="identity.evaluated_position")&&field.value===null)field.reason=input.positionLookupReason;
  }
+ const internalLease=buildInternalLeaseAnalysis({id:input.runId,original_input:api,status:"complete",attempts:input.attempts},input.asOf,input.internalLeaseSettings);
+ if(internalLease.record){
+  put("forecast.lease_screening",{readiness:internalLease.record.forecastReadiness,oilForecasts:internalLease.oilForecasts},"decision_engine","/internalLease","existing_arps_lease_screening_v1");
+  if(internalLease.record.conditionalEconomics)put("economics.lease_scenarios",internalLease.record.conditionalEconomics,"decision_engine","/internalLease/record/conditionalEconomics",internalLease.record.conditionalEconomics.method);
+  else fields["economics.lease_scenarios"]={status:"insufficient_data",value:null,reason:"Supply explicit lease scenario prices, WI/NRI, operating costs, liabilities and purchase/exit criteria in this analysis. No partner forecast is required.",reasonCode:"buyer_criterion_not_supplied",origin:null};
+ }else for(const key of ["forecast.lease_screening","economics.lease_scenarios"])fields[key]={status:"insufficient_data",value:null,reason:internalLease.reason,reasonCode:"reviewed_documents_insufficient",origin:null};
  const chartInputs=buildChartInputs(fields);
  const calculations=GOLD2_CALCULATIONS.map(c=>({...c,status:c.outputs.every(k=>fields[k].value===null)?"unavailable" as const:"recomputed" as const,
   reason:c.outputs.every(k=>fields[k].value===null)?c.outputs.map(k=>`${k}: ${fields[k].reason}`).join("; "):null,
   outputOrigins:Object.fromEntries(c.outputs.map(k=>[k,fields[k].origin]))}));
- return {schemaVersion:GOLD2_VERSION,state:"draft_not_validated" as const,input,inputHash:payloadHash(input),regulator,chartInputs,calculations,wellContext,titleContext,evidenceScenarios,sourceInventory,searchCoverage,partner,measurements,ownership,productionMetrics,forecastMetrics,reconciliation,economics,rulesInput,decision,fields,disclosures:GOLD2_DISCLOSURES,
+ return {schemaVersion:GOLD2_VERSION,state:"draft_not_validated" as const,input,inputHash:payloadHash(input),regulator,internalLease,chartInputs,calculations,wellContext,titleContext,evidenceScenarios,sourceInventory,searchCoverage,partner,measurements,ownership,productionMetrics,forecastMetrics,reconciliation,economics,rulesInput,decision,fields,disclosures:GOLD2_DISCLOSURES,
   implementationGaps:Object.entries(fields).filter(([,f])=>f.reasonCode==="engine_not_connected").map(([key])=>`Unimplemented field mapping: ${key}`),
  };
 }

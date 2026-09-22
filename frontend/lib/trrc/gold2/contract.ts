@@ -4,6 +4,7 @@ import {normalizeApiNumber} from "../normalization";
 import {REQUIRED_DECISION_FIELDS} from "../decision-record";
 export const GOLD2_VERSION="2.0.0";
 export const GOLD2_FIELDS=[...REQUIRED_DECISION_FIELDS,
+ "forecast.lease_screening","economics.lease_scenarios",
  "identity.as_of","identity.lease_name","identity.well_number","geology.reported_api_depth","economics.underwrite_basis","economics.cashflow_timing","economics.risk_haircut","economics.differentials","economics.assumption_provenance","economics.monthly_cashflows",
  "forecast.next12_gas","forecast.model_version","forecast.generated_at","production.reporting_period","production.membership_scope",
  "geology.reference_elevation","geology.gross_interval","geology.formation_tops","decision.confidence_domains","decision.closing_rule_trace","decision.next_actions","decision.supporting_reasons","decision.risk_reasons","evidence.source_inventory","evidence.search_coverage",

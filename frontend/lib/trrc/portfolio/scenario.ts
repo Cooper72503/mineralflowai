@@ -67,7 +67,7 @@ export function evaluatePortfolioScenario(streams:ScenarioStream[],raw:unknown,a
   const maximumEntryUsd=hold.reduce((pv,v,i)=>pv+v/Math.pow(1+discount,i+1),0)-settings.initialCapexUsd;
   const remainingGrossOilBbl=shifted.reduce((sum,f)=>sum+f.oil.reduce((a,b)=>a+b,0),0);
   const remainingReportedGasMcf=settings.productionScope==="oil_only"?null:shifted.reduce((sum,f)=>sum+f.gas.reduce((a,b)=>a+b,0),0);
-  const result={name,prices,maximumEntryUsd,askingPriceMeetsReturnCriterion:askingPriceUsd!<=maximumEntryUsd,remainingGrossOilBbl,remainingReportedGasMcf,netCashFlowByMonth:cf,entryExit:flip,models:shifted.map(({cf,oil,gas,...metadata})=>metadata)};
+  const result={name,prices,maximumEntryUsd,askingPriceMeetsReturnCriterion:askingPriceUsd!<=maximumEntryUsd,remainingGrossOilBbl,remainingReportedGasMcf,netCashFlowByMonth:cf,entryExit:flip,models:shifted.map(({cf,oil,gas,...metadata})=>({...metadata,forecastMonths:oil.map((oilBbl,i)=>({month:new Date(Date.UTC(Number(asOf.slice(0,4)),Number(asOf.slice(5,7))+i,1)).toISOString().slice(0,7),oilBbl,gasMcf:settings.productionScope==="oil_only"?null:gas[i]??null}))}))};
   if([maximumEntryUsd,remainingGrossOilBbl,...cf,...Object.values(flip).filter((v):v is number=>typeof v==="number")].some(v=>!Number.isFinite(v)))throw Error("Nonfinite package economics");
   calculated.push(result);
  }

@@ -1,3 +1,4 @@
+import {buildPackageDecision} from "@/lib/trrc/gold2/package-decision";
 import {NextRequest,NextResponse} from "next/server";
 import {z} from "zod";
 import {createSupabaseFromRouteRequest} from "@/lib/supabase/from-route-request";
@@ -11,10 +12,18 @@ export async function GET(request:NextRequest,{params}:{params:Promise<{packageI
  const result=await db.from("trrc_packages").select("id,members_json,status,record_id,error_summary,created_at,updated_at").eq("id",packageId).eq("user_id",user.id).maybeSingle();
  if(result.error)return NextResponse.json({ok:false,error:"Package lookup failed."},{status:503});
  if(!result.data)return NextResponse.json({ok:false,error:"Package not found."},{status:404});
- if(request.nextUrl.searchParams.get("format")==="gold2-json"){
+ if(["gold2-json","decision-json"].includes(request.nextUrl.searchParams.get("format")??"")){
   if(result.data.status!=="evidence_ready")return NextResponse.json({ok:false,error:"Package evidence is not ready."},{status:409});
   const saved=await db.from("trrc_packages").select("gold_records_json").eq("id",packageId).eq("user_id",user.id).single();
   if(saved.error||!saved.data)return NextResponse.json({ok:false,error:"Saved GOLD records could not be loaded."},{status:503});
+  if(request.nextUrl.searchParams.get("format")==="decision-json"){
+   const portfolio=await db.from("trrc_portfolio_records").select("record_json").eq("id",result.data.record_id).eq("user_id",user.id).maybeSingle();
+   if(portfolio.error||!portfolio.data)return NextResponse.json({ok:false,error:"Saved package evidence could not be loaded."},{status:503});
+   try{
+    const report=buildPackageDecision(portfolio.data.record_json,saved.data.gold_records_json);
+    return NextResponse.json({packageId,recordId:result.data.record_id,report},{headers:{"Cache-Control":"private, no-store","Content-Disposition":`attachment; filename="MineralFlow-${packageId}-GOLD-Decision-Record.json"`}});
+   }catch{return NextResponse.json({ok:false,error:"Saved package failed current report validation. Regenerate the package before delivery."},{status:409});}
+  }
   return NextResponse.json({packageId,recordId:result.data.record_id,acceptance:"Drafts with explicit evidence gaps; structural validity is not acquisition approval.",records:saved.data.gold_records_json},{headers:{"Cache-Control":"private, no-store","Content-Disposition":`attachment; filename="MineralFlow-${packageId}-GOLD-drafts.json"`}});
  }
  const ids=(result.data.members_json as {runId:string|null}[]).flatMap(m=>m.runId?[m.runId]:[]);
