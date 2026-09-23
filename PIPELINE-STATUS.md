@@ -1,3 +1,23 @@
+# Current cycle — county search coverage and recovery
+
+**GOLD reports validated: 0/10.** No new live acquisition acceptance.
+
+- Shared-lease API inputs no longer consume the county query budget repeatedly.
+- Empty lease searches expand to punctuation-normalized and distinctive-name
+  variants and survey-only discovery; source legal descriptions are unchanged.
+- Failed and bounded searches are eligible on resume; successful/empty legal
+  and party queries remain cached. Lease queries repeat on resume to discover
+  public previews, with within-pass deduplication.
+- Empty, failed, truncated and budget-limited primary searches create review
+  items. Operator-wide grantor noise no longer triggers predecessor searches.
+- A thrown preview retrieval error is recorded without stopping later documents.
+- Local regression: 138 worker tests; full worker build/typecheck passed.
+- Not live-verified: new Midland results, OCR/title ownership, price-feed handoff,
+  unified package PDF, and the remaining non-county worker coverage audit.
+- Bounds remain 12 county queries / 6 predecessor queries / 8 preview attempts;
+  these are disclosed limits, not a claim of exhaustive county retrieval.
+
+---
 # Current cycle — GOLD release standard and purchase-independent valuation
 
 **GOLD reports validated: 0/10.** No live acceptance added.

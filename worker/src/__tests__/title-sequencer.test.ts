@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { runTitleResearchJob, storeIndexEntries, type TitleJobDeps } from "../title-sequencer.js";
+import { runTitleResearchJob, searchCountyRecordsForJob, storeIndexEntries, type TitleJobDeps } from "../title-sequencer.js";
 
 vi.mock("../tools/browser.js", () => ({ getCodaDocuments: vi.fn(), getBrowser: vi.fn(), closeBrowser: vi.fn() }));
 vi.mock("../tools/ewa.js", () => ({ searchWellbore: vi.fn(), getGisLocation: vi.fn(), getDrillingPermits: vi.fn(), getCompletionRecords: vi.fn(), PDA_BASE: "https://webapps2.rrc.texas.gov/EWA" }));
@@ -252,4 +252,52 @@ describe("automatic county previews", () => {
   await runTitleResearchJob("job-1",supabase,d);
   expect(getDocument).toHaveBeenCalledTimes(1);
  });
+});
+
+
+describe("county search coverage", () => {
+  const provider = () => ({ provider: { id: "publicsearch_us", name: "x", counties: {}, search: vi.fn() }, identifier: "midland", displayName: "Midland" });
+  const well = { id: "w", api10: "4232946216", api14: null, county_name: "Midland", resolution_status: "resolved", operator_name: "CHEVRON U.S.A. INC.", lease_name: "CMC BUTTERCUP 25-37 UNIT", survey_name: "T&P RR CO", abstract_number: "A-329236" };
+  const empty = (value: string) => ({ found: false, status: "automated" as const, county: "Midland", provider: "publicsearch_us", total_count: 0, search_url: `https://example.test/${encodeURIComponent(value)}`, message: "No matches", records: [] });
+
+  it("twelve shared-lease wells search unique variants without exhausting the budget and expose empty coverage", async () => {
+    const { supabase, store } = makeSupabase(seedJob());
+    const fetch = vi.fn(async (_county: string, value: string) => empty(value));
+    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider: provider }), "job-1", "user-1", Array.from({ length: 12 }, (_, i) => ({ ...well, id: String(i) })));
+    const queries = fetch.mock.calls.map(c => c[1]);
+    expect(queries).toContain("CMC BUTTERCUP 25 37 UNIT");
+    expect(queries).toContain("BUTTERCUP");
+    expect(queries).toContain("T&P RR CO");
+    expect(queries.length).toBe(new Set(queries).size);
+    expect(queries.length).toBeLessThan(12);
+    expect(store.title_search_log.some(r => r.status === "skipped_bounded")).toBe(false);
+    expect(store.title_review_items.some(r => String(r.title).includes("No county instruments"))).toBe(true);
+  });
+
+  it("retries a persisted failed legal query on resume", async () => {
+    const seed = seedJob();
+    seed.title_search_log = [{ job_id: "job-1", provider: "county:publicsearch_us", query_type: "legal_description", query_value: "T&P RR CO A-329236", status: "failed" }];
+    const { supabase } = makeSupabase(seed);
+    const fetch = vi.fn(async (_county: string, value: string) => empty(value));
+    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider: provider }), "job-1", "user-1", [well]);
+    expect(fetch).toHaveBeenCalledWith("Midland", "T&P RR CO A-329236");
+  });
+
+  it("surfaces truncated result sets and does not chase operator-only grantors", async () => {
+    const { supabase, store } = makeSupabase(seedJob());
+    const fetch = vi.fn(async (_county: string, value: string) => value === well.operator_name ? { ...empty(value), total_count: 50, records: [{ grantor: "UNRELATED RESIDENT", grantee: "PIPELINE CO", doc_type: "EASEMENT", recorded_date: "2020-01-01", doc_number: "1", book_volume_page: "", legal_description: "RESIDENTIAL SUBDIVISION" }] } : empty(value));
+    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider: provider }), "job-1", "user-1", [well]);
+    expect(fetch).not.toHaveBeenCalledWith("Midland", "UNRELATED RESIDENT");
+    expect(store.title_review_items.some(r => String(r.title).includes("truncated"))).toBe(true);
+    expect(store.title_instruments[0].instrument_content_verified).toBe(false);
+  });
+
+  it("records the unfinished search plan when distinct leases exceed the budget", async () => {
+    const { supabase, store } = makeSupabase(seedJob());
+    const fetch = vi.fn(async (_county: string, value: string) => empty(value));
+    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider: provider }), "job-1", "user-1", Array.from({ length: 16 }, (_, i) => ({ ...well, lease_name: `LEASE ${i}`, id: String(i) })));
+    expect(fetch.mock.calls.length).toBe(12);
+    expect(store.title_search_log.some(r => r.status === "skipped_bounded")).toBe(true);
+    expect(store.title_review_items.some(r => r.title === "County search budget reached")).toBe(true);
+  });
 });
