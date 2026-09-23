@@ -1,3 +1,17 @@
+# Current cycle — GOLD release standard and purchase-independent valuation
+
+**GOLD reports validated: 0/10.** No live acceptance added.
+
+- GOLD-REPORT-STANDARD.md now defines the unified deal report and release gates.
+- Removed the unnecessary asking-price gate on conditional purchase ceiling,
+  forecast cash flow and modeled exit. Existing PV-10/exit arithmetic is shared.
+- Absent entry price keeps profit, IRR, MOIC, payout and price comparison null;
+  no assumed purchase price is inserted. Prices, interests and costs still need
+  explicit supported inputs or disclosed scenario assumptions.
+- Verification: 884/884 frontend tests; TypeScript and worker build passed.
+- Combined PDF, live title ingestion/ownership and price-feed handoff remain open.
+
+---
 # Current cycle — internal engines in one GOLD work product
 
 **GOLD reports validated: 0/10.** Synthetic integration is not live acceptance.

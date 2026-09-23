@@ -197,8 +197,8 @@ export function computeFlipAnalysis(
   return { schemaVersion: FLIP_SCHEMA_VERSION, sufficientData: true, entryBasis, assumptions: a, scenarios, leverSensitivity, notes };
 }
 
-/** Shared package/single-asset arithmetic. Inputs are already aligned net cash flows. */
-export function evaluateFlipCashFlows(asIs:number[],opt:number[],scenario:Scenario,entryUsd:number,a:FlipAssumptions):FlipScenarioResult {
+/** Purchase-independent cash-flow and exit values, using the same PV-10 arithmetic. */
+export function evaluateUnpricedCashFlows(asIs:number[],opt:number[],scenario:Scenario,a:FlipAssumptions){
  const H=Math.max(1,Math.round(a.holdMonths));
     const pv10AsIsUsd = pv10Slice(asIs, 0, Infinity);
     const pv10OptimizedUsd = pv10Slice(opt, 0, Infinity);
@@ -206,6 +206,15 @@ export function evaluateFlipCashFlows(asIs:number[],opt:number[],scenario:Scenar
     const exitRemainingPv10Usd = pv10Slice(opt, H, Infinity);
     const grossExitUsd = exitRemainingPv10Usd * a.exitMultipleOfPv10;
     const exitProceedsUsd = grossExitUsd - Math.max(0,grossExitUsd) * a.transactionCostPct;
+ return {scenario,pv10AsIsUsd,pv10OptimizedUsd,upliftPv10Usd:pv10OptimizedUsd-pv10AsIsUsd,
+ entryUsd:null,holdNetCashFlowUsd,exitRemainingPv10Usd,exitProceedsUsd,capexUsd:a.optimizationCapexUsd,
+ profitUsd:null,moic:null,irrAnnualPct:null,payoutMonths:null,forecastMonths:opt.length,holdCoversFullForecast:opt.length<=H};
+}
+
+/** Shared package/single-asset arithmetic. Inputs are already aligned net cash flows. */
+export function evaluateFlipCashFlows(asIs:number[],opt:number[],scenario:Scenario,entryUsd:number,a:FlipAssumptions):FlipScenarioResult {
+ const H=Math.max(1,Math.round(a.holdMonths));
+ const {pv10AsIsUsd,pv10OptimizedUsd,holdNetCashFlowUsd,exitRemainingPv10Usd,exitProceedsUsd}=evaluateUnpricedCashFlows(asIs,opt,scenario,a);
     const outlay = entryUsd + a.optimizationCapexUsd;
     const profitUsd = exitProceedsUsd + holdNetCashFlowUsd - outlay;
     const moic = outlay > 0 ? (exitProceedsUsd + holdNetCashFlowUsd) / outlay : null;

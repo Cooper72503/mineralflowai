@@ -2,7 +2,7 @@
 import {z} from "zod";
 import {fitArpsDecline} from "../decline-curve";
 import {forecastNetCashFlowSeries,monthlyDiscountRate} from "../economics";
-import {evaluateFlipCashFlows,DEFAULT_FLIP_ASSUMPTIONS} from "../flip";
+import {evaluateFlipCashFlows,evaluateUnpricedCashFlows,DEFAULT_FLIP_ASSUMPTIONS} from "../flip";
 const nonnegative=z.number().finite().nonnegative(),fraction=nonnegative.max(1);
 const price=z.object({oilUsdBbl:nonnegative,gasUsdMcf:nonnegative}).strict();
 export const PortfolioScenarioSchema=z.object({
@@ -48,7 +48,6 @@ export function evaluatePortfolioScenario(streams:ScenarioStream[],raw:unknown,a
   return {key:stream.key,age,trailingUnreportedMonths,excludedEarlierMonths,through:months.at(-1)?.month??null,input:{monthlyOilBbl:oil as number[],monthlyGasMcf:settings.productionScope==="oil_only"?[]:gas as number[],operating:{workingInterest:settings.workingInterest,netRevenueInterest:settings.netRevenueInterest,variableLoeUsdPerBoe:settings.variableLoeUsdPerBoe,workoverReserveUsdPerBoe:settings.workoverReserveUsdPerBoe,oilSeveranceFraction:settings.oilSeveranceFraction,gasSeveranceFraction:settings.gasSeveranceFraction,adValoremFraction:settings.adValoremFraction}}};
  });
  if(!streams.length)reasons.push("No reconciled lease streams available.");
- if(askingPriceUsd===null)reasons.push("Package asking price is required for entry/exit analysis.");
  const calculated=[];
  if(!reasons.length)for(const [name,prices] of Object.entries(settings.prices)){
   const forecasts=prepared.map(p=>({p,model:forecastNetCashFlowSeries(p.input,prices)}));
@@ -61,20 +60,22 @@ export function evaluatePortfolioScenario(streams:ScenarioStream[],raw:unknown,a
   if(!horizon){reasons.push("No forecast production remains at the valuation month.");break;}
   const cf=Array.from({length:horizon},(_,i)=>shifted.reduce((sum,f)=>sum+(f.cf[i]??0),0)-settings.fixedMonthlyCostsUsd);
   cf[horizon-1]-=settings.terminalLiabilityUsd;
-  const flip=evaluateFlipCashFlows(cf,cf,name==="downside"?"stress":name as "base"|"upside",askingPriceUsd!,{...DEFAULT_FLIP_ASSUMPTIONS,holdMonths:settings.holdMonths,exitMultipleOfPv10:settings.exitMultipleOfPv10,transactionCostPct:settings.sellingCostFraction,optimizationCapexUsd:settings.initialCapexUsd});
+  const flipSettings={...DEFAULT_FLIP_ASSUMPTIONS,holdMonths:settings.holdMonths,exitMultipleOfPv10:settings.exitMultipleOfPv10,transactionCostPct:settings.sellingCostFraction,optimizationCapexUsd:settings.initialCapexUsd};
+  const scenarioName=name==="downside"?"stress":name as "base"|"upside";
+  const flip=askingPriceUsd===null?evaluateUnpricedCashFlows(cf,cf,scenarioName,flipSettings):evaluateFlipCashFlows(cf,cf,scenarioName,askingPriceUsd,flipSettings);
   const discount=monthlyDiscountRate(settings.requiredAnnualReturn);
   const hold=Array.from({length:settings.holdMonths},(_,i)=>cf[i]??0);hold[hold.length-1]+=flip.exitProceedsUsd;
   const maximumEntryUsd=hold.reduce((pv,v,i)=>pv+v/Math.pow(1+discount,i+1),0)-settings.initialCapexUsd;
   const remainingGrossOilBbl=shifted.reduce((sum,f)=>sum+f.oil.reduce((a,b)=>a+b,0),0);
   const remainingReportedGasMcf=settings.productionScope==="oil_only"?null:shifted.reduce((sum,f)=>sum+f.gas.reduce((a,b)=>a+b,0),0);
-  const result={name,prices,maximumEntryUsd,askingPriceMeetsReturnCriterion:askingPriceUsd!<=maximumEntryUsd,remainingGrossOilBbl,remainingReportedGasMcf,netCashFlowByMonth:cf,entryExit:flip,models:shifted.map(({cf,oil,gas,...metadata})=>({...metadata,forecastMonths:oil.map((oilBbl,i)=>({month:new Date(Date.UTC(Number(asOf.slice(0,4)),Number(asOf.slice(5,7))+i,1)).toISOString().slice(0,7),oilBbl,gasMcf:settings.productionScope==="oil_only"?null:gas[i]??null}))}))};
+  const result={name,prices,maximumEntryUsd,askingPriceMeetsReturnCriterion:askingPriceUsd===null?null:askingPriceUsd<=maximumEntryUsd,entryPriceReason:askingPriceUsd===null?"No asking price supplied; price comparison, profit, IRR, MOIC and payout are unavailable.":null,remainingGrossOilBbl,remainingReportedGasMcf,netCashFlowByMonth:cf,entryExit:flip,models:shifted.map(({cf,oil,gas,...metadata})=>({...metadata,forecastMonths:oil.map((oilBbl,i)=>({month:new Date(Date.UTC(Number(asOf.slice(0,4)),Number(asOf.slice(5,7))+i,1)).toISOString().slice(0,7),oilBbl,gasMcf:settings.productionScope==="oil_only"?null:gas[i]??null}))}))};
   if([maximumEntryUsd,remainingGrossOilBbl,...cf,...Object.values(flip).filter((v):v is number=>typeof v==="number")].some(v=>!Number.isFinite(v)))throw Error("Nonfinite package economics");
   calculated.push(result);
  }
  return {status:reasons.length?"insufficient_data":"calculated_conditional",settings,reasons,scenarios:reasons.length?[]:calculated,
   inputProvenance:{production:"/production/leaseStreams",assumptions:"/input/scenario",askingPrice:"/input/askingPriceUsd"},
   valuationMonth:asOf.slice(0,7),method:"existing_arps_and_cashflow_engines_sum_unique_streams_then_shared_flip_v1",
-  disclosures:["Conditional scenario inputs are buyer/model assumptions, not verified title or seller ownership. Uniform WI/NRI is applied across these selected streams only for this scenario.","Prices are explicitly provided realized prices, not a live strip. Oil-only scope excludes gas revenue and gas volumes intentionally.","Existing Arps screening forecast and terminal thresholds are reused. Waterflood intervention or incremental recovery is not predicted; forecast volumes are not certified reserves.","Forecast fitting uses the contiguous complete suffix ending at the last reported month. Earlier disconnected history is retained but excluded from the fit, with excluded month counts disclosed.","Forecasts bridge from each last reported month to the end of the valuation month; historical/unreported bridge cash is excluded from purchase returns.","Fixed costs include water handling and are charged once per package month. Terminal liability is charged at forecast end. Initial capital is charged once at entry.","Exit is remaining model PV-10 at the hold date times the stated multiple less selling cost; it is not an observed market sale price.","Maximum entry discounts hold cash and net exit proceeds at the stated buyer return, less initial capital. Meeting this numeric criterion is not title clearance or a buy recommendation.","IRR uses the existing positive-return solver and is withheld for multiple cash-flow sign changes; null does not imply zero return. No rate-uplift or development upside has been assumed."]};
+  disclosures:["Purchase ceiling and modeled exit do not require an asking price. Entry-dependent returns are withheld when no price is supplied.","Conditional scenario inputs are buyer/model assumptions, not verified title or seller ownership. Uniform WI/NRI is applied across these selected streams only for this scenario.","Prices are explicitly provided realized prices, not a live strip. Oil-only scope excludes gas revenue and gas volumes intentionally.","Existing Arps screening forecast and terminal thresholds are reused. Waterflood intervention or incremental recovery is not predicted; forecast volumes are not certified reserves.","Forecast fitting uses the contiguous complete suffix ending at the last reported month. Earlier disconnected history is retained but excluded from the fit, with excluded month counts disclosed.","Forecasts bridge from each last reported month to the end of the valuation month; historical/unreported bridge cash is excluded from purchase returns.","Fixed costs include water handling and are charged once per package month. Terminal liability is charged at forecast end. Initial capital is charged once at entry.","Exit is remaining model PV-10 at the hold date times the stated multiple less selling cost; it is not an observed market sale price.","Maximum entry discounts hold cash and net exit proceeds at the stated buyer return, less initial capital. Meeting this numeric criterion is not title clearance or a buy recommendation.","IRR uses the existing positive-return solver and is withheld for multiple cash-flow sign changes; null does not imply zero return. No rate-uplift or development upside has been assumed."]};
 }
 
 /** Descriptive readiness runs even before a buyer supplies financial assumptions. */

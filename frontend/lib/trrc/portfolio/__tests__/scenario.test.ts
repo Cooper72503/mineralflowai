@@ -39,3 +39,15 @@ it("can use a six-month complete trailing window without compressing an earlier 
  const s=stream("A");s.months[4].volumes.oil_bbl.value=null;
  const r=evaluatePortfolioScenario([s],settings,2500000,"2026-09-16");expect(r.status).toBe("calculated_conditional");expect(r.scenarios[0].models[0].excludedEarlierMonths).toBe(5);expect(r.scenarios[0].models[0].oilFit?.monthsOfHistory).toBe(7);
 });
+
+it("calculates purchase ceiling and exit without inventing an asking price or returns",()=>{
+ const noPrice=evaluatePortfolioScenario([stream("A")],settings,null,"2026-09-16");
+ const priced=evaluatePortfolioScenario([stream("A")],settings,2500000,"2026-09-16");
+ expect(noPrice.status).toBe("calculated_conditional");
+ for(let i=0;i<3;i++){
+  expect(noPrice.scenarios[i].maximumEntryUsd).toBe(priced.scenarios[i].maximumEntryUsd);
+  expect(noPrice.scenarios[i].entryExit.exitProceedsUsd).toBe(priced.scenarios[i].entryExit.exitProceedsUsd);
+  expect(noPrice.scenarios[i].askingPriceMeetsReturnCriterion).toBeNull();
+  expect(noPrice.scenarios[i].entryExit).toMatchObject({entryUsd:null,profitUsd:null,moic:null,irrAnnualPct:null,payoutMonths:null});
+ }
+});
