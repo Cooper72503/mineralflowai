@@ -132,6 +132,14 @@ describe("publicsearch search outcome evidence", () => {
     expect(result.error).toContain("outcome unverified");
   });
 
+  it("flags a full 50-row page as incomplete without inventing a total", async () => {
+    const rows = Array.from({ length: 50 }, (_, i) => ["", "", "", "A", "B", "DEED", "2020-01-01", String(i), "1/2", "SEC 37 BLK 39 T4S"]);
+    const result = await searchSnapshot(rows, "Results");
+    expect(result.records).toHaveLength(50);
+    expect(result.total_count).toBe(50);
+    expect(result.coverage_incomplete).toBe(true);
+  });
+
   it("preserves retrieved index entries", async () => {
     const result = await searchSnapshot([["", "", "", "A", "B", "DEED", "2020-01-01", "123", "1/2", "Section 25"]], "1 result", ["39265019"]);
     expect(result.error).toBeUndefined();

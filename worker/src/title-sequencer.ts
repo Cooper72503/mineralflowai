@@ -1,3 +1,4 @@
+import { tractQueries, indexMatchesTract, type SearchTract } from "./title-tract-search.js";
 import { persistSurfaceTractCandidates } from "./title-tract-handoff.js";
 import { checkedQuery, PipelinePersistenceError } from "./persistence.js";
 import { canonicalApi10 } from "./identity.js";
@@ -345,6 +346,10 @@ export async function storeIndexEntries(supabase: SupabaseClient, jobId: string,
 }
 
 export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[]): Promise<void> {
+  const { data: tractRows } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status").eq("job_id", jobId).eq("match_status", "confirmed"), "title search tracts");
+  const tracts = (tractRows ?? []) as SearchTract[];
+  const tractCountiesPlanned = new Set<string>();
+  const tractHits = new Set<string>();
   let queries = 0;
   const downloaded = new Set<string>();
   const attempted = new Set<string>();
@@ -375,6 +380,14 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
     }
     const providerId = `county:${provider.provider.id}`;
     const candidates: Array<{ type: string; value: string }> = [];
+    if (!tractCountiesPlanned.has(county.toUpperCase())) {
+      tractCountiesPlanned.add(county.toUpperCase());
+      for (const tract of tracts.filter(t => t.county?.toUpperCase() === county.toUpperCase())) {
+        const precise = tractQueries(tract);
+        for (const value of precise) candidates.push({ type: "tract_description", value });
+        if (!precise.length) await addReviewItem(supabase, jobId, userId, "search_incomplete", `Tract ${tract.id} lacks a supported section/block/township search identity`, "Inspect the confirmed legal description or plat. No township is inferred from an abstract identifier.", { tractId: tract.id });
+      }
+    }
     if (well.lease_name) candidates.push({ type: "lease_name", value: well.lease_name });
     if (well.survey_name) candidates.push({ type: "legal_description", value: well.abstract_number ? `${well.survey_name} ${well.abstract_number}` : well.survey_name });
     if (well.operator_name) {
@@ -413,8 +426,8 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
       if (status === "failed" || status === "provider_unavailable") {
         await addReviewItem(supabase, jobId, userId, "search_incomplete", `County search incomplete: ${county} / ${q.value}`, r.error ?? r.message, { county, query: q.value, status });
       }
-      if (r.total_count > r.records.length) {
-        await addReviewItem(supabase, jobId, userId, "search_incomplete", `County results truncated: ${county} / ${q.value}`, `Provider reports ${r.total_count} hits but returned ${r.records.length}. Coverage is incomplete.`, { county, query: q.value });
+      if (r.total_count > r.records.length || ("coverage_incomplete" in r && r.coverage_incomplete)) {
+        await addReviewItem(supabase, jobId, userId, "search_incomplete", `County results truncated: ${county} / ${q.value}`, `Returned ${r.records.length} rows; reported count ${r.total_count}. Pagination coverage is incomplete or unverified.`, { county, query: q.value });
       }
       // Variants broaden discovery only. Never rewrite the source legal description.
       if (q.type === "lease_name" && r.records.length === 0) {
@@ -426,16 +439,18 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
         if (well.survey_name && well.abstract_number) candidates.push({ type: "legal_description", value: well.survey_name });
       }
       if (r.records.length > 0) {
-        const stored = await storeIndexEntries(supabase, jobId, county, r.search_url, r.records);
-        // Operator-wide results can include unrelated residential/pipeline records.
-        // Follow predecessor names from lease/legal searches only.
-        if (!q.type.startsWith("operator")) for (const n of stored.grantorNames) followups.push({ county, name: n });
+        await storeIndexEntries(supabase, jobId, county, r.search_url, r.records);
+        const relevant = r.records.filter(entry => tracts.some(t => t.county?.toUpperCase() === county.toUpperCase() && indexMatchesTract(entry.legal_description, t)));
+        if (relevant.length) tractHits.add(county.toUpperCase());
+        // A broad query or a unit-name/address hit alone cannot seed predecessors.
+        // Use relevant records even on resume, when the index row already exists.
+        for (const entry of relevant) for (const name of splitIndexNames(entry.grantor)) followups.push({ county, name });
         // Exact normalized unit-name match is a discovery filter, not tract proof.
         // Broad operator/party results must never trigger indiscriminate downloads.
-        if (q.type.startsWith("lease_name") && deps.getCountyDocument) {
+        if (deps.getCountyDocument) {
           const normalize = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, "");
           for (const entry of r.records) {
-            if (normalize(entry.legal_description) !== normalize(well.lease_name ?? "")) continue;
+            if (!relevant.includes(entry) && !(well.lease_name && normalize(entry.legal_description) === normalize(well.lease_name))) continue;
             if (!entry.document_url) {
               await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} has no retrieval link`, "The index matched the unit name but did not expose a supported document link. Document retrieval is incomplete.", { county, sourceUrl: r.search_url });
               continue;
@@ -488,6 +503,9 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
     await addReviewItem(supabase, jobId, userId, "search_incomplete", "County search budget reached", "Some planned searches were not executed. See skipped_bounded entries; this job does not establish exhaustive county coverage.", { queryLimit: MAX_COUNTY_QUERIES_PER_JOB });
   }
   for (const county of searchedCounties) {
+    if (!tractHits.has(county.toUpperCase()) && tracts.some(t => t.county?.toUpperCase() === county.toUpperCase() && tractQueries(t).length)) {
+      await addReviewItem(supabase, jobId, userId, "search_incomplete", `No tract-matching index records retrieved in this pass for ${county}`, "Broad index hits do not establish a title chain. Review precise tract queries, pagination limits and underlying unit/lease instruments; prior stored evidence is not invalidated by this search result.", { county });
+    }
     const { data } = await checkedQuery(supabase.from("title_instruments").select("id").eq("job_id", jobId).eq("county", county).limit(1), "title_instruments");
     if (!data?.length) {
       await addReviewItem(supabase, jobId, userId, "search_incomplete", `No county instruments retrieved for ${county}`, "Automated searches have not established title. Review query coverage, obtain the unit legal description from permits/plats, and search the relevant tract and predecessor parties. Empty results do not prove that no records exist.", { county });

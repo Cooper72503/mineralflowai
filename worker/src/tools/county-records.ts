@@ -63,6 +63,8 @@ export type CountyRecordsResult = {
   provider: string;
   records: CountyRecordEntry[];
   total_count: number;
+  /** Visible page may be capped; total_count is not a verified all-pages count. */
+  coverage_incomplete?: boolean;
   search_url: string;
   message: string;
   error?: string;
@@ -225,6 +227,7 @@ const publicSearchUsProvider: CountyRecordsProvider = {
         provider: "publicsearch.us",
         records: records.slice(0, 100),
         total_count: records.length,
+        coverage_incomplete: records.length >= 50,
         search_url: searchUrl,
         message: records.length > 0
           ? `${records.length} record(s) found for "${searchValue}" in ${countyDisplayName} County.`

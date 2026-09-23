@@ -133,10 +133,10 @@ describe("runTitleResearchJob (FIXTURE stubs)", () => {
   });
 
   it("with a supported county provider, stores index hits as UNVERIFIED instruments and follows grantor names once, bounded and logged", async () => {
-    const { supabase, store } = makeSupabase(seedJob());
+    const { supabase, store } = makeSupabase({ ...seedJob(), title_canonical_tracts: [{ id: "t", job_id: "job-1", county: "Martin", section_name: "12", block_number: "35 T4S", match_status: "confirmed" }] });
     const getCountyRecords = vi.fn(async (_county: string, value: string) => ({
       found: true, status: "automated" as const, county: "Martin", provider: "publicsearch_us", total_count: 1, search_url: `https://x/${encodeURIComponent(value)}`, message: "ok",
-      records: value === "DOE UNIT" ? [{ grantor: "SMITH, JOHN & SMITH, JANE", grantee: "ACME OIL", doc_type: "OIL AND GAS LEASE", recorded_date: "2019-05-01", doc_number: "2019-1", book_volume_page: "", legal_description: "A-1234 SEC 12 BLK 35" }] : [],
+      records: value === "DOE UNIT" ? [{ grantor: "SMITH, JOHN & SMITH, JANE", grantee: "ACME OIL", doc_type: "OIL AND GAS LEASE", recorded_date: "2019-05-01", doc_number: "2019-1", book_volume_page: "", legal_description: "A-1234 SEC 12 BLK 35 T4S" }] : [],
     }));
     await runTitleResearchJob("job-1", supabase, deps({ getCountyRecords, findProvider: vi.fn(() => ({ provider: { id: "publicsearch_us", name: "x", counties: {}, search: vi.fn() }, identifier: "martin", displayName: "Martin" })) }));
 
@@ -151,7 +151,7 @@ describe("runTitleResearchJob (FIXTURE stubs)", () => {
     // lease name + legal description + operator, then two grantor follow-ups at depth 1
     const followups = store.title_search_log.filter(l => l.depth === 1);
     expect(followups.map(l => l.query_value).sort()).toEqual(["SMITH, JANE", "SMITH, JOHN"]);
-    expect(getCountyRecords).toHaveBeenCalledTimes(5);
+    expect(getCountyRecords).toHaveBeenCalledTimes(7);
   });
 
   it("reuses an already-resolved well on retry and is idempotent on index rows", async () => {
@@ -317,5 +317,22 @@ describe("operator discovery on resumed title jobs", () => {
     expect(getCountyDocument).not.toHaveBeenCalled();
     expect(store.title_instruments[0].instrument_content_verified).toBe(false);
     expect(store.title_search_log.some(r => r.query_type === "operator_variant" && r.status === "success")).toBe(true);
+  });
+});
+
+
+describe("confirmed tract search priority and predecessor gating", () => {
+  it("prioritizes the confirmed tract independently of well order and excludes street/wrong-township grantors", async () => {
+    const { supabase, store } = makeSupabase({ ...seedJob(), title_canonical_tracts: [{ id: "t", job_id: "job-1", county: "Midland", section_name: "37", block_number: "39 T4S", match_status: "confirmed" }] });
+    const row = (n: string, legal: string) => ({ doc_number: n, grantor: n, grantee: "BUYER", doc_type: "MINERAL DEED", recorded_date: "2020-01-01", book_volume_page: "", legal_description: legal });
+    const fetch = vi.fn(async (_county: string, value: string) => ({ found: true, status: "automated" as const, county: "Midland", provider: "publicsearch_us", total_count: 3, search_url: "https://example.test", message: "ok", records: value === "SEC 37 BLK 39 T4S" ? [row("RELEVANT OWNER", "SEC 37 BLK 39 T4S"), row("WRONG TOWNSHIP", "SEC 37 BLK 39 T3S"), row("STREET OWNER", "OWNER: 3810 BUTTERCUP GARDENDALE TX 79758")] : [] }));
+    const well = { id: "w", api10: "4232946216", api14: null, county_name: "Midland", resolution_status: "resolved", operator_name: null, lease_name: "BUTTERCUP UNIT", survey_name: null, abstract_number: null };
+    const findProvider = () => ({ provider: { id: "publicsearch_us", name: "x", counties: {}, search: vi.fn() }, identifier: "midland", displayName: "Midland" });
+    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider }), "job-1", "user-1", Array.from({ length: 12 }, (_, i) => ({ ...well, id: String(i) })));
+    expect(fetch.mock.calls.slice(0, 2).map(c => c[1])).toEqual(["SEC 37 BLK 39 T4S", "SECTION 37 BLOCK 39 T4S"]);
+    expect(fetch).toHaveBeenCalledWith("Midland", "RELEVANT OWNER");
+    expect(fetch).not.toHaveBeenCalledWith("Midland", "WRONG TOWNSHIP");
+    expect(fetch).not.toHaveBeenCalledWith("Midland", "STREET OWNER");
+    expect(store.title_instruments.every(r => r.instrument_content_verified === false)).toBe(true);
   });
 });

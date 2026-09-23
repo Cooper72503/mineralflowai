@@ -1,3 +1,20 @@
+# Current cycle — tract-directed county searches
+
+**GOLD reports validated: 0/10.** Live acceptance unchanged.
+
+- User's live run found 320 unverified index leads, no verified instruments or
+  retrieved documents, and no subject-tract match; counts are not title progress.
+- Confirmed section/block/township queries now precede broad discovery.
+- Predecessor searches require a conservative tract match, including township;
+  street/address and mixed-tract matches are rejected. Matching index records
+  can trigger preview retrieval but cannot establish ownership.
+- Full 50-row publicsearch pages now disclose possibly incomplete coverage;
+  all-page retrieval remains unimplemented. No matching tract hits gets a review.
+- Verification: 151 worker tests, TypeScript and bundle build passed locally.
+- Next live gate: precise Buttercup queries -> relevant documents -> ingestion
+  -> reviewed ownership -> combined GOLD. No new live run performed here.
+
+---
 # Current cycle — operator discovery and declared worker build setup
 
 **GOLD reports validated: 0/10.** No live report acceptance added.
