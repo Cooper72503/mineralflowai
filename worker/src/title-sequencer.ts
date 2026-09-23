@@ -377,7 +377,18 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
     const candidates: Array<{ type: string; value: string }> = [];
     if (well.lease_name) candidates.push({ type: "lease_name", value: well.lease_name });
     if (well.survey_name) candidates.push({ type: "legal_description", value: well.abstract_number ? `${well.survey_name} ${well.abstract_number}` : well.survey_name });
-    if (well.operator_name) candidates.push({ type: "operator", value: well.operator_name });
+    if (well.operator_name) {
+      candidates.push({ type: "operator", value: well.operator_name });
+      // Clerk indices often collapse TRRC's spaced initials (U. S. A. -> USA).
+      // Plan this independently of the raw query so cached empty results on a
+      // resumed job cannot suppress the newly introduced discovery query.
+      const normalized = well.operator_name
+        .replace(/\b(?:[a-z]\.\s*){2,}/gi, initials => initials.replace(/[.\s]/g, "") + " ")
+        .replace(/[^a-z0-9\s]/gi, " ").replace(/\s+/g, " ").trim();
+      if (normalized.toUpperCase() !== well.operator_name.toUpperCase().trim()) {
+        candidates.push({ type: "operator_variant", value: normalized });
+      }
+    }
 
     for (const q of candidates) {
       const key = `${county.toUpperCase()}|${q.value.toUpperCase().replace(/\s+/g, " ").trim()}`;
@@ -418,7 +429,7 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
         const stored = await storeIndexEntries(supabase, jobId, county, r.search_url, r.records);
         // Operator-wide results can include unrelated residential/pipeline records.
         // Follow predecessor names from lease/legal searches only.
-        if (q.type !== "operator") for (const n of stored.grantorNames) followups.push({ county, name: n });
+        if (!q.type.startsWith("operator")) for (const n of stored.grantorNames) followups.push({ county, name: n });
         // Exact normalized unit-name match is a discovery filter, not tract proof.
         // Broad operator/party results must never trigger indiscriminate downloads.
         if (q.type.startsWith("lease_name") && deps.getCountyDocument) {

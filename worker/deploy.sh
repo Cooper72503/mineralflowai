@@ -3,6 +3,7 @@
 # Usage: bash deploy.sh
 
 set -e
+cd "$(dirname "$0")"
 
 echo "=== MineralFlow TRRC Worker — Deploy ==="
 
@@ -15,8 +16,8 @@ fi
 
 echo "Node: $(node -v) | npm: $(npm -v)"
 
-# 2. Install dependencies
-npm install
+# 2. Install locked frontend build and worker dependencies from the full repo.
+npm run setup:build
 
 # 3. Install Playwright + Chromium
 npx playwright install chromium
@@ -28,7 +29,6 @@ if [ ! -f ../frontend/package-lock.json ]; then
   echo "Build requires the full repository (worker/ and frontend/). Alternatively build in CI and deploy the complete worker/dist directory."
   exit 1
 fi
-npm ci --prefix ../frontend --include=dev
 npm run build
 
 # 5. Install pm2 for process management

@@ -301,3 +301,21 @@ describe("county search coverage", () => {
     expect(store.title_review_items.some(r => r.title === "County search budget reached")).toBe(true);
   });
 });
+
+
+describe("operator discovery on resumed title jobs", () => {
+  it.each(["CHEVRON U. S. A. INC.", "CHEVRON U.S.A. INC."])("searches normalized %s despite a cached empty raw query, without following unrelated parties", async (operator) => {
+    const seed = seedJob();
+    seed.title_search_log = [{ job_id: "job-1", provider: "county:publicsearch_us", query_type: "operator", query_value: operator, status: "empty" }];
+    const { supabase, store } = makeSupabase(seed);
+    const fetch = vi.fn(async (_county: string, value: string) => ({ found: true, status: "automated" as const, county: "Midland", provider: "publicsearch_us", total_count: 1, search_url: "https://example.test", message: "ok", records: value === "CHEVRON USA INC" ? [{ grantor: "UNRELATED GRANTOR", grantee: "CHEVRON USA INC", doc_type: "EASEMENT", recorded_date: "2020-01-01", doc_number: "1", book_volume_page: "", legal_description: "OTHER TRACT", document_url: "https://example.test/doc/1" }] : [] }));
+    const getCountyDocument = vi.fn();
+    const findProvider = () => ({ provider: { id: "publicsearch_us", name: "x", counties: {}, search: vi.fn() }, identifier: "midland", displayName: "Midland" });
+    const well = { id: "w", api10: "4232946216", api14: null, county_name: "Midland", resolution_status: "resolved", operator_name: operator, lease_name: null, survey_name: null, abstract_number: null };
+    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider, getCountyDocument }), "job-1", "user-1", Array.from({ length: 12 }, (_, i) => ({ ...well, id: String(i) })));
+    expect(fetch.mock.calls.map(c => c[1])).toEqual(["CHEVRON USA INC"]);
+    expect(getCountyDocument).not.toHaveBeenCalled();
+    expect(store.title_instruments[0].instrument_content_verified).toBe(false);
+    expect(store.title_search_log.some(r => r.query_type === "operator_variant" && r.status === "success")).toBe(true);
+  });
+});

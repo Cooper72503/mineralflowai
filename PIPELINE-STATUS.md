@@ -1,3 +1,19 @@
+# Current cycle — operator discovery and declared worker build setup
+
+**GOLD reports validated: 0/10.** No live report acceptance added.
+
+- Merged deployed 59083b2 and preserved its uneven-survey Buttercup regression.
+- Added normalized operator discovery that still runs when the raw operator
+  query was cached empty; operator variants cannot trigger document downloads
+  or predecessor searches. Existing query budget remains enforced.
+- Explicit full-repository setup installs locked frontend and worker build
+  dependencies; prebuild diagnoses missing local dependencies before compilation.
+- Verified 141 worker tests, TypeScript and engine bundle build. Missing-checkout
+  and missing-dependency diagnostic paths exercised in isolated directories.
+- Not run here: fresh network dependency install, live Buttercup resume,
+  document ingestion, ownership review, or GOLD acquisition acceptance.
+
+---
 # Current cycle — county search coverage and recovery
 
 **GOLD reports validated: 0/10.** No new live acquisition acceptance.

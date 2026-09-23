@@ -60,6 +60,7 @@ describe("real Buttercup search plan", () => {
     expect(seen).toContain("BUTTERCUP");                       // distinctive discovery token
     expect(seen).toContain("T&P RR CO A-329236");              // legal description (one well)
     expect(seen).toContain("T&P RR CO");                       // survey-only fallback
+    expect(seen).toContain("CHEVRON USA INC");                 // normalized operator discovery
     expect(seen).toContain("CHEVRON U. S. A. INC.");           // operator, verbatim
     expect(seen.length).toBeLessThanOrEqual(12);               // within the query budget
     expect(store.title_search_log.some(r => r.status === "skipped_bounded")).toBe(false);
