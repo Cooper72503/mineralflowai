@@ -259,7 +259,7 @@ function TitleChainPageInner() {
         {jobId && bundle && (
           <>
             <Card title="Job" right={<div style={{ display: "flex", gap: 8 }}>
-              {bundle.job.status === "failed" && <button style={btn("ghost", busy === "retry")} onClick={retry}>Retry retrieval</button>}
+              {["failed", "awaiting_tract_confirmation", "awaiting_documents"].includes(bundle.job.status) && <button disabled={!!busy} style={btn("ghost", !!busy)} onClick={retry}>{busy === "retry" ? "Queuing retrieval…" : "Resume retrieval"}</button>}
               {["pending", "resolving_wells", "searching_records"].includes(bundle.job.status) && <button style={btn("danger", busy === "cancel")} onClick={cancel}>Cancel</button>}
             </div>}>
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12.5, alignItems: "center" }}>

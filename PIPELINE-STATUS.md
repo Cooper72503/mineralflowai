@@ -1,3 +1,18 @@
+# Current cycle — authenticated retrieval resume
+
+**GOLD reports validated: 0/10.** No live acquisition acceptance added.
+
+- Merged deployed 891d356 and retained its real-corpus tract regression.
+- Added Resume retrieval for review-paused title jobs through the existing
+  authenticated route; preserves tracts, documents, evidence and scope identity.
+- Conditional owner/status/version update prevents a retry overwriting another
+  action. Running, complete and cancelled jobs are excluded; failed retry limit
+  stays enforced. Manual review-paused resumes are separate from failed recovery.
+- Verified 894 frontend tests (10 new route tests); TypeScript passed.
+- Not verified here: live UI/authenticated resume, new county results, or GOLD.
+- Frontend deployment only; no migration or worker change for this checkpoint.
+
+---
 # Current cycle — tract-directed county searches
 
 **GOLD reports validated: 0/10.** Live acceptance unchanged.
