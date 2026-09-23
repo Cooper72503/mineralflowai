@@ -47,7 +47,15 @@ export interface TitleReportInput {
   documents: { fileName: string; pages: number | null; ocrStatus: string; extractionStatus: string; sourceUrl: string | null }[];
   tracts: { label: string; confidence: number | null; matchStatus: string; associationType: string | null }[];
   openReviewItems: { title: string; detail: string | null }[];
+  /**
+   * County-clerk record searches only — the searches that can actually
+   * produce a chain of title. The same log also holds the TRRC lookups that
+   * resolved each API to a well; those are well resolution, not title, and
+   * printing all of them buries the three searches a buyer needs to see, so
+   * they are summarized in wellResolutionQueries instead.
+   */
   countyCoverage: { provider: string; county: string | null; queryType: string; queryValue: string; status: string; resultCount: number }[];
+  wellResolutionQueries: { total: number; succeeded: number; providers: string[] };
   analysis: { classification: string; version: number; findings: number } | null;
   ownership: { described: string; nri: string | null } | null;
   ownershipReason: string;
@@ -79,7 +87,8 @@ export async function loadTitleForReport(
 ): Promise<TitleReportInput> {
   const empty = (status: TitleReportInput["status"], headline: string, ownershipReason: string): TitleReportInput => ({
     status, headline, jobId, stageDetail: null, subjectLeads: [], subjectMatchedCount: 0, totalIndexRows: 0, verifiedInstrumentCount: 0,
-    documents: [], tracts: [], openReviewItems: [], countyCoverage: [], analysis: null, ownership: null, ownershipReason,
+    documents: [], tracts: [], openReviewItems: [], countyCoverage: [],
+    wellResolutionQueries: { total: 0, succeeded: 0, providers: [] }, analysis: null, ownership: null, ownershipReason,
   });
 
   if (!jobId) {
@@ -201,10 +210,18 @@ export async function loadTitleForReport(
       associationType: bundle.associations.find(a => a.canonicalTractId === t.id)?.associationType ?? null,
     })),
     openReviewItems: bundle.reviewItems.filter(r => r.status === "open").map(r => ({ title: r.title, detail: str(r.detail) })),
-    countyCoverage: bundle.searchLog.map(l => ({
-      provider: l.provider, county: l.county, queryType: l.query_type, queryValue: l.query_value,
+    countyCoverage: bundle.searchLog.filter(l => String(l.provider).startsWith("county:")).map(l => ({
+      provider: String(l.provider).replace(/^county:/, ""), county: l.county, queryType: l.query_type, queryValue: l.query_value,
       status: l.status, resultCount: typeof l.result_count === "number" ? l.result_count : 0,
     })),
+    wellResolutionQueries: (() => {
+      const rows = bundle.searchLog.filter(l => !String(l.provider).startsWith("county:"));
+      return {
+        total: rows.length,
+        succeeded: rows.filter(l => String(l.status) === "success").length,
+        providers: [...new Set(rows.map(l => String(l.provider)))].sort(),
+      };
+    })(),
     analysis: bundle.latestAnalysis ? {
       classification: String(bundle.latestAnalysis.status_classification),
       version: bundle.latestAnalysis.version,

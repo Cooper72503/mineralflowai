@@ -26,7 +26,8 @@ const analyzed: TitleReportInput = {
   ],
   tracts: [{ label: "SEC 12 BLK A-21 PSL SURVEY, A-482, GAINES", confidence: 0.82, matchStatus: "needs_confirmation", associationType: null }],
   openReviewItems: [{ title: "County records must be supplied manually", detail: "Gaines County uses LGS Online Solutions; no automated connector exists." }],
-  countyCoverage: [{ provider: "publicsearch", county: "GAINES", queryType: "legal_description", queryValue: "SEC 12 BLK A-21 PSL", status: "ok", resultCount: 123 }],
+  countyCoverage: [{ provider: "publicsearch_us", county: "GAINES", queryType: "legal_description", queryValue: "SEC 12 BLK A-21 PSL", status: "ok", resultCount: 123 }],
+  wellResolutionQueries: { total: 5, succeeded: 5, providers: ["trrc_ewa", "trrc_gis"] },
   analysis: { classification: "POTENTIAL_GAPS_DETECTED", version: 2, findings: 4 },
   ownership: null,
   ownershipReason: "Ownership is not established: no reviewed mineral position has been selected against the current title analysis.",
@@ -35,7 +36,7 @@ const analyzed: TitleReportInput = {
 const none: TitleReportInput = {
   status: "no_job", headline: "No title research has been run for this well.", jobId: null, stageDetail: null,
   subjectLeads: [], subjectMatchedCount: 0, totalIndexRows: 0, verifiedInstrumentCount: 0, documents: [], tracts: [],
-  openReviewItems: [], countyCoverage: [], analysis: null, ownership: null,
+  openReviewItems: [], countyCoverage: [], wellResolutionQueries: { total: 0, succeeded: 0, providers: [] }, analysis: null, ownership: null,
   ownershipReason: "Ownership is not established: no title research scope is linked to this run.",
 };
 

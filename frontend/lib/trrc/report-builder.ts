@@ -1932,7 +1932,13 @@ export function TitleEvidenceDetailPage({ run, id: identity, title, generatedAt 
       "listed as not searched, not as returning nothing — the two mean different things to a buyer.",
     ),
 
-    React.createElement(Text, { style: S.subTitle }, "County Search Coverage"),
+    React.createElement(Text, { style: S.subTitle }, "County Clerk Record Searches"),
+    React.createElement(Text, { style: S.noteText },
+      "These are the searches that can produce a chain of title. " +
+      (title.wellResolutionQueries.total > 0
+        ? `A further ${title.wellResolutionQueries.total} regulatory lookup(s) (${title.wellResolutionQueries.providers.join(", ")}) resolved each API to a well and its lease; ${title.wellResolutionQueries.succeeded} succeeded. Those are well identification, not title, and are itemized in the Evidence Index.`
+        : "No regulatory well-resolution lookups were logged for this scope."),
+    ),
     title.countyCoverage.length > 0 ? React.createElement(View, {},
       React.createElement(View, { style: S.tableHeader },
         React.createElement(Text, { style: [S.tableHeaderCell, { width: "22%" }] }, "Provider"),
@@ -1951,7 +1957,7 @@ export function TitleEvidenceDetailPage({ run, id: identity, title, generatedAt 
         React.createElement(Text, { style: [S.tableCell, { width: "10%", color: c.status === "ok" ? C.green : C.red }] }, c.status),
         React.createElement(Text, { style: [S.tableCell, { width: "8%" }] }, String(c.resultCount)),
       )),
-    ) : React.createElement(Text, { style: S.bodyText }, "No county record search has been logged for this scope."),
+    ) : React.createElement(Text, { style: S.bodyText }, "No county clerk record search has been logged for this scope. Without one, no chain of title can exist in this report."),
 
     React.createElement(View, { style: S.divider }),
 
@@ -2838,7 +2844,9 @@ export async function buildTrrcPdfReport(
         status: "no_job", headline: "No title research has been run for this well.",
         jobId: null, stageDetail: null, subjectLeads: [], subjectMatchedCount: 0,
         totalIndexRows: 0, verifiedInstrumentCount: 0, documents: [], tracts: [],
-        openReviewItems: [], countyCoverage: [], analysis: null, ownership: null,
+        openReviewItems: [], countyCoverage: [],
+        wellResolutionQueries: { total: 0, succeeded: 0, providers: [] },
+        analysis: null, ownership: null,
         ownershipReason: "Ownership is not established: no title research scope is linked to this run.",
       };
 
