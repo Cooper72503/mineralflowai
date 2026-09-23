@@ -348,6 +348,13 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
   let queries = 0;
   const downloaded = new Set<string>();
   const attempted = new Set<string>();
+  // Lease-name queries that came back empty, keyed the same way as `attempted`.
+  // The survey-only fallback below is driven off this rather than off the
+  // zero-result branch alone: with wells sharing one lease, only the FIRST
+  // well reaches that branch, and a later well is the one that may carry the
+  // survey/abstract. Keying it here lets that well still contribute its
+  // fallback instead of being silently skipped as a duplicate.
+  const leaseNameEmpty = new Set<string>();
   const searchedCounties = new Set<string>();
   let bounded = false;
   const followups: Array<{ county: string; name: string }> = [];
@@ -374,7 +381,12 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
 
     for (const q of candidates) {
       const key = `${county.toUpperCase()}|${q.value.toUpperCase().replace(/\s+/g, " ").trim()}`;
-      if (attempted.has(key)) continue;
+      if (attempted.has(key)) {
+        if (q.type === "lease_name" && leaseNameEmpty.has(key) && well.survey_name && well.abstract_number) {
+          candidates.push({ type: "legal_description", value: well.survey_name });
+        }
+        continue;
+      }
       attempted.add(key);
       if (queries >= MAX_COUNTY_QUERIES_PER_JOB) {
         bounded = true;
@@ -395,6 +407,7 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
       }
       // Variants broaden discovery only. Never rewrite the source legal description.
       if (q.type === "lease_name" && r.records.length === 0) {
+        leaseNameEmpty.add(key);
         const plain = q.value.replace(/[^a-z0-9\s]/gi, " ").replace(/\s+/g, " ").trim();
         const distinctive = plain.split(" ").filter(t => /^[a-z]+$/i.test(t) && t.length >= 5 && !/^(UNIT|LEASE|COUNTY)$/i.test(t)).join(" ");
         if (plain) candidates.push({ type: "lease_name_variant", value: plain });
