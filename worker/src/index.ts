@@ -25,6 +25,7 @@ import { checkedQuery } from "./persistence.js";
 
 import { createClient } from "@supabase/supabase-js";
 import { runLandmanSequencer } from "./sequencer.js";
+import { sweepStaleTitleJobs } from "./title-recovery.js";
 import { runTitleResearchJob } from "./title-sequencer.js";
 import {processPackages} from "./package-jobs.js";
 import { closeBrowser } from "./tools/browser.js";
@@ -99,6 +100,8 @@ async function claimAndRunTitleJob(jobId: string): Promise<void> {
     activeTitleJobs.delete(jobId);
   }
 }
+
+const recoverStaleTitleJobs = () => sweepStaleTitleJobs(supabase, activeTitleJobs);
 
 async function pollTitleJobs(): Promise<void> {
   if (activeTitleJobs.size >= MAX_CONCURRENT) return;
@@ -228,6 +231,10 @@ async function main() {
   console.log(`[worker] polling every ${POLL_INTERVAL_MS}ms`);
 
   await recoverStaleRuns();
+  await recoverStaleTitleJobs();
+  // Frontend-owned stages (ingesting, analyzing) can stall without any worker
+  // restart, so the sweep also runs periodically, not only at boot.
+  setInterval(() => { recoverStaleTitleJobs().catch(console.error); }, 10 * 60 * 1000);
 
   // Graceful shutdown
   process.on("SIGTERM", async () => {
