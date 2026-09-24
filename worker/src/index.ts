@@ -26,6 +26,7 @@ import { checkedQuery } from "./persistence.js";
 import { createClient } from "@supabase/supabase-js";
 import { runLandmanSequencer } from "./sequencer.js";
 import { sweepStaleTitleJobs } from "./title-recovery.js";
+import { processRetrievedTitleJob } from "./title-processing.js";
 import { runTitleResearchJob } from "./title-sequencer.js";
 import {processPackages} from "./package-jobs.js";
 import { closeBrowser } from "./tools/browser.js";
@@ -87,7 +88,11 @@ async function claimAndRunTitleJob(jobId: string): Promise<void> {
   console.log(`[worker] starting title job ${jobId}`);
   try {
     await runTitleResearchJob(jobId, supabase);
-    console.log(`[worker] title job ${jobId} reached tract confirmation`);
+    console.log(`[worker] title job ${jobId} retrieval finished; reading documents`);
+    // Keep the job in the active set while documents are read, so the stale
+    // sweep never mistakes a long OCR pass for a stalled job.
+    const processed = await processRetrievedTitleJob(supabase, jobId);
+    if (processed) console.log(`[worker] title job ${jobId} processed: ${processed.documentsRead} document(s) read, ${processed.instrumentsCreated} instrument(s), analysis ${processed.analysisId ?? "not published"}${processed.error ? ` — ${processed.error}` : ""}`);
   } catch (err) {
     console.error(`[worker] title job ${jobId} failed:`, err);
     await checkedQuery(supabase.from("title_research_jobs").update({

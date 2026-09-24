@@ -16,7 +16,7 @@ try{
  create table title_job_wells(id uuid default gen_random_uuid(),job_id uuid,user_id uuid,original_input text,api10 text,api14 text,sidetrack_suffix text,completion_suffix text,state_code text,county_code text,county_name text,validation_error text,resolution_status text,resolution_error text);
  create table title_review_items(job_id uuid,user_id uuid,title text,kind text,status text);`);
  await db.exec('alter default privileges in schema public grant execute on functions to anon,authenticated');
- for(const file of ['032_atomic_title_job_creation.sql','033_run_title_link.sql','034_portfolio_evidence_records.sql','035_atomic_due_diligence_intake.sql','036_durable_packages.sql'])await db.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
+ for(const file of ['032_atomic_title_job_creation.sql','033_run_title_link.sql','034_portfolio_evidence_records.sql','035_atomic_due_diligence_intake.sql','036_durable_packages.sql','039_package_title_scope.sql'])await db.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
  await db.exec(`grant select on trrc_due_diligence_runs,title_research_jobs,title_job_wells to authenticated;set role authenticated;set request.jwt.claim.sub='${owner}'`);
  const entries=[{input:'42-165-02733',api10:'4216502733',api14:'42165027330000',countyName:'GAINES'},{input:'invalid',api10:null,error:'Invalid Texas API'}];
  const enqueue=(k=key,e=entries)=>db.query('select enqueue_api_package($1,$2::jsonb) as id',[k,JSON.stringify(e)]);
@@ -28,6 +28,15 @@ try{
  await assert.rejects(enqueue('00000000-0000-4000-8000-000000000009',[entries[0],{input:'4216502733',api10:'4216500004'}]),/API does not match/);
  assert.equal((await db.query('select count(*)::int n from trrc_due_diligence_runs')).rows[0].n,1);
  await assert.rejects(db.exec("update trrc_packages set status='evidence_ready'"),/permission denied/);
+ // A multi-well package shares one title scope; an API with a live scope keeps it.
+ const lease=[{input:'42-317-40001',api10:'4231740001',countyName:'MARTIN'},{input:'42-317-40002',api10:'4231740002',countyName:'MARTIN'},{input:'4231740002',api10:'4231740002',countyName:'MARTIN'},entries[0]];
+ const leasePkg=(await db.query('select members_json from trrc_packages where id=$1',[(await enqueue('00000000-0000-4000-8000-000000000011',lease)).rows[0].id])).rows[0];
+ const leaseRuns=(await db.query('select id,title_research_job_id t from trrc_due_diligence_runs where id=any($1::uuid[])',[leasePkg.members_json.map(m=>m.runId)])).rows;
+ assert.equal(leaseRuns.length,4);
+ const priorTitle=(await db.query('select title_research_job_id t from trrc_due_diligence_runs where id=$1',[pkg.members_json[0].runId])).rows[0].t;
+ const leaseTitles=new Set(leaseRuns.filter(r=>r.t!==priorTitle).map(r=>r.t));
+ assert.equal(leaseTitles.size,1);assert.equal(leaseRuns.filter(r=>r.t===priorTitle).length,1);
+ assert.deepEqual((await db.query('select api10 from title_job_wells where job_id=$1 order by api10',[[...leaseTitles][0]])).rows.map(r=>r.api10),['4231740001','4231740002']);
  await db.exec(`set request.jwt.claim.sub='${other}'`);assert.equal((await db.query('select count(*)::int n from trrc_packages')).rows[0].n,0);
  await db.exec('reset role; set role anon');await assert.rejects(enqueue(),/permission denied/);
  await db.exec('reset role');

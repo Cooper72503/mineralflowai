@@ -417,14 +417,138 @@ export async function storeIndexEntries(supabase: SupabaseClient, jobId: string,
   return { inserted, grantorNames: Array.from(grantorNames) };
 }
 
+export const MAX_COUNTY_DOCUMENTS_PER_JOB = 40;
+
+/**
+ * Reading priority for a county index row, lower first; null = not read.
+ *
+ * Before this, images were fetched in search-result order and capped at
+ * eight, so on the Buttercup tract all eight went to releases and pipeline
+ * agreements while the 1975 special warranty deed and 2023 mineral deed —
+ * the only instruments there that move mineral ownership — were never read.
+ * Every row stays in the reported chain; this only decides which images
+ * are worth reading to establish ownership.
+ */
+export function ownershipReadPriority(entry: { doc_type?: string | null; grantor?: string | null; grantee?: string | null }): number | null {
+  const type = (entry.doc_type ?? "").toUpperCase();
+  const parties = `${entry.grantor ?? ""} ${entry.grantee ?? ""}`.toUpperCase();
+  // Surface and midstream instruments do not move mineral title.
+  if (/EASEMENT|RIGHT OF WAY|\bROW\b|SURFACE/.test(type)) return null;
+  if (/PIPELINE|MIDSTREAM|GATHERING|TELEPHONE|ELECTRIC|COOPERATIVE/.test(parties) && !/UNIT\b/.test(parties)) return null;
+  if (/MINERAL DEED|ROYALTY|WARRANTY DEED|QUITCLAIM|\bDEED\b(?! OF TRUST)|CONVEYANCE|CORRECTION/.test(type)) return 0;
+  if (/HEIRSHIP|PROBATE|\bWILL\b|LETTERS|ESTATE|JUDGMENT/.test(type)) return 0;
+  if (/\bUNIT\b|POOL|RATIF|DESIGNATION/.test(type) || /\bUNIT\b/.test(parties)) return 1;
+  // Releases before leases: "RELEASE" contains "LEASE". A lease release still
+  // names the lessor of record, so it outranks liens.
+  if (/RELEASE|\bREL\b/.test(type)) return /LIEN|TRUST|MORTGAGE/.test(type) ? 4 : 3;
+  if (/LEASE|\bLS\b|MEMORANDUM|ASSIGN|AMENDMENT/.test(type)) return 2;
+  if (/DEED OF TRUST|LIEN/.test(type)) return 4;
+  return 5;
+}
+
+/**
+ * Read the courthouse images for the recordings on the job's confirmed
+ * tracts, ownership conveyances first. Built from every stored index row,
+ * not just this pass's results, so a resumed job whose searches are already
+ * logged still reads what it has not read.
+ */
+export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[] = []): Promise<number> {
+  if (!deps.getCountyDocument) return 0;
+  const { data: tractRows } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status").eq("job_id", jobId).eq("match_status", "confirmed"), "title search tracts");
+  const confirmed = (tractRows ?? []) as SearchTract[];
+  // A recording indexed by the unit's own name (a unit designation or
+  // ratification) belongs to the unit's title even without a section call.
+  // Exact normalized match only: a discovery rule, never tract proof.
+  const normalize = (v: string | null | undefined) => (v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const unitNames = new Set(wells.filter(w => w.lease_name).map(w => `${(w.county_name ?? "").toUpperCase()}|${normalize(w.lease_name)}`));
+  if (!confirmed.length && !unitNames.size) return 0;
+  const rows = await pagedRows(page => supabase.from("title_instruments").select("id, county, extraction_json").eq("job_id", jobId).is("document_id", null).order("id").range(page, page + 999), "title_instruments");
+  const { data: saved } = await checkedQuery(supabase.from("title_documents").select("source_url").eq("job_id", jobId).eq("source", "county_public_preview"), "title_documents");
+  const have = new Set(((saved ?? []) as Array<{ source_url: string | null }>).map(d => d.source_url));
+
+  type Candidate = { entry: IndexEntry; county: string; priority: number };
+  const byUrl = new Map<string, Candidate>();
+  let unreadable = 0, notOwnership = 0;
+  for (const r of rows) {
+    const entry = (r.extraction_json as { index?: IndexEntry } | null)?.index;
+    const county = String(r.county ?? "");
+    if (!entry) continue;
+    const onTract = confirmed.some(t => t.county?.toUpperCase() === county.toUpperCase() && indexMatchesTract(entry.legal_description, t));
+    if (!onTract && !unitNames.has(`${county.toUpperCase()}|${normalize(entry.legal_description)}`)) continue;
+    const priority = ownershipReadPriority(entry);
+    if (priority === null) { notOwnership++; continue; }
+    if (!entry.document_url) { unreadable++; continue; }
+    if (have.has(entry.document_url) || byUrl.has(entry.document_url)) continue;
+    byUrl.set(entry.document_url, { entry, county, priority });
+  }
+  const queue = [...byUrl.values()].sort((a, b) => a.priority - b.priority || String(a.entry.recorded_date).localeCompare(String(b.entry.recorded_date)));
+  const budget = Math.max(0, MAX_COUNTY_DOCUMENTS_PER_JOB - have.size);
+  let fetched = 0;
+  for (const { entry, county } of queue.slice(0, budget)) {
+    const document = await deps.getCountyDocument(entry.document_url!).catch(e => ({ ok: false as const, error: String(e) }));
+    if (!document.ok) {
+      await logSearch(supabase, jobId, userId, { provider: "county_public_preview", county, queryType: "document", queryValue: entry.document_url!, status: "failed", resultCount: 0, error: document.error, sourceUrl: entry.document_url! });
+      await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} could not be retrieved`, document.error, { county, sourceUrl: entry.document_url });
+      continue;
+    }
+    await logSearch(supabase, jobId, userId, { provider: "county_public_preview", county, queryType: "document", queryValue: entry.document_url!, status: "success", resultCount: 1, error: null, sourceUrl: entry.document_url! });
+    await storeRemoteDocument(supabase, { ...deps, fetchBytes: async () => ({ ok: true, bytes: document.bytes, contentType: "application/pdf" }) }, jobId, userId, null, {
+      url: entry.document_url!, source: "county_public_preview", sourceIdentifier: `${county}:${entry.doc_number}:public-preview:${document.pageCount}-pages`, category: "other", fileName: `${entry.doc_number.replace(/[^a-z0-9-]/gi, "_")}-public-preview.pdf`,
+    });
+    fetched++;
+  }
+  if (fetched) await appendLimitation(supabase, jobId, "County public preview images were retrieved automatically. They are not certified copies.");
+  if (queue.length > budget) await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", `${queue.length - budget} further ownership-relevant recordings on the lease were not read within the ${MAX_COUNTY_DOCUMENTS_PER_JOB}-document limit.`, { remaining: queue.length - budget });
+  if (unreadable) await addReviewItem(supabase, jobId, userId, "document_retrieval", `${unreadable} recording(s) on the tract expose no retrieval link`, "They remain in the chain as index entries; their images must be obtained from the clerk.", { count: unreadable });
+  if (notOwnership) await appendLimitation(supabase, jobId, `${notOwnership} surface, easement or midstream recording(s) on the tract are reported from the county index and were not read; they do not move mineral title.`);
+  return fetched;
+}
+
+/**
+ * Confirm a proposed tract when the county itself ties it to the well's
+ * lease: a recording indexed against that tract's section, block and
+ * township names the lease or unit. Live case: the GIS surface survey put a
+ * CMC BUTTERCUP 25-37 UNIT well in Sec 37 Blk 39 T4S, and Midland indexed an
+ * instrument to the CMC BUTTERCUP UNIT against that same section. Two
+ * independent public records agreeing is the confirmation; it is recorded as
+ * evidence, never as a person's review. Rejected tracts are never touched.
+ */
+export async function corroborateCandidateTracts(supabase: SupabaseClient, jobId: string, userId: string, wells: JobWellRow[]): Promise<number> {
+  const { data: proposed } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status, tract_label").eq("job_id", jobId).eq("match_status", "proposed"), "title candidate tracts");
+  if (!proposed?.length) return 0;
+  const rows = await pagedRows(page => supabase.from("title_instruments").select("county, extraction_json").eq("job_id", jobId).is("document_id", null).order("id").range(page, page + 999), "title_instruments");
+  const tokensFor = (lease: string) => lease.toUpperCase().replace(/[^A-Z0-9\s]/g, " ").split(/\s+/).filter(t => /^[A-Z]{5,}$/.test(t) && !/^(UNIT|LEASE|COUNTY|STATE|TEXAS)$/.test(t));
+  let confirmed = 0;
+  for (const tract of proposed as Array<SearchTract & { tract_label: string }>) {
+    const probe = { ...tract, match_status: "confirmed" };
+    for (const well of wells.filter(w => w.lease_name && w.county_name?.toUpperCase() === tract.county?.toUpperCase())) {
+      const tokens = tokensFor(well.lease_name!);
+      if (!tokens.length) continue;
+      const witness = rows.map(r => ({ county: String(r.county ?? ""), index: (r.extraction_json as { index?: IndexEntry } | null)?.index }))
+        .find(r => r.index && r.county.toUpperCase() === (tract.county ?? "").toUpperCase() && indexMatchesTract(r.index.legal_description, probe)
+          && tokens.every(t => `${r.index!.grantor ?? ""} ${r.index!.grantee ?? ""} ${r.index!.legal_description ?? ""}`.toUpperCase().includes(t)));
+      if (!witness?.index) continue;
+      const evidence = { documentId: null, instrumentId: null, page: null, sourceUrl: null, label: "County index corroborates the lease tract",
+        excerpt: `${witness.county} County instrument ${witness.index.doc_number} (${witness.index.doc_type}, ${witness.index.grantor} to ${witness.index.grantee}) is indexed against ${witness.index.legal_description} and names ${well.lease_name}.` };
+      const { data: done } = await checkedQuery(supabase.from("title_canonical_tracts").update({ match_status: "confirmed", needs_user_selection: false }).eq("id", tract.id).eq("match_status", "proposed").select("id"), "title tract corroboration");
+      await checkedQuery(supabase.from("title_well_tract_associations").update({ review_status: "confirmed" }).eq("job_id", jobId).eq("canonical_tract_id", tract.id).eq("well_id", well.id).eq("review_status", "proposed"), "title association corroboration");
+      await addReviewItem(supabase, jobId, userId, "tract_corroborated", `Tract confirmed from public records: ${tract.tract_label}`, evidence.excerpt, { tractId: tract.id, evidence });
+      if (done?.length) confirmed++;
+      break;
+    }
+  }
+  return confirmed;
+}
+
 export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[]): Promise<void> {
   await repairIndexParties(supabase, jobId);
-  const { data: tractRows } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status").eq("job_id", jobId).eq("match_status", "confirmed"), "title search tracts");
-  const tracts = (tractRows ?? []) as SearchTract[];
+  // Searching is discovery, so proposed tracts are searched as well as
+  // confirmed ones; reading images and linking use confirmed tracts only.
+  const { data: tractRows } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status").eq("job_id", jobId).neq("match_status", "rejected"), "title search tracts");
+  const tracts = ((tractRows ?? []) as SearchTract[]).map(t => ({ ...t, match_status: "confirmed" }));
   const tractCountiesPlanned = new Set<string>();
   const tractHits = new Set<string>();
   let queries = 0;
-  const downloaded = new Set<string>();
   const attempted = new Set<string>();
   // Lease-name queries that came back empty, keyed the same way as `attempted`.
   // The survey-only fallback below is driven off this rather than off the
@@ -518,37 +642,7 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
         // A broad query or a unit-name/address hit alone cannot seed predecessors.
         // Use relevant records even on resume, when the index row already exists.
         for (const entry of relevant) for (const name of splitIndexNames(entry.grantor)) followups.push({ county, name });
-        // Exact normalized unit-name match is a discovery filter, not tract proof.
-        // Broad operator/party results must never trigger indiscriminate downloads.
-        if (deps.getCountyDocument) {
-          const normalize = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, "");
-          for (const entry of r.records) {
-            if (!relevant.includes(entry) && !(well.lease_name && normalize(entry.legal_description) === normalize(well.lease_name))) continue;
-            if (!entry.document_url) {
-              await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} has no retrieval link`, "The index matched the unit name but did not expose a supported document link. Document retrieval is incomplete.", { county, sourceUrl: r.search_url });
-              continue;
-            }
-            if (downloaded.has(entry.document_url)) continue;
-            if (downloaded.size >= 8) {
-              await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", "More unit-name candidates exist than the eight-document automatic retrieval limit. Coverage is incomplete.", { county });
-              break;
-            }
-            downloaded.add(entry.document_url);
-            const { data: savedPreview } = await checkedQuery(supabase.from("title_documents").select("id").eq("job_id", jobId).eq("source_url", entry.document_url).eq("source", "county_public_preview").limit(1), "title_documents");
-            if (savedPreview?.length) continue;
-            const document = await deps.getCountyDocument(entry.document_url).catch(e => ({ ok: false as const, error: String(e) }));
-            if (!document.ok) {
-              await logSearch(supabase, jobId, userId, { provider: "county_public_preview", county, queryType: "document", queryValue: entry.document_url, status: "failed", resultCount: 0, error: document.error, sourceUrl: entry.document_url });
-              await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} could not be retrieved`, document.error, { county, sourceUrl: entry.document_url });
-              continue;
-            }
-            await storeRemoteDocument(supabase, { ...deps, fetchBytes: async () => ({ ok: true, bytes: document.bytes, contentType: "application/pdf" }) }, jobId, userId, null, {
-              url: entry.document_url, source: "county_public_preview", sourceIdentifier: `${county}:${entry.doc_number}:public-preview:${document.pageCount}-pages`, category: "other", fileName: `${entry.doc_number.replace(/[^a-z0-9-]/gi, "_")}-public-preview.pdf`,
-            });
-            await addReviewItem(supabase, jobId, userId, "document_review", `County preview ${entry.doc_number}: extraction and tract review required`, "Public preview retrieved. Check the document storage/search log, process ingestion, and review its legal description before using it in ownership analysis.", { county, sourceUrl: entry.document_url, pageCount: document.pageCount });
-            await appendLimitation(supabase, jobId, "County public preview images were retrieved automatically. They are not certified copies; unit-name matching does not establish tract scope. Extraction and review remain required.");
-          }
-        }
+        // Documents are not fetched here, in result order: see retrieveOwnershipDocuments().
 
       }
     }
@@ -572,6 +666,8 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
     await logSearch(supabase, jobId, userId, { provider: providerId, county: f.county, queryType: "party_name", queryValue: f.name, status, resultCount: r.records.length, error: r.error ?? null, sourceUrl: r.search_url, depth: 1 });
     if (r.records.length > 0) await storeIndexEntries(supabase, jobId, f.county, r.search_url, r.records);
   }
+  await corroborateCandidateTracts(supabase, jobId, userId, wells);
+  if (deps.getCountyDocument) await retrieveOwnershipDocuments(supabase, deps, jobId, userId, wells);
   if (bounded) {
     await addReviewItem(supabase, jobId, userId, "search_incomplete", "County search budget reached", "Some planned searches were not executed. See skipped_bounded entries; this job does not establish exhaustive county coverage.", { queryLimit: MAX_COUNTY_QUERIES_PER_JOB });
   }
