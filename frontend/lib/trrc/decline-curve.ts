@@ -46,7 +46,7 @@ export interface EurEstimate {
 }
 
 const TERMINAL_RATE_BBL_PER_MONTH = 150; // ~5 BBL/day, a common stripper-well economic limit
-const MAX_FORECAST_MONTHS = 480;         // 40-year cap so a near-flat fit can't forecast forever
+export const MAX_FORECAST_MONTHS = 480;         // 40-year cap so a near-flat fit can't forecast forever
 const TERMINAL_DECLINE_RATE_PER_MONTH = 0.08 / 12; // 8%/year — common for tight/unconventional reservoirs, converges faster than the looser 6%/year convention
 
 /**

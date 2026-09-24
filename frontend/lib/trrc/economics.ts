@@ -17,7 +17,7 @@
  * before — never a fabricated number against a price nobody entered.
  */
 
-import { fitArpsDecline, fitArpsDeclineWindowed, forecastToTerminalRate, stabilizedRate, type DeclineCurveFit } from "./decline-curve";
+import { fitArpsDecline, fitArpsDeclineWindowed, forecastToTerminalRate, stabilizedRate, MAX_FORECAST_MONTHS, type DeclineCurveFit } from "./decline-curve";
 import type { PriceDeck, ScenarioPrice } from "./eia-pricing";
 import { classifyBasin, loeMidpoint, checkDeclineAgainstBasin, type BasinBenchmark } from "./basin-benchmarks";
 
@@ -169,6 +169,9 @@ function computeMonthlyEconomics(
   avgMonthlyWaterBbl: number | null,
   nglAndBasis: NglAndBasisAssumptions | null = null,
   operating: OperatingCashFlowAssumptions | null = null,
+  // Minimum monthly operating cost for the whole lease (8/8ths), applied as
+  // max(per-BOE cost, floor). Zero keeps the per-BOE-only model.
+  fixedFloorUsdPerMonth = 0,
 ): MonthlyEconomics[] {
   const effectiveGasPriceUsdMcf = price.gasUsdMcf - (nglAndBasis?.wahaDifferentialUsdMcf ?? 0);
   const horizon = Math.max(oilForecast.length, gasForecast.length);
@@ -184,7 +187,7 @@ function computeMonthlyEconomics(
     const severanceTax = oilRevenue * (operating?.oilSeveranceFraction ?? TX_SEVERANCE_TAX_OIL) + gasRevenue * (operating?.gasSeveranceFraction ?? TX_SEVERANCE_TAX_GAS);
     const adValorem = grossRevenue * (operating?.adValoremFraction ?? AD_VALOREM_PCT_OF_REVENUE);
     const boe = oilRate + gasRate / MCF_PER_BOE;
-    const loe = boe * loeUsdPerBoe * (operating?.workingInterest ?? 1);
+    const loe = Math.max(boe * loeUsdPerBoe, fixedFloorUsdPerMonth) * (operating?.workingInterest ?? 1);
     const workoverReserve = boe * (operating?.workoverReserveUsdPerBoe ?? WORKOVER_RESERVE_USD_PER_BOE) * (operating?.workingInterest ?? 1);
     // Held constant at the historical average water rate for the whole
     // forecast — water cut isn't decline-curve-forecastable the way
@@ -365,6 +368,26 @@ export interface CashFlowSeriesInput {
   monthlyWaterBbl?: (number | null)[];
   nglAndBasis?: NglAndBasisAssumptions | null;
   operating?: OperatingCashFlowAssumptions;
+  /**
+   * When supplied, the forecast runs to the lease's economic limit instead
+   * of the fixed 150 bbl/month terminal rate. Operating cost becomes
+   * max(per-BOE cost, producingWells x fixed floor) and production stops at
+   * the first month the operator's 8/8ths cash flow at leaseNri is not
+   * positive — the point the operator would shut in, which ends royalty
+   * income too. A lease making 75 bbl/month from two wells that still
+   * covers its costs keeps producing; the fixed terminal rate cut it off.
+   */
+  economicLimit?: EconomicLimitBasis;
+  /** Operator's per-BOE cost for the economic limit when the valued interest bears none; the basin midpoint otherwise. */
+  operatorLoeUsdPerBoe?: number | null;
+}
+
+export const FIXED_OPERATING_FLOOR_USD_PER_WELL_MONTH = 1500;
+export interface EconomicLimitBasis {
+  producingWells: number;
+  /** The operator's revenue share of 8/8ths (the combined working-interest decimal). */
+  leaseNri: number;
+  fixedFloorUsdPerWellMonth?: number;
 }
 
 export interface CashFlowSeries {
@@ -376,6 +399,12 @@ export interface CashFlowSeries {
   loeUsdPerBoe: number;
   oilFit: DeclineCurveFit | null;
   gasFit: DeclineCurveFit | null;
+  /** Months to the economic limit when an economicLimit basis was supplied; null otherwise. */
+  economicLimitMonths?: number | null;
+  /** True when production was still economic at the forecast's 40-year cap. */
+  economicLimitAtHorizonCap?: boolean;
+  /** The operator's per-BOE operating cost used for the economic limit. */
+  operatorLoeUsdPerBoe?: number | null;
 }
 
 export function forecastNetCashFlowSeries(
@@ -405,8 +434,14 @@ export function forecastNetCashFlowSeries(
   const adjustFit = (fit: DeclineCurveFit | null): DeclineCurveFit | null => fit ? { ...fit, di: fit.di * declineMultiplier } : null;
   const oilFit = adjustFit(baseOilFit);
   const gasFit = adjustFit(baseGasFit);
-  const oilForecast = oilFit ? forecastToTerminalRate(oilFit).map(p => ({ rate: p.rate * rateMultiplier })) : [];
-  const gasForecast = gasFit ? forecastToTerminalRate(gasFit, GAS_TERMINAL_RATE_MCF_PER_MONTH).map(p => ({ rate: p.rate * rateMultiplier })) : [];
+  const limit = input.economicLimit;
+  const wells = limit ? Math.max(1, Math.round(limit.producingWells)) : 0;
+  if (limit && !(limit.leaseNri > 0 && limit.leaseNri <= 1)) throw Error("Invalid economic-limit basis");
+  const floor = limit ? wells * (limit.fixedFloorUsdPerWellMonth ?? FIXED_OPERATING_FLOOR_USD_PER_WELL_MONTH) : 0;
+  // With an economic-limit basis, decline to a technical floor first; the
+  // economic limit below decides where production actually stops.
+  let oilForecast = oilFit ? forecastToTerminalRate(oilFit, limit ? 1 : undefined).map(p => ({ rate: p.rate * rateMultiplier })) : [];
+  let gasForecast = gasFit ? forecastToTerminalRate(gasFit, limit ? 10 : GAS_TERMINAL_RATE_MCF_PER_MONTH).map(p => ({ rate: p.rate * rateMultiplier })) : [];
 
   const water = input.monthlyWaterBbl ?? [];
   const knownWater = water.filter((v): v is number => v !== null && Number.isFinite(v) && v >= 0);
@@ -414,8 +449,30 @@ export function forecastNetCashFlowSeries(
   const avgMonthlyWaterBbl = swdModeled ? knownWater.reduce((a, b) => a + b, 0) / knownWater.length : null;
 
   const adjustedPrice: ScenarioPrice = { ...price, oilUsdBbl: price.oilUsdBbl + oilPriceAdder };
-  const months = computeMonthlyEconomics(adjustedPrice, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, input.nglAndBasis ?? null, input.operating ?? null);
-  return { sufficientData: true, forecastOilByMonth: oilForecast.map(p=>p.rate), forecastGasByMonth: gasForecast.map(p=>p.rate), netCashFlowByMonth: months.map(m => m.netCashFlow), loeUsdPerBoe, oilFit, gasFit };
+  let economicLimitMonths: number | null = null;
+  let economicLimitAtHorizonCap = false;
+  let operatorLoeUsdPerBoe: number | null = null;
+  if (limit) {
+    // The shut-in point is the operator's, whichever interest is being
+    // valued: a royalty call supplies zero operating cost, but the operator
+    // still bears it, so use the operator's cost here.
+    const operatorLoe = input.operating && input.operating.variableLoeUsdPerBoe > 0
+      ? input.operating.variableLoeUsdPerBoe * loeMultiplier
+      : (input.operatorLoeUsdPerBoe && input.operatorLoeUsdPerBoe > 0 ? input.operatorLoeUsdPerBoe : (basin ? loeMidpoint(basin) : DEFAULT_LOE_USD_PER_BOE)) * loeMultiplier;
+    const operator = computeMonthlyEconomics(adjustedPrice, oilForecast, gasForecast, operatorLoe, avgMonthlyWaterBbl, input.nglAndBasis ?? null,
+      { workingInterest: 1, netRevenueInterest: limit.leaseNri, variableLoeUsdPerBoe: operatorLoe, workoverReserveUsdPerBoe: WORKOVER_RESERVE_USD_PER_BOE,
+        adValoremFraction: input.operating?.adValoremFraction ?? AD_VALOREM_PCT_OF_REVENUE, oilSeveranceFraction: input.operating?.oilSeveranceFraction ?? TX_SEVERANCE_TAX_OIL, gasSeveranceFraction: input.operating?.gasSeveranceFraction ?? TX_SEVERANCE_TAX_GAS }, floor);
+    const stop = operator.findIndex(m => !(m.netCashFlow > 0));
+    economicLimitMonths = stop === -1 ? operator.length : stop;
+    economicLimitAtHorizonCap = stop === -1 && operator.length >= MAX_FORECAST_MONTHS;
+    operatorLoeUsdPerBoe = operatorLoe;
+    oilForecast = oilForecast.slice(0, economicLimitMonths);
+    gasForecast = gasForecast.slice(0, economicLimitMonths);
+  }
+  // A cost-free interest (royalty: no operating cost supplied) never carries the floor.
+  const chargesCost = !input.operating || input.operating.variableLoeUsdPerBoe > 0;
+  const months = computeMonthlyEconomics(adjustedPrice, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, input.nglAndBasis ?? null, input.operating ?? null, chargesCost ? floor : 0);
+  return { sufficientData: true, forecastOilByMonth: oilForecast.map(p=>p.rate), forecastGasByMonth: gasForecast.map(p=>p.rate), netCashFlowByMonth: months.map(m => m.netCashFlow), loeUsdPerBoe, oilFit, gasFit, economicLimitMonths, economicLimitAtHorizonCap, operatorLoeUsdPerBoe };
 }
 
 export function computeEconomics(

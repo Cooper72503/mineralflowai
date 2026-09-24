@@ -124,10 +124,10 @@ describe("computeEconomics — basin classification wires a basin-typical LOE an
     expect(result.declineSanityCheck).not.toBeNull();
   });
 
-  it("classifies a real Sprabery field name (confirmed live this session, lease 52210) as West Texas Conventional, not Permian", () => {
+  it("classifies Spraberry (Trend Area) in Midland County as Permian, not West Texas conventional", () => {
     const oilSeries = generateCurve(3000, 0.05, 0.9, 36);
     const result = computeEconomics(oilSeries, [], flatPriceDeck, "SPRABERRY (TREND AREA)", "MIDLAND");
-    expect(result.basin?.id).toBe("west_tx_conventional");
+    expect(result.basin?.id).toBe("permian_basin");
   });
 
   it("falls back to county-based classification when the field name doesn't match any basin", () => {

@@ -64,7 +64,7 @@ import { runOffsetAnalytics, type OffsetAnalyticsPayload, type LegalDescription 
 import { runGeologicalDueDiligence, persistGeologicalAssessment } from "./geology";
 import { loadTitleForReport, type TitleReportInput } from "./title/report-input";
 import { loadLeaseOwnership, type LeaseOwnership } from "./ownership/mineral-roll";
-import { valueLeaseInterests, type InterestValuation, TX_OIL_SEVERANCE, AD_VALOREM } from "./ownership/interest-value";
+import { valueLeaseInterests, producingWellCount, type InterestValuation, TX_OIL_SEVERANCE, AD_VALOREM } from "./ownership/interest-value";
 import type { GeologicalAssessmentResult } from "./geology/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -80,7 +80,7 @@ export type LiteSourceAttempt = {
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
-const C = {
+export const C = {
   navy:     "#0F2A47",
   accent:   "#1E5FAD",
   white:    "#FFFFFF",
@@ -102,7 +102,7 @@ const C = {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const S = StyleSheet.create({
+export const S = StyleSheet.create({
   page: {
     fontFamily: "Helvetica",
     fontSize: 9,
@@ -239,7 +239,7 @@ function str(v: unknown): string {
 // to the other. Null months render as a gap in the line, never as a false
 // zero — a missing report is not the same claim as a reported zero.
 
-function ProductionChart({ months, metricKey, title, unit, color }: {
+export function ProductionChart({ months, metricKey, title, unit, color }: {
   months: TrrcDDProductionRow[];
   metricKey: "oil_bbl" | "gas_mcf";
   title: string;
@@ -313,7 +313,7 @@ function ProductionChart({ months, metricKey, title, unit, color }: {
   );
 }
 
-function kv(label: string, value: string | null | undefined, highlight?: "red" | "yellow") {
+export function kv(label: string, value: string | null | undefined, highlight?: "red" | "yellow") {
   const color = highlight === "red" ? C.red : highlight === "yellow" ? C.yellow : C.dark;
   return React.createElement(
     View, { style: S.kvRow },
@@ -322,7 +322,7 @@ function kv(label: string, value: string | null | undefined, highlight?: "red" |
   );
 }
 
-function Footer({ generatedAt, runId }: { generatedAt: string; runId: string }) {
+export function Footer({ generatedAt, runId }: { generatedAt: string; runId: string }) {
   return React.createElement(
     View, { style: S.footer },
     React.createElement(Text, { style: S.footerText }, "CONFIDENTIAL — MineralFlow AI — TRRC Public Records"),
@@ -336,7 +336,7 @@ function SectionTitle({ children }: { children: string }) {
 
 // ─── Data extraction ──────────────────────────────────────────────────────────
 
-function getAttempt(attempts: LiteSourceAttempt[], ...names: string[]): Record<string, unknown> | null {
+export function getAttempt(attempts: LiteSourceAttempt[], ...names: string[]): Record<string, unknown> | null {
   for (const name of names) {
     const a = latestSourceAttempts(attempts).find(x => x.source_name === name && x.status === "success");
     if (a?.result_data_json && !a.result_data_json.error && !a.result_data_json.data_gap && a.result_data_json.endpoint_available !== false) return a.result_data_json;
@@ -348,7 +348,7 @@ function getAttemptRaw(attempts: LiteSourceAttempt[], name: string): LiteSourceA
   return latestSourceAttempts(attempts).find(x => x.source_name === name) ?? null;
 }
 
-interface WellIdentity {
+export interface WellIdentity {
   wellName: string;
   operator: string;
   operatorNo: string;
@@ -362,7 +362,7 @@ interface WellIdentity {
   leaseNumbers: string[];
 }
 
-function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDiligenceRun): WellIdentity {
+export function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDiligenceRun): WellIdentity {
   const wb = getAttempt(attempts, "search_by_api", "search_by_lease");
   // searchWellbore()'s actual return shape (worker/src/tools/ewa.ts) puts
   // rows under the key "wells" — "wellbores"/"records" never matched
@@ -1122,7 +1122,7 @@ function EngineeringAnalysisPage({ run, id: identity, analytics, analogWells, ge
 // report does not currently collect — shown as an explicit "not computed"
 // note rather than a fabricated number.
 
-function fmtUsd(v: number): string {
+export function fmtUsd(v: number): string {
   return `$${Math.round(v).toLocaleString("en-US")}`;
 }
 
@@ -2024,20 +2024,65 @@ export function TitleEvidenceDetailPage({ run, id: identity, title, generatedAt 
 // appraisal-district mineral roll matched on the RRC lease number; each
 // interest is valued from this report's own lease forecast and price deck.
 
-const TYPE_LABEL: Record<string, string> = { royalty: "Royalty", overriding_royalty: "Overriding royalty", working_interest: "Working interest", unknown: "Unclassified" };
-const fmtDec = (d: number) => d.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+export const TYPE_LABEL: Record<string, string> = { royalty: "Royalty", overriding_royalty: "Overriding royalty", working_interest: "Working interest", unknown: "Unclassified" };
+export const fmtDec = (d: number) => d.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+
+/** Ownership and interest values for one lease, per appraisal tract. Shared by this report and the deal report. */
+export function OwnershipSection({ ownership, valuation, trrcLeaseName, repeatHeader = true }: { ownership: LeaseOwnership; valuation: InterestValuation; trrcLeaseName: string | null; repeatHeader?: boolean }) {
+  const src = ownership.sources.map(x => `${x.county} County appraisal district mineral roll, tax year ${x.taxYear} (file ${x.fileName}, SHA-256 ${x.sha256.slice(0, 12)}...)`).join("; ");
+  const valueOf = new Map(valuation.owners.map((o, i) => [i, o]));
+  const w = { owner: 196, type: 86, dec: 78, base: 68, stress: 54, upside: 54 };
+  const cell = (width: number, text: string, bold = false, align: "left" | "right" = "left") =>
+    React.createElement(Text, { style: [S.tableCell, { width, paddingRight: 6, textAlign: align, fontFamily: bold ? "Helvetica-Bold" : "Helvetica" }] }, text);
+  const headerCell = (width: number, text: string, align: "left" | "right" = "left") => React.createElement(Text, { style: [S.tableHeaderCell, { width, textAlign: align }] }, text);
+  const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
+
+  if (ownership.status !== "matched") return React.createElement(View, {},
+    React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg }] }, React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, ownership.reason ?? "No owners were matched.")),
+    ...ownership.rejectedTracts.map((t, i) => React.createElement(Text, { key: `rj${i}`, style: S.noteText }, `Not attached: appraisal tract ${t.cadLeaseNumber ?? "-"} (${t.owners} owners). ${t.reason}`)));
+
+  const ownerIndex = new Map(ownership.owners.map((o, i) => [o, i]));
+  return React.createElement(View, {},
+    React.createElement(Text, { style: S.noteText }, `Owners of record on RRC lease ${ownership.rrcLeaseNumber}, as carried by ${src}. Decimals are revenue shares of each appraisal tract, taken by the appraisal district from operator division orders as of January 1: evidence of current ownership, not a title opinion. ${ownership.nameVerified ? `Every attached tract's lease name matches the TRRC lease name ${trrcLeaseName ?? ""}.` : "The TRRC lease name was not available, so tract names could not be verified against it."}${ownership.productionShareBasis ? ` ${ownership.productionShareBasis}` : ""}`),
+    ...ownership.rejectedTracts.map((t, i) => React.createElement(View, { key: `rj${i}`, style: [S.flagBox, { backgroundColor: C.yellowBg }] }, React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, `Not attached: appraisal tract ${t.cadLeaseNumber ?? "-"} (${t.owners} owners). ${t.reason}`))),
+
+    React.createElement(Text, { style: S.subTitle }, `Appraisal tracts (${ownership.tracts.length})`),
+    React.createElement(View, { style: S.tableHeader }, headerCell(170, "Tract"), headerCell(70, "Share of lease", "right"), headerCell(50, "Owners", "right"), headerCell(62, "Royalty", "right"), headerCell(62, "Override", "right"), headerCell(62, "Working", "right"), headerCell(60, "All", "right")),
+    ...ownership.tracts.map((t, i) => React.createElement(View, { key: `t${i}`, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt, wrap: false },
+      cell(170, `${t.leaseName ?? "-"} (${t.cadLeaseNumber ?? "-"})`), cell(70, pct(t.productionShare), false, "right"), cell(50, String(t.owners.length), false, "right"),
+      cell(62, fmtDec(t.totals.royalty), false, "right"), cell(62, fmtDec(t.totals.overriding_royalty), false, "right"), cell(62, fmtDec(t.totals.working_interest), false, "right"),
+      cell(60, fmtDec(t.totals.all), true, "right"))),
+    ...ownership.tracts.filter(t => t.irregular).map((t, i) => React.createElement(View, { key: `ir${i}`, style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 4 }] },
+      React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, `Tract ${t.cadLeaseNumber ?? "-"}: decimals sum to ${fmtDec(t.totals.all)}, not about 1. Individual decimals are shown as carried; this tract's values should not be relied on until reconciled.`))),
+
+    React.createElement(Text, { style: S.subTitle }, "What one interest is worth"),
+    valuation.status !== "valued"
+      ? React.createElement(Text, { style: S.bodyText }, `Interest values unavailable: ${valuation.reason}`)
+      : React.createElement(View, {},
+        kv("Royalty, per 0.01 decimal of the whole lease", `${fmtUsd(valuation.royaltyUnitPv10!.base * 0.01)} base  |  ${fmtUsd(valuation.royaltyUnitPv10!.stress * 0.01)} stress  |  ${fmtUsd(valuation.royaltyUnitPv10!.upside * 0.01)} upside`),
+        valuation.workingInterestPv10 ? kv("Whole working interest", `${fmtUsd(valuation.workingInterestPv10.base)} base  |  ${fmtUsd(valuation.workingInterestPv10.stress)} stress  |  ${fmtUsd(valuation.workingInterestPv10.upside)} upside`) : null,
+        kv("Remaining modeled production", `${Math.round(valuation.remainingOilBbl ?? 0).toLocaleString("en-US")} bbl oil, ${Math.round(valuation.remainingGasMcf ?? 0).toLocaleString("en-US")} mcf gas ${valuation.economicLimitAtHorizonCap ? `over the 40-year forecast cap (${valuation.economicLimitMonths?.base ?? "-"} months; still economic at base prices when the cap is reached)` : `to the economic limit (${valuation.economicLimitMonths?.base ?? "-"} months at base prices)`}`),
+        React.createElement(Text, { style: S.noteText }, `PV-10 under the ${valuation.priceBasis}. A tract's decimals apply to its share of lease production. Royalty and overrides bear production taxes only (${(TX_OIL_SEVERANCE * 100).toFixed(1)}% oil and 7.5% gas severance, ${(AD_VALOREM * 100).toFixed(0)}% ad valorem). The working interest bears operating cost of $${valuation.loeUsdPerBoe?.toFixed(2)}/BOE, a $2/BOE workover reserve and a floor of $1,500 per producing well per month (${valuation.producingWells} well${valuation.producingWells === 1 ? "" : "s"}); production stops at the first month the operator's cash flow at a ${valuation.leaseNri?.toFixed(4)} revenue share is not positive. ${valuation.leaseNriBasis ?? ""} Screening values, not an appraisal.`)),
+
+    React.createElement(Text, { style: S.subTitle }, `All owners of record (${ownership.owners.length})`),
+    // A fixed header repeats on every later page of the page run, so only the last table on a run may repeat it.
+    React.createElement(View, { style: S.tableHeader, fixed: repeatHeader }, headerCell(w.owner, "Owner"), headerCell(w.type, "Interest"), headerCell(w.dec, "Decimal", "right"), headerCell(w.base, "PV-10 base", "right"), headerCell(w.stress, "Stress", "right"), headerCell(w.upside, "Upside", "right")),
+    ...ownership.tracts.flatMap((t, ti) => [
+      ownership.tracts.length > 1 ? React.createElement(View, { key: `th${ti}`, style: [S.tableRow, { backgroundColor: C.offWhite }], wrap: false }, cell(w.owner + w.type + w.dec + w.base + w.stress + w.upside, `${t.leaseName ?? "-"} (tract ${t.cadLeaseNumber ?? "-"}, ${pct(t.productionShare)} of lease production)`, true)) : null,
+      ...t.owners.map((o, i) => {
+        const v = valueOf.get(ownerIndex.get(o) ?? -1)?.pv10;
+        return React.createElement(View, { key: `o${ti}-${i}`, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt, wrap: false },
+          cell(w.owner, o.inCareOf && !/\*\*\*/.test(o.inCareOf) ? `${o.ownerName} (c/o ${o.inCareOf})` : o.ownerName), cell(w.type, TYPE_LABEL[o.interestType]),
+          cell(w.dec, fmtDec(o.decimal), false, "right"), cell(w.base, v ? fmtUsd(v.base) : "—", false, "right"), cell(w.stress, v ? fmtUsd(v.stress) : "—", false, "right"), cell(w.upside, v ? fmtUsd(v.upside) : "—", false, "right"));
+      }),
+    ]),
+    React.createElement(Text, { style: [S.noteText, { marginTop: 6 }] }, `Interest labels: ${ownership.sources[0]?.interestTypeBasis ?? "as coded on the roll."} Owner mailing addresses are held in the dataset and are not printed in this report.`),
+  );
+}
 
 export function OwnershipPage({ run, id: identity, ownership, valuation, generatedAt }: {
   run: TrrcDueDiligenceRun; id: WellIdentity; ownership: LeaseOwnership; valuation: InterestValuation; generatedAt: string;
 }) {
-  const src = ownership.sources.map(x => `${x.county} County appraisal district mineral roll, tax year ${x.taxYear} (file ${x.fileName}, SHA-256 ${x.sha256.slice(0, 12)}...)`).join("; ");
-  const byType = (["royalty", "overriding_royalty", "working_interest", "unknown"] as const).filter(t => ownership.owners.some(o => o.interestType === t));
-  const values = new Map(valuation.owners.map((o, i) => [i, o.pv10]));
-  const w = { owner: 190, type: 90, dec: 80, base: 70, stress: 55, upside: 55 };
-  const cell = (width: number, text: string, bold = false, align: "left" | "right" = "left") =>
-    React.createElement(Text, { style: [S.tableCell, { width, paddingRight: 6, textAlign: align, fontFamily: bold ? "Helvetica-Bold" : "Helvetica" }] }, text);
-  const headerCell = (width: number, text: string, align: "left" | "right" = "left") => React.createElement(Text, { style: [S.tableHeaderCell, { width, textAlign: align }] }, text);
-
   return React.createElement(
     Page, { size: "LETTER", style: S.page },
     React.createElement(View, { style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border }, fixed: true },
@@ -2045,43 +2090,7 @@ export function OwnershipPage({ run, id: identity, ownership, valuation, generat
       React.createElement(Text, { style: { fontSize: 7, color: C.gray } }, identity.apiNumber || run.original_input),
     ),
     React.createElement(Text, { style: S.sectionTitle }, "SECTION 8 (CONTINUED) — CURRENT OWNERSHIP AND INTEREST VALUE"),
-
-    ownership.status !== "matched"
-      ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg }] }, React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, ownership.reason ?? "No owners were matched."))
-      : React.createElement(View, {},
-        React.createElement(Text, { style: S.noteText }, `Owners of record on RRC lease ${ownership.rrcLeaseNumber}, as carried by ${src}. Decimals are revenue shares of the whole lease taken by the appraisal district from operator division orders as of January 1; they are evidence of current ownership, not a title opinion. Roll lease name${ownership.rollLeaseNames.length > 1 ? "s" : ""}: ${ownership.rollLeaseNames.join("; ") || "none"} — ${ownership.nameAgreement === "agrees" ? "agrees with" : ownership.nameAgreement === "differs" ? "DIFFERS from" : "cannot be compared with"} the TRRC lease name ${identity.wellName || "(unavailable)"}.`),
-
-        React.createElement(Text, { style: S.subTitle }, "Interests on the lease"),
-        React.createElement(View, { style: S.tableHeader }, headerCell(160, "Interest"), headerCell(70, "Owners", "right"), headerCell(110, "Combined decimal", "right"), headerCell(150, "PV-10, base (all holders)", "right")),
-        ...byType.map((t, i) => {
-          const holders = valuation.owners.filter(o => o.interestType === t);
-          const pv = holders.every(o => o.pv10) ? holders.reduce((s2, o) => s2 + (o.pv10?.base ?? 0), 0) : null;
-          return React.createElement(View, { key: t, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt },
-            cell(160, TYPE_LABEL[t]), cell(70, String(holders.length), false, "right"), cell(110, fmtDec(ownership.totals[t]), false, "right"), cell(150, pv === null ? "—" : fmtUsd(pv), false, "right"));
-        }),
-        React.createElement(View, { style: [S.tableRow, { borderBottomWidth: 1.5 }] },
-          cell(160, "All interests", true), cell(70, String(ownership.owners.length), true, "right"), cell(110, fmtDec(ownership.totals.all), true, "right"), cell(150, valuation.totalsPv10 ? fmtUsd(valuation.totalsPv10.base) : "—", true, "right")),
-        ownership.totalsIrregular ? React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg, marginTop: 6 }] },
-          React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, `Decimals on this lease sum to ${fmtDec(ownership.totals.all)}, not about 1. The roll may carry several appraisal leases under this RRC number, or a gas ID that coincides with an oil lease number. Individual decimals are shown as carried; combined figures should not be relied on until reconciled.`)) : null,
-
-        React.createElement(Text, { style: S.subTitle }, "What one interest is worth"),
-        valuation.status !== "valued"
-          ? React.createElement(Text, { style: S.bodyText }, `Interest values unavailable: ${valuation.reason}`)
-          : React.createElement(View, {},
-            kv("Royalty, per 0.01 decimal", `${fmtUsd((valuation.royaltyUnitPv10!.base) * 0.01)} base  |  ${fmtUsd(valuation.royaltyUnitPv10!.stress * 0.01)} stress  |  ${fmtUsd(valuation.royaltyUnitPv10!.upside * 0.01)} upside`),
-            valuation.workingInterestPv10 ? kv("Whole working interest", `${fmtUsd(valuation.workingInterestPv10.base)} base  |  ${fmtUsd(valuation.workingInterestPv10.stress)} stress  |  ${fmtUsd(valuation.workingInterestPv10.upside)} upside`) : null,
-            React.createElement(Text, { style: S.noteText }, `PV-10 of the Section 4 forecast under the ${valuation.priceBasis} (Section 5 scenarios). Royalty and overrides bear production taxes only (${(TX_OIL_SEVERANCE * 100).toFixed(1)}% oil severance, ${(AD_VALOREM * 100).toFixed(0)}% ad valorem). The working interest bears all operating cost at $${valuation.loeUsdPerBoe?.toFixed(2)}/BOE plus a $2/BOE workover reserve and receives the roll's combined working-interest decimal; each holder's value is their share of it. Screening values, not an appraisal.`)),
-
-        React.createElement(Text, { style: S.subTitle }, `All owners of record (${ownership.owners.length})`),
-        React.createElement(View, { style: S.tableHeader, fixed: true }, headerCell(w.owner, "Owner"), headerCell(w.type, "Interest"), headerCell(w.dec, "Decimal", "right"), headerCell(w.base, "PV-10 base", "right"), headerCell(w.stress, "Stress", "right"), headerCell(w.upside, "Upside", "right")),
-        ...ownership.owners.map((o, i) => {
-          const pv = values.get(i);
-          return React.createElement(View, { key: `o${i}`, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt, wrap: false },
-            cell(w.owner, o.inCareOf && !/\*\*\*/.test(o.inCareOf) ? `${o.ownerName} (c/o ${o.inCareOf})` : o.ownerName), cell(w.type, TYPE_LABEL[o.interestType]),
-            cell(w.dec, fmtDec(o.decimal), false, "right"), cell(w.base, pv ? fmtUsd(pv.base) : "—", false, "right"), cell(w.stress, pv ? fmtUsd(pv.stress) : "—", false, "right"), cell(w.upside, pv ? fmtUsd(pv.upside) : "—", false, "right"));
-        }),
-        React.createElement(Text, { style: [S.noteText, { marginTop: 6 }] }, `Interest labels: ${ownership.sources[0]?.interestTypeBasis ?? "as coded on the roll."} Owner mailing addresses are held in the dataset and are not printed in this report.`),
-      ),
+    React.createElement(OwnershipSection, { ownership, valuation, trrcLeaseName: identity.wellName || null }),
     React.createElement(Footer, { generatedAt, runId: run.id }),
   );
 }
@@ -2921,13 +2930,13 @@ export async function buildTrrcPdfReport(
 
   // ── Ownership (Section 8 continued): the appraisal-district mineral roll,
   // matched on the RRC lease number, valued against this report's forecast.
-  let ownership: LeaseOwnership = { status: "unavailable", rrcLeaseNumber: run.resolved_lease_number, sources: [], rollLeaseNames: [], nameAgreement: "unknown", owners: [],
-    totals: { royalty: 0, overriding_royalty: 0, working_interest: 0, unknown: 0, all: 0 }, totalsIrregular: false, reason: "Mineral roll ownership was not loaded for this report." };
+  let ownership: LeaseOwnership = { status: "unavailable", rrcLeaseNumber: run.resolved_lease_number, sources: [], tracts: [], rejectedTracts: [], nameVerified: false, productionShareBasis: null, owners: [], reason: "Mineral roll ownership was not loaded for this report." };
   if (persistGeologyTo?.supabase && !isSampleReport) {
     try { ownership = await loadLeaseOwnership(persistGeologyTo.supabase, { leaseNumber: run.resolved_lease_number, leaseName: identity.wellName || null }); }
     catch (error) { console.error("Mineral roll ownership failed", error); }
   }
-  const valuation = valueLeaseInterests(ownership, { monthlyOilBbl: reported.oil, monthlyGasMcf: reported.gas, fieldName: identity.field || null, county: identity.county || null }, priceDeck);
+  // Producing wells for the economic limit: TRRC's oil proration schedule for the lease.
+  const valuation = valueLeaseInterests(ownership, { monthlyOilBbl: reported.oil, monthlyGasMcf: reported.gas, fieldName: identity.field || null, county: identity.county || null }, priceDeck, producingWellCount(oilProrationWellsForAcreage).count);
 
   const doc = React.createElement(
     Document,

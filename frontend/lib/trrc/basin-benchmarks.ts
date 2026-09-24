@@ -99,23 +99,29 @@ export const BASIN_BENCHMARKS: BasinBenchmark[] = [
 ];
 
 /**
- * Classifies a well's basin from its TRRC field name (checked first — more
- * specific and reliable) and county (fallback). Returns null when nothing
- * matches rather than guessing — an unclassified well falls back to the
- * generic flat LOE default in economics.ts, not a wrong basin's range.
+ * Classifies a well's basin from its county first and its TRRC field name
+ * second. Returns null when nothing matches rather than guessing — an
+ * unclassified well falls back to the generic flat LOE default in
+ * economics.ts, not a wrong basin's range.
+ *
+ * County is geography; a field name is a historical label. TRRC still files
+ * modern Midland and Martin horizontal wells under "SPRABERRY (TREND AREA)",
+ * and checking the field first sent them to "West Texas Conventional" —
+ * stripper-well LOE of $22/BOE instead of the Permian $13.75 — while the same
+ * report's decline fit called them unconventional horizontals.
  */
 export function classifyBasin(fieldName: string | null, county: string | null): BasinBenchmark | null {
   const field = (fieldName ?? "").toUpperCase();
   const cty = (county ?? "").toUpperCase();
 
-  if (field) {
-    for (const basin of BASIN_BENCHMARKS) {
-      if (basin.fieldNameKeywords.some(kw => field.includes(kw))) return basin;
-    }
-  }
   if (cty) {
     for (const basin of BASIN_BENCHMARKS) {
       if (basin.countyKeywords.some(kw => cty.includes(kw))) return basin;
+    }
+  }
+  if (field) {
+    for (const basin of BASIN_BENCHMARKS) {
+      if (basin.fieldNameKeywords.some(kw => field.includes(kw))) return basin;
     }
   }
   return null;
@@ -134,6 +140,9 @@ export function loeMidpoint(basin: BasinBenchmark): number {
 export function checkDeclineAgainstBasin(basin: BasinBenchmark, diAnnualPct: number): { inRange: boolean; typicalAnnualRangePct: [number, number] } | null {
   if (!basin.declineRatePctPerMonthRange) return null;
   const [loMo, hiMo] = basin.declineRatePctPerMonthRange;
+  // A single reference value is not a range: comparing against it flagged
+  // almost every well "outside" a printed "13-13%" range.
+  if (!(hiMo > loMo)) return null;
   // Convert typical monthly nominal decline to an annual effective range,
   // same formula used for diAnnualPct elsewhere (1 - (1-d)^12), for an
   // apples-to-apples comparison against the fitted well's own annual figure.

@@ -5,7 +5,9 @@ describe("classifyBasin", () => {
   it("classifies real TRRC field names confirmed live this session", () => {
     // Lease 52210, district 08 (Permian/Sprabery) and lease 253905,
     // district 09 (Barnett Shale) — both real, captured live this session.
-    expect(classifyBasin("SPRABERRY (TREND AREA)", "MIDLAND")?.id).toBe("west_tx_conventional");
+    // County first: modern Midland horizontals are filed under the Spraberry Trend field name.
+    expect(classifyBasin("SPRABERRY (TREND AREA)", "MIDLAND")?.id).toBe("permian_basin");
+    expect(classifyBasin("SPRABERRY (TREND AREA)", null)?.id).toBe("west_tx_conventional");
     expect(classifyBasin("NEWARK, EAST (BARNETT SHALE)", "TARRANT")?.id).toBe("barnett_shale");
   });
 
