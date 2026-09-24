@@ -60,6 +60,8 @@ export interface GraphInstrument {
   signatureObservations: Array<{ party: string; observed: "signed" | "not_signed" | "unclear"; note: string | null; page: number | null }>;
   sourceUrl: string | null;
   sourcePage: number | null;
+  /** The county clerk's own document type for this recording, verbatim, when indexed. */
+  clerkDocType?: string | null;
 }
 
 export interface GraphClaim {
@@ -293,6 +295,7 @@ export function buildOwnershipGraph(input: GraphInput): GraphOutput {
           recordingReference: recordingRef(inst), from, to, statedFraction: null, fractionBasis: "unknown", fractionVerbatim: null,
           computedShare: null, support: "not_evaluated", contentVerified: false,
           notes: [...eventNotes, "County index entry only — instrument text not reviewed; conveyance language not interpreted"], citations,
+          clerkDocType: inst.clerkDocType ?? null,
         });
         continue;
       }
@@ -643,6 +646,7 @@ function baseEvent(eventId: string, inst: GraphInstrument, claim: GraphClaim, fr
     recordingReference: recordingRef(inst), from, to,
     statedFraction: claim.fraction?.toJSON() ?? null, fractionBasis: claim.fractionBasis, fractionVerbatim: claim.fractionVerbatim,
     computedShare: null, support, contentVerified: inst.contentVerified, notes, citations,
+    clerkDocType: inst.clerkDocType ?? null,
   };
 }
 

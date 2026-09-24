@@ -10,6 +10,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { runTitleChainAnalysis } from "@/lib/trrc/title/analysis";
 import { linkUnmatchedClaims } from "@/lib/trrc/title/link-claims";
+import { supersedeIndexedCopies } from "@/lib/trrc/title/supersede-index";
+import { propagateLeaseAssociations } from "@/lib/trrc/title/lease-associations";
 import { buildTitleChainReport } from "@/lib/trrc/title/report";
 
 export const runtime = "nodejs";
@@ -29,12 +31,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const priorStatus = job.status as string;
-  await supabase.from("title_research_jobs").update({ status: "analyzing", stage_detail: "Reconstructing ownership" }).eq("id", jobId);
-  await linkUnmatchedClaims(supabase, jobId);
-  const result = await runTitleChainAnalysis(supabase, user.id, jobId);
-  if (!result.ok) {
-    await supabase.from("title_research_jobs").update({ status: priorStatus, stage_detail: `Analysis failed: ${result.error}` }).eq("id", jobId);
-    return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
+  await supabase.from("title_research_jobs").update({ status: "analyzing", stage_detail: "Reconstructing ownership", updated_at: new Date().toISOString() }).eq("id", jobId);
+  // Restore the prior status on any throw. Without this, an exception in
+  // claim linking or analysis left the job in "analyzing" permanently — job
+  // dd4c0167 sat there from 2026-09-21, counted as a live scope, and blocked
+  // title linkage for every later run on its APIs. A platform timeout cannot
+  // be caught here; the worker's stale-job sweep covers that case.
+  try {
+    await supersedeIndexedCopies(supabase, jobId);
+    await propagateLeaseAssociations(supabase, jobId, user.id);
+    await linkUnmatchedClaims(supabase, jobId);
+    const result = await runTitleChainAnalysis(supabase, user.id, jobId);
+    if (!result.ok) {
+      await supabase.from("title_research_jobs").update({ status: priorStatus, stage_detail: `Analysis failed: ${result.error}`, updated_at: new Date().toISOString() }).eq("id", jobId).eq("status", "analyzing");
+      return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
+    }
+    return NextResponse.json({ ok: true, data: { reused: result.reused, report: buildTitleChainReport(result.analysis) } });
+  } catch (error) {
+    console.error("Title analysis failed", error);
+    await supabase.from("title_research_jobs").update({ status: priorStatus, stage_detail: "Analysis failed — no analysis was published; retry after reviewing the job", updated_at: new Date().toISOString() }).eq("id", jobId).eq("status", "analyzing");
+    return NextResponse.json({ ok: false, error: "Title analysis failed. No analysis was published." }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, data: { reused: result.reused, report: buildTitleChainReport(result.analysis) } });
 }

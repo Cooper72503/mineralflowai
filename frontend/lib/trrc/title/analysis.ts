@@ -10,6 +10,8 @@
  * returns the existing latest version instead of writing another.
  */
 
+import { selectAll } from "./select-all";
+import { SUPERSEDED_EVIDENCE_LEVEL } from "./supersede-index";
 import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Fraction } from "./fraction";
@@ -53,9 +55,16 @@ export function chronologyFromBranches(events: Array<{ event: ChainEvent; tractL
     contentVerified: e.contentVerified,
     notes: e.notes.join("; "),
     citations: e.citations,
+    clerkDocType: e.clerkDocType ?? null,
   }));
   const key = (d: string | null) => (d ? Date.parse(d.length === 4 ? `${d}-01-01` : d.length === 7 ? `${d}-01` : d) : Number.POSITIVE_INFINITY);
   return rows.sort((a, b) => (key(a.sortDate) - key(b.sortDate)) || a.tractLabel.localeCompare(b.tractLabel));
+}
+
+function clerkDocTypeOf(extraction: unknown): string | null {
+  const x = extraction as { index?: { doc_type?: unknown }; clerk_index?: { doc_type?: unknown } } | null;
+  const v = x?.index?.doc_type ?? x?.clerk_index?.doc_type;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
 export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: string, jobId: string): Promise<AnalysisResult> {
@@ -66,10 +75,10 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
   const { job, wells, tracts, associations, documents, reviewItems, searchLog } = bundle;
 
   const [instRes, partyRes, tractRes, claimRes] = await Promise.all([
-    supabase.from("title_instruments").select("*").eq("job_id", jobId),
-    supabase.from("title_instrument_parties").select("*").eq("job_id", jobId),
-    supabase.from("title_instrument_tracts").select("*").eq("job_id", jobId),
-    supabase.from("title_claims").select("*").eq("job_id", jobId),
+    selectAll<Record<string, unknown>>((a, b) => supabase.from("title_instruments").select("*").eq("job_id", jobId).order("id").range(a, b)),
+    selectAll<Record<string, unknown>>((a, b) => supabase.from("title_instrument_parties").select("*").eq("job_id", jobId).order("id").range(a, b)),
+    selectAll<Record<string, unknown>>((a, b) => supabase.from("title_instrument_tracts").select("*").eq("job_id", jobId).order("id").range(a, b)),
+    selectAll<Record<string, unknown>>((a, b) => supabase.from("title_claims").select("*").eq("job_id", jobId).order("id").range(a, b)),
   ]);
   for(const [name,result] of [["instruments",instRes],["parties",partyRes],["tracts",tractRes],["claims",claimRes]] as const){
     if(result.error)return {ok:false,error:`Could not load title ${name}: ${result.error.message}`,status:503};
@@ -78,9 +87,17 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
   const partyRows = (partyRes.data ?? []) as Record<string, unknown>[];
   const tractRows = (tractRes.data ?? []) as Record<string, unknown>[];
   const claimRows = (claimRes.data ?? []) as Record<string, unknown>[];
+  // An index row whose document was downloaded and read is represented by
+  // the read instrument; counting both would put the same recording in the
+  // chain twice. The fingerprint below still covers every row.
+  const superseded = new Set(instRows.filter(r => r.evidence_level === SUPERSEDED_EVIDENCE_LEVEL).map(r => String(r.id)));
+  const liveInstRows = instRows.filter(r => !superseded.has(String(r.id)));
+  const livePartyRows = partyRows.filter(r => !superseded.has(String(r.instrument_id)));
+  const liveTractRows = tractRows.filter(r => !superseded.has(String(r.instrument_id)));
+  const liveClaimRows = claimRows.filter(r => !superseded.has(String(r.instrument_id)));
   const docsById = new Map(documents.map(d => [d.id, d]));
 
-  const instruments: GraphInstrument[] = instRows.map(r => ({
+  const instruments: GraphInstrument[] = liveInstRows.map(r => ({
     id: String(r.id),
     documentId: (r.document_id as string | null) ?? null,
     instrumentType: (r.instrument_type as GraphInstrument["instrumentType"]) ?? "other",
@@ -95,16 +112,17 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
     signatureObservations: ((r.signature_observations_json as GraphInstrument["signatureObservations"]) ?? []),
     sourceUrl: (r.source_url_or_doc_id as string | null) ?? docsById.get(String(r.document_id))?.source_url ?? null,
     sourcePage: (r.source_page as number | null) ?? null,
+    clerkDocType: clerkDocTypeOf(r.extraction_json),
   }));
 
-  const parties: GraphParty[] = partyRows.map(r => ({
+  const parties: GraphParty[] = livePartyRows.map(r => ({
     id: String(r.id), instrumentId: String(r.instrument_id), name: String(r.party_name), role: (r.role as GraphParty["role"]) ?? "other",
     capacity: (r.capacity as GraphParty["capacity"]) ?? "unknown", capacityDetail: (r.capacity_detail as string | null) ?? null,
     canonicalPartyId: (r.canonical_party_id as string | null) ?? null, page: (r.source_page as number | null) ?? null, excerpt: (r.source_excerpt as string | null) ?? null,
   }));
 
-  const tractsById = new Map(tractRows.map(r => [String(r.id), r]));
-  const claims: GraphClaim[] = claimRows.map(r => {
+  const tractsById = new Map(liveTractRows.map(r => [String(r.id), r]));
+  const claims: GraphClaim[] = liveClaimRows.map(r => {
     const t = tractsById.get(String(r.instrument_tract_id)) ?? {};
     const fractionRow = r.fraction_numerator != null || r.fraction_denominator != null ? r : t;
     const num = fractionRow.fraction_numerator;
@@ -124,7 +142,11 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
   // Fingerprint for idempotency.
   const byId=(rows:Record<string,unknown>[])=>[...rows].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
   const fingerprint = titleInputFingerprint({
-    algorithm:"complete-title-input-v1",schema:TITLE_CHAIN_SCHEMA_VERSION,
+    // v4: unit tracts named but not confirmed are disclosed. v3: every event
+    // (read or index-only) carries the clerk's document type, superseded index rows are
+    // excluded and bulk reads are paged. The fingerprint must change when the
+    // analysis output changes, or an unchanged input reuses a stale analysis.
+    algorithm:"complete-title-input-v4",schema:TITLE_CHAIN_SCHEMA_VERSION,
     scope:job.interest_scope,start:job.research_start_date,asOf:job.as_of_date,limitations:job.limitations_json,
     instruments:byId(instRows),parties:byId(partyRows),instrumentTracts:byId(tractRows),claims:byId(claimRows),
     wells,tracts,associations,documents,reviewItems,searchLog,
@@ -144,6 +166,17 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
   if (confirmedTracts.length === 0) limitations.push("No tract has been confirmed; ownership branches cannot be built until a candidate tract is confirmed or a legal description is supplied.");
   const unlinkedClaims = claims.filter(c => !c.canonicalTractId).length;
   if (unlinkedClaims > 0) limitations.push(`${unlinkedClaims} instrument tract(s) are not linked to a confirmed tract and are excluded from the branches (see review queue).`);
+  // A unit named for its sections ("CMC BUTTERCUP 25-37 UNIT") tells the
+  // buyer which tracts the unit spans. When the name cites a section that no
+  // confirmed tract covers, the chain describes only part of the unit; say so
+  // rather than let a one-tract chain read as the whole unit's title.
+  const confirmedSections = new Set(tracts.filter(t => t.matchStatus === "confirmed").map(t => (t.sectionName ?? "").replace(/^0+/, "")).filter(Boolean));
+  for (const unit of new Set(wells.map(w => w.wellName ?? "").concat((await supabase.from("title_job_wells").select("lease_name").eq("job_id", jobId)).data?.map(r => String(r.lease_name ?? "")) ?? []).filter(Boolean))) {
+    const named = unit.match(/\b(\d{1,3})\s*[-&\/]\s*(\d{1,3})\b/);
+    if (!named || !/\bunit\b/i.test(unit)) continue;
+    const missing = [named[1], named[2]].map(n => n.replace(/^0+/, "")).filter(n => !confirmedSections.has(n));
+    if (missing.length) limitations.push(`The unit name "${unit}" refers to Section ${missing.join(" and ")}, which no confirmed tract covers. This chain of title covers the confirmed tract only; other unit tracts have not been researched.`);
+  }
   const proposedOnly = tracts.filter(t => t.matchStatus === "proposed").length;
   if (proposedOnly > 0) limitations.push(`${proposedOnly} candidate tract(s) remain unconfirmed and are excluded from the branches.`);
   for (const c of providerUnavailable) limitations.push(`No automated county-records provider for ${c} County; only TRRC documents and uploads were reviewed.`);

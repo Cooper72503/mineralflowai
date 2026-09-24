@@ -193,7 +193,21 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
         }
       }
 
-      // 4. Instruments.
+      // 4. Re-extraction replaces this document's earlier machine extraction.
+      // A document is only pending again when the extraction schema changed
+      // or someone re-queued it; keeping the old rows would leave both
+      // readings in the chain (live case: a 1957 release first read as a deed
+      // of trust with effect "encumbrance"). A person's review of any claim
+      // is never discarded — that case stops for repair instead.
+      const { data: prior } = await checkedIngestionQuery(supabase.from("title_instruments").select("id").eq("job_id", jobId).eq("document_id", doc.id));
+      const priorIds = ((prior ?? []) as Array<{ id: string }>).map(p => p.id);
+      if (priorIds.length > 0) {
+        const { data: reviewed } = await checkedIngestionQuery(supabase.from("title_claims").select("id").in("instrument_id", priorIds).neq("human_review_status", "unreviewed").limit(1));
+        if (reviewed && reviewed.length > 0) throw new Error("This document's earlier extraction has reviewed claims; re-extraction would discard that review. Repair is required before retrying.");
+        await checkedIngestionQuery(supabase.from("title_instruments").delete().in("id", priorIds));
+      }
+
+      // 5. Instruments.
       for (const inst of extractedDoc.instruments) {
         const dedupeKey = instrumentDedupeKey(inst);
         const { data: existing } = await checkedIngestionQuery(supabase.from("title_instruments").select("id, document_id, instrument_content_verified").eq("job_id", jobId).eq("dedupe_key", dedupeKey).limit(1));

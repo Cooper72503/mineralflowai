@@ -68,8 +68,13 @@ export function classifyDocumentKind(text: string): ExtractedDocument["documentK
   const t = text.toLowerCase();
   if (/application for permit to drill|form w-1\b|drilling permit application/.test(t)) return "w1_application";
   if (/completion report|form w-2\b|form g-1\b|well completion/.test(t)) return "completion_report";
+  // Conveyance language is checked before the plat test. Recorded instruments
+  // routinely carry a surveyed plat as an exhibit (easements, pooling and unit
+  // designations); testing for a plat first classified a Midland pipeline
+  // easement with 48 "grantor" references as a location plat and extracted
+  // nothing from it. A bare plat still has no conveyance language.
+  if (/grantor|grantee|lessor|lessee|assignor|assignee|convey|hereby grant|affidavit of heirship|last will|letters testamentary|deed of trust|release of lien|hereby releases?\b|releases?\s+and\s+relinquish|release\s+of\s+(?:production\s+payment|oil|royalty|overriding|assignment)/.test(t)) return "instrument";
   if (/\bplat\b/.test(t) && /surveyor|registered professional land surveyor|r\.p\.l\.s/.test(t)) return "location_plat";
-  if (/grantor|grantee|lessor|lessee|assignor|assignee|convey|hereby grant|affidavit of heirship|last will|letters testamentary|deed of trust|release of lien/.test(t)) return "instrument";
   if (/instrument\s*(no|#)|recording date|doc(ument)?\s*(no|#)/.test(t) && /grantor[\s\S]*grantee/.test(t)) return "index_listing";
   return "other";
 }
@@ -93,6 +98,16 @@ const TYPE_PATTERNS: Array<[RegExp, InstrumentType]> = [
 ];
 
 export function classifyInstrumentType(text: string): { type: InstrumentType; verbatim: string | null } {
+  // The caption names the instrument. A release's body necessarily recites
+  // the thing it releases — "deed of trust executed by Valor Oil Company ...
+  // recorded in Volume 144" — so scanning the body in pattern order typed a
+  // 1957 Midland RELEASE OF DEED OF TRUST (OCR: "TRUSS") as a deed of trust
+  // with effect "encumbrance": the chain showed the tract encumbered by the
+  // very instrument that cleared it. A caption that opens with "release of"
+  // decides the type before the body is consulted.
+  const caption = text.slice(0, 400);
+  const releaseCaption = caption.match(/\brelease\s+of\s+[a-z]+(?:\s+[a-z]+){0,4}/i);
+  if (releaseCaption) return { type: "release", verbatim: releaseCaption[0].replace(/\s+/g, " ").trim() };
   const head = text.slice(0, 4000);
   for (const [re, type] of TYPE_PATTERNS) {
     const m = head.match(re) ?? text.match(re);

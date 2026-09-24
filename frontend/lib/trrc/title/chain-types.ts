@@ -13,7 +13,13 @@ import type { TitleAssessmentClassification, MatchStatus } from "./types";
 export type { TitleAssessmentClassification, MatchStatus };
 
 export const TITLE_CHAIN_SCHEMA_VERSION = "1.0.0";
-export const EXTRACTION_SCHEMA_VERSION = "1.0.0";
+// 1.1.0: conveyance language is recognized before the plat test, and release
+// phrasing ("hereby releases", "releases and relinquishes") marks an
+// instrument. Cached 1.0.0 extractions classified plat-bearing instruments and
+// such releases as non-instruments, so they must be recomputed.
+// 1.2.0: a caption opening "release of" types the instrument as a release
+// before the body is scanned (a release recites the deed of trust it clears).
+export const EXTRACTION_SCHEMA_VERSION = "1.2.0";
 
 /** Concise statement required on every report surface. */
 export const TITLE_CHAIN_REPORT_STATEMENT =
@@ -208,6 +214,8 @@ export interface ChainEvent {
   contentVerified: boolean;
   notes: string[];
   citations: Citation[];
+  /** The county clerk's own document type ("RIGHT OF WAY", "REL OIL&GAS LS"), verbatim, when indexed. */
+  clerkDocType?: string | null;
 }
 
 export interface Holding {
@@ -297,6 +305,8 @@ export interface ChronologyRow {
   contentVerified: boolean;
   notes: string;
   citations: Citation[];
+  /** The county clerk's own document type, verbatim, when indexed. */
+  clerkDocType?: string | null;
 }
 
 export interface SourceInventoryEntry {

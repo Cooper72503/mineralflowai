@@ -14,6 +14,8 @@ function db(tables: Record<string, { data: unknown; error: unknown }>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const q: any = {
         select: () => q,
+        order: () => q,
+        range: () => q,
         eq: (...v: unknown[]) => { filters.push([name, ...v]); return q; },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         then: (resolve: any) => Promise.resolve(tables[name] ?? { data: [], error: null }).then(resolve),

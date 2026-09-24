@@ -17,6 +17,8 @@
  * Every load failure is returned as a status, never thrown, so a title
  * outage degrades the section rather than failing the whole report.
  */
+import { selectAll } from "./select-all";
+import { SUPERSEDED_EVIDENCE_LEVEL } from "./supersede-index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadJobBundle } from "./job-store";
 import { loadReviewedPosition } from "../gold2/position-link";
@@ -116,11 +118,11 @@ export async function loadTitleForReport(
   // title_instrument_parties / title_instrument_tracts identically, so
   // reading those is the only way one code path sees every instrument.
   const [instrumentsResult, partiesResult, tractsResult] = await Promise.all([
-    supabase.from("title_instruments")
-      .select("id, instrument_type, instrument_number, doc_number, recorded_date, instrument_content_verified")
-      .eq("job_id", jobId),
-    supabase.from("title_instrument_parties").select("instrument_id, party_name, role").eq("job_id", jobId),
-    supabase.from("title_instrument_tracts").select("instrument_id, legal_description").eq("job_id", jobId),
+    selectAll<Record<string, unknown>>((a, b) => supabase.from("title_instruments")
+      .select("id, instrument_type, instrument_number, doc_number, recorded_date, instrument_content_verified, evidence_level")
+      .eq("job_id", jobId).order("id").range(a, b)),
+    selectAll<Record<string, unknown>>((a, b) => supabase.from("title_instrument_parties").select("instrument_id, party_name, role").eq("job_id", jobId).order("id").range(a, b)),
+    selectAll<Record<string, unknown>>((a, b) => supabase.from("title_instrument_tracts").select("instrument_id, legal_description").eq("job_id", jobId).order("id").range(a, b)),
   ]);
 
   const partyRows = partiesResult.error ? [] : (partiesResult.data ?? []);
@@ -131,7 +133,9 @@ export async function loadTitleForReport(
       .map(p => str(p["party_name"]))
       .filter((n): n is string => n !== null);
 
-  const rows = instrumentsResult.error ? [] : (instrumentsResult.data ?? []);
+  // A superseded index row is represented by its read copy; listing both
+  // would show the same recording twice.
+  const rows = (instrumentsResult.error ? [] : (instrumentsResult.data ?? [])).filter(r => r["evidence_level"] !== SUPERSEDED_EVIDENCE_LEVEL);
   const leads: TitleIndexLead[] = rows.map(r => {
     const id = String(r["id"]);
     const grantors = namesFor(id, "grantor");
