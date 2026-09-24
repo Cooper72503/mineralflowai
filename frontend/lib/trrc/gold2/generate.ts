@@ -23,10 +23,21 @@ export async function generateGold2ForRun(db:SupabaseClient,runId:string,userId:
   const supplements=ReportSupplements.parse(supplementInput);
   const titleLink=await loadTitleForApi(db,api,userId,run.title_research_job_id);
   if(titleLink.status==="query_failed")return {ok:false as const,status:503,error:"Title evidence could not be verified. Retry the request; no report was delivered."};
+  // A run created while its API was ambiguous has no link. When the lookup
+  // now resolves a unique published scope, keep it on the run (migration
+  // 033's trigger re-checks account and API) so it never needs binding.
+  if(!run.title_research_job_id&&titleLink.status==="linked"&&titleLink.title?.jobId){
+   const {error:linkError}=await db.from("trrc_due_diligence_runs").update({title_research_job_id:titleLink.title.jobId,title_setup_warning:null}).eq("id",runId).eq("user_id",userId);
+   if(linkError)console.error(`[generateGold2ForRun] title relink refused for ${runId}:`,linkError.message);
+  }
   const selectedPosition=Object.prototype.hasOwnProperty.call(supplements,"position")?null:await loadReviewedPosition(db,userId,api,titleLink.title);
   const report=assembleGold2Draft({api,runId,asOf:new Date().toISOString(),attempts,title:titleLink.title,titleLookup:{status:titleLink.status,reason:titleLink.reason},position:selectedPosition?.position??null,positionLookupReason:selectedPosition?.reason??null,partner:null,reconciliationPolicy:null,economics:null,...supplements} as Parameters<typeof assembleGold2Draft>[0]);
   if(validateGold2Draft(report).length)throw Error("GOLD report failed deterministic validation");
   const bytes=format==="pdf"?await renderGold2Pdf(report):Buffer.from(JSON.stringify(report,null,2)+"\n");
   return {ok:true as const,bytes,filename:`${api}-gold2.${format}`,contentType:format==="pdf"?"application/pdf":"application/json"};
- }catch(error){if(error instanceof PositionLoadError)return {ok:false as const,status:error.status,error:error.message+". Retry the report request."};return {ok:false as const,status:422,error:"Retained inputs failed report validation; no report containing unvalidated values was delivered."};}
+ }catch(error){if(error instanceof PositionLoadError)return {ok:false as const,status:error.status,error:error.message+". Retry the report request."};
+  // The response stays generic; the cause is logged, because a render fault
+  // and a validation refusal otherwise look identical from the outside.
+  console.error(`[generateGold2ForRun] ${runId}:`,error);
+  return {ok:false as const,status:422,error:"Retained inputs failed report validation; no report containing unvalidated values was delivered."};}
 }

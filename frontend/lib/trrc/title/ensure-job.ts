@@ -43,6 +43,29 @@ export interface EnsureTitleJobResult {
 const DEFAULT_INTEREST_SCOPE: InterestScope[] = ["minerals"];
 const LIVE_JOB_STATUSES_EXCLUDED = ["cancelled", "failed"];
 
+/**
+ * The single live (not cancelled/failed) title scope for this account and
+ * API, without creating one. Shared by run creation and by report
+ * generation, so a run created while its API was ambiguous links itself
+ * once the ambiguity is gone instead of needing someone to bind it.
+ */
+export async function findUniqueLiveTitleJob(
+  supabase: SupabaseClient,
+  userId: string,
+  api10: string,
+): Promise<{ jobId: string | null; reason: string | null }> {
+  const existingWells = await supabase.from("title_job_wells").select("job_id").eq("user_id", userId).eq("api10", api10);
+  if (existingWells.error) return { jobId: null, reason: `Could not check existing title jobs: ${existingWells.error.message}` };
+  const ids = [...new Set((existingWells.data ?? []).map(w => String(w.job_id)))];
+  if (!ids.length) return { jobId: null, reason: null };
+  const jobs = await supabase.from("title_research_jobs").select("id, status, updated_at").eq("user_id", userId).in("id", ids).order("updated_at", { ascending: false });
+  if (jobs.error) return { jobId: null, reason: `Could not check title research scopes: ${jobs.error.message}` };
+  const live = (jobs.data ?? []).filter(j => !LIVE_JOB_STATUSES_EXCLUDED.includes(String(j.status)));
+  if (live.length > 1) return { jobId: null, reason: "Multiple live title research scopes match this API; select the intended scope before linking title." };
+  if (live.length === 1) return { jobId: String(live[0].id), reason: null };
+  return { jobId: null, reason: null };
+}
+
 export async function ensureTitleJobForApi(
   supabase: SupabaseClient,
   userId: string,
@@ -57,18 +80,9 @@ export async function ensureTitleJobForApi(
   const api10 = first.api10;
 
   // Reuse a live job for this api10 if one exists.
-  const existingWells = await supabase.from("title_job_wells").select("job_id").eq("user_id", userId).eq("api10", api10);
-  if (existingWells.error) {
-    return { ok: false, created: false, jobId: null, api10, reason: `Could not check existing title jobs: ${existingWells.error.message}` };
-  }
-  const ids = [...new Set((existingWells.data ?? []).map(w => String(w.job_id)))];
-  if (ids.length > 0) {
-    const jobs = await supabase.from("title_research_jobs").select("id, status, updated_at").eq("user_id", userId).in("id", ids).order("updated_at", { ascending: false });
-    if (jobs.error) return { ok: false, created: false, jobId: null, api10, reason: `Could not check title research scopes: ${jobs.error.message}` };
-    const live = (jobs.data ?? []).filter(j => !LIVE_JOB_STATUSES_EXCLUDED.includes(String(j.status)));
-    if (live.length > 1) return { ok: false, created: false, jobId: null, api10, reason: "Multiple live title research scopes match this API; select the intended scope before linking title." };
-    if (live.length === 1) return { ok: true, created: false, jobId: String(live[0].id), api10, reason: null };
-  }
+  const existing = await findUniqueLiveTitleJob(supabase, userId, api10);
+  if (existing.jobId) return { ok: true, created: false, jobId: existing.jobId, api10, reason: null };
+  if (existing.reason) return { ok: false, created: false, jobId: null, api10, reason: existing.reason };
 
   const interestScope = opts.interestScope && opts.interestScope.length > 0 ? opts.interestScope : DEFAULT_INTEREST_SCOPE;
   const asOfDate = opts.asOfDate ?? new Date().toISOString().slice(0, 10);

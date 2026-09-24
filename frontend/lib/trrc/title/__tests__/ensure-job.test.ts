@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ensureTitleJobForApi } from "../ensure-job";
+import { ensureTitleJobForApi, findUniqueLiveTitleJob } from "../ensure-job";
 
 /**
  * In-memory Supabase stand-in: reads answer from seeded rows; creation is
@@ -110,4 +110,20 @@ it("does not pick a scope by recency when multiple live scopes exist",async()=>{
  const {db,rpcCalls}=makeDb({wells:[{job_id:"a",api10:"4216502733",user_id:USER},{job_id:"b",api10:"4216502733",user_id:USER}],jobs:[{id:"a",status:"pending",user_id:USER,updated_at:"2026-09-15"},{id:"b",status:"complete",user_id:USER,updated_at:"2026-09-14"}]});
  const result=await ensureTitleJobForApi(db,USER,"4216502733");
  expect(result).toMatchObject({ok:false,jobId:null});expect(result.reason).toContain("Multiple live");expect(rpcCalls).toEqual([]);
+});
+
+// The Buttercup failure: one scope stuck in-flight, one complete. Once the
+// worker's stale sweep marks the stuck one failed, the lookup must resolve
+// the survivor without creating anything, so unlinked runs heal themselves.
+it("resolves the surviving scope once a stuck duplicate is marked failed",async()=>{
+ const wells=[{job_id:"31f9fe66",api10:"4232946776",user_id:USER},{job_id:"dd4c0167",api10:"4232946776",user_id:USER}];
+ const stuck=makeDb({wells,jobs:[{id:"31f9fe66",status:"awaiting_tract_confirmation",user_id:USER,updated_at:"2026-09-23"},{id:"dd4c0167",status:"analyzing",user_id:USER,updated_at:"2026-09-21"}]});
+ expect(await findUniqueLiveTitleJob(stuck.db,USER,"4232946776")).toMatchObject({jobId:null});
+ const swept=makeDb({wells,jobs:[{id:"31f9fe66",status:"awaiting_tract_confirmation",user_id:USER,updated_at:"2026-09-23"},{id:"dd4c0167",status:"failed",user_id:USER,updated_at:"2026-09-24"}]});
+ expect(await findUniqueLiveTitleJob(swept.db,USER,"4232946776")).toEqual({jobId:"31f9fe66",reason:null});
+ expect(swept.rpcCalls).toEqual([]);expect(swept.violations).toEqual([]);
+});
+it("reports no scope, not an error, when the API has never been researched",async()=>{
+ const {db}=makeDb({});
+ expect(await findUniqueLiveTitleJob(db,USER,"4232946776")).toEqual({jobId:null,reason:null});
 });

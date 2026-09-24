@@ -16,6 +16,7 @@ import type {
   TrrcDDProductionRow,
 } from "./types";
 import type { TrrcManifest } from "./manifest-builder";
+import { findUniqueLiveTitleJob } from "./title/ensure-job";
 import { deriveCoverageFromAttempts, type LiteSourceAttempt } from "./coverage";
 
 export type GenerateReportResult =
@@ -210,19 +211,38 @@ export async function generatePdfReportForRun(
     return { ok: false, error: "PDF report generation is temporarily unavailable.", status: 501 };
   }
 
+  // A run created while its API had no unique title scope carries a null
+  // link and a setup warning. Re-resolve it now: if exactly one live scope
+  // matches this account and API, persist the link (migration 033's trigger
+  // re-checks account and API) so the run heals without anyone binding it.
+  let titleJobId = (runRaw["title_research_job_id"] as string | null) ?? null;
+  let titleSetupWarning = (runRaw["title_setup_warning"] as string | null) ?? null;
+  if (!titleJobId && run.resolved_primary_api) {
+    try {
+      const found = await findUniqueLiveTitleJob(supabase, userId, run.resolved_primary_api);
+      if (found.jobId) {
+        const { error: linkError } = await supabase.from("trrc_due_diligence_runs")
+          .update({ title_research_job_id: found.jobId, title_setup_warning: null })
+          .eq("id", runId).eq("user_id", userId);
+        if (!linkError) { titleJobId = found.jobId; titleSetupWarning = null; }
+        else console.error(`[generatePdfReportForRun] title relink refused for ${runId}:`, linkError.message);
+      } else if (found.reason) {
+        titleSetupWarning = found.reason;
+      }
+    } catch (err) {
+      console.error(`[generatePdfReportForRun] title relink failed for ${runId}:`, err);
+    }
+  }
+
   let pdfBuffer: Buffer;
   try {
     pdfBuffer = await buildTrrcPdfReport(
       run, manifest, findings, scorecard ?? {} as AcquisitionScorecard, production, coverage, sourceAttemptRows,
       undefined, false, { supabase, runId },
-      // Migration 033's explicit run -> title-job link. Deliberately the only
-      // source: the report never guesses a title scope from the API number,
-      // because an unselected or ambiguous scope must read as "no reviewed
-      // title", not as somebody else's chain attached to this well.
-      {
-        jobId: (runRaw["title_research_job_id"] as string | null) ?? null,
-        setupWarning: (runRaw["title_setup_warning"] as string | null) ?? null,
-      },
+      // The explicit run -> title-job link, healed above only when exactly
+      // one live scope for this account and API exists. An ambiguous scope
+      // still reads as "no reviewed title", never as a guessed chain.
+      { jobId: titleJobId, setupWarning: titleSetupWarning },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

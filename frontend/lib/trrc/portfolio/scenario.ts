@@ -1,6 +1,6 @@
 /** Connect existing forecast/cash-flow/exit engines; never infer ownership or reserves. */
 import {z} from "zod";
-import {fitArpsDecline} from "../decline-curve";
+import {fitArpsDeclineWindowed} from "../decline-curve";
 import {forecastNetCashFlowSeries,monthlyDiscountRate} from "../economics";
 import {evaluateFlipCashFlows,evaluateUnpricedCashFlows,DEFAULT_FLIP_ASSUMPTIONS} from "../flip";
 const nonnegative=z.number().finite().nonnegative(),fraction=nonnegative.max(1);
@@ -86,8 +86,14 @@ export function assessPortfolioForecastReadiness(streams:ScenarioStream[],asOf:s
   const values=reported.map(m=>m.volumes.oil_bbl.value);
   const contiguous=reported.every((m,i)=>i===0||monthIndex(m.month)-monthIndex(reported[i-1].month)===1);
   const complete=contiguous&&values.every(v=>v!==null);
-  const fit=complete?fitArpsDecline(values as number[]):null;
+  // Same step-change windowing the diligence report and the cash-flow engine
+  // use (decline-curve.ts): lease volumes that jump when new wells report are
+  // a change in the well count, not a decline. Buttercup's lease rose 4.5x in
+  // 2024; the plain fit over the whole history returned no forecast here while
+  // the diligence report fit the same lease at R-squared 0.99.
+  const windowed=complete?fitArpsDeclineWindowed(values as number[]):null;
+  const fit=windowed?.fit??null;
   const reason=!latest?"No reported oil volumes available.":latest.volumes.oil_bbl.value===0?"Last reported oil volume is zero; the existing producing-well decline engine cannot infer a restart rate.":!complete?"Historical oil observations have gaps; calendar time cannot be compressed.":!fit?"Existing decline engine cannot establish a supported producing forecast from these observations.":null;
-  return {streamKey:stream.key,latestReportedOilMonth:latest?.month??null,latestReportedOilBbl:latest?.volumes.oil_bbl.value??null,reportingLagMonths:latest?monthIndex(asOf.slice(0,7))-monthIndex(latest.month):null,trailingUnreportedMonths,excludedEarlierMonths,canFitOil:fit!==null,oilFit:fit,reason,productionPointer:"/production/leaseStreams"};
+  return {streamKey:stream.key,latestReportedOilMonth:latest?.month??null,latestReportedOilBbl:latest?.volumes.oil_bbl.value??null,reportingLagMonths:latest?monthIndex(asOf.slice(0,7))-monthIndex(latest.month):null,trailingUnreportedMonths,excludedEarlierMonths:excludedEarlierMonths+(fit?windowed!.monthsExcluded:0),declineWindowNote:fit?windowed!.reason:null,canFitOil:fit!==null,oilFit:fit,reason,productionPointer:"/production/leaseStreams"};
  });
 }

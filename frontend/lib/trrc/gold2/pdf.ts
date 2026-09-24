@@ -54,7 +54,7 @@ function LeaseAnalysis({report}:{report:Record2}){
  const record=lease.record, economics=record.conditionalEconomics;
  return e(View,{},e(Text,{style:s.section},"MineralFlow lease forecast and entry / exit"),
   e(Text,{style:s.warning},"RRC lease-wide production. These volumes and values are not allocated to the requested well or established as the seller's interest. Conditional WI/NRI does not clear title."),
-  ...record.forecastReadiness.map(r=>e(View,{key:r.streamKey,style:s.box},e(Text,{style:s.label},r.streamKey),e(Text,{style:s.note},`Latest oil: ${r.latestReportedOilMonth??"unavailable"}; ${r.latestReportedOilBbl??"unavailable"} bbl. Reporting lag: ${r.reportingLagMonths??"unknown"} months. ${r.reason??"Existing Arps fit available; forecast is screening, not certified reserves."}`))),
+  ...record.forecastReadiness.map(r=>e(View,{key:r.streamKey,style:s.box},e(Text,{style:s.label},r.streamKey),e(Text,{style:s.note},`Latest oil: ${r.latestReportedOilMonth??"unavailable"}; ${r.latestReportedOilBbl??"unavailable"} bbl. Reporting lag: ${r.reportingLagMonths??"unknown"} months. ${r.reason??"Existing Arps fit available; forecast is screening, not certified reserves."}${!r.reason&&r.declineWindowNote?` ${r.declineWindowNote}`:""}`))),
   ...lease.oilForecasts.map(m=>{
    const points=m.months.slice(0,60),max=Math.max(1,...points.map(p=>p.oilBbl)),step=500/Math.max(1,points.length);
    return e(View,{key:m.streamKey,wrap:false},e(Text,{style:s.label},`${m.streamKey}: remaining modeled oil ${m.remainingOilBbl===null?"unavailable":display(m.remainingOilBbl)+" bbl"}`),e(Svg,{width:510,height:110},...points.map((p,i)=>e(Rect,{key:i,x:i*step,y:100-p.oilBbl/max*95,width:Math.max(1,step-1),height:p.oilBbl/max*95,fill:c.teal}))),e(Text,{style:s.note},m.reason??`First ${points.length} forecast months; scale 0-${display(max)} bbl/month.`),e(Text,{style:s.note},m.disclosure),e(Text,{style:s.citation},"/internalLease/oilForecasts; evidence: /internalLease/record/production/leaseStreams"));
@@ -66,6 +66,58 @@ function Values({report}:{report:Record2}){
  if(!points.some(p=>typeof p.value==="number"))return e(Missing,{reason:report.fields["economics.base_value"].reason??"Evidenced ownership and forecast plus supplied economics inputs are required."});
  const max=Math.max(1,...points.map(p=>typeof p.value==="number"?Math.abs(p.value):0));
  return e(View,{wrap:false},e(Text,{style:s.section},"Commodity scenarios - ownership held fixed"),...points.map(p=>e(View,{key:p.name,style:s.row},e(Text,{style:{width:65}},p.name),e(View,{style:{width:320}},typeof p.value==="number"?e(View,{style:{width:Math.abs(p.value)/max*300,height:13,backgroundColor:p.value>=0?c.teal:"#AF493A"}}):null),e(Text,{style:{width:100}},typeof p.value==="number"?`$${display(p.value)}`:"Unavailable"))));
+}
+// The chain of title, printed. The display() fallback renders any array as
+// "N entries - retained in companion JSON", which left the report's own chain
+// of title — the section a buyer turns to first — as a bare count.
+type ChainRow={recordedDate:string|null;executionDate:string|null;instrumentType:string;clerkDocType?:string|null;contentVerified:boolean;recordingReference:string|null;fromParties:{displayName:string}[];toParties:{displayName:string}[];citations:{label:string|null;sourceUrl:string|null;page:number|null}[]};
+const words=(t:string)=>t==="other"?"Recorded instrument":t.replace(/_/g," ").replace(/^./,x=>x.toUpperCase());
+function TitleSummary({report}:{report:Record2}){
+ const t=report.input.title;
+ if(!t)return e(Missing,{reason:report.fields["title.instruments"].reason??"No published title analysis accompanies this API."});
+ const rows=(t.chronology??[]) as unknown as ChainRow[];
+ const read=rows.filter(r=>r.contentVerified).length;
+ const tracts=t.tracts.filter(x=>x.matchStatus==="confirmed").map(x=>x.tractLabel);
+ return e(View,{style:s.box,wrap:false},e(Text,{style:s.label},`Title analysis v${t.version} | ${t.generatedAt.slice(0,10)} | ${t.statusDisplay}`),
+  e(Text,{style:s.value},`${rows.length} recorded instruments on the confirmed tract`),
+  e(Text,{style:s.note},`${tracts.join("; ")||"No confirmed tract"}. ${read} read from the recorded image; ${rows.length-read} from the county clerk index only. The full chain is in Appendix A. Index entries establish that a recording exists and who the clerk indexed as parties; they do not establish what was conveyed, reserved or excepted.`));
+}
+function TitleChain({report}:{report:Record2}){
+ const t=report.input.title;
+ if(!t)return e(Missing,{reason:report.fields["title.instruments"].reason??"No published title analysis accompanies this API."});
+ const rows=(t.chronology??[]) as unknown as ChainRow[];
+ const clerk=t.searchCoverage.filter(x=>x.provider.startsWith("county:"));
+ const w={date:62,type:96,parties:222,evidence:48,ref:92};
+ const cell=(width:number,text:string,bold=false)=>e(Text,{style:[s.cell,{width,fontWeight:bold?700:400}]},text);
+ return e(View,{},
+  e(Text,{style:s.section},"Chain of title - confirmed subject tract"),
+  e(Text,{style:s.note},`${t.tracts.filter(x=>x.matchStatus==="confirmed").map(x=>x.tractLabel).join("; ")}. Parties as indexed by the county clerk. "Read" instruments were extracted from the recorded image and are cited to a page; "Index" rows are clerk index entries whose images were not read.`),
+  e(View,{style:[s.row,{borderBottomWidth:1.5}],fixed:true},cell(w.date,"Recorded",true),cell(w.type,"Instrument",true),cell(w.parties,"Grantor  >  Grantee",true),cell(w.evidence,"Evidence",true),cell(w.ref,"Reference",true)),
+  ...rows.map((r,i)=>{
+   const cite=r.citations.find(c=>c.sourceUrl)??r.citations[0];
+   const party=`${(r.fromParties??[]).map(p=>p.displayName).join("; ")||"-"}  >  ${(r.toParties??[]).map(p=>p.displayName).join("; ")||"-"}`;
+   const type=r.clerkDocType?`${r.clerkDocType}${words(r.instrumentType).toLowerCase()!==r.clerkDocType.toLowerCase()?`\n${words(r.instrumentType)}`:""}`:words(r.instrumentType);
+   const ref=[r.recordingReference??cite?.label??"",r.contentVerified&&cite?.page?`p. ${cite.page}`:""].filter(Boolean).join(" | ");
+   return e(View,{key:i,style:s.row,wrap:false},cell(w.date,r.recordedDate??r.executionDate??"-"),cell(w.type,type),cell(w.parties,party),
+    e(Text,{style:[s.cell,{width:w.evidence,color:r.contentVerified?c.teal:c.muted,fontWeight:r.contentVerified?700:400}]},r.contentVerified?"Read":"Index"),
+    r.contentVerified&&cite?.sourceUrl?e(Link,{src:cite.sourceUrl,style:[s.cell,{width:w.ref,color:c.teal}]},ref||"Source"):cell(w.ref,ref||"-"));
+  }),
+  rows.length===0?e(Text,{style:s.note},"No recorded instruments are linked to a confirmed tract in this analysis."):null,
+  e(Text,{style:s.section},"County clerk searches"),
+  // Latest outcome per distinct query, tract searches first, then by hits.
+  // Budget-skipped predecessor searches are counted, not listed.
+  ...(()=>{
+   const latest=new Map<string,typeof clerk[number]>();
+   for(const q of clerk)latest.set(`${q.queryType}|${q.queryValue}`,q);
+   const ran=[...latest.values()].filter(q=>q.status!=="skipped_bounded");
+   const skipped=[...latest.values()].filter(q=>q.status==="skipped_bounded").length;
+   ran.sort((a,b)=>Number(b.queryType==="tract_description")-Number(a.queryType==="tract_description")||(b.resultCount??0)-(a.resultCount??0));
+   return [e(View,{key:"qh",style:[s.row,{borderBottomWidth:1.5}]},cell(110,"Search",true),cell(250,"Query",true),cell(80,"Outcome",true),cell(60,"Hits",true)),
+    ...ran.map((q,i)=>e(View,{key:`q${i}`,style:s.row,wrap:false},cell(110,q.queryType.replace(/_/g," ")),cell(250,q.queryValue),cell(80,q.status.replace(/_/g," ")),cell(60,`${q.resultCount??0}${(q.resultCount??0)>=50?" (page cap)":""}`))),
+    skipped?e(Text,{key:"qs",style:s.note},`${skipped} further predecessor-party searches were planned but not run within the per-job query budget. Coverage of predecessor parties is therefore incomplete.`):null];
+  })(),
+  clerk.length===0?e(Text,{style:s.note},"No county clerk search was logged; no chain of title can exist in this report."):null,
+  ...(t.limitations.length?[e(Text,{key:"lh",style:s.section},"Title limitations"),...t.limitations.map((l,i)=>e(Text,{key:`l${i}`,style:s.note},`- ${l}`))]:[]));
 }
 function RuleTrace({report}:{report:Record2}){return e(View,{},...report.decision.trace.map(r=>e(View,{key:r.id,style:s.box,wrap:false},e(Text,{style:s.label},`${r.id} - ${r.outcome}`),e(Text,{style:s.note},r.reason))));}
 function Sources({report}:{report:Record2}){return e(View,{},...report.regulator.evidence.map(r=>e(View,{key:r.id,style:s.box,wrap:false},e(Text,{style:s.value},r.source.replace(/_/g," ")),e(Text,{style:s.note},`${r.status} | ${r.retrievedAt}\n${r.error??"See retained payload for query results and scope."}`),r.sourceUrl?e(Link,{src:r.sourceUrl,style:s.citation},r.sourceUrl):null,e(Text,{style:s.citation},`Evidence ${r.id}\nSHA-256 ${r.sha256}`))),...report.disclosures.map(d=>e(View,{key:d.id,style:s.box,wrap:false},e(Text,{style:s.label},label("d."+d.id)),e(Text,{style:s.note},d.text))));}
@@ -97,5 +149,6 @@ export async function renderGold2Pdf(report:Record2):Promise<Buffer>{
   ...GOLD2_CHARTS.filter(chart=>chart.page===sectionIndex+1).map(chart=>e(EvidenceChart,{key:chart.id,report,id:chart.id})),
   e(View,{style:s.grid},...section.fields.map(k=>e(Field,{key:k,report,k}))),
   section.id==="15"?e(RuleTrace,{report}):null,section.id==="A2"?e(Sources,{report}):null,
+  section.id==="10"?e(TitleSummary,{report}):null,section.id==="A"?e(TitleChain,{report}):null,
   e(Text,{fixed:true,style:s.footer,render:({pageNumber,totalPages})=>`MineralFlow | ${report.input.api} | Evidence-based research, subject to professional review | ${pageNumber}/${totalPages}`})))));
 }
