@@ -34,28 +34,6 @@ function IconPermitTracker() {
     </svg>
   );
 }
-function IconOffsetAnalytics() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 13.5V2.5" />
-      <path d="M2 13.5h12" />
-      <path d="M4.5 13.5V9.5M8 13.5V6M11.5 13.5V3.5" />
-      <circle cx="4.5" cy="9.5" r="0.9" fill="currentColor" stroke="none" />
-      <circle cx="8" cy="6" r="0.9" fill="currentColor" stroke="none" />
-      <circle cx="11.5" cy="3.5" r="0.9" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-function IconTitleChain() {
-  return (
-    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="1.5" width="4.5" height="3" rx="0.75" />
-      <rect x="9.5" y="6.5" width="4.5" height="3" rx="0.75" />
-      <rect x="2" y="11.5" width="4.5" height="3" rx="0.75" />
-      <path d="M6.5 3h1.5v5h1.5M6.5 13h1.5V8" />
-    </svg>
-  );
-}
 function IconSettings() {
   return (
     <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -92,11 +70,10 @@ function IconBrandMark() {
 }
 
 // ── Nav config ─────────────────────────────────────────────────────────────
+// One engine. Offsets and the chain of title are sections of its report, not separate tools.
 const primaryNav = [
-  { href: "/trrc-due-diligence", label: "TRRC Due Diligence", Icon: IconDueDiligence },
-  { href: "/trrc-permit-tracker", label: "TRRC Permit Tracker", Icon: IconPermitTracker },
-  { href: "/trrc-offset-analytics", label: "Offset Analytics", Icon: IconOffsetAnalytics },
-  { href: "/trrc-title-chain", label: "Title Chain", Icon: IconTitleChain },
+  { href: "/trrc-due-diligence", label: "Due Diligence Engine", Icon: IconDueDiligence },
+  { href: "/trrc-permit-tracker", label: "Permit Tracker", Icon: IconPermitTracker, sub: true },
 ] as const;
 
 const accountNav = [
@@ -135,19 +112,20 @@ function NavGroup({
   pathname,
   onClose,
 }: {
-  items: ReadonlyArray<{ href: string; label: string; Icon: () => JSX.Element }>;
+  items: ReadonlyArray<{ href: string; label: string; Icon: () => JSX.Element; sub?: boolean }>;
   pathname: string;
   onClose?: () => void;
 }) {
   return (
     <>
-      {items.map(({ href, label, Icon }) => {
+      {items.map(({ href, label, Icon, sub }) => {
         const isActive = pathname === href || pathname.startsWith(href + "/");
+        const className = [sub ? "sidebar-sub-item" : null, isActive ? "active" : null].filter(Boolean).join(" ") || undefined;
         return (
           <Link
             key={href}
             href={href}
-            className={isActive ? "active" : undefined}
+            className={className}
             onClick={onClose}
           >
             <Icon />

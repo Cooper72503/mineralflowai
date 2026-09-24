@@ -1,6 +1,6 @@
 "use client";
 
-import {ScenarioControls} from "./portfolio/scenario-controls";
+import {ScenarioControls} from "../portfolio/scenario-controls";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
@@ -14,10 +14,10 @@ import type {
   TrrcDDProductionRow,
   SourceCoverageStatus,
   TrrcGeologyDashboardSummary,
-} from "../../../lib/trrc/types";
+} from "../../../../lib/trrc/types";
 import { buildEvidenceIndex } from "@/lib/trrc/evidence-index";
 import { useApiFetch } from "@/lib/trrc/use-api-fetch";
-import { COLORS } from "./colors";
+import { COLORS } from "../colors";
 // detectInputType unused — each field has an explicit type now
 
 // ─── District options ──────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ export default function TrrcDueDiligencePage() {
       if (!res.ok || !data.ok) {
         // Run doesn't exist or isn't this user's — drop the stale
         // reference rather than getting stuck retrying it forever.
-        router.replace("/trrc-due-diligence");
+        router.replace("/trrc-due-diligence/well");
         return;
       }
       setRunId(id);
@@ -229,7 +229,7 @@ export default function TrrcDueDiligencePage() {
         setPhase("running");
       }
     } catch {
-      router.replace("/trrc-due-diligence");
+      router.replace("/trrc-due-diligence/well");
     }
   }, [apiFetch, router]);
 
@@ -431,7 +431,7 @@ export default function TrrcDueDiligencePage() {
       const id: string = data.data.id;
       setRunId(id);
       setRun(data.data);
-      router.replace(`/trrc-due-diligence?run=${id}`, { scroll: false });
+      router.replace(`/trrc-due-diligence/well?run=${id}`, { scroll: false });
       if (data.data.needs_user_selection) {
         setPhase("selecting");
       } else {
@@ -468,7 +468,7 @@ export default function TrrcDueDiligencePage() {
     setRun(null);
     setPhase("form");
     setError(null);
-    router.replace("/trrc-due-diligence", { scroll: false });
+    router.replace("/trrc-due-diligence/well", { scroll: false });
   }, [runId, apiFetch, router]);
 
   const handleResolve = useCallback(async (entityId: string) => {
@@ -506,7 +506,7 @@ export default function TrrcDueDiligencePage() {
     setError(null);
     setDownloadError(null);
     setActiveTab("summary");
-    router.replace("/trrc-due-diligence", { scroll: false });
+    router.replace("/trrc-due-diligence/well", { scroll: false });
   }, [router]);
 
   const handleDownload = useCallback(async (type: keyof typeof DOWNLOAD_PATHS, internalLeaseSettings?:unknown) => {
@@ -570,14 +570,14 @@ export default function TrrcDueDiligencePage() {
             color: COLORS.text,
             letterSpacing: "-0.02em",
           }}>
-            Due Diligence
+            Well Records
           </h1>
           <p style={{ margin: 0, fontSize: "0.9rem", color: COLORS.textMuted }}>
             Query every available Texas Railroad Commission public record for any well, lease, or operator.
           </p>
           {phase === "form" && (
-            <Link href="/trrc-due-diligence/portfolio" style={{ fontSize: "0.8rem", color: COLORS.accent, textDecoration: "none", display: "inline-block", marginTop: "0.5rem" }}>
-              Have a list of wells? Run them as a portfolio →
+            <Link href="/trrc-due-diligence" style={{ fontSize: "0.8rem", color: COLORS.accent, textDecoration: "none", display: "inline-block", marginTop: "0.5rem" }}>
+              ← Due Diligence Engine
             </Link>
           )}
         </div>

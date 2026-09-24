@@ -66,10 +66,10 @@ export default function DashboardPage() {
                 </svg>
               </div>
               <div style={{ fontSize: "1rem", fontWeight: 600, color: "#e2e8f0", marginBottom: "0.35rem" }}>
-                TRRC Due Diligence
+                Due Diligence Engine
               </div>
               <div style={{ fontSize: "0.82rem", color: "#8892a4", lineHeight: 1.5 }}>
-                Query every Texas Railroad Commission public record for any well, lease, or operator.
+                Enter a deal's API numbers: lease, ownership, chain of title, value and a recommended offer.
               </div>
               <div style={{
                 marginTop: "1rem",
