@@ -21,6 +21,10 @@ export function explainFieldGaps(fields:Record<string,DraftField>,input:Gold2Inp
   }
   if(domain==="economics"){
    if(["evidence_adjusted_value","risk_adjusted_value","measured_exposure"].includes(name))dependency(key,"reviewed_documents_insufficient","A supported reviewed joint alternative and computable baseline value are required; overlapping scenarios and unknown liabilities are not summed or assumed zero.");
+   // A lease screening scenario may be present while position economics are
+   // not: say which is missing, rather than denying that any assumptions
+   // were supplied directly beneath the ceilings they produced.
+   else if(input.economics===null&&(input as {internalLeaseSettings?:unknown}).internalLeaseSettings!=null)dependency(key,"position_not_supplied","Position values need a reviewed ownership position (the interest being bought) and a position-level assumption set. The lease screen in this section is an 8/8ths operated scenario under stated assumptions, not the offered interest.");
    else if(input.economics===null)dependency(key,"buyer_criterion_not_supplied","No explicit economic assumption set was supplied; prices, deductions, taxes and buyer criteria are not inferred.");
    else if(["risk_haircut","differentials"].includes(name))dependency(key,"engine_not_connected","Explicit differential/risk-haircut assumptions are not yet mapped by the report economics contract.");
    else if(input.position===null)dependency(key,"position_not_supplied","A reviewed ownership position is required to calculate position economics.");
