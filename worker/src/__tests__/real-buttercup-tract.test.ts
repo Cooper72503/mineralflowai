@@ -55,4 +55,36 @@ describe("real Buttercup tract", () => {
     expect(indexMatchesTract("SEC 37 BLK 39 T4S T&P RY CO SURV", tract)).toBe(true);
   });
 
+
+  // From the 2026-09-24 resumed run: SEC 37 BLK 39 T4S returned 42 index rows.
+  // The clerk search is keyword-based, so it also returns the transposed tract
+  // (Sec 39 Blk 37). Every row below is verbatim from that result set.
+  it("accepts the labeled clerk format and section lists that cover the tract", () => {
+    for (const legal of [
+      "Survey-  Name: T&P RR CO  Survey Block: 39 Township: T4S Section: 37",
+      "Survey- Name: T&P RY CO Survey: 236 Survey Block: 39 Township: T4S Section: 37,38",
+      "Survey - Name: T&P RY CO Block: 39 Section: 36,37 Township: T4S",
+      "SEC 7,17,19,37,47 BLK 39 T4S T&P RY CO S",
+      "SEC 37,38,48 BLK 39 T4S T&P RR CO SURV",
+      "SEC 37-38 BLK 39 T4S T&P RY CO SURV",
+      "SEC 37 BLK 39 T4S T & P RR CO SUR",
+    ]) expect(indexMatchesTract(legal, tract), legal).toBe(true);
+  });
+
+  it("rejects the transposed tract, the wrong township and multi-block descriptions", () => {
+    for (const legal of [
+      "SEC 39 BLK 37 T4S T&P RR CO SURV",
+      "Survey-  Name: T&P RR CO  Survey Block: 37 Township: T4S Section: 39",
+      "SEC 34,39 BLK 37 T4S",
+      "Survey-  Name: T&P RR CO Survey Block: 37 Township: T4S Section: 13,14,22-24,26-28,33-35,38,39",
+      "SEC 37 BLK 39 T3S T&P RY CO SURV",
+      "SEC 46 BLK 37,39 T4S T&P RR CO SURV",
+    ]) expect(indexMatchesTract(legal, tract), legal).toBe(false);
+  });
+
+  it("expands section ranges but does not let an implausible span match everything", () => {
+    expect(indexMatchesTract("SEC 35-38 BLK 39 T4S", tract)).toBe(true);
+    expect(indexMatchesTract("SEC 38-40 BLK 39 T4S", tract)).toBe(false);
+    expect(indexMatchesTract("SEC 1-400 BLK 39 T4S", tract)).toBe(false);
+  });
 });

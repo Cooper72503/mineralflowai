@@ -17,7 +17,9 @@ function makeSupabase() {
     const q: Record<string, unknown> = {
       select: () => q, limit: () => q, order: () => q, single: () => q, maybeSingle: () => q,
       eq: (k: string, v: unknown) => { filters.push([k, v]); return q; },
-      in: () => q, neq: () => q,
+      in: () => q, neq: () => q, range: () => q,
+      is: (k: string, v: unknown) => { filters.push([k, v === null ? undefined : v]); return q; },
+      delete: () => { mode = "delete"; return q; },
       insert: (v: Row | Row[]) => { mode = "insert"; payload = v; return q; },
       update: (v: Row) => { mode = "update"; payload = v; return q; },
       upsert: (v: Row) => { mode = "upsert"; payload = v; return q; },
@@ -28,7 +30,7 @@ function makeSupabase() {
           store[table].push(...rows);
           return Promise.resolve(res({ data: rows, error: null }));
         }
-        if (mode === "update") return Promise.resolve(res({ data: [], error: null }));
+        if (mode === "update" || mode === "delete") return Promise.resolve(res({ data: [], error: null }));
         return Promise.resolve(res({ data: store[table].filter(r => filters.every(([k, v]) => r[k] === v)), error: null }));
       },
     };

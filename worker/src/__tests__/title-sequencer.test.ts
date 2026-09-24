@@ -23,11 +23,12 @@ function makeSupabase(seed: Store) {
     if (op === "eq") return row[k] === v;
     if (op === "neq") return row[k] !== v;
     if (op === "in") return (v as unknown[]).includes(row[k]);
+    if (op === "is") return v === null ? row[k] == null : row[k] === v;
     return true;
   });
   const builder = (table: string) => {
     const filters: Array<[string, string, unknown]> = [];
-    let op: "select" | "insert" | "update" | "upsert" = "select";
+    let op: "select" | "insert" | "update" | "upsert" | "delete" = "select";
     let payload: Record<string, unknown> | Record<string, unknown>[] | null = null;
     let upsertConflict: string[] = [];
     let ignoreDuplicates = false;
@@ -48,6 +49,12 @@ function makeSupabase(seed: Store) {
         }
         return { data: out, error: null };
       }
+      if (op === "delete") {
+        const keep = rows().filter(r => !matches(r, filters));
+        const removed = rows().length - keep.length;
+        store[table] = keep;
+        return { data: [], error: null, count: removed };
+      }
       if (op === "update") {
         const hit = rows().filter(r => matches(r, filters));
         for (const r of hit) Object.assign(r, payload);
@@ -63,7 +70,9 @@ function makeSupabase(seed: Store) {
       eq: (k: string, v: unknown) => { filters.push(["eq", k, v]); return chain; },
       neq: (k: string, v: unknown) => { filters.push(["neq", k, v]); return chain; },
       in: (k: string, v: unknown[]) => { filters.push(["in", k, v]); return chain; },
-      order: () => chain, limit: () => chain,
+      is: (k: string, v: unknown) => { filters.push(["is", k, v]); return chain; },
+      delete: () => { op = "delete"; return chain; },
+      order: () => chain, limit: () => chain, range: () => chain,
       single: async () => { const r = exec(); return { data: (r.data as unknown[])[0] ?? null, error: null }; },
       maybeSingle: async () => { const r = exec(); return { data: (r.data as unknown[])[0] ?? null, error: null }; },
       then: (resolve: (v: unknown) => void, reject?: (e: unknown) => void) => Promise.resolve(exec()).then(resolve, reject),

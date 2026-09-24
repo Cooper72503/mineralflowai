@@ -284,9 +284,11 @@ function normalizeDocType(docType: string): string {
   if (/mineral deed/.test(t)) return "mineral_deed";
   if (/royalty/.test(t)) return "royalty_deed";
   if (/deed of trust/.test(t)) return "deed_of_trust";
-  if (/release/.test(t)) return "release";
+  // Clerks abbreviate: Midland indexes a lease release as "REL OIL&GAS LS".
+  // Mirrored by frontend/lib/trrc/title/clerk-types.ts; change both together.
+  if (/release|\brel\b/.test(t)) return "release";
   if (/assign/.test(t)) return "assignment";
-  if (/lease/.test(t)) return "lease";
+  if (/lease|\bo\s*&\s*g\s+ls\b|\bls\b/.test(t)) return "lease";
   if (/heirship/.test(t)) return "affidavit_of_heirship";
   if (/probate|will|letters/.test(t)) return "probate";
   if (/lien|judgment/.test(t)) return "lien";
@@ -306,11 +308,81 @@ function effectForType(type: string): string {
   }
 }
 
-function splitIndexNames(raw: string): string[] {
+// A trailing entity designator. "&"/"and" inside such a name is part of the
+// name, not a list: TEXAS & PACIFIC RAILWAY COMPANY is the sovereign-grant
+// root of title for every T&P survey section, and splitting it cut the chain
+// at its origin. The same split produced "P PIPE" (from T&P PIPE AND SUPPLY
+// INC) and "BOB" (from BOB & TONI MIDKIFF LTD), both of which were then
+// spent as predecessor searches.
+const ENTITY_SUFFIX = /\b(?:INC|INCORPORATED|LLC|L\.?L\.?C|LTD|LIMITED|LP|L\.?P|LLP|CO|COMPANY|CORP|CORPORATION|ASN|ASSN|ASSOCIATION|BANK|TRUST|PARTNERSHIP|PARTNERS?|FACTORY|ESTATE|FOUNDATION|FUND|UNIT)\.?$/i;
+
+export function splitIndexNames(raw: string): string[] {
   const s = raw.trim();
   if (!s) return [];
   if (/\bet ux\b|\bet vir\b|\bet al\b/i.test(s)) return [s.replace(/\bet (ux|vir|al)\b/gi, "").trim()];
-  return s.split(/\s*(?:&|;|\band\b)\s*/i).map(x => x.trim()).filter(x => x.length >= 3);
+  const names: string[] = [];
+  // ";" always separates parties; "&"/"and" only sometimes does.
+  for (const part of s.split(/\s*;\s*/)) {
+    const pieces = part.split(/\s*(?:&|\band\b)\s*/i).map(x => x.trim());
+    const joinsOneEntity = ENTITY_SUFFIX.test(part) && pieces.slice(0, -1).every(p => !ENTITY_SUFFIX.test(p));
+    // "K & S LAND CO INC", "T&P ..." — a one- or two-letter side is an initial, not a party.
+    const initials = pieces.some(p => p.replace(/[^A-Za-z]/g, "").length <= 2);
+    if (pieces.length === 1 || joinsOneEntity || initials) names.push(part.trim());
+    else names.push(...pieces);
+  }
+  return names.filter(x => x.length >= 3);
+}
+
+/**
+ * Recompute type and parties for index rows stored under an older mapping
+ * or splitter, from the clerk's verbatim doc type and grantor/grantee kept in
+ * extraction_json.index.
+ * Rows whose parties already match are untouched; read-document instruments
+ * are never touched. Runs at the start of county search, so resuming a job
+ * repairs it.
+ */
+async function pagedRows(page: (from: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>, label: string): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await checkedQuery(page(from), label);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    out.push(...rows);
+    if (rows.length < 1000) return out;
+  }
+}
+
+export async function repairIndexParties(supabase: SupabaseClient, jobId: string): Promise<number> {
+  // Paged: PostgREST returns 1,000 rows per request and truncates silently.
+  // An unpaged read here made rows past the cap look partyless, so their
+  // correct parties were deleted and rewritten.
+  const rows = await pagedRows(page => supabase.from("title_instruments").select("id, instrument_type, extraction_json").eq("job_id", jobId).is("document_id", null).order("id").range(page, page + 999), "title_instruments");
+  const stored = await pagedRows(page => supabase.from("title_instrument_parties").select("instrument_id, party_name, role").eq("job_id", jobId).order("id").range(page, page + 999), "title_instrument_parties");
+  const have = new Map<string, string[]>();
+  for (const p of stored as Array<{ instrument_id: string; party_name: string; role: string }>) {
+    have.set(p.instrument_id, [...(have.get(p.instrument_id) ?? []), `${p.role}:${p.party_name}`]);
+  }
+  let repaired = 0;
+  for (const r of rows as Array<{ id: string; instrument_type: string; extraction_json: { index?: { grantor?: string; grantee?: string; doc_type?: string } } | null }>) {
+    const index = r.extraction_json?.index;
+    if (!index) continue;
+    // Re-type rows stored under an older clerk-type mapping ("REL OIL&GAS LS" was "other").
+    const type = normalizeDocType(index.doc_type ?? "");
+    if (type !== r.instrument_type) {
+      await checkedQuery(supabase.from("title_instruments").update({ instrument_type: type }).eq("id", r.id), "title_instruments");
+      await checkedQuery(supabase.from("title_claims").update({ effect: effectForType(type) }).eq("instrument_id", r.id).eq("human_review_status", "unreviewed"), "title_claims");
+      repaired++;
+    }
+    const want = [
+      ...splitIndexNames(index.grantor ?? "").map(n => ({ party_name: n, party_name_verbatim: index.grantor ?? null, role: "grantor" })),
+      ...splitIndexNames(index.grantee ?? "").map(n => ({ party_name: n, party_name_verbatim: index.grantee ?? null, role: "grantee" })),
+    ];
+    const current = (have.get(r.id) ?? []).sort().join("|");
+    if (want.map(p => `${p.role}:${p.party_name}`).sort().join("|") === current) continue;
+    await checkedQuery(supabase.from("title_instrument_parties").delete().eq("instrument_id", r.id), "title_instrument_parties");
+    if (want.length) await checkedQuery(supabase.from("title_instrument_parties").insert(want.map(p => ({ job_id: jobId, run_id: null, instrument_id: r.id, capacity: "unknown", ...p }))), "title_instrument_parties");
+    repaired++;
+  }
+  return repaired;
 }
 
 export async function storeIndexEntries(supabase: SupabaseClient, jobId: string, county: string, sourceUrl: string, entries: IndexEntry[]): Promise<{ inserted: number; grantorNames: string[] }> {
@@ -346,6 +418,7 @@ export async function storeIndexEntries(supabase: SupabaseClient, jobId: string,
 }
 
 export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[]): Promise<void> {
+  await repairIndexParties(supabase, jobId);
   const { data: tractRows } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status").eq("job_id", jobId).eq("match_status", "confirmed"), "title search tracts");
   const tracts = (tractRows ?? []) as SearchTract[];
   const tractCountiesPlanned = new Set<string>();
