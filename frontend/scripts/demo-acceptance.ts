@@ -40,15 +40,21 @@ async function main() {
 
   // 2 Retrieval
   const ids = members.flatMap(m => m.runId ? [m.runId] : []);
+  const ambiguousApis = new Set<string>();
   const { data: runs } = await db.from("trrc_due_diligence_runs").select("id,status,resolved_primary_api,title_research_job_id,result_summary").in("id", ids);
   check("retrieval", (runs ?? []).length === ids.length && (runs ?? []).every(r => r.status === "complete"), `${(runs ?? []).filter(r => r.status === "complete").length} of ${ids.length} runs complete`);
   for (const r of runs ?? []) {
-    const { data: att } = await db.from("trrc_source_attempts").select("source_name,status,attempted_at,error_message").eq("run_id", r.id).order("attempted_at");
-    const latest = new Map<string, { status: string; error_message: string | null }>();
+    const { data: att } = await db.from("trrc_source_attempts").select("source_name,status,attempted_at,error_message,result_data_json").eq("run_id", r.id).order("attempted_at");
+    const latest = new Map<string, { status: string; error_message: string | null; result_data_json?: Record<string, unknown> | null }>();
     for (const a of att ?? []) latest.set(a.source_name, a);
     const failed = [...latest].filter(([, a]) => a.status !== "success" && a.status !== "not_applicable").map(([n, a]) => `${n} (${(a.error_message ?? a.status).slice(0, 80)})`);
     const missing = REQUIRED_SOURCES.filter(n => latest.get(n)?.status !== "success");
-    check("retrieval", missing.length === 0, `${r.resolved_primary_api}: ${latest.size} sources, ${failed.length ? `failed: ${failed.join("; ")}` : "none failed"}${missing.length ? `; required not retrieved: ${missing.join(", ")}` : ""}`);
+    // TRRC carries some wellbores on several leases, none current; the run
+    // then withholds lease-level queries rather than pick one. In a
+    // regression run that is the expected, stated outcome.
+    const ambiguous = regression && /Multiple lease\/district associations/i.test(String(latest.get("search_by_api")?.result_data_json?.["message"] ?? ""));
+    if (ambiguous) ambiguousApis.add(String(r.resolved_primary_api ?? ""));
+    check("retrieval", missing.length === 0 || ambiguous, `${r.resolved_primary_api}: ${latest.size} sources, ${failed.length ? `failed: ${failed.join("; ")}` : "none failed"}${missing.length ? `; required not retrieved: ${missing.join(", ")}` : ""}`);
   }
 
   // 3 Title research
@@ -65,7 +71,15 @@ async function main() {
   const deal = load.deal;
   const again = await loadDeal(db, userId, packageId);
   const strip = (d: typeof deal) => JSON.stringify({ ...d, generatedAt: null, sources: d.sources.map(s => ({ ...s, retrievedAt: s.label === "Price deck" ? null : s.retrievedAt })) });
-  check("determinism", again.ready && strip(again.deal) === strip(deal), "two builds from the same evidence are identical (apart from build time)");
+  const firstDiff = (a: unknown, b: unknown, path = ""): string | null => {
+    if (JSON.stringify(a) === JSON.stringify(b)) return null;
+    if (a && b && typeof a === "object" && typeof b === "object") {
+      for (const k of new Set([...Object.keys(a as object), ...Object.keys(b as object)])) { const d = firstDiff((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${path}.${k}`); if (d) return d; }
+    }
+    return `${path}: ${JSON.stringify(a)?.slice(0, 100)} vs ${JSON.stringify(b)?.slice(0, 100)}`;
+  };
+  const same = again.ready && strip(again.deal) === strip(deal);
+  check("determinism", same, same ? "two builds from the same evidence are identical (apart from build time)" : `builds differ at ${again.ready ? firstDiff(JSON.parse(strip(deal)), JSON.parse(strip(again.deal))) : "second build not ready"}`);
   check("prices", deal.deck.source === "eia_live", `${deal.deckLabel}`);
 
   for (const [lease, n] of expectedLeases) {
@@ -87,13 +101,27 @@ async function main() {
     check("citations", cited.length >= 3 && cited.every(id => deal.sources.some(s => s.id === id)) && (l.title.status !== "published" || l.sources.title.length > 0), `${tag}: cites [${cited.join(", ")}]`);
   }
   check("decision", !!deal.decision.verdict, `deal: ${deal.decision.verdict} — ${deal.decision.reasons.join(" ")}`);
+  if (ambiguousApis.size) {
+    const inputsFor = (api: string) => members.filter(m => m.input.replace(/\D/g, "").startsWith(api.replace(/\D/g, "").slice(0, 10)));
+    const unlisted = [...ambiguousApis].filter(api => !inputsFor(api).every(m => deal.excluded.some(x => x.input === m.input && x.reason)));
+    check("grouping", unlisted.length === 0, unlisted.length ? `ambiguous APIs not listed as excluded: ${unlisted.join(", ")}` : `${ambiguousApis.size} API(s) with ambiguous lease associations are excluded from valuation with a stated reason`);
+  }
 
   // 9 Report
   const pdf = await renderDealPdf(deal);
-  const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default as (b: Buffer) => Promise<{ numpages: number; text: string }>;
-  const parsed = await pdfParse(pdf);
+  const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default as (b: Buffer, o?: Record<string, unknown>) => Promise<{ numpages: number; text: string }>;
+  const pageText: string[] = [];
+  const parsed = await pdfParse(pdf, { pagerender: async (page: { getTextContent: () => Promise<{ items: { str: string }[] }> }) => {
+    const text = (await page.getTextContent()).items.map(i => i.str).join(" ");
+    pageText.push(text);
+    return text;
+  } });
+  // A page holding only the running header and footer is a layout defect.
+  const bare = pageText.map((t, i) => [i + 1, t.replace(/MineralFlow AI — Acquisition Report|Package \S+ · \S+|CONFIDENTIAL — Public-record screening, not a title opinion, reserve report or appraisal|\d+ \/ \d+/g, "").trim().length] as const).filter(([, n]) => n < 40);
+  check("report", bare.length === 0, bare.length ? `pages with no content: ${bare.map(([p]) => p).join(", ")}` : "no blank pages");
   const needed = ["1. DECISION", "2. LEASE AND WELLS", "3. PRODUCTION AND FORECAST", "4. OWNERSHIP", "5. CHAIN OF TITLE", "6. REGULATORY", "7. EVIDENCE", ...deal.leases.map(l => l.leaseName ?? l.leaseNumber)];
-  const absent = needed.filter(s => !parsed.text.includes(s));
+  const flat = (t: string) => t.replace(/\s+/g, "");
+  const absent = needed.filter(s => !flat(parsed.text).includes(flat(s)));
   const junk = ["undefined", "NaN", "[object", "Infinity"].filter(s => parsed.text.includes(s));
   if (/[^.]\.\.(?!\.)/.test(parsed.text)) junk.push("double period");
   check("report", absent.length === 0, absent.length ? `missing: ${absent.join(", ")}` : `${parsed.numpages} pages, all seven sections and every lease present`);

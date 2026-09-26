@@ -46,8 +46,9 @@ function Tr({ i, cols }: { i: number; cols: [string, number, ("left" | "right")?
 }
 const Note = (t: string) => e(Text, { style: S.noteText }, t);
 const Body = (t: string) => e(Text, { style: S.bodyText }, t);
-const Sub = (t: string) => e(Text, { style: S.subTitle }, t);
-const Section = (t: string) => e(Text, { style: [S.sectionTitle, { marginTop: 0 }] }, t);
+// Headings carry minPresenceAhead so one never sits alone at the foot of a page.
+const Sub = (t: string) => e(Text, { style: S.subTitle, minPresenceAhead: 120 }, t);
+const Section = (t: string) => e(Text, { style: [S.sectionTitle, { marginTop: 0 }], minPresenceAhead: 160 }, t);
 const Flag = (t: string, tone: "red" | "yellow" | "gray", key?: string | number) =>
   e(View, { key, style: [S.flagBox, { backgroundColor: tone === "red" ? C.redBg : tone === "yellow" ? C.yellowBg : C.offWhite }], wrap: false },
     e(Text, { style: [S.flagItem, { color: tone === "red" ? C.red : tone === "yellow" ? C.yellow : C.dark }] }, t));
@@ -108,7 +109,7 @@ function LeaseSection({ deal }: { deal: Deal }) {
       kv("Lease type", `${l.leaseType === "O" ? "Oil" : "Gas"} lease, district ${l.district}${refs(l.sources.wells)}`),
       kv("Field", l.field), kv("County", l.county), kv("Operator", `${l.operator ?? "—"}${l.operatorNo ? ` (P-5 ${l.operatorNo})` : ""}`),
       kv("Submitted APIs", `${l.apis.length}${refs(l.sources.wells)}`),
-      kv("Producing wells", `${l.producingWells}. ${l.producingWellsBasis}${refs(l.sources.wells)}`),
+      kv("Producing wells", `${l.producingWellsBasis}${refs(l.sources.wells)}`),
       kv("Basin classification", l.basin ? `${l.basin.name}: operating cost $${l.basin.loeRange[0]}–$${l.basin.loeRange[1]}/BOE, midpoint $${l.basin.loeMidpoint.toFixed(2)} used` : "Unclassified; the generic operating cost is used"),
       e(Th, { cols: [["API", 90], ["Well", 50], ["Proration status", 150], ["Forms", 70], ["Submitted", 60]] }),
       ...l.wells.map((w, j) => e(Tr, { key: j, i: j, cols: [[`${w.api10.slice(0, 2)}-${w.api10.slice(2, 5)}-${w.api10.slice(5)}`, 90], [w.wellNo ?? "—", 50], [w.onProration ? (w.status ?? "—") : "Not on the oil proration schedule", 150, "left", w.status && /SHUT/i.test(w.status) ? C.yellow : undefined], [w.formsLacking ? "Lacking" : w.onProration ? "Complete" : "—", 70, "left", w.formsLacking ? C.red : undefined], [w.inPackage ? "Yes" : "No", 60]] })),
@@ -116,15 +117,20 @@ function LeaseSection({ deal }: { deal: Deal }) {
 }
 
 // ─── 3. Production and forecast ──────────────────────────────────────────────
-function ProductionSection({ deal }: { deal: Deal }) {
-  return e(View, {}, Section("3. PRODUCTION AND FORECAST"),
-    ...deal.leases.map((l, i) => {
+function ProductionSection({ deal, only }: { deal: Deal; only?: number }) {
+  const leases = only === undefined ? deal.leases : [deal.leases[only]];
+  const heading = only === undefined || only === 0;
+  // The heading sits inside the lease block: react-pdf moves a block holding
+  // charts as one piece, which left a heading outside it alone on a page.
+  return e(View, {},
+    ...leases.map((l, i) => {
       const recent = l.production.slice(-36);
       const v = l.valuation, f = l.fit, p = refs(l.sources.production);
       const years = v.baseForecast ? [0, 1, 2, 3, 4].map(y => ({ y: y + 1, oil: sum(v.baseForecast!.oilBbl.slice(y * 12, y * 12 + 12)), gas: sum(v.baseForecast!.gasMcf.slice(y * 12, y * 12 + 12)) })) : [];
       const gasOf = (r: typeof l.production[number]) => (r.gas_mcf ?? 0) + (r.casinghead_gas_mcf ?? 0);
       const chartRows = recent.map(r => ({ ...r, gas_mcf: r.gas_mcf === null && r.casinghead_gas_mcf === null ? null : gasOf(r) }));
-      return e(View, { key: i, style: { marginBottom: 10 } },
+      return e(View, { key: i },
+        heading && i === 0 ? Section("3. PRODUCTION AND FORECAST") : null,
         Sub(leaseTitle(l)),
         e(View, { style: { flexDirection: "row", marginBottom: 6 } },
           e(ProductionChart, { months: chartRows, metricKey: "oil_bbl", title: "Oil, last 36 months", unit: "bbl/month", color: C.navy }),
@@ -147,18 +153,22 @@ function ProductionSection({ deal }: { deal: Deal }) {
 }
 
 // ─── 4. Ownership ────────────────────────────────────────────────────────────
-function OwnershipBlock({ deal }: { deal: Deal }) {
-  return e(View, {}, Section("4. OWNERSHIP"),
-    ...deal.leases.map((l, i) => e(View, { key: i, style: { marginBottom: 10 } },
+function OwnershipBlock({ deal, only }: { deal: Deal; only?: number }) {
+  const leases = only === undefined ? deal.leases : [deal.leases[only]];
+  const heading = only === undefined || only === 0;
+  return e(View, {}, heading ? Section("4. OWNERSHIP") : null,
+    ...leases.map((l, i) => e(View, { key: i, style: { marginBottom: 10 } },
       Sub(`${leaseTitle(l)}${refs([...l.sources.roll, ...l.sources.production, deal.sources.find(s => s.label === "Price deck")!.id])}`),
-      e(OwnershipSection, { ownership: l.ownership, valuation: l.valuation, trrcLeaseName: l.leaseName, repeatHeader: i === deal.leases.length - 1 }))));
+      e(OwnershipSection, { ownership: l.ownership, valuation: l.valuation, trrcLeaseName: l.leaseName, repeatHeader: true }))));
 }
 
 // ─── 5. Chain of title ───────────────────────────────────────────────────────
-function TitleBlock({ deal }: { deal: Deal }) {
-  return e(View, {}, Section("5. CHAIN OF TITLE"),
-    Note("From county clerk records at the courthouse. Parties are as indexed by the clerk. \"Read\" instruments were extracted from the recorded image; \"Index\" rows are clerk index entries whose images were not read. This is evidence of the record, not a title opinion; ownership fractions are never inferred from it."),
-    ...deal.leases.map((l, i) => {
+function TitleBlock({ deal, only }: { deal: Deal; only?: number }) {
+  const leases = only === undefined ? deal.leases : [deal.leases[only]];
+  const heading = only === undefined || only === 0;
+  return e(View, {}, heading ? Section("5. CHAIN OF TITLE") : null,
+    heading ? Note("From county clerk records at the courthouse. Parties are as indexed by the clerk. \"Read\" instruments were extracted from the recorded image; \"Index\" rows are clerk index entries whose images were not read. This is evidence of the record, not a title opinion; ownership fractions are never inferred from it.") : null,
+    ...leases.map((l, i) => {
       const t = l.title.analysis;
       if (!t) return e(View, { key: i, style: { marginBottom: 8 } }, Sub(leaseTitle(l)), Flag(`Unavailable: ${l.title.reason}`, "yellow"));
       const clerk = t.searchCoverage.filter(c => c.provider.startsWith("county:"));
@@ -219,14 +229,19 @@ function EvidenceBlock({ deal }: { deal: Deal }) {
     ].map((t, i) => e(Text, { key: i, style: S.flagItem }, `• ${t}`)));
 }
 
-const SECTIONS = [DecisionSection, LeaseSection, ProductionSection, OwnershipBlock, TitleBlock, RegulatoryBlock, EvidenceBlock];
+const SECTIONS: { Sec: (p: { deal: Deal; only?: number }) => React.ReactElement; perLease: boolean }[] = [
+  { Sec: DecisionSection, perLease: false }, { Sec: LeaseSection, perLease: false }, { Sec: ProductionSection, perLease: true },
+  { Sec: OwnershipBlock, perLease: true }, { Sec: TitleBlock, perLease: true }, { Sec: RegulatoryBlock, perLease: false }, { Sec: EvidenceBlock, perLease: false },
+];
 
-// Each section is its own page run. A page break requested from inside a
-// nested view sent react-pdf into an unbounded layout loop (heap exhaustion
-// on the 25-instrument Buttercup chain), so sections never request breaks.
+// Each section is its own page run, and in the per-lease sections each lease
+// starts one: a page break requested from inside a nested view sent react-pdf
+// into an unbounded layout loop, and a lease block that would not fit left
+// its heading stranded on an otherwise empty page.
 export async function renderDealPdf(deal: Deal): Promise<Buffer> {
-  const sections = SECTIONS;
-  const doc = e(Document, { title: `MineralFlow Acquisition Report ${deal.packageId.slice(0, 8)}`, author: "MineralFlow AI" },
-    ...sections.map((Sec, i) => e(Chrome, { key: i, deal }, e(Sec, { deal }))));
+  const runs = SECTIONS.flatMap(({ Sec, perLease }, i) => perLease && deal.leases.length
+    ? deal.leases.map((_, li) => e(Chrome, { key: `${i}-${li}`, deal }, e(Sec, { deal, only: li })))
+    : [e(Chrome, { key: `${i}`, deal }, e(Sec, { deal }))]);
+  const doc = e(Document, { title: `MineralFlow Acquisition Report ${deal.packageId.slice(0, 8)}`, author: "MineralFlow AI" }, ...runs);
   return renderToBuffer(doc as never);
 }

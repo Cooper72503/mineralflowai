@@ -2052,7 +2052,11 @@ export function OwnershipSection({ ownership, valuation, trrcLeaseName, repeatHe
     React.createElement(View, { style: [S.flagBox, { backgroundColor: C.yellowBg }] }, React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, ownership.reason ?? "No owners were matched.")),
     ...ownership.rejectedTracts.map((t, i) => React.createElement(Text, { key: `rj${i}`, style: S.noteText }, `Not attached: appraisal tract ${t.cadLeaseNumber ?? "-"} (${t.owners} owners). ${t.reason}`)));
 
-  const ownerIndex = new Map(ownership.owners.map((o, i) => [o, i]));
+  // Match by appraisal tract and roll row, not object identity: a report
+  // rebuilt from stored JSON has separate copies of the same owner.
+  const ownerKey = (o: { cadLeaseNumber: string | null; sourceRow: number }) => `${o.cadLeaseNumber ?? ""}|${o.sourceRow}`;
+  const ownerIndexByKey = new Map(ownership.owners.map((o, i) => [ownerKey(o), i]));
+  const ownerIndex = { get: (o: (typeof ownership.owners)[number]) => ownerIndexByKey.get(ownerKey(o)) };
   return React.createElement(View, {},
     React.createElement(Text, { style: S.noteText }, `Owners of record on RRC lease ${ownership.rrcLeaseNumber}, as carried by ${src}. Decimals are revenue shares of each appraisal tract, taken by the appraisal district from operator division orders as of January 1: evidence of current ownership, not a title opinion. ${ownership.nameVerified ? `Every attached tract's lease name matches the TRRC lease name ${trrcLeaseName ?? ""}.` : "The TRRC lease name was not available, so tract names could not be verified against it."}${ownership.productionShareBasis ? ` ${ownership.productionShareBasis}` : ""}`),
     ...ownership.rejectedTracts.map((t, i) => React.createElement(View, { key: `rj${i}`, style: [S.flagBox, { backgroundColor: C.yellowBg }] }, React.createElement(Text, { style: [S.flagItem, { color: C.yellow }] }, `Not attached: appraisal tract ${t.cadLeaseNumber ?? "-"} (${t.owners} owners). ${t.reason}`))),

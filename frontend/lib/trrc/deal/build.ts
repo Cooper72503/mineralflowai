@@ -192,7 +192,9 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     const critical = new Map<string, number>(), important = new Map<string, number>();
     for (const run of memberRuns) {
       const a = attemptsById.get(run.id) ?? [];
-      const { data: rows } = await db.from("trrc_production_monthly").select("*").eq("run_id", run.id).order("production_month", { ascending: false }).limit(120);
+      const { data: rows, error: prodError } = await db.from("trrc_production_monthly").select("*").eq("run_id", run.id).order("production_month", { ascending: false }).limit(120);
+      // A failed read must not silently drop a well's regulatory flags.
+      if (prodError) throw Error(`Production for run ${run.id.slice(0, 8)} could not be read; report withheld.`);
       const flags = generateFlags(a, computeProductionAnalytics(currentProduction((rows ?? []) as unknown as TrrcDDProductionRow[], a)), run);
       for (const f of flags.critical) critical.set(f, (critical.get(f) ?? 0) + 1);
       for (const f of flags.important) important.set(f, (important.get(f) ?? 0) + 1);
