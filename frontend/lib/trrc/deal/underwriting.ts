@@ -91,7 +91,8 @@ export function decideLease(x: LeaseSignals): LeaseDecision {
   if (x.monthsOfHistory < 12) review.push(`Only ${x.monthsOfHistory} months of reported production.`);
   for (const f of x.regulatoryCritical) review.push(`Regulatory: ${f}`);
 
-  if (x.title.status !== "published") conditions.push(`Title: ${x.title.reason ?? "no published courthouse chain"}. Close subject to title examination.`);
+  const titleReason = (x.title.reason ?? "no published courthouse chain").replace(/[.\s]+$/, "");
+  if (x.title.status !== "published") conditions.push(`Title: ${titleReason}. Close subject to title examination.`);
   else if (x.title.readInstruments === 0) conditions.push(`Title: ${x.title.indexedInstruments} recordings are from the clerk index only; no instrument text was read. Close subject to title examination.`);
   else conditions.push(`Title: ${x.title.readInstruments} of ${x.title.indexedInstruments} recordings read. The chain is evidence, not a title opinion; close subject to title examination.`);
   conditions.push("Owner decimals are the appraisal district's, taken from operator division orders; confirm against the seller's division order before closing.");
@@ -109,14 +110,16 @@ export function decideLease(x: LeaseSignals): LeaseDecision {
   if (x.trailingUnreportedMonths >= 3) risks.push({ severity: 2, text: `${x.trailingUnreportedMonths} recent months have no reported production.` });
   for (const f of x.regulatoryCritical) risks.push({ severity: 3, text: f });
   for (const f of x.regulatoryImportant) risks.push({ severity: 1, text: f });
-  if (x.title.status !== "published" || x.title.readInstruments === 0) risks.push({ severity: 2, text: "Title rests on the county index; no instrument text was read." });
+  if (x.title.status !== "published") risks.push({ severity: 2, text: `No courthouse chain of title: ${titleReason}.` });
+  else if (x.title.readInstruments === 0) risks.push({ severity: 2, text: "Title rests on the county index; no instrument text was read." });
   if (x.ownership.rejectedTracts.length) risks.push({ severity: 1, text: `${x.ownership.rejectedTracts.length} appraisal tract(s) under the same RRC number belong to another district's lease and were excluded.` });
   if (x.excludedMembers) risks.push({ severity: 2, text: `${x.excludedMembers} submitted API(s) on this lease could not be reconciled to its production.` });
   risks.sort((a, b) => b.severity - a.severity);
 
   const verdict: Verdict = pass.length ? "PASS" : review.length ? "REVIEW" : "BUY";
   const reasons = verdict === "PASS" ? pass : verdict === "REVIEW" ? review
-    : [`Valued from ${x.monthsOfHistory} months of reported lease production, a decline fit with R-squared ${x.fitRSquared!.toFixed(2)}, and ${x.ownership.owners.length} owners of record whose decimals reconcile.`];
+    : [`Valued from ${x.monthsOfHistory} months of reported lease production, a decline fit with R-squared ${x.fitRSquared!.toFixed(2)}, and ${x.ownership.owners.length.toLocaleString("en-US")} owners of record whose decimals reconcile.`,
+       x.title.status === "published" ? `Courthouse chain: ${x.title.readInstruments} of ${x.title.indexedInstruments} recordings read; close subject to title examination.` : `No courthouse chain of title (${titleReason}); close subject to title examination.`];
   return { verdict, reasons, conditions, risks: risks.slice(0, 6) };
 }
 

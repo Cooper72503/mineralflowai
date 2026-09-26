@@ -51,9 +51,15 @@ describe("decideLease", () => {
     expect(decideLease(signals({ fitRSquared: 0.4 })).verdict).toBe("REVIEW");
     expect(decideLease(signals({ regulatoryCritical: ["Plugging deadline passed."] })).verdict).toBe("REVIEW");
   });
-  it("ranks risks most severe first and keeps title rested on the index as a risk", () => {
+  it("ranks risks most severe first and says plainly when no chain of title exists", () => {
     const d = decideLease(signals({ valuation: valued({ economicLimitMonths: { stress: 20, base: 30, upside: 40 } }), title: { status: "not_found", readInstruments: 0, indexedInstruments: 0, reason: "Martin County clerk records are not online." } }));
     expect(d.risks[0].severity).toBe(3);
+    expect(d.risks.some(r => r.text === "No courthouse chain of title: Martin County clerk records are not online.")).toBe(true);
+    expect(d.risks.some(r => r.text.includes("county index"))).toBe(false);
+    expect(d.conditions.every(c => !c.includes(".."))).toBe(true);
+  });
+  it("names an index-only chain as index-only", () => {
+    const d = decideLease(signals({ title: { status: "published", readInstruments: 0, indexedInstruments: 12, reason: null } }));
     expect(d.risks.some(r => r.text.includes("county index"))).toBe(true);
   });
 });
@@ -64,6 +70,7 @@ describe("decideDeal", () => {
     const d = decideDeal([{ name: "A", decision: buy }, { name: "B", decision: pass }]);
     expect(d.verdict).toBe("BUY");
     expect(d.reasons).toEqual(["Buy A within the offer ranges.", "Pass on B."]);
+    expect(buy.reasons[1]).toContain("close subject to title examination");
   });
   it("reviews when nothing reconciles", () => {
     expect(decideDeal([]).verdict).toBe("REVIEW");

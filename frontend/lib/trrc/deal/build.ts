@@ -67,6 +67,39 @@ function deckWithOverrides(live: PriceDeck, o: DealOverrides): PriceDeck {
     scenarios: { stress: { oilUsdBbl: oil * 0.75, gasUsdMcf: gas * 0.75 }, base: { oilUsdBbl: oil, gasUsdMcf: gas }, strip: { oilUsdBbl: oil, gasUsdMcf: gas }, upside: { oilUsdBbl: oil * 1.25, gasUsdMcf: gas * 1.25 } } };
 }
 
+/**
+ * A package shares one courthouse research scope across its leases, so each
+ * lease's chain is cut to the confirmed tracts its own wells sit on and the
+ * recordings on those tracts. A lease whose wells reach no confirmed tract
+ * gets no chain, with the reason taken from that scope's county searches.
+ */
+export function scopeTitleToLease(analysis: TitleChainAnalysis, leaseApis: string[], wells: DealWell[]): { analysis: TitleChainAnalysis | null; reason: string } {
+  const apis = new Set([...leaseApis, ...wells.map(w => w.api10)]);
+  const leaseWells = analysis.wells.filter(w => w.api14 && apis.has(w.api14.slice(0, 10)));
+  const confirmed = new Map(analysis.tracts.filter(t => t.matchStatus === "confirmed").map(t => [t.id, t]));
+  const tractIds = new Set(leaseWells.flatMap(w => w.associations.map(a => a.tractId)).filter(id => confirmed.has(id)));
+  const counties = [...new Set(leaseWells.map(w => (w.countyName ?? "").toUpperCase()).filter(Boolean))];
+  const coverage = analysis.searchCoverage.filter(c => counties.includes((c.county ?? "").toUpperCase()));
+  if (!tractIds.size) {
+    const byCounty = counties.map(county => {
+      const rows = coverage.filter(c => (c.county ?? "").toUpperCase() === county);
+      const name = county.charAt(0) + county.slice(1).toLowerCase();
+      if (rows.length && rows.every(r => r.status === "provider_unavailable")) return `${name} County clerk records are not online for automated search`;
+      if (!rows.length) return `${name} County was not searched`;
+      return `${name} County was searched but no recording confirmed this lease's tract`;
+    });
+    return { analysis: null, reason: byCounty.length ? byCounty.join("; ") : "None of this lease's wells were resolved in the courthouse research scope" };
+  }
+  const labels = new Set([...tractIds].map(id => confirmed.get(id)!.tractLabel));
+  return { reason: "", analysis: {
+    ...analysis,
+    tracts: analysis.tracts.filter(t => tractIds.has(t.id)),
+    wells: leaseWells,
+    chronology: analysis.chronology.filter(r => labels.has(r.tractLabel)),
+    searchCoverage: coverage,
+  } };
+}
+
 export async function loadDeal(db: SupabaseClient, userId: string, packageId: string, overrides: DealOverrides = {}): Promise<DealLoad> {
   const pkg = await db.from("trrc_packages").select("id, members_json").eq("id", packageId).eq("user_id", userId).maybeSingle();
   if (pkg.error) throw Error("Package lookup failed.");
@@ -89,7 +122,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
   const generatedAt = new Date().toISOString();
   const { input, runs } = await loadPortfolioInputs(db, userId, { members });
   const record = buildPortfolioRecord(input, runs, generatedAt);
-  const live = await getPriceDeck();
+  const live = await getPriceDeck(db);
   const deck = deckWithOverrides(live, overrides);
   const loeOverride = overrides.loeUsdPerBoe && overrides.loeUsdPerBoe > 0 ? overrides.loeUsdPerBoe : null;
 
@@ -105,9 +138,9 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     if (found) return found.id;
     const id = String(sources.length + 1); sources.push({ id, ...s }); return id;
   };
-  const deckLabel = deck.source === "eia_live" ? `EIA spot prices, ${deck.asOf}: WTI Cushing $${deck.wtiSpotUsdBbl.toFixed(2)}/bbl, Henry Hub $${deck.henryHubUsdMcf.toFixed(2)}/MMBtu`
+  const deckLabel = deck.source === "eia_live" ? `EIA spot prices, ${deck.asOf}: WTI Cushing $${deck.wtiSpotUsdBbl.toFixed(2)}/bbl, Henry Hub $${deck.henryHubUsdMcf.toFixed(2)}/MMBtu${deck.fromSnapshot ? ` (live EIA unavailable at report time; EIA values as retrieved ${String(deck.retrievedAt).slice(0, 16).replace("T", " ")} UTC)` : ""}`
     : deck.source === "user_input" ? `Supplied prices: oil $${deck.wtiSpotUsdBbl.toFixed(2)}/bbl, gas $${deck.henryHubUsdMcf.toFixed(2)}/mcf` : `Placeholder prices as of ${deck.asOf} (live EIA prices unavailable)`;
-  cite({ label: "Price deck", detail: deckLabel, retrievedAt: generatedAt, url: deck.source === "eia_live" ? "https://www.eia.gov/opendata/" : null });
+  cite({ label: "Price deck", detail: deckLabel, retrievedAt: deck.retrievedAt ?? generatedAt, url: deck.source === "eia_live" ? "https://www.eia.gov/opendata/" : null });
   cite({ label: "MineralFlow standard assumptions", detail: "Texas severance tax rates per Tex. Tax Code §202.052 (oil, 4.6%) and §201.052 (gas, 7.5%); ad valorem, operating cost, workover reserve, economic limit, discounting, offer policy and decision rules as stated in Section 1", retrievedAt: null, url: "https://statutes.capitol.texas.gov/Docs/TX/htm/TX.202.htm" });
 
   const leases: DealLease[] = [];
@@ -171,8 +204,10 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       const api = memberRuns.find(r => r.title_research_job_id === titleIds[0])!.resolved_primary_api ?? stream.apis[0];
       const t = await loadTitleForApi(db, api, userId, titleIds[0]);
       if (t.title) {
-        const rows = t.title.chronology ?? [];
-        title = { status: "published", reason: null, analysis: t.title, readInstruments: rows.filter(r => r.contentVerified).length, indexedInstruments: rows.length };
+        const scoped = scopeTitleToLease(t.title, stream.apis, wells);
+        title = scoped.analysis
+          ? { status: "published", reason: null, analysis: scoped.analysis, readInstruments: scoped.analysis.chronology.filter(r => r.contentVerified).length, indexedInstruments: scoped.analysis.chronology.length }
+          : { status: "not_found", reason: scoped.reason, analysis: null, readInstruments: 0, indexedInstruments: 0 };
       } else title = { status: t.status === "in_progress" ? "in_progress" : t.status === "not_found" ? "not_found" : "unavailable", reason: t.reason, analysis: null, readInstruments: 0, indexedInstruments: 0 };
     }
 
