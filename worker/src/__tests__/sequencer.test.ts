@@ -303,3 +303,12 @@ describe("TRRC outage during identity resolution", () => {
     await expect(runLandmanSequencer(RUN_ID, "4216502733", supabase)).resolves.toBeUndefined();
   });
 });
+
+describe("TRRC outage on lease records", () => {
+  it("stops the run for retry when production times out", async () => {
+    vi.mocked(ewa.searchWellbore).mockResolvedValue({ found: true, wells: [{ api_no: "16502733" }], lease_number: "10289", district: "8A", county: "GAINES" } as never);
+    vi.mocked(ewa.getProduction).mockResolvedValue({ found: false, rows: [], lease_number: "10289", district: "8A", message: "Error: TimeoutError: The operation was aborted due to timeout", error: "TimeoutError: The operation was aborted due to timeout" } as never);
+    const { supabase } = makeMockSupabase({ resolved_primary_api: "16502733" });
+    await expect(runLandmanSequencer(RUN_ID, "16502733", supabase)).rejects.toThrow(/lease records unavailable/);
+  });
+});
