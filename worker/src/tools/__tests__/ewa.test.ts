@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser, getCompletionRecords, getOilProration, normalizeDistrictForQuery } from "../ewa.js";
+import { extractTables, findDataTable, searchWellbore, getProduction, searchLeaseWells, getWellStatus, getDrillingPermits, getGisLocation, getGathererPurchaser, getCompletionRecords, getOilProration, getPluggingRecords, normalizeDistrictForQuery } from "../ewa.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -783,5 +783,36 @@ describe("lease inventory completeness regression", () => {
   it("rejects records from a different lease instead of attributing them to the asset", async () => {
     mockFetchSequence(["<html></html>", table(1,"1 results Page: 1 of 1","99999")]);
     expect((await searchLeaseWells("01973", "7B")).error).toContain("outside the requested lease/district");
+  });
+});
+
+describe("getPluggingRecords — TRRC GIS well status (the online W-3 query is retired)", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = originalFetch; });
+  const gis = (features: unknown[]) => { globalThis.fetch = (async () => new Response(JSON.stringify({ features }), { status: 200 })) as typeof fetch; };
+
+  it("reports a plugged well from its GIS symbol and never claims a W-3 was checked", async () => {
+    gis([{ attributes: { API: "31734414", GIS_SYMBOL_DESCRIPTION: "Plugged Oil Well" } }]);
+    const r = await getPluggingRecords("4231734414");
+    expect(r.found).toBe(true);
+    expect(r.error).toBeUndefined();
+    expect(r.records[0].status).toBe("Plugged Oil Well");
+    expect(r.w3_certificate_checked).toBe(false);
+  });
+  it("reports a producing well as not plugged without an error", async () => {
+    gis([{ attributes: { API: "31743016", GIS_SYMBOL_DESCRIPTION: "Oil Well" } }]);
+    const r = await getPluggingRecords("4231743016");
+    expect(r.found).toBe(false);
+    expect(r.error).toBeUndefined();
+    expect(r.message).toContain("Oil Well");
+  });
+  it("does not treat a well missing from the GIS layer as not plugged", async () => {
+    gis([]);
+    const r = await getPluggingRecords("4231743016");
+    expect(r.error).toMatch(/not found/);
+  });
+  it("rejects a response for a different API", async () => {
+    gis([{ attributes: { API: "31799999", GIS_SYMBOL_DESCRIPTION: "Oil Well" } }]);
+    expect((await getPluggingRecords("4231743016")).error).toMatch(/not found/);
   });
 });

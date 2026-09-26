@@ -45,7 +45,7 @@ export const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string
   fetch_well_status:          { category: "well_status",        label: "Well Status (Active/Inactive/Plugged)" },
   fetch_inactive_well_status: { category: "inactive_well",      label: "Inactive Well Aging Report (IWAR)" },
   fetch_orphan_well:          { category: "orphan_well",        label: "Orphan Well / P5 Insolvent Operator" },
-  fetch_plugging_records:     { category: "plugging",           label: "Plugging Records (W-3C)" },
+  fetch_plugging_records:     { category: "plugging",           label: "Plugging status" },
   fetch_compliance_violations:{ category: "compliance",         label: "Compliance Violations" },
   fetch_p4_records:           { category: "p4_records",         label: "P-4 Gatherer/Purchaser Records" },
   fetch_injection_records:    { category: "injection",          label: "UIC / Injection Well Records" },

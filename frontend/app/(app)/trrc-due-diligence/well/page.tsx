@@ -1236,7 +1236,7 @@ const SOURCE_LABELS: Record<string, string> = {
   fetch_well_status:          "Well Status",
   fetch_inactive_well_status: "Inactive Well Aging (IWAR)",
   fetch_orphan_well:          "Orphan Well Check",
-  fetch_plugging_records:     "Plugging Records (W-3C)",
+  fetch_plugging_records:     "Plugging status",
   fetch_compliance_violations:"Compliance Violations",
   fetch_p4_records:           "P-4 Gatherer / Purchaser",
   fetch_proration:            "Proration / Daily Allowable",

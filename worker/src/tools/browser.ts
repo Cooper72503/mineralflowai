@@ -41,9 +41,12 @@ export interface Violation {
   last_enforcement_action:  string;
   compliant_on_reinspection:string;
   penalty:                  string;
+  api_no?: string; lease_no?: string; lease_name?: string; well_no?: string; county?: string; last_enforcement_action_date?: string;
 }
 
-export async function getComplianceViolations(
+const ICE_URL = "https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml";
+
+async function queryComplianceViolations(
   operatorNumber: string | null,
   apiNumber: string | null,
 ): Promise<{
@@ -59,101 +62,94 @@ export async function getComplianceViolations(
 
   try {
     if(!operatorNumber&&!canonicalApi10(apiNumber))throw Error("A valid API or operator number is required for compliance lookup");
-    let submitted=false;
     const browser = await getBrowser();
     context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     });
     const page = await context.newPage();
 
-    await page.goto("https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml", {
-      waitUntil: "networkidle",
-      timeout: 30_000,
-    });
+    // TRRC rebuilt this page as "RRC OIL" (Online Inspection Lookup) with
+    // Inspections and Violations tabs; the old operatorNo/apiPrefix fields
+    // are gone, which failed every run with "controls unavailable"
+    // (live 2026-09-25). The Violations tab takes an operator number or an
+    // 8-digit API (county + well; the 10-digit form is rejected).
+    await page.goto(ICE_URL, { waitUntil: "networkidle", timeout: 45_000 });
+    const tab = page.locator('a[href$=":icetab2"]').first();
+    const shown = (l: typeof tab) => l.waitFor({ state: "visible", timeout: 10_000 }).then(() => true, () => false);
+    if (!(await shown(tab))) throw Error("Compliance search controls were unavailable; no query was submitted");
+    await tab.click();
+    if (!(await shown(page.locator('input[id$=":qvapino"]').first()))) throw Error("Compliance search controls were unavailable; no query was submitted");
+    const field = page.locator(operatorNumber ? 'input[id$=":qvopno"]' : 'input[id$=":qvapino"]').first();
+    if (!(await shown(field))) throw Error("Compliance search controls were unavailable; no query was submitted");
+    await field.fill(operatorNumber ?? canonicalApi10(apiNumber)!.slice(2));
+    await page.locator('[id$=":icetab2"] button[type="submit"]').first().click();
+    // Results arrive by AJAX; before a search the table holds one blank row
+    // and the counter reads "0 out of 0", so wait for the table itself.
+    await page.waitForFunction(() => {
+      const row = document.querySelector('tbody[id$="vQueryTable_data"] tr');
+      return !!row && (row.textContent ?? "").trim().length > 0;
+    }, undefined, { timeout: 45_000 });
 
-    // Try by operator number first (more complete — gets all violations for the operator)
-    if (operatorNumber) {
-      const opInput = page.locator('input[id*="operatorNo"], input[name*="operatorNo"]').first();
-      if (await opInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await opInput.fill(operatorNumber);
-        await page.locator('input[type="submit"], button[type="submit"]').first().click();
-        await page.waitForLoadState("networkidle", { timeout: 20_000 });
-        submitted=true;
-      }
-    } else if (apiNumber) {
-      // Try by API number
-      const digits = canonicalApi10(apiNumber)!;
-      const prefix = digits.slice(2, 5);
-      const suffix = digits.slice(5, 10);
-      const prefixInput = page.locator('input[id*="apiPrefix"], input[name*="apiPrefix"], input[id*="apiNoPrefixArg"]').first();
-      if (await prefixInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await prefixInput.fill(prefix);
-        const suffixInput = page.locator('input[id*="apiSuffix"], input[name*="apiSuffix"], input[id*="apiNoSuffixArg"]').first();
-        await suffixInput.fill(suffix);
-        await page.locator('input[type="submit"], button[type="submit"]').first().click();
-        await page.waitForLoadState("networkidle", { timeout: 20_000 });
-        submitted=true;
-      }
+    const bodyText = await page.innerText("body");
+    if (/Ewa_\d+|correct the errors|access denied|validation error/i.test(bodyText)) throw Error("Compliance query was rejected");
+    const summary = /Showing \d+-\d+ out of (\d+) violations/i.exec(bodyText);
+    if (!summary) throw Error("Compliance response contained neither recognized violation rows nor an explicit empty result");
+    const total = Number(summary[1]);
+    if (total === 0) {
+      if (!/search returned no results/i.test(bodyText)) throw Error("Compliance response contained neither recognized violation rows nor an explicit empty result");
+      return { found: false, violations: [], open_count: 0, total_count: 0, searched_by: operatorNumber ? "operator_number" : "api_number", message: "No violations found (inspection and violation data from August 1, 2015)" };
     }
-
-    if(!submitted)throw Error("Compliance search controls were unavailable; no query was submitted");
-    const bodyText=await page.innerText("body");
-    if(/Ewa_\d+|correct the errors|access denied|validation error/i.test(bodyText))throw Error("Compliance query was rejected");
-    // Wait for results table
-    await page.waitForSelector('table', { timeout: 15_000 }).catch(() => null);
-
-    // Extract violation rows from all tables
+    // Ten rows show by default; ask for the page's maximum so every row is read.
+    if (total > 10) {
+      await page.locator('select[name$="vQueryTable_rppDD"]').first().selectOption("500");
+      await page.waitForFunction((n: number) => document.querySelectorAll('tbody[id$="vQueryTable_data"] tr').length >= n, Math.min(total, 500), { timeout: 45_000 });
+    }
+    // Each header cell also holds a hidden "Filter by ..." label; read the title span.
+    const headers = (await page.locator('[id$=":vQueryTable"] thead th .ui-column-title').allTextContents()).map(h => h.trim()).filter(Boolean);
+    const keys = headers.map(h => h.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""));
     const violations: Violation[] = [];
-    const tables = await page.locator("table").all();
-
-    for (const table of tables) {
-      const rows = await table.locator("tr").all();
-      if (rows.length < 2) continue;
-
-      const headerCells = await rows[0].locator("th, td").allTextContents();
-      const headerStr = headerCells.join(" ").toLowerCase();
-      if (!headerStr.includes("violation") && !headerStr.includes("rule")) continue;
-
-      const keys = headerCells.map(h => h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+$/, ""));
-
-      for (const row of rows.slice(1)) {
-        const cells = await row.locator("td").allTextContents();
-        if (cells.length < 3) continue;
-        const obj: Record<string, string> = {};
-        keys.forEach((k, i) => { obj[k] = (cells[i] ?? "").trim(); });
-
-        violations.push({
-          violation_discovery_date:  obj["violation_discovery_date"] || obj["date"] || obj["discovery_date"] || obj["violation_date"] || "",
-          violated_rule:             obj["rule"] || obj["violated_rule"] || "",
-          violated_rule_description: obj["description"] || obj["rule_description"] || obj["violated_rule_description"] || "",
-          major_violation:           obj["major"] || obj["major_violation"] || "",
-          last_enforcement_action:   obj["last_action"] || obj["enforcement_action"] || obj["last_enforcement_action"] || "",
-          compliant_on_reinspection: obj["compliant"] || obj["compliant_on_reinspection"] || "",
-          penalty:                   obj["penalty"] || obj["penalty_amount"] || "",
-        });
-      }
+    for (const row of await page.locator('tbody[id$="vQueryTable_data"] tr').all()) {
+      const cells = (await row.locator("td").allTextContents()).map(c => c.trim());
+      if (cells.length < keys.length) continue;
+      const o: Record<string, string> = {};
+      keys.forEach((k, i) => { o[k] = cells[i] ?? ""; });
+      violations.push({
+        violation_discovery_date: o["violation_discovery_date"] ?? "", violated_rule: o["violated_rule"] ?? "", violated_rule_description: o["violated_rule_description"] ?? "",
+        major_violation: o["major_violation_indicator"] ?? "", last_enforcement_action: o["last_enforcement_action"] ?? "", compliant_on_reinspection: o["compliant_on_reinspection"] ?? "",
+        penalty: "", api_no: o["api_no"] ?? "", lease_no: o["lease_no"] ?? "", lease_name: o["lease_facility_name"] ?? "", well_no: o["well_no"] ?? "", county: o["county"] ?? "",
+        last_enforcement_action_date: o["last_enforcement_action_date"] ?? "",
+      });
     }
-
+    if (!violations.length) throw Error("Compliance response reported violations but no rows could be read");
     const openCount = confirmedOpenCount(violations);
-
-    if (violations.length === 0) {
-      if(!/no (?:violations|results|records)(?: were)? found|no records to display/i.test(bodyText))throw Error("Compliance response contained neither recognized violation rows nor an explicit empty result");
-      return { found: false, violations: [], open_count: 0, total_count: 0, searched_by: operatorNumber ? "operator_number" : "api_number", message: "No violations found" };
-    }
-
+    const truncated = violations.length < total;
     return {
       found: true,
       violations,
-      open_count:  openCount,
-      total_count: violations.length,
+      open_count: truncated ? null : openCount,
+      total_count: total,
       searched_by: operatorNumber ? "operator_number" : "api_number",
-      message:     `${violations.length} violation(s) found, ${openCount===null?"unknown number":openCount} open`,
+      message: `${total} violation(s) on record${truncated ? `; ${violations.length} read` : ""}, ${truncated || openCount === null ? "open count unknown" : `${openCount} not compliant on reinspection`} (data from August 1, 2015)`,
     };
   } catch (e) {
-    return { found: false, violations: [], open_count: null, total_count: 0, searched_by: "", message: `ICE portal error: ${String(e)}`, error: String(e) };
+    return { found: false, violations: [], open_count: null, total_count: 0, searched_by: "", message: `Compliance lookup error: ${String(e)}`, error: String(e) };
   } finally {
     await context?.close();
   }
+}
+
+/**
+ * RRC OIL loads slowly and occasionally never renders its controls; one
+ * clean retry turns that into the answer the same query gives seconds later.
+ * A rejected query or a parsed result is never retried.
+ */
+export async function getComplianceViolations(
+  operatorNumber: string | null,
+  apiNumber: string | null,
+): ReturnType<typeof queryComplianceViolations> {
+  const first = await queryComplianceViolations(operatorNumber, apiNumber);
+  if (!first.error || !/controls were unavailable|Timeout|net::|Navigation/i.test(first.error)) return first;
+  return queryComplianceViolations(operatorNumber, apiNumber);
 }
 
 // ─── S5 — Inactive Well Status ────────────────────────────────────────────────

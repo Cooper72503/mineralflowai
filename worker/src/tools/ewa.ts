@@ -995,22 +995,37 @@ export async function getPluggingRecords(apiNumber: string): Promise<{
   records: Record<string, string>[];
   message: string;
   error?: string;
+  source?: string;
+  query_url?: string;
+  w3_certificate_checked?: boolean;
 }> {
-  const split = splitApi(apiNumber);
-  if (!split) return { found: false, records: [], message: "Invalid API", error: "Invalid API" };
-
+  // TRRC retired its online plugging query: pluggingQueryAction.do returns
+  // HTTP 500 on every request and is no longer on the EWA query menu, and
+  // the Completions system carries only W-2/G-1 packets (live 2026-09-25).
+  // Plugging status is read instead from TRRC's GIS well layer, which
+  // carries each well's current symbol ("Plugged Oil Well", "Oil Well",
+  // ...). A W-3 plugging certificate is not available online, so its
+  // presence is never asserted either way.
+  const digits = canonicalApi10(apiNumber);
+  if (!digits) return { found: false, records: [], message: "Invalid API", error: "Invalid API" };
+  const url = `https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer/1/query?f=json&where=API%3D%27${digits.slice(2)}%27&outFields=API,GIS_SYMBOL_DESCRIPTION&returnGeometry=false`;
+  const base = { source: "TRRC GIS well layer (well status symbol)", query_url: url, w3_certificate_checked: false };
   try {
-    const html = await ewaFetch("pluggingQueryAction.do", {
-      "searchArgs.apiNoPrefixArg": split.prefix,
-      "searchArgs.apiNoSuffixArg": split.suffix,
-    });
-    if (/no results found/i.test(html)) return { found: false, records: [], message: "No plugging records" };
-    const table = findDataTable(html, 2);
-    if (!table) return { found: false, records: [], message: "Could not parse plugging response", error: "Could not parse plugging response" };
-    const records = rowsToObjects(table.header, table.rows.slice(0, 10));
-    return { found: true, records, message: `${records.length} plugging record(s)` };
+    const res = await fetchWithRetry(url, { signal: AbortSignal.timeout(20_000) }, { label: "GIS plugging status" });
+    if (!res.ok) throw new Error(`GIS HTTP ${res.status}`);
+    const json = await res.json() as { error?: { message?: string }; features?: Array<{ attributes?: Record<string, unknown> }> };
+    if (json.error || !Array.isArray(json.features)) throw new Error(json.error?.message ?? "Malformed GIS response: features missing");
+    const matches = json.features.filter(f => canonicalApi10(String(f.attributes?.["API"] ?? "")) === digits);
+    if (matches.length === 0) return { ...base, found: false, records: [], message: "Well not found on TRRC's GIS well layer; plugging status not established", error: "Well not found on TRRC's GIS well layer" };
+    if (matches.length > 1) throw new Error("GIS response does not uniquely match the requested API");
+    const symbol = String(matches[0].attributes?.["GIS_SYMBOL_DESCRIPTION"] ?? "").trim();
+    if (!symbol) throw new Error("GIS well record carries no status symbol");
+    if (/plugged/i.test(symbol)) {
+      return { ...base, found: true, records: [{ status: symbol, source: "TRRC GIS well layer" }], message: `TRRC's GIS well layer shows this well as "${symbol}". The W-3 plugging certificate is not available online.` };
+    }
+    return { ...base, found: false, records: [], message: `Not plugged: TRRC's GIS well layer shows this well as "${symbol}".` };
   } catch (e) {
-    return { found: false, records: [], message: `Error: ${String(e)}`, error: String(e) };
+    return { ...base, found: false, records: [], message: `Error: ${String(e)}`, error: String(e) };
   }
 }
 

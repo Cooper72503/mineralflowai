@@ -381,7 +381,10 @@ export function extractIdentity(attempts: LiteSourceAttempt[], run: TrrcDueDilig
   return {
     wellName:    str(first["lease_name"] ?? first["well_name"] ?? wb?.["well_name"]),
     operator:    str(first["operator_name"] ?? wb?.["operator_name"] ?? wb?.["operator"]),
-    operatorNo:  str(first["operator_no"]   ?? wb?.["operator_no"]   ?? wb?.["operator_number"]),
+    // The wellbore query rarely carries the P-5 number; the run resolves it
+    // from the operator registry search, so fall back to that.
+    operatorNo:  str(first["operator_no"]   ?? wb?.["operator_no"]   ?? wb?.["operator_number"]) || str(run.resolved_operator_number)
+                 || str((getAttempt(attempts, "search_by_operator")?.["record"] as Record<string, unknown> | undefined)?.["operator_number"]),
     county:      str(first["county"]        ?? wb?.["county"]),
     field:       str(first["field_name"]    ?? first["field"]       ?? wb?.["field"]),
     formation:   str(first["formation"]     ?? wb?.["formation"]),
@@ -551,7 +554,9 @@ export function generateFlags(
   const gisForFlags = getAttempt(attempts, "fetch_gis_plat");
   const statusStr = str(wellStatus?.["status"] ?? wellStatus?.["well_status"]) || str(gisForFlags?.["well_type"]);
   const plugging = getAttempt(attempts, "fetch_plugging_records");
-  if (/plugged/i.test(statusStr) && plugging?.["found"] === false) {
+  // Only a real W-3 lookup can say a certificate is missing; the GIS-based
+  // plugging status never asserts either way.
+  if (/plugged/i.test(statusStr) && plugging?.["found"] === false && plugging?.["w3_certificate_checked"] !== false) {
     critical.push("WELL SHOWS PLUGGED STATUS but no W-3C plugging certificate found — possible abandonment without proper documentation.");
   }
 
@@ -1214,7 +1219,7 @@ function EconomicEvaluationPage({ run, id: identity, econ, generatedAt, reportin
       ),
 
       React.createElement(Text, { style: S.noteText },
-        `Price basis: ${econ.priceDeck.source === "eia_live" ? "live EIA data" : "static placeholder — not a live quote"}, as of ${econ.priceDeck.asOf}. ` +
+        `Price basis: ${econ.priceDeck.source === "eia_live" ? (econ.priceDeck.fromSnapshot ? `EIA data as retrieved ${String(econ.priceDeck.retrievedAt).slice(0, 10)} (live EIA unavailable at report time)` : "live EIA data") : "static placeholder — not a live quote"}, as of ${econ.priceDeck.asOf}. ` +
         `WTI spot $${econ.priceDeck.wtiSpotUsdBbl.toFixed(2)}/BBL, Henry Hub spot $${econ.priceDeck.henryHubUsdMcf.toFixed(2)}/MCF. ` +
         `Breakeven price holds the base scenario's gas price and all cost assumptions fixed and solves for the flat oil price at which cumulative (undiscounted) net cash flow is zero.`,
       ),
@@ -1538,8 +1543,14 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
   // that's a real confirmed-absence, not a guess (see coverage.ts for the
   // full reasoning). When GIS shows a plugged symbol, this stays an honest
   // "—" — we can't fabricate the actual W-3C filing details.
+  // TRRC retired its online plugging query; the worker now reads plugging
+  // status from the GIS well layer (w3_certificate_checked: false), which
+  // says whether the well is plugged, not whether a W-3 was filed.
+  const pluggingFromGis = plugging?.["w3_certificate_checked"] === false;
   const pluggingDirectKnown = plugging?.["found"] === true || plugging?.["found"] === false;
-  const pluggingStr = pluggingDirectKnown
+  const pluggingStr = pluggingFromGis
+    ? str(plugging?.["message"]) || "—"
+    : pluggingDirectKnown
     ? (plugging?.["found"] === true ? "Filed" : "Not Filed")
     : (gisStatus && !/plugged/i.test(gisStatus) ? "Not Filed (inferred — RRC GIS shows well as not plugged)" : "—");
 
@@ -1557,7 +1568,7 @@ function CompliancePage({ run, id: identity, attempts, generatedAt }: {
     kv("Inactive Well Designation",  inactive?.["found"] ? "Yes" : inactive?.["found"] === false ? "No" : "—"),
     inactiveRecords.length > 0 ? kv("Plugging Deadline", str(inactiveRecords[0]?.["plugging_deadline_date"] ?? inactiveRecords[0]?.["deadline"]), "yellow") : null,
     kv("Orphan Well Program",        isOrphan ? "YES — CRITICAL" : orphan !== null ? "No" : "—", isOrphan ? "red" : undefined),
-    kv("Plugging Records (W-3C)",    pluggingStr),
+    kv(pluggingFromGis ? "Plugging status" : "Plugging Records (W-3C)", pluggingStr),
 
     plugRecords.length > 0 ? React.createElement(View, { style: { marginTop: 4, marginBottom: 6 } },
       kv("Plug Date",        str(plugRecords[0]?.["plug_date"] ?? plugRecords[0]?.["date"])),
@@ -2785,7 +2796,7 @@ export async function buildTrrcPdfReport(
     ? await fetchLateralPath(identity.apiNumber, mapLat, mapLng)
     : null;
   const analytics = computeProductionAnalytics(production);
-  const priceDeck = await getPriceDeck();
+  const priceDeck = await getPriceDeck(persistGeologyTo?.supabase);
   const reported = reportedProductionSeries(analytics.months);
   const econ = computeEconomics(
     reported.oil,

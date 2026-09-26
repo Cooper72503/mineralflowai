@@ -2,8 +2,8 @@ import {beforeEach,afterEach,describe,it,expect,vi} from "vitest";
 import {confirmedOpenCount,selectExactOperator} from "../browser-contracts.js";
 const f=vi.hoisted(()=>{
  const state={visible:true,body:"",html:"",options:[{value:"123456",text:"123456 ACME OIL, INC."}]};
- const locator:any={first:()=>locator,nth:()=>locator,isVisible:vi.fn(async()=>state.visible),fill:vi.fn(),click:vi.fn(),all:vi.fn(async()=>[]),evaluateAll:vi.fn(async()=>state.options)};
- const page={locator:vi.fn(()=>locator),goto:vi.fn(),waitForLoadState:vi.fn(),waitForSelector:vi.fn(async()=>null),innerText:vi.fn(async()=>state.body),content:vi.fn(async()=>state.html),setDefaultTimeout:vi.fn(),click:vi.fn(),fill:vi.fn(),selectOption:vi.fn(),waitForTimeout:vi.fn()};
+ const locator:any={first:()=>locator,nth:()=>locator,isVisible:vi.fn(async()=>state.visible),waitFor:vi.fn(async()=>{if(!state.visible)throw Error("hidden");}),fill:vi.fn(),click:vi.fn(),all:vi.fn(async()=>[]),allTextContents:vi.fn(async()=>[]),selectOption:vi.fn(),evaluateAll:vi.fn(async()=>state.options)};
+ const page={locator:vi.fn(()=>locator),goto:vi.fn(),waitForLoadState:vi.fn(),waitForSelector:vi.fn(async()=>null),waitForFunction:vi.fn(async()=>null),innerText:vi.fn(async()=>state.body),content:vi.fn(async()=>state.html),setDefaultTimeout:vi.fn(),click:vi.fn(),fill:vi.fn(),selectOption:vi.fn(),waitForTimeout:vi.fn()};
  const context={newPage:async()=>page,close:vi.fn()};
  const browser={isConnected:()=>true,newContext:async()=>context,close:vi.fn()};
  return {state,locator,page,context,browser,launch:vi.fn(async()=>browser)};
@@ -25,13 +25,20 @@ describe("browser retrieval cannot treat an unexecuted or unparsed query as clea
   expect(result.error).toMatch(/neither recognized/);
   expect(result.open_count).toBeNull();
  });
- it("accepts an explicit empty result only after submitting the canonical API",async()=>{
-  f.state.body="No violations found";
+ it("accepts an explicit empty result only after submitting the 8-digit API",async()=>{
+  f.state.body="Showing 0-0 out of 0 violations Your search returned no results";
   const result=await getComplianceViolations(null,"16502733");
   expect(result.error).toBeUndefined();
   expect(result.open_count).toBe(0);
-  expect(f.locator.fill).toHaveBeenCalledWith("165");
-  expect(f.locator.fill).toHaveBeenCalledWith("02733");
+  expect(f.locator.fill).toHaveBeenCalledWith("16502733");
+ });
+ it("does not accept the pre-search counter as an empty result",async()=>{
+  f.state.body="Showing 0-0 out of 0 violations";
+  expect((await getComplianceViolations(null,"16502733")).error).toMatch(/neither recognized/);
+ });
+ it("fails when violations are reported but no rows can be read",async()=>{
+  f.state.body="Showing 1-10 out of 43 violations";
+  expect((await getComplianceViolations("486710",null)).error).toMatch(/no rows could be read/);
  });
  it("rejects a query error even if the page also contains an empty-results message",async()=>{
   f.state.body="Ewa_1011 correct the errors. No results found";

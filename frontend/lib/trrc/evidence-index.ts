@@ -50,7 +50,7 @@ const SOURCE_META: Record<string, { label: string; portal: string; portal_url: s
   fetch_production:             { label: "S8 — Monthly Production",            portal: "TRRC EWA — Production Query",            portal_url: `${EWA_BASE}/specificLeaseQueryAction.do` },
   fetch_p4_records:             { label: "S9 — P-4 Gatherer/Purchaser",        portal: "TRRC EWA — P-4 Gatherer/Purchaser Query", portal_url: `${EWA_BASE}/gathererPurchaserQueryAction.do` },
   fetch_completion_records:     { label: "S10 — W-2 Completion Record",        portal: "TRRC EWA — Completion Query",            portal_url: `${EWA_BASE}/completionQueryAction.do` },
-  fetch_plugging_records:       { label: "S11 — Plugging Records (W-3C)",      portal: "TRRC EWA — Plugging Query",              portal_url: `${EWA_BASE}/pluggingQueryAction.do` },
+  fetch_plugging_records:       { label: "S11 — Plugging status",               portal: "TRRC GIS well layer (the online W-3 query is retired)", portal_url: "https://gis.rrc.texas.gov/GISViewer/" },
   fetch_coda_records:           { label: "S12 — CODA Imaged Documents",        portal: "TRRC CODA — Imaged Records",             portal_url: `${EWA_BASE}/cogisQueryAction.do` },
   fetch_compliance_violations:  { label: "S13 — Compliance Violations",        portal: "TRRC PDA ICE — Inspection & Compliance", portal_url: PDA_ICE_URL },
   fetch_injection_records:      { label: "S14 — UIC / Injection Permits",      portal: "TRRC EWA — Injection/Disposal Query",    portal_url: `${EWA_BASE}/uicQueryAction.do` },
