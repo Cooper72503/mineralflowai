@@ -22,7 +22,10 @@ const NUM = String.raw`\d+[A-Z]?`;
 const ITEM = String.raw`${NUM}(?:\s*-\s*\d+)?`;
 const LIST = String.raw`(${ITEM}(?:\s*(?:,|&|\bAND\b)\s*${ITEM})*)`;
 const MAX_RANGE = 60;
-const SECTION_RE = new RegExp(String.raw`\bSEC(?:TION)?S?\.?\s*:?\s*-?\s*${LIST}`, "g");
+// Howard's clerk writes aliquot parts before the number: "Section: E/2 10"
+// is the east half of Section 10. The part is skipped, never read as the section.
+const ALIQUOT = String.raw`(?:(?:[NSEW]{1,2}\s*/\s*[24]|ALL)\s*(?:OF\s*)?)*`;
+const SECTION_RE = new RegExp(String.raw`\bSEC(?:TION)?S?\.?\s*:?\s*-?\s*${ALIQUOT}${LIST}`, "g");
 const BLOCK_RE = new RegExp(String.raw`\bBL(?:OC)?K\.?\s*:?\s*-?\s*${LIST}`, "g");
 const TOWNSHIP_RE = /\bT(?:OWNSHIP)?\s*:?\s*-?\s*(\d+)\s*-?\s*([NS])\b/g;
 

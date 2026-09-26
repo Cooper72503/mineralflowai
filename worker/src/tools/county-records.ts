@@ -434,9 +434,23 @@ function tylerCountySearch(subdomain: string): CountyRecordsProvider["search"] {
       await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
       await dismissTylerSessionPrompt(page);
 
-      // Disclaimer page, if present.
+      // Disclaimer page, if present. Some Tyler counties (Howard, live
+      // 2026-09-25) gate "I Accept" behind a reCAPTCHA: the button stays
+      // disabled until a person solves it. That is never automated; the
+      // search is reported as requiring a manual search instead.
       const disclaimerAccept = page.locator("#submitDisclaimerAccept, a:has-text(\"Accept\"), button:has-text(\"Accept\")").first();
       if (await disclaimerAccept.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        if (!(await disclaimerAccept.isEnabled().catch(() => false))) {
+          const captcha = await page.locator(".g-recaptcha, iframe[title*=\"reCAPTCHA\"]").count().catch(() => 0);
+          if (captcha > 0) {
+            return {
+              found: false, status: "manual_required", county: countyDisplayName, provider: "tylerhost.net", records: [], total_count: 0, search_url: baseUrl,
+              message: `${countyDisplayName} County's records site requires a person to complete a CAPTCHA before searching; this search was not run automatically.`,
+              data_gap: true,
+            };
+          }
+          throw new Error("County records disclaimer could not be accepted (button disabled)");
+        }
         await disclaimerAccept.click();
         await page.waitForLoadState("domcontentloaded").catch(() => null);
         await dismissTylerSessionPrompt(page);
@@ -460,16 +474,27 @@ function tylerCountySearch(subdomain: string): CountyRecordsProvider["search"] {
       }
 
       await page.waitForSelector("#field_BothNamesID", { state: "visible", timeout: 30_000 });
-      await page.fill("#field_BothNamesID", searchValue);
+      // The name box is a tag input (Tyler 2025.1): clicking Search after
+      // page.fill() submits nothing, and the old 8-second race then read the
+      // untouched form as "no records" for every Tyler county. Type the
+      // name and press Enter, which posts the search.
+      await page.click("#field_BothNamesID");
+      const suggested = page.waitForResponse(r => r.url().includes("/search/suggest/"), { timeout: 15_000 }).catch(() => null);
+      await page.keyboard.type(searchValue, { delay: 40 });
+      await suggested;
       await dismissTylerSessionPrompt(page);
-      await page.click("#searchButton");
-      await page.waitForLoadState("domcontentloaded").catch(() => null);
+      const results = page.waitForResponse(r => r.url().includes("/searchResults/") && r.request().method() === "GET", { timeout: 45_000 });
+      // First Enter commits the typed name as a search tag, the second submits.
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(1_500);
+      await page.keyboard.press("Enter");
+      const response = await results.catch(() => null);
+      if (!response || !response.ok()) throw new Error(`County records search did not return a results page${response ? ` (HTTP ${response.status()})` : ""}`);
+      const resultsHtml = await response.text();
       await dismissTylerSessionPrompt(page);
-
-      await Promise.race([
-        page.waitForSelector("li.ss-search-row", { timeout: 20_000 }).catch(() => null),
-        page.waitForTimeout(8_000),
-      ]);
+      // An empty result is only accepted when the server's own results page
+      // carries no result rows; otherwise wait for the rows to render.
+      if (resultsHtml.includes("ss-search-row")) await page.waitForSelector("li.ss-search-row", { timeout: 20_000 });
 
       const rawRows = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll("li.ss-search-row"));
