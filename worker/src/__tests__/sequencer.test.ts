@@ -36,6 +36,7 @@ vi.mock("../tools/county-records.js", () => ({
 }));
 
 import * as ewa from "../tools/ewa.js";
+import * as browserTools from "../tools/browser.js";
 import {
   stepSearchWellbore,
   runLandmanSequencer,
@@ -195,6 +196,16 @@ describe("runLandmanSequencer — entry branches and never-stop-at-one-failure",
     expect(orphanAttempt).toBeDefined();
     const prodAttempt = attempts.find(a => a["source_name"] === "fetch_production");
     expect(prodAttempt?.["status"]).toBe("failed_transient");
+  });
+
+  it("searches compliance by the subject well's API, not the operator's statewide record", async () => {
+    vi.mocked(ewa.searchWellbore).mockResolvedValue({
+      found: true, wells: [{ api_no: "16502733" }], lease_number: "10289", district: "8A", county: "GAINES", operator_number: "123456",
+    } as never);
+    vi.mocked(browserTools.getComplianceViolations).mockResolvedValue({ found: false, violations: [], open_count: 0, total_count: 0, searched_by: "api_number", message: "No violations found" } as never);
+    const { supabase } = makeMockSupabase({ resolved_primary_api: "16502733", resolved_operator_number: "123456" });
+    await runLandmanSequencer(RUN_ID, "16502733", supabase);
+    expect(browserTools.getComplianceViolations).toHaveBeenCalledWith(null, "4216502733");
   });
 
   it("returns early without a terminal update when the run is cancelled mid-sequence", async () => {

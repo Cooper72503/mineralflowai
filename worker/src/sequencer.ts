@@ -253,7 +253,11 @@ export async function stepGetOrphanWell(state: AgentState, runId: string, supaba
 
 export async function stepGetComplianceViolations(state: AgentState, runId: string, supabase: SupabaseClient, callIndex: number): Promise<void> {
   await logStep(supabase, runId, "get_compliance_violations", "running");
-  const r = await browser.getComplianceViolations(state.operatorNumber, state.apiNumber ?? state.requestedApiNumber ?? null);
+  // The subject well's own record first. An operator search returns the
+  // operator's statewide history (1,712 rows for Diamondback, live
+  // 2026-09-26): slow, heavy to store in every run, and not about this asset.
+  const api = state.apiNumber ?? state.requestedApiNumber ?? null;
+  const r = await browser.getComplianceViolations(api ? null : state.operatorNumber, api);
   await persistAttempt(supabase, runId, "fetch_compliance_violations", callIndex, r);
 }
 

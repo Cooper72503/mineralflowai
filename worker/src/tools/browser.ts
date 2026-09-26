@@ -45,6 +45,7 @@ export interface Violation {
 }
 
 const ICE_URL = "https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml";
+export const MAX_STORED_VIOLATIONS = 50;
 
 async function queryComplianceViolations(
   operatorNumber: string | null,
@@ -54,6 +55,7 @@ async function queryComplianceViolations(
   violations: Violation[];
   open_count: number | null;
   total_count: number;
+  stored_count?: number;
   searched_by: string;
   message: string;
   error?: string;
@@ -123,9 +125,12 @@ async function queryComplianceViolations(
     if (!violations.length) throw Error("Compliance response reported violations but no rows could be read");
     const openCount = confirmedOpenCount(violations);
     const truncated = violations.length < total;
+    // Counts come from every row read; only the first rows are stored, so an
+    // operator-wide history (1,712 rows) cannot bloat every run's evidence.
     return {
       found: true,
-      violations,
+      violations: violations.slice(0, MAX_STORED_VIOLATIONS),
+      stored_count: Math.min(violations.length, MAX_STORED_VIOLATIONS),
       open_count: truncated ? null : openCount,
       total_count: total,
       searched_by: operatorNumber ? "operator_number" : "api_number",

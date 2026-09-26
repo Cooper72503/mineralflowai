@@ -225,6 +225,23 @@ async function recoverStaleRuns(): Promise<void> {
   }
 }
 
+// A run left "running" by a process that died cannot be recovered at boot
+// when the database is unreachable then (live 2026-09-26: six runs stranded
+// after a restart during a Supabase outage). Sweep periodically too: a run
+// this process is not executing, untouched for 15 minutes, is re-queued.
+// Every step updates progress, so a live run is never that quiet.
+export const STALE_RUN_AFTER_MS = 15 * 60 * 1000;
+async function sweepStaleRuns(): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_RUN_AFTER_MS).toISOString();
+  let q = supabase.from("trrc_due_diligence_runs")
+    .update({ status: "pending", progress_percent: 0, updated_at: new Date().toISOString() })
+    .eq("status", "running").lt("updated_at", cutoff);
+  if (activeRuns.size) q = q.not("id", "in", `(${[...activeRuns].join(",")})`);
+  const { data, error } = await q.select("id");
+  if (error) { console.error("[worker] stale run sweep failed:", error.message); return; }
+  if (data?.length) console.log(`[worker] re-queued ${data.length} stranded run(s): ${data.map(r => r["id"]).join(", ")}`);
+}
+
 let packagePollActive=false;
 async function pollPackages(){
  if(packagePollActive)return;
@@ -240,7 +257,7 @@ async function main() {
   await recoverStaleTitleJobs();
   // Frontend-owned stages (ingesting, analyzing) can stall without any worker
   // restart, so the sweep also runs periodically, not only at boot.
-  setInterval(() => { recoverStaleTitleJobs().catch(console.error); }, 10 * 60 * 1000);
+  setInterval(() => { recoverStaleTitleJobs().catch(console.error); sweepStaleRuns().catch(console.error); }, 10 * 60 * 1000);
   // Record EIA prices at boot and every 6 hours, so a report can still be
   // priced from EIA's own published values if EIA is down at report time.
   const snapshotEia = () => recordEiaSnapshot(supabase).then(p => { if (p) console.log(`[worker] recorded EIA price deck for ${p}`); }).catch(console.error);
