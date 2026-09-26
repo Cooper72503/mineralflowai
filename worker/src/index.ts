@@ -1,4 +1,4 @@
-import { checkedQuery } from "./persistence.js";
+import { checkedQuery, TransientRetrievalError } from "./persistence.js";
 /**
  * MineralFlow TRRC Worker
  *
@@ -68,6 +68,10 @@ assertCleanSecret("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY);
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const activeRuns = new Set<string>();
+const MAX_TRANSIENT_RETRIES = 3;
+const TRANSIENT_COOLDOWN_MS = 2 * 60 * 1000;
+const transientRetries = new Map<string, number>();
+const cooldownUntil = new Map<string, number>();
 const activeTitleJobs = new Set<string>();
 
 // ─── Title-chain research jobs (migration 028) ───────────────────────────────
@@ -152,6 +156,17 @@ async function claimAndRun(runId: string, input: string): Promise<void> {
     await runLandmanSequencer(runId, input, supabase);
     console.log(`[worker] completed run ${runId}`);
   } catch (err) {
+    // A TRRC outage while identifying the well: retry after a cooldown,
+    // three attempts in all, instead of completing a run tied to no lease.
+    if (err instanceof TransientRetrievalError && (transientRetries.get(runId) ?? 0) < MAX_TRANSIENT_RETRIES) {
+      const n = (transientRetries.get(runId) ?? 0) + 1;
+      transientRetries.set(runId, n);
+      cooldownUntil.set(runId, Date.now() + TRANSIENT_COOLDOWN_MS * n);
+      console.warn(`[worker] run ${runId}: ${err.message}; retry ${n} of ${MAX_TRANSIENT_RETRIES} after ${(TRANSIENT_COOLDOWN_MS * n) / 1000}s`);
+      await checkedQuery(supabase.from("trrc_due_diligence_runs").update({ status: "pending", progress_percent: 0, updated_at: new Date().toISOString() })
+        .eq("id", runId).neq("status", "cancelled"), "Diligence transient retry");
+      return;
+    }
     console.error(`[worker] run ${runId} failed:`, err);
     await checkedQuery(supabase.from("trrc_due_diligence_runs").update({
       status:        "failed",
@@ -174,15 +189,19 @@ async function poll(): Promise<void> {
     .select("id, original_input, normalized_input")
     .eq("status", "pending")
     .order("created_at", { ascending: true })
-    .limit(available);
+    .limit(available + cooldownUntil.size);
 
   if (error) {
     console.error("[worker] poll error:", error.message);
     return;
   }
 
+  let claimed = 0;
   for (const run of (runs ?? [])) {
+    if (claimed >= available) break;
+    if ((cooldownUntil.get(String(run["id"])) ?? 0) > Date.now()) continue;
     const input = String(run["normalized_input"] ?? run["original_input"] ?? "");
+    claimed++;
     claimAndRun(String(run["id"]), input).catch(console.error);
   }
 }

@@ -47,7 +47,14 @@ export function buildPortfolioRecord(raw:PortfolioInput,runs:RetainedRun[],asOf=
    const foundTypes=Array.isArray(history)?history.filter((a):a is {lease_type:string;status:string}=>!!a&&typeof a==="object"&&(a as {status?:string}).status==="found").map(a=>a.lease_type):[];
    const leaseType=foundTypes.length===1&&["O","G"].includes(foundTypes[0])?foundTypes[0]:null;
    if(errors.length)reason=`Retained evidence validation failed: ${errors.join("; ")}`;
-   else if(!lease||!district||record.fields["identity.api10"].value!==api)reason="No uniquely evidenced API-to-lease association.";
+   else if(!lease||!district||record.fields["identity.api10"].value!==api){
+    // Say what stopped the association: an unanswered TRRC query is not the same finding as an ambiguous one.
+    const wb=[...run.attempts].reverse().find(a=>a.source_name==="search_by_api");
+    const wbMessage=String((wb?.result_data_json as {message?:unknown}|null)?.message??"");
+    reason=wb&&wb.status!=="success"?`TRRC wellbore query did not complete (${String(wb.error_message??"no response").slice(0,120)}); the well could not be tied to a lease.`
+     :/Multiple lease\/district associations/i.test(wbMessage)?"TRRC carries this wellbore on more than one lease with none current; its production is not attributed to any of them."
+     :"No uniquely evidenced API-to-lease association.";
+   }
    else if(!prod||record.fields["production.lease_monthly"].status!=="observed")reason=record.fields["production.lease_monthly"].reason??"Lease production is unavailable.";
    else if(!leaseType)reason="Successful oil/gas lease query type is not retained; the production stream cannot be uniquely identified.";
    else if(identifier(prod.data.lease_number)!==lease||identifier(prod.data.district)!==district)reason="Production stream differs from the evidenced lease association.";

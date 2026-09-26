@@ -1,4 +1,4 @@
-import { PipelinePersistenceError } from "./persistence.js";
+import { PipelinePersistenceError, TransientRetrievalError } from "./persistence.js";
 /**
  * Deterministic TRRC Sequencer — replaces agent.ts's Claude-orchestrated
  * tool-selection loop with real control flow. The LLM's job there was
@@ -436,6 +436,20 @@ export async function runLandmanSequencer(
         supabase, runId, "entry_resolution", callIndex,
         `No deterministic TRRC entry point for input type "${inputType}" without a resolvable API number, lease+district, or operator identity.`,
       );
+    }
+  }
+
+  // A TRRC outage during identity resolution is not a result: completing
+  // the run would tie nothing to a lease and quietly drop the well from its
+  // package (live 2026-09-26: the wellbore query timed out for 10 of 12
+  // wells). Stop so the worker retries the run later.
+  if (entryHandled && !state.leaseNumber && !state.apiNumberConfirmed) {
+    const { data: identity } = await supabase.from("trrc_source_attempts").select("source_name,status,error_message")
+      .eq("run_id", runId).in("source_name", ["search_by_api", "fetch_well_status"]);
+    const rows = identity ?? [];
+    const transport = (m: string | null) => /timeout|timed out|aborted|fetch failed|ECONN|EAI_AGAIN|socket|HTTP 5\d\d/i.test(m ?? "");
+    if (rows.length && rows.every(r => r["status"] !== "success" && transport(r["error_message"] as string | null))) {
+      throw new TransientRetrievalError(`TRRC well identity lookup unavailable: ${String(rows[0]["error_message"] ?? "").slice(0, 160)}`);
     }
   }
 

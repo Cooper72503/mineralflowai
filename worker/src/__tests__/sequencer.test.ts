@@ -84,7 +84,10 @@ function makeMockSupabase(runRow: Record<string, unknown> = {}, opts: { cancelle
       if (table === "trrc_source_attempts") {
         return {
           upsert: (row: Record<string, unknown>) => { attempts.push(row); upserts.source_attempts++; return Promise.resolve({ error: opts.failTable === table ? {message: "injected database failure"} : null }); },
-          select: () => ({ eq: async () => ({ data: attempts }) }),
+          select: () => ({ eq: () => {
+            const all = Promise.resolve({ data: attempts });
+            return Object.assign(all, { in: async (_k: string, names: string[]) => ({ data: attempts.filter(a => names.includes(String(a["source_name"]))) }) });
+          } }),
         };
       }
       if (table === "trrc_production_monthly") {
@@ -283,5 +286,20 @@ describe("lease-only coverage boundaries", () => {
     await runLandmanSequencer(RUN_ID,"10289",supabase);
     expect(attempts.find(a=>a.source_name === "search_by_lease")?.status).toBe("failed_transient");
     expect(attempts.find(a=>a.source_name === "fetch_severance_records")?.status).toBe("success");
+  });
+});
+
+describe("TRRC outage during identity resolution", () => {
+  it("stops the run for retry instead of completing it tied to no lease", async () => {
+    vi.mocked(ewa.searchWellbore).mockRejectedValue(new Error("TimeoutError: The operation was aborted due to timeout"));
+    vi.mocked(ewa.getWellStatus).mockRejectedValue(new Error("TimeoutError: The operation was aborted due to timeout"));
+    const { supabase } = makeMockSupabase({ resolved_primary_api: null });
+    await expect(runLandmanSequencer(RUN_ID, "4216502733", supabase)).rejects.toThrow(/identity lookup unavailable/);
+  });
+  it("still completes when TRRC answers that the well does not exist", async () => {
+    vi.mocked(ewa.searchWellbore).mockResolvedValue({ found: false, wells: [], lease_number: null, district: null, message: "No wellbores found" } as never);
+    vi.mocked(ewa.getWellStatus).mockResolvedValue({ found: false, message: "Not found" } as never);
+    const { supabase } = makeMockSupabase({ resolved_primary_api: null });
+    await expect(runLandmanSequencer(RUN_ID, "4216502733", supabase)).resolves.toBeUndefined();
   });
 });

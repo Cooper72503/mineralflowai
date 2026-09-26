@@ -24,6 +24,16 @@ describe("full worker sequence — replay real core retrieval, disclose unrecord
   const [run]=snapshot.trrc_due_diligence_runs;
   const attempts=snapshot.trrc_source_attempts;
   const production=snapshot.trrc_production_monthly;
+  // A capture whose wellbore lookup itself timed out is an outage, not a
+  // result: the run stops for retry rather than completing tied to no lease.
+  const wbError=String((data("search_by_api") as {error?:string}).error ?? "");
+  if(/timeout|aborted|fetch failed|HTTP 5\d\d/i.test(wbError)&&!(data("search_by_api") as {lease_number?:string|null}).lease_number){
+   // The well-status fallback was not captured; during the same outage it times out too.
+   vi.mocked(ewa.getWellStatus).mockRejectedValue(new Error("TimeoutError: The operation was aborted due to timeout"));
+   await expect(runLandmanSequencer("r",c.case.api10,db)).rejects.toThrow(/identity lookup unavailable/);
+   expect(run.status).not.toBe("complete");
+   return;
+  }
   await runLandmanSequencer("r",c.case.api10,db);
   expect(run.status).toBe("complete");
   expect(ewa.getGisLocation).toHaveBeenCalledWith(c.case.api10);

@@ -7,12 +7,12 @@ export function createLocalStore(run:Record<string,unknown>,checkpoint?:(snapsho
  const snapshot:LocalSnapshot={trrc_due_diligence_runs:[structuredClone(run)],trrc_source_attempts:[],trrc_production_monthly:[]};
  const db={from(table:string){
   if(!Object.prototype.hasOwnProperty.call(snapshot,table))throw Error(`Unsupported local-store table: ${table}`);
-  const filters:{key:string;value:unknown;negated:boolean}[]=[];
+  const filters:{key:string;value:unknown;negated:boolean;anyOf?:unknown[]}[]=[];
   let operation:"select"|"update"|"upsert"="select";
   let payload:Record<string,unknown>|LocalRows={};let conflict:string[]=[];
   async function execute(){
    const rows=snapshot[table as keyof LocalSnapshot];
-   const matching=(row:Record<string,unknown>)=>filters.every(f=>f.negated?row[f.key]!==f.value:row[f.key]===f.value);
+   const matching=(row:Record<string,unknown>)=>filters.every(f=>f.anyOf?f.anyOf.includes(row[f.key]):f.negated?row[f.key]!==f.value:row[f.key]===f.value);
    let data=rows.filter(matching);
    if(operation==="update")for(const row of data)Object.assign(row,payload);
    if(operation==="upsert"){
@@ -30,6 +30,7 @@ export function createLocalStore(run:Record<string,unknown>,checkpoint?:(snapsho
    select:(_columns?:string)=>chain,
    eq:(key:string,value:unknown)=>{filters.push({key,value,negated:false});return chain;},
    neq:(key:string,value:unknown)=>{filters.push({key,value,negated:true});return chain;},
+   in:(key:string,values:unknown[])=>{filters.push({key,value:null,negated:false,anyOf:values});return chain;},
    update:(patch:Record<string,unknown>)=>{operation="update";payload=patch;return chain;},
    upsert:(input:Record<string,unknown>|LocalRows,options?:{onConflict?:string})=>{operation="upsert";payload=input;conflict=(options?.onConflict??"").split(",").filter(Boolean);return chain;},
    single:async()=>{const result=await execute();return result.data.length===1?{data:result.data[0],error:null}:{data:null,error:{message:`Expected one ${table} row, received ${result.data.length}`}};},

@@ -192,9 +192,15 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     const critical = new Map<string, number>(), important = new Map<string, number>();
     for (const run of memberRuns) {
       const a = attemptsById.get(run.id) ?? [];
-      const { data: rows, error: prodError } = await db.from("trrc_production_monthly").select("*").eq("run_id", run.id).order("production_month", { ascending: false }).limit(120);
-      // A failed read must not silently drop a well's regulatory flags.
-      if (prodError) throw Error(`Production for run ${run.id.slice(0, 8)} could not be read; report withheld.`);
+      // A failed read must not silently drop a well's regulatory flags: retry
+      // a transient failure twice, then withhold the report rather than guess.
+      let rows: unknown[] | null = null, prodError: { message: string } | null = null;
+      for (let attempt = 0; attempt < 3 && rows === null; attempt++) {
+        if (attempt) await new Promise(r => setTimeout(r, 750 * attempt));
+        const res = await db.from("trrc_production_monthly").select("*").eq("run_id", run.id).order("production_month", { ascending: false }).limit(120);
+        if (res.error) prodError = res.error; else rows = res.data ?? [];
+      }
+      if (rows === null) throw Error(`Production for run ${run.id.slice(0, 8)} could not be read (${prodError?.message ?? "unknown error"}); report withheld.`);
       const flags = generateFlags(a, computeProductionAnalytics(currentProduction((rows ?? []) as unknown as TrrcDDProductionRow[], a)), run);
       for (const f of flags.critical) critical.set(f, (critical.get(f) ?? 0) + 1);
       for (const f of flags.important) important.set(f, (important.get(f) ?? 0) + 1);
