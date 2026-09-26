@@ -26,6 +26,7 @@ import { checkedQuery } from "./persistence.js";
 import { createClient } from "@supabase/supabase-js";
 import { runLandmanSequencer } from "./sequencer.js";
 import { sweepStaleTitleJobs } from "./title-recovery.js";
+import { recordEiaSnapshot } from "./eia-snapshots.js";
 import { processRetrievedTitleJob } from "./title-processing.js";
 import { runTitleResearchJob } from "./title-sequencer.js";
 import {processPackages} from "./package-jobs.js";
@@ -240,6 +241,11 @@ async function main() {
   // Frontend-owned stages (ingesting, analyzing) can stall without any worker
   // restart, so the sweep also runs periodically, not only at boot.
   setInterval(() => { recoverStaleTitleJobs().catch(console.error); }, 10 * 60 * 1000);
+  // Record EIA prices at boot and every 6 hours, so a report can still be
+  // priced from EIA's own published values if EIA is down at report time.
+  const snapshotEia = () => recordEiaSnapshot(supabase).then(p => { if (p) console.log(`[worker] recorded EIA price deck for ${p}`); }).catch(console.error);
+  await snapshotEia();
+  setInterval(snapshotEia, 6 * 60 * 60 * 1000);
 
   // Graceful shutdown
   process.on("SIGTERM", async () => {

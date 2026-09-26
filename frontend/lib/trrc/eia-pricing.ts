@@ -17,6 +17,8 @@
  * never silently presented as live data.
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 export interface ScenarioPrice {
   oilUsdBbl: number;
   gasUsdMcf: number;
@@ -25,6 +27,10 @@ export interface ScenarioPrice {
 export interface PriceDeck {
   source: "eia_live" | "static_fallback" | "user_input";
   asOf: string; // date (or period label) the price basis reflects
+  /** When the EIA values were retrieved. */
+  retrievedAt?: string;
+  /** True when live EIA failed and the latest recorded EIA pull was used. */
+  fromSnapshot?: boolean;
   wtiSpotUsdBbl: number;
   henryHubUsdMcf: number;
   scenarios: {
@@ -78,28 +84,51 @@ async function fetchEiaSeries(route: string, seriesId: string, apiKey: string, p
     .filter(r => r.period && isFinite(r.value));
 }
 
-export async function getPriceDeck(): Promise<PriceDeck> {
+export const EIA_SERIES = [
+  { route: "petroleum/pri/spt", series: "RWTC", name: "WTI Cushing spot" },
+  { route: "natural-gas/pri/fut", series: "RNGWHHD", name: "Henry Hub spot" },
+] as const;
+
+/** A recorded EIA pull older than this is not used for a report. */
+export const SNAPSHOT_MAX_AGE_DAYS = 45;
+
+/**
+ * Live EIA first. When the live call fails and a database client is given,
+ * the latest recorded EIA pull (written by the retrieval worker) is used and
+ * labeled with its retrieval time — the same EIA values, not an estimate.
+ * Only when neither exists does the placeholder deck appear, and nothing is
+ * valued on it.
+ */
+export async function getPriceDeck(db?: SupabaseClient): Promise<PriceDeck> {
   const apiKey = process.env.EIA_API_KEY;
   if (apiKey) {
     try {
       const [wtiRows, hhRows] = await Promise.all([
-        fetchEiaSeries("petroleum/pri/spt", "RWTC", apiKey, 12),
-        fetchEiaSeries("natural-gas/pri/fut", "RNGWHHD", apiKey, 12),
+        fetchEiaSeries(EIA_SERIES[0].route, EIA_SERIES[0].series, apiKey, 12),
+        fetchEiaSeries(EIA_SERIES[1].route, EIA_SERIES[1].series, apiKey, 12),
       ]);
       if (wtiRows.length > 0 && hhRows.length > 0) {
-        return buildDeck(
+        return { ...buildDeck(
           "eia_live",
           wtiRows[0].period,
           wtiRows[0].value,
           hhRows[0].value,
           average(wtiRows.map(r => r.value)),
           average(hhRows.map(r => r.value)),
-        );
+        ), retrievedAt: new Date().toISOString() };
       }
     } catch {
-      // Falls through to the static deck below — a live-fetch failure must
-      // never surface as a crash or a silently-wrong price, only a clearly
-      // labeled fallback.
+      // Falls through to the recorded deck, then the placeholder — a
+      // live-fetch failure must never surface as a crash or a
+      // silently-wrong price, only a clearly labeled fallback.
+    }
+  }
+  if (db) {
+    const { data } = await db.from("eia_price_snapshots").select("period, wti_spot_usd_bbl, henry_hub_usd_mmbtu, wti_trailing_12_usd_bbl, henry_hub_trailing_12_usd_mmbtu, retrieved_at")
+      .order("retrieved_at", { ascending: false }).limit(1).maybeSingle();
+    if (data && Date.now() - Date.parse(String(data.retrieved_at)) <= SNAPSHOT_MAX_AGE_DAYS * 86_400_000) {
+      return { ...buildDeck("eia_live", String(data.period), Number(data.wti_spot_usd_bbl), Number(data.henry_hub_usd_mmbtu), Number(data.wti_trailing_12_usd_bbl), Number(data.henry_hub_trailing_12_usd_mmbtu)),
+        retrievedAt: String(data.retrieved_at), fromSnapshot: true };
     }
   }
   return buildDeck("static_fallback", STATIC_AS_OF, STATIC_WTI_USD_BBL, STATIC_HH_USD_MCF, STATIC_WTI_USD_BBL, STATIC_HH_USD_MCF);

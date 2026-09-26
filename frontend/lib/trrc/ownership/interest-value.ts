@@ -67,7 +67,7 @@ export function valueLeaseInterests(
   /** A supplied operating cost per BOE; the basin midpoint otherwise. */
   loeOverrideUsdPerBoe: number | null = null,
 ): InterestValuation {
-  const priceBasis = `${deck.source === "eia_live" ? "Live EIA" : deck.source === "user_input" ? "Supplied" : "Placeholder"} price deck as of ${deck.asOf}`;
+  const priceBasis = `${deck.source === "eia_live" ? (deck.fromSnapshot ? `EIA (retrieved ${String(deck.retrievedAt).slice(0, 10)})` : "Live EIA") : deck.source === "user_input" ? "Supplied" : "Placeholder"} price deck as of ${deck.asOf}`;
   const wells = Math.max(1, Math.round(producingWells));
   const none = (reason: string): InterestValuation => ({ status: "unavailable", reason, priceBasis, loeUsdPerBoe: null, producingWells: wells, leaseNri: null, leaseNriBasis: null,
     economicLimitMonths: null, economicLimitAtHorizonCap: false, royaltyUnitPv10: null, royaltyUnitPv15: null, workingInterestPv10: null, workingInterestPv15: null, baseForecast: null, remainingOilBbl: null, remainingGasMcf: null,

@@ -26,6 +26,6 @@ export async function ownershipForRun(supabase: SupabaseClient, run: Record<stri
   const ownership = await loadLeaseOwnership(supabase, { leaseNumber: (run.resolved_lease_number as string | null) ?? null, leaseName });
   const proration = getAttempt(attempts, "fetch_oil_proration");
   const producingWells = producingWellCount(Array.isArray(proration?.["wells"]) ? proration!["wells"] as unknown[] : []).count;
-  const valuation = valueLeaseInterests(ownership, { monthlyOilBbl: reported.oil, monthlyGasMcf: reported.gas, fieldName: identity.field || null, county: identity.county || null }, await getPriceDeck(), producingWells);
+  const valuation = valueLeaseInterests(ownership, { monthlyOilBbl: reported.oil, monthlyGasMcf: reported.gas, fieldName: identity.field || null, county: identity.county || null }, await getPriceDeck(supabase), producingWells);
   return { ownership, valuation, leaseName };
 }
