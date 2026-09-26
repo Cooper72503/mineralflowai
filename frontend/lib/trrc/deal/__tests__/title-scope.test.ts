@@ -9,7 +9,7 @@ const analysis = {
     { api14: "42317430160000", countyName: "Martin", associations: [] },
   ],
   chronology: [{ tractLabel: "T&P RR, Blk 34 T2N, Sec 10, Howard County", contentVerified: false }, { tractLabel: "elsewhere", contentVerified: true }],
-  searchCoverage: [{ provider: "county:tyler_technologies", county: "Howard", status: "success" }, { provider: "none", county: "Martin", status: "provider_unavailable" }],
+  searchCoverage: [{ provider: "county:tyler_technologies", county: "Howard", status: "success" }, { provider: "none", county: "Martin", status: "provider_unavailable" }, { provider: "trrc_ewa", county: "Martin", status: "success" }],
 } as unknown as TitleChainAnalysis;
 
 describe("scopeTitleToLease", () => {

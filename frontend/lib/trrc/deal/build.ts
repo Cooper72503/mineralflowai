@@ -79,14 +79,18 @@ export function scopeTitleToLease(analysis: TitleChainAnalysis, leaseApis: strin
   const confirmed = new Map(analysis.tracts.filter(t => t.matchStatus === "confirmed").map(t => [t.id, t]));
   const tractIds = new Set(leaseWells.flatMap(w => w.associations.map(a => a.tractId)).filter(id => confirmed.has(id)));
   const counties = [...new Set(leaseWells.map(w => (w.countyName ?? "").toUpperCase()).filter(Boolean))];
-  const coverage = analysis.searchCoverage.filter(c => counties.includes((c.county ?? "").toUpperCase()));
+  // County clerk searches only; the TRRC lookups that resolved the wells also carry a county.
+  const coverage = analysis.searchCoverage.filter(c => (c.provider.startsWith("county:") || c.provider === "none") && counties.includes((c.county ?? "").toUpperCase()));
   if (!tractIds.size) {
     const byCounty = counties.map(county => {
       const rows = coverage.filter(c => (c.county ?? "").toUpperCase() === county);
       const name = county.charAt(0) + county.slice(1).toLowerCase();
-      if (rows.length && rows.every(r => r.status === "provider_unavailable")) return `${name} County clerk records are not online for automated search`;
+      if (rows.length && rows.every(r => r.status === "provider_unavailable")) {
+        const captcha = rows.some(r => /CAPTCHA/i.test(r.errorMessage ?? ""));
+        return captcha ? `${name} County's records site required a CAPTCHA, so it was not searched automatically` : `${name} County clerk records are not online for automated search`;
+      }
       if (!rows.length) return `${name} County was not searched`;
-      return `${name} County was searched but no recording confirmed this lease's tract`;
+      return `${name} County was searched (${rows.filter(r => r.status === "success").length} of ${rows.length} searches returned recordings), but none tied a recording to a surveyed tract under this lease's wells`;
     });
     return { analysis: null, reason: byCounty.length ? byCounty.join("; ") : "None of this lease's wells were resolved in the courthouse research scope" };
   }

@@ -528,7 +528,9 @@ function tylerCountySearch(subdomain: string): CountyRecordsProvider["search"] {
           recorded_date: (r.columns["Recording Date"] ?? [])[0] ?? "",
           doc_number,
           book_volume_page: bookVolPage,
-          legal_description: (r.columns["Legal Description"] ?? [])[0] ?? "",
+          // A recording can list several tracts; keep every legal line, not
+          // just the first (a unit designation names each section it covers).
+          legal_description: (r.columns["Legal Description"] ?? []).join(" | "),
         };
       }).filter(r => r.grantor || r.grantee);
 

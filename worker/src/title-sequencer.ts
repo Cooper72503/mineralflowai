@@ -619,7 +619,8 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
       searchedCounties.add(county);
       const r = await deps.getCountyRecords(county, q.value).catch(e => ({ found: false, status: "automated" as const, county, provider: provider.provider.id, records: [] as IndexEntry[], total_count: 0, search_url: "", message: String(e), error: String(e) }));
       const status = r.error ? "failed" : r.status === "manual_required" ? "provider_unavailable" : r.records.length > 0 ? "success" : "empty";
-      await logSearch(supabase, jobId, userId, { provider: providerId, county, queryType: q.type, queryValue: q.value, status, resultCount: r.records.length, error: r.error ?? null, sourceUrl: r.search_url });
+      // A manual-required result keeps its reason (e.g. the county's CAPTCHA) in the log.
+      await logSearch(supabase, jobId, userId, { provider: providerId, county, queryType: q.type, queryValue: q.value, status, resultCount: r.records.length, error: r.error ?? (r.status === "manual_required" ? r.message : null), sourceUrl: r.search_url });
       if (status === "failed" || status === "provider_unavailable") {
         await addReviewItem(supabase, jobId, userId, "search_incomplete", `County search incomplete: ${county} / ${q.value}`, r.error ?? r.message, { county, query: q.value, status });
       }
@@ -663,7 +664,7 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
     follow++; queries++;
     const r = await deps.getCountyRecords(f.county, f.name).catch(e => ({ found: false, status: "automated" as const, county: f.county, provider: provider.provider.id, records: [] as IndexEntry[], total_count: 0, search_url: "", message: String(e), error: String(e) }));
     const status = r.error ? "failed" : r.status === "manual_required" ? "provider_unavailable" : r.records.length > 0 ? "success" : "empty";
-    await logSearch(supabase, jobId, userId, { provider: providerId, county: f.county, queryType: "party_name", queryValue: f.name, status, resultCount: r.records.length, error: r.error ?? null, sourceUrl: r.search_url, depth: 1 });
+    await logSearch(supabase, jobId, userId, { provider: providerId, county: f.county, queryType: "party_name", queryValue: f.name, status, resultCount: r.records.length, error: r.error ?? (r.status === "manual_required" ? r.message : null), sourceUrl: r.search_url, depth: 1 });
     if (r.records.length > 0) await storeIndexEntries(supabase, jobId, f.county, r.search_url, r.records);
   }
   await corroborateCandidateTracts(supabase, jobId, userId, wells);
