@@ -32,17 +32,23 @@ export interface ProcessTitleJobResult {
 
 export async function processTitleJob(supabase: SupabaseClient, jobId: string, userId: string): Promise<ProcessTitleJobResult> {
   const out: ProcessTitleJobResult = { documentsRead: 0, instrumentsCreated: 0, extractionErrors: 0, analysisId: null, classification: null, error: null };
-  const setJob = (patch: Record<string, unknown>) =>
-    supabase.from("title_research_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", jobId).neq("status", "cancelled");
+  const setJob = async (patch: Record<string, unknown>) => {
+    const result = await supabase.from("title_research_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", jobId).neq("status", "cancelled").select("id");
+    if (result.error) throw Error(`Title stage could not be saved: ${result.error.message}`);
+    if (!result.data?.length) throw Error("Title job is unavailable or cancelled; processing stopped.");
+  };
 
   try {
     await setJob({ status: "ingesting", stage_detail: "Reading retrieved courthouse documents" });
+    let remaining = 0;
     for (let pass = 0; pass < MAX_INGEST_PASSES; pass++) {
       const r = await ingestPendingDocuments(supabase, userId, jobId, { limit: 3 });
       out.documentsRead += r.processed; out.instrumentsCreated += r.instrumentsCreated; out.extractionErrors += r.errors.length;
+      remaining = r.remaining;
       await setJob({ stage_detail: `Reading retrieved courthouse documents (${out.documentsRead} read)` });
       if (r.remaining === 0 || r.processed === 0) break;
     }
+    if (remaining > 0) throw Error(`${remaining} retrieved documents still await processing; no analysis was published.`);
     await setJob({ status: "analyzing", stage_detail: "Reconstructing the chain of title" });
     await supersedeIndexedCopies(supabase, jobId);
     await propagateLeaseAssociations(supabase, jobId, userId);
@@ -50,7 +56,7 @@ export async function processTitleJob(supabase: SupabaseClient, jobId: string, u
     const analysis = await runTitleChainAnalysis(supabase, userId, jobId);
     if (!analysis.ok) {
       out.error = analysis.error;
-      await setJob({ status: "awaiting_documents", stage_detail: `Analysis failed: ${analysis.error}` });
+      await setJob({ status: "failed", error_summary: analysis.error, stage_detail: `Analysis failed: ${analysis.error}` });
       return out;
     }
     out.analysisId = analysis.analysis.analysisId;
@@ -58,7 +64,7 @@ export async function processTitleJob(supabase: SupabaseClient, jobId: string, u
     return out;
   } catch (error) {
     out.error = error instanceof Error ? error.message : String(error);
-    await setJob({ status: "awaiting_documents", stage_detail: "Automatic document processing failed; stored evidence is preserved — retry from the job page" });
+    await setJob({ status: "failed", error_summary: out.error, stage_detail: "Automatic document processing failed; stored evidence is preserved — retry from the job page" });
     return out;
   }
 }

@@ -66,7 +66,8 @@ function DecisionSection({ deal }: { deal: Deal }) {
     ...deal.decision.reasons.slice(1).map((r, i) => e(Text, { key: i, style: S.bodyText }, r)),
     Body(`${deal.submitted} API${deal.submitted === 1 ? "" : "s"} submitted (${deal.distinctApis} distinct) resolve to ${deal.leases.length} producing lease${deal.leases.length === 1 ? "" : "s"}${wells ? ` carrying ${wells} well${wells === 1 ? "" : "s"} on TRRC's proration schedule` : ""}. Each lease's production is counted once, however many of its wells were submitted.${refs(deal.leases.flatMap(l => l.sources.wells))}`),
 
-    Sub("What the leases are worth (PV-10, all owners of record)"),
+    Sub(deal.completeness?.status === "partial" ? "Partial screening values — not a complete package valuation" : "Lease screening values (PV-10, appraisal-roll interests)"),
+    deal.completeness?.status === "partial" ? Note(`${deal.completeness.valuedLeases} of ${deal.completeness.totalLeases} identified leases valued. Unresolved evidence prevents a whole-package acquisition decision. See the stated conditions and exclusions.`) : null,
     e(Th, { cols: [["Interest", 200], ["Downside", 100, "right"], ["Base", 100, "right"], ["Upside", 100, "right"]] }),
     e(Tr, { i: 0, cols: [["Royalty and overriding royalty owners", 200], [deal.totals.royaltyAndOverridePv10 ? fmtUsd(deal.totals.royaltyAndOverridePv10.stress) : "Unavailable", 100, "right"], [deal.totals.royaltyAndOverridePv10 ? fmtUsd(deal.totals.royaltyAndOverridePv10.base) : "Unavailable", 100, "right"], [deal.totals.royaltyAndOverridePv10 ? fmtUsd(deal.totals.royaltyAndOverridePv10.upside) : "Unavailable", 100, "right"]] }),
     e(Tr, { i: 1, cols: [["Working interest (8/8ths, net of all costs)", 200], [deal.totals.workingInterestPv10 ? fmtUsd(deal.totals.workingInterestPv10.stress) : "Unavailable", 100, "right"], [deal.totals.workingInterestPv10 ? fmtUsd(deal.totals.workingInterestPv10.base) : "Unavailable", 100, "right"], [deal.totals.workingInterestPv10 ? fmtUsd(deal.totals.workingInterestPv10.upside) : "Unavailable", 100, "right"]] }),
@@ -136,6 +137,7 @@ function ProductionSection({ deal, only }: { deal: Deal; only?: number }) {
           e(ProductionChart, { months: chartRows, metricKey: "oil_bbl", title: "Oil, last 36 months", unit: "bbl/month", color: C.navy }),
           e(ProductionChart, { months: chartRows, metricKey: "gas_mcf", title: "Gas incl. casinghead, last 36 months", unit: "mcf/month", color: C.accent })),
         kv("Reported history", `${l.production.length} months through ${l.lastReportedMonth ?? "—"}${l.trailingUnreportedMonths ? `; ${l.trailingUnreportedMonths} later month(s) not yet reported` : ""}${p}`),
+        Note(`Forecast origin: the month after ${l.lastReportedMonth ?? "the last evidenced month"}. Historical screening PV is measured at that origin; it is not silently advanced to the report date. Unreported intervening months are not asserted as cash received.`),
         kv("Cumulative (reported window)", `${num(sum(l.production.map(r => r.oil_bbl ?? 0)))} bbl oil, ${num(sum(l.production.map(gasOf)))} mcf gas${p}`),
         f ? kv(`Decline fit (${l.fitPhase})`, `qi ${num(f.qi)}/month, initial decline ${f.diAnnualPct.toFixed(1)}%/yr, b ${f.b.toFixed(2)}, R² ${f.rSquared.toFixed(2)}; current decline ${f.currentAnnualDeclinePct.toFixed(1)}%/yr (${f.classification})${p}`) : kv("Decline fit", "Unavailable: fewer than six contiguous reported months."),
         l.fitWindowNote ? Note(l.fitWindowNote) : null,
@@ -207,9 +209,12 @@ function RegulatoryBlock({ deal }: { deal: Deal }) {
       Sub(`${leaseTitle(l)}${refs(l.sources.wells)}`),
       ...l.regulatory.critical.map((f, j) => Flag(`Critical: ${f}`, "red", `c${j}`)),
       ...l.regulatory.important.map((f, j) => Flag(`Important: ${f}`, "yellow", `m${j}`)),
+      ...(l.regulatory.coverage ?? []).map((c, j) => e(Text, { key: `coverage${j}`, style: S.flagItem }, `${c.api} — ${c.source.replace(/^fetch_/, "").replace(/_/g, " ")}: ${c.status.toUpperCase()}. ${c.reason} [${c.sourceId}]`)),
       ...(l.regulatory.important.some(f => /FORMS LACKING/i.test(f)) ? [] : l.wells.filter(w => w.formsLacking).map((w, j) => Flag(`Well ${w.wellNo ?? w.api10}: forms lacking on the proration schedule.`, "yellow", `f${j}`))),
       !l.regulatory.critical.length && !l.regulatory.important.length && !l.wells.some(w => w.formsLacking)
-        ? Body("No critical or important regulatory flags across the submitted wells' TRRC records (well status, compliance, plugging, orphan list, injection, permits).") : null)));
+        ? Body(l.regulatory.coverage?.length && l.regulatory.coverage.every(c => c.status === "verified")
+          ? "No critical or important flags were identified in the successfully checked sources."
+          : "Regulatory clearance is not established: one or more checks are unavailable or limited. Absence of a flagged finding is not a clean result.") : null)));
 }
 
 // ─── 7. Evidence ─────────────────────────────────────────────────────────────

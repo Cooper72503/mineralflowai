@@ -29,6 +29,7 @@ export type InterestType = "royalty" | "overriding_royalty" | "working_interest"
 type Totals = Record<InterestType, number> & { all: number };
 
 export interface RollOwner {
+  tractKey?: string;
   ownerName: string;
   inCareOf: string | null;
   interestType: InterestType;
@@ -45,6 +46,7 @@ export interface RollOwner {
 }
 
 export interface RollTract {
+  tractKey?: string;
   cadLeaseNumber: string | null;
   leaseName: string | null;
   operatorName: string | null;
@@ -82,7 +84,11 @@ const distinctive = (s: string | null) => new Set((s ?? "").toUpperCase().replac
 export function leaseNamesAgree(trrcName: string | null, rollName: string | null): boolean | null {
   const want = distinctive(trrcName), have = distinctive(rollName);
   if (!want.size || !have.size) return null;
-  return [...want].some(t => have.has(t));
+  // A common surname is not a lease identity. Preserve unit numbers and
+  // suffixes; only an explicit trailing appraisal tract designation is removed.
+  const canonical = (s: string) => s.toUpperCase().replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\b(?:TR|TRACT)\s+[A-Z0-9]+\s*$/, "").replace(/\s+/g, " ").trim();
+  return canonical(trrcName!) === canonical(rollName!);
 }
 const zero = (): Totals => ({ royalty: 0, overriding_royalty: 0, working_interest: 0, unknown: 0, all: 0 });
 
@@ -94,10 +100,17 @@ export async function loadLeaseOwnership(supabase: SupabaseClient, lease: { leas
   const rrc = lease.leaseNumber?.replace(/\D/g, "").replace(/^0+(?=\d)/, "") || null;
   if (!rrc) return empty("unavailable", null, "The API did not resolve to an RRC lease number, so the mineral roll cannot be matched.");
 
-  const { data: imports, error: importError } = await supabase.from("mineral_roll_imports")
+  const { data: allImports, error: importError } = await supabase.from("mineral_roll_imports")
     .select("id, county, tax_year, source_file_name, source_sha256, interest_type_basis").eq("status", "complete");
   if (importError) return empty("unavailable", rrc, `Mineral roll imports could not be read: ${importError.message}`);
-  if (!imports?.length) return empty("no_roll", rrc, "No appraisal-district mineral roll has been imported.");
+  if (!allImports?.length) return empty("no_roll", rrc, "No appraisal-district mineral roll has been imported.");
+  const requestedCounty = lease.county?.trim().toUpperCase();
+  const effective = allImports.filter(i => (!requestedCounty || String(i.county).trim().toUpperCase() === requestedCounty) && Number.isInteger(Number(i.tax_year)) && Number(i.tax_year) <= new Date().getUTCFullYear());
+  if (!effective.length) return empty("no_roll", rrc, `No effective appraisal-district mineral roll is imported${requestedCounty ? ` for ${requestedCounty.charAt(0) + requestedCounty.slice(1).toLowerCase()} County` : ""}.`);
+  const latestYear = new Map<string, number>();
+  for (const i of effective) latestYear.set(String(i.county).toUpperCase(), Math.max(latestYear.get(String(i.county).toUpperCase()) ?? 0, Number(i.tax_year)));
+  const imports = effective.filter(i => Number(i.tax_year) === latestYear.get(String(i.county).toUpperCase()));
+  const selectedIds = new Set(imports.map(i => String(i.id)));
 
   const { data: rows, error } = await selectAll<Record<string, unknown>>((a, b) => supabase.from("mineral_roll_interests")
     .select("import_id, cad_lease_number, owner_name, in_care_of, interest_type, interest_type_code, decimal_interest, acres, market_value, lease_name, operator_name, legal_description, mineral_account_number, source_row")
@@ -119,6 +132,8 @@ export async function loadLeaseOwnership(supabase: SupabaseClient, lease: { leas
   // Group by import and appraisal tract.
   const groups = new Map<string, Record<string, unknown>[]>();
   for (const r of rows) { const k = `${r.import_id}|${r.cad_lease_number ?? ""}`; groups.set(k, [...(groups.get(k) ?? []), r]); }
+  // Defend against stale/mixed snapshots even when an adapter returns extra rows.
+  for (const [key, members] of groups) if (!selectedIds.has(String(members[0].import_id))) groups.delete(key);
 
   const tracts: RollTract[] = [];
   const rejectedTracts: LeaseOwnership["rejectedTracts"] = [];
@@ -134,8 +149,14 @@ export async function loadLeaseOwnership(supabase: SupabaseClient, lease: { leas
       continue;
     }
     if (agrees === null) unverifiable = true;
+    const imported = imports.find(i => String(i.id) === String(members[0].import_id));
+    if (imported && imports.filter(i => String(i.county).toUpperCase() === String(imported.county).toUpperCase()).length > 1)
+      return empty("unavailable", rrc, `Multiple completed roll versions exist for ${imported.county} ${imported.tax_year}; select one effective snapshot before ownership is valued.`);
+    if (members.some(r => !Number.isFinite(num(r.decimal_interest)) || num(r.decimal_interest) === null || Number(r.decimal_interest) < 0 || Number(r.decimal_interest) > 1))
+      return empty("unavailable", rrc, "An appraisal interest has a missing or invalid decimal; no ownership allocation was inferred.");
     usedImports.add(key.split("|")[0]);
     const owners: RollOwner[] = members.map(r => ({
+      tractKey: key,
       ownerName: String(r.owner_name), inCareOf: (r.in_care_of as string | null) ?? null,
       interestType: ((r.interest_type as InterestType) ?? "unknown"), interestTypeCode: (r.interest_type_code as string | null) ?? null,
       decimal: num(r.decimal_interest) ?? 0, acres: num(r.acres), marketValue: num(r.market_value),
@@ -145,7 +166,7 @@ export async function loadLeaseOwnership(supabase: SupabaseClient, lease: { leas
     })).sort((a, b) => b.decimal - a.decimal);
     const totals = zero();
     for (const o of owners) { totals[o.interestType] += o.decimal; totals.all += o.decimal; }
-    tracts.push({ cadLeaseNumber: cad, leaseName, operatorName: owners.find(o => o.operatorName)?.operatorName ?? null,
+    tracts.push({ tractKey: key, cadLeaseNumber: cad, leaseName, operatorName: owners.find(o => o.operatorName)?.operatorName ?? null,
       legalDescription: owners.find(o => o.legalDescription)?.legalDescription ?? null, owners, totals,
       irregular: totals.all < 0.95 || totals.all > 1.05, marketValue: owners.reduce((s, o) => s + (o.marketValue ?? 0), 0), productionShare: 0 });
   }

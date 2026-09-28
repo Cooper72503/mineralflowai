@@ -38,7 +38,7 @@ async function main() {
   // 1 Intake
   const { data: pkg } = await db.from("trrc_packages").select("id,status,members_json,created_at,updated_at").eq("id", packageId).eq("user_id", userId).single();
   const members = (pkg?.members_json ?? []) as { input: string; runId: string | null; error: string | null }[];
-  check("intake", !!pkg && members.length > 0 && members.every(m => m.runId), `${members.length} members, all with runs: ${members.every(m => m.runId)}`);
+  check("intake", !!pkg && members.length > 0 && members.length <= 50 && members.every(m => m.runId), `${members.length} members, all with runs: ${members.every(m => m.runId)}`);
   check("intake", members.every(m => !m.error), members.filter(m => m.error).map(m => `${m.input}: ${m.error}`).join("; ") || "no member warnings");
 
   // 2 Retrieval
@@ -57,7 +57,7 @@ async function main() {
     // regression run that is the expected, stated outcome.
     const ambiguous = regression && /Multiple lease\/district associations/i.test(String(latest.get("search_by_api")?.result_data_json?.["message"] ?? ""));
     if (ambiguous) ambiguousApis.add(String(r.resolved_primary_api ?? ""));
-    check("retrieval", missing.length === 0 || ambiguous, `${r.resolved_primary_api}: ${latest.size} sources, ${failed.length ? `failed: ${failed.join("; ")}` : "none failed"}${missing.length ? `; required not retrieved: ${missing.join(", ")}` : ""}`);
+    check("retrieval", missing.length === 0 || (ambiguous && missing.every(n => ["fetch_production", "fetch_oil_proration"].includes(n))), `${r.resolved_primary_api}: ${latest.size} sources, ${failed.length ? `failed: ${failed.join("; ")}` : "none failed"}${missing.length ? `; required not retrieved: ${missing.join(", ")}` : ""}`);
   }
 
   // 3 Title research
@@ -73,7 +73,7 @@ async function main() {
   if (!load.ready) return finish(outDir, null);
   const deal = load.deal;
   const again = await loadDeal(db, userId, packageId);
-  const strip = (d: typeof deal) => JSON.stringify({ ...d, generatedAt: null, sources: d.sources.map(s => ({ ...s, retrievedAt: s.label === "Price deck" ? null : s.retrievedAt })) });
+  const strip = (d: typeof deal) => JSON.stringify({ ...d, generatedAt: null, deck: { ...d.deck, retrievedAt: null }, sources: d.sources.map(s => ({ ...s, retrievedAt: s.label === "Price deck" ? null : s.retrievedAt })) });
   const firstDiff = (a: unknown, b: unknown, path = ""): string | null => {
     if (JSON.stringify(a) === JSON.stringify(b)) return null;
     if (a && b && typeof a === "object" && typeof b === "object") {
@@ -106,7 +106,9 @@ async function main() {
   check("assumptions", unsourced.length === 0, unsourced.length ? `no basis for: ${unsourced.join(", ")}` : "every assumption states its basis");
   const byLease = (edits: Record<string, Record<string, unknown>>) => Object.fromEntries(Object.entries(applyAssumptionEdits(deal, edits).byLease).map(([k, v]) => [k, v.assumptions]));
   const record = assembleDecision(deal, byLease({}));
+  check("decision safety", !deal.excluded.length || record.verdict !== "BUY", `${deal.excluded.length} excluded submissions; whole-package verdict ${record.verdict}`);
   for (const r of record.leases) {
+    check("decision safety", r.verdict !== "BUY" || ![...r.missing, ...r.contradictions].some(f => f.severity >= 2), `${r.leaseKey}: ${r.verdict}; material evidence gaps cannot be sealed as BUY`);
     const s = r.economics.scenarios, e = r.entry, x = r.exit;
     const ordered = !!s && s.downside.presentValue <= s.base.presentValue && s.base.presentValue <= s.upside.presentValue && [s.downside, s.base, s.upside].every(c => Number.isFinite(c.presentValue) && c.presentValue > 0);
     check("economics", ordered, s ? `${r.leaseName}: PV ${[s.downside, s.base, s.upside].map(c => `$${Math.round(c.presentValue).toLocaleString("en-US")}`).join(" / ")}, life ${s.base.lifeMonths} mo (${r.economics.provider.name})` : `${r.leaseName}: ${r.economics.reason}`);

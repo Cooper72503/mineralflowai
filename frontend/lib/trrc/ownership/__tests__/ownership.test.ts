@@ -98,7 +98,7 @@ describe("loadLeaseOwnership", () => {
     expect((await loadLeaseOwnership(db({}) as never, { leaseNumber: null, leaseName: null })).status).toBe("unavailable");
     const otherCounty = await loadLeaseOwnership(db({ mineral_roll_imports: [IMPORT] }) as never, { leaseNumber: "59990", leaseName: null, county: "MIDLAND" });
     expect(otherCounty.status).toBe("no_roll");
-    expect(otherCounty.reason).toBe("No appraisal-district mineral roll is imported for Midland County.");
+    expect(otherCounty.reason).toBe("No effective appraisal-district mineral roll is imported for Midland County.");
     expect(otherCounty.sources).toEqual([]);
   });
 });
@@ -173,5 +173,25 @@ describe("valueLeaseInterests on a low-rate lease", () => {
     expect(b.producingWells).toBe(2);
     if (b.status === "valued") expect(b.economicLimitMonths!.base).toBeLessThan(a.economicLimitMonths!.base);
     else expect(b.reason).toContain("economic limit");
+  });
+});
+
+describe("ownership identity and effective snapshot guards", () => {
+  it("does not merge numbered units sharing a surname", () => {
+    expect(leaseNamesAgree("SMITH UNIT 1", "SMITH UNIT 2")).toBe(false);
+    expect(leaseNamesAgree("SMITH A", "SMITH B")).toBe(false);
+  });
+  it("does not combine former owners with the latest tax-year owners", async () => {
+    const r = await loadLeaseOwnership(db({ mineral_roll_imports: [{ ...IMPORT, id: "old", tax_year: 2024 }, IMPORT], mineral_roll_interests: [{ ...row("FORMER", "royalty", 1), import_id: "old" }, row("CURRENT", "royalty", 1)] }) as never, { leaseNumber: "38991", leaseName: "SHOCKLEY 3", county: "MARTIN" });
+    expect(r.owners.map(o => o.ownerName)).toEqual(["CURRENT"]);
+    expect(r.sources.map(s => s.taxYear)).toEqual([2025]);
+  });
+  it("withholds conflicting snapshots in the same year", async () => {
+    const r = await loadLeaseOwnership(db({ mineral_roll_imports: [IMPORT, { ...IMPORT, id: "other" }], mineral_roll_interests: [row("A", "royalty", 1)] }) as never, { leaseNumber: "38991", leaseName: "SHOCKLEY 3" });
+    expect(r.status).toBe("unavailable"); expect(r.reason).toContain("Multiple completed roll versions");
+  });
+  it("never attaches another county's owners even for the same lease number and name", async () => {
+    const r = await loadLeaseOwnership(db({ mineral_roll_imports: [IMPORT], mineral_roll_interests: [row("A", "royalty", 1)] }) as never, { leaseNumber: "38991", leaseName: "SHOCKLEY 3", county: "MIDLAND" });
+    expect(r.status).toBe("no_roll"); expect(r.owners).toEqual([]);
   });
 });

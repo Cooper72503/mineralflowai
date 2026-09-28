@@ -20,6 +20,6 @@ const defaultEngine: Engine = async (...args) => (await import(engineUrl)).proce
 export async function processRetrievedTitleJob(supabase: SupabaseClient, jobId: string, engine: Engine = defaultEngine): Promise<ProcessTitleJobResult | null> {
   const { data: job, error } = await supabase.from("title_research_jobs").select("user_id, status").eq("id", jobId).maybeSingle();
   if (error) throw new Error(`Title job reload failed: ${error.message}`);
-  if (!job || !["awaiting_tract_confirmation", "awaiting_documents"].includes(String(job.status))) return null;
+  if (!job || !["ingesting", "awaiting_tract_confirmation", "awaiting_documents"].includes(String(job.status))) return null;
   return engine(supabase, jobId, String(job.user_id));
 }

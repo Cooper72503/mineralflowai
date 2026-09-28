@@ -20,6 +20,9 @@ import { loadTitleForApi } from "../gold2/title-link";
 import type { TitleChainAnalysis } from "../title/chain-types";
 import type { TrrcDDProductionRow, TrrcDueDiligenceRun } from "../types";
 import { decideDeal, decideLease, offersFor, type LeaseDecision, type Offers, type Verdict } from "./underwriting";
+import { regulatoryCoverage, unreportedMonths, type RegulatoryCoverage } from "./readiness";
+import { aggregateStatus } from "../title/chain-findings";
+import { STATUS_DISPLAY } from "../title/chain-types";
 
 export interface Source { id: string; label: string; detail: string; retrievedAt: string | null; url: string | null }
 export interface DealWell { api10: string; wellNo: string | null; status: string | null; formsLacking: boolean; inPackage: boolean; onProration: boolean }
@@ -34,7 +37,7 @@ export interface DealLease {
   fit: DeclineCurveFit | null; fitPhase: "oil" | "gas" | null; fitWindowNote: string | null;
   basin: { name: string; loeRange: [number, number]; loeMidpoint: number } | null;
   ownership: LeaseOwnership; valuation: InterestValuation; offers: Offers;
-  regulatory: { critical: string[]; important: string[] };
+  regulatory: { critical: string[]; important: string[]; coverage?: Array<RegulatoryCoverage & { api: string; sourceId: string }> };
   /** Per TRRC source: how many of the lease's wells it was retrieved for, and the last failure if any. */
   coverage: { source: string; retrieved: number; wells: number; lastError: string | null; lastAt: string | null }[];
   title: { status: "published" | "in_progress" | "not_found" | "unavailable"; reason: string | null; analysis: TitleChainAnalysis | null; readInstruments: number; indexedInstruments: number };
@@ -46,6 +49,7 @@ export interface Deal {
   packageId: string; generatedAt: string;
   submitted: number; distinctApis: number;
   excluded: { input: string; api: string | null; reason: string }[];
+  completeness?: { status: "complete" | "partial"; blockers: string[]; valuedLeases: number; totalLeases: number };
   deck: PriceDeck; deckLabel: string;
   overrides: { oilUsdBbl: number | null; gasUsdMcf: number | null; loeUsdPerBoe: number | null };
   leases: DealLease[];
@@ -97,12 +101,25 @@ export function scopeTitleToLease(analysis: TitleChainAnalysis, leaseApis: strin
     return { analysis: null, reason: byCounty.length ? byCounty.join("; ") : "None of this lease's wells were resolved in the courthouse research scope" };
   }
   const labels = new Set([...tractIds].map(id => confirmed.get(id)!.tractLabel));
+  const branches = (analysis.branches ?? []).filter(b => tractIds.has(b.tractId));
+  const eventIds = new Set(branches.flatMap(b => b.events.map(e => e.eventId)));
+  const chronology = analysis.chronology.filter(r => eventIds.has(r.rowId) ||
+    // Historical analyses lack an event mapping in some rows. Never attach
+    // an ambiguous display label shared by two distinct canonical tracts.
+    (labels.has(r.tractLabel) && analysis.tracts.filter(t => t.tractLabel === r.tractLabel).length === 1));
+  const instrumentIds = new Set(chronology.map(r => r.instrumentId));
+  const documentIds = new Set(chronology.flatMap(r => r.documentId ? [r.documentId] : []));
+  const findings = (analysis.findings ?? []).filter(f => f.affectedTractId ? tractIds.has(f.affectedTractId)
+    : f.instrumentIds?.length ? f.instrumentIds.some(id => instrumentIds.has(id))
+    : f.citations?.some(c => c.documentId) ? f.citations.some(c => c.documentId && documentIds.has(c.documentId)) : true);
+  const status = aggregateStatus({ findings, confirmedTractCount: tractIds.size, verifiedInstrumentsOnConfirmedTracts: chronology.filter(r => r.contentVerified).length });
   return { reason: "", analysis: {
     ...analysis,
+    status, statusDisplay: STATUS_DISPLAY[status], branches, findings,
     tracts: analysis.tracts.filter(t => tractIds.has(t.id)),
     wells: leaseWells,
-    chronology: analysis.chronology.filter(r => labels.has(r.tractLabel)),
-    findings: analysis.findings.filter(f => !f.affectedTractId || tractIds.has(f.affectedTractId)),
+    chronology,
+    sourceInventory: (analysis.sourceInventory ?? []).filter(s => documentIds.has(s.documentId) || (s.instrumentIds ?? []).some(id => instrumentIds.has(id))),
     searchCoverage: coverage,
   } };
 }
@@ -119,9 +136,11 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
   const done = (status.data ?? []).filter(r => TERMINAL.includes(String(r.status))).length;
   if (done < runIds.length) return { ready: false, reason: `Retrieving public records: ${done} of ${runIds.length} wells complete.`, progress: { complete: done, total: runIds.length } };
   const titleIds = [...new Set((status.data ?? []).flatMap(r => r.title_research_job_id ? [String(r.title_research_job_id)] : []))];
+  const titleStates = new Map<string, string>();
   if (titleIds.length) {
     const titles = await db.from("title_research_jobs").select("id, status, stage_detail").eq("user_id", userId).in("id", titleIds);
-    if (titles.error) throw Error("Title research status could not be loaded.");
+    if (titles.error || titles.data?.length !== titleIds.length) throw Error("Title research status could not be loaded.");
+    for (const t of titles.data ?? []) titleStates.set(String(t.id), String(t.status));
     const active = (titles.data ?? []).find(t => ACTIVE_TITLE.includes(String(t.status)));
     if (active) return { ready: false, reason: `Researching courthouse records: ${String(active.stage_detail ?? active.status)}.`, progress: { complete: done, total: runIds.length } };
   }
@@ -193,8 +212,14 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
 
     // Regulatory flags across every well on the lease, each stated once.
     const critical = new Map<string, number>(), important = new Map<string, number>();
+    const regulatoryChecks: Array<RegulatoryCoverage & { api: string; sourceId: string }> = [];
     for (const run of memberRuns) {
       const a = attemptsById.get(run.id) ?? [];
+      for (const c of regulatoryCoverage(a)) {
+        const api = run.resolved_primary_api ?? run.original_input;
+        const sourceId = cite({ label: `TRRC ${c.source.replace(/^fetch_/, "").replace(/_/g, " ")}`, detail: `${api}: ${c.status}. ${c.reason}`, retrievedAt: c.attemptedAt, url: c.url });
+        regulatoryChecks.push({ ...c, api, sourceId });
+      }
       // A failed read must not silently drop a well's regulatory flags: retry
       // a transient failure twice, then withhold the report rather than guess.
       let rows: unknown[] | null = null, prodError: { message: string } | null = null;
@@ -227,7 +252,9 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     else if (titleIds.length === 1) {
       const api = memberRuns.find(r => r.title_research_job_id === titleIds[0])!.resolved_primary_api ?? stream.apis[0];
       const t = await loadTitleForApi(db, api, userId, titleIds[0]);
-      if (t.title) {
+      if (titleStates.get(titleIds[0]) !== "complete") {
+        title = { ...title, status: "unavailable", reason: `Title research is ${titleStates.get(titleIds[0]) ?? "unknown"}; any earlier analysis is not the completed result of this retrieval.` };
+      } else if (t.title) {
         const scoped = scopeTitleToLease(t.title, stream.apis, wells);
         title = scoped.analysis
           ? { status: "published", reason: null, analysis: scoped.analysis, readInstruments: scoped.analysis.chronology.filter(r => r.contentVerified).length, indexedInstruments: scoped.analysis.chronology.length }
@@ -249,24 +276,32 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     };
 
     const excludedMembers = record.inventory.members.filter(m => m.api && stream.apis.includes(m.api) && m.status !== "reconciled").length;
+    const lastReportedMonth = fitPhase === "gas" ? reported.gasLastReportedMonth : reported.oilLastReportedMonth;
+    const age = unreportedMonths(lastReportedMonth, generatedAt);
+    const evidenceGaps = regulatoryChecks.filter(c => c.status === "unavailable").map(c => `${c.api}: ${c.source}: ${c.reason}`);
+    if (age === null) evidenceGaps.push("No valid last-reported production month is established.");
+    if (!prorationAttempt) evidenceGaps.push("Proration inventory and producing-well count are unverified; any cost-floor estimate is conditional.");
+    for (const run of memberRuns) if (run.status !== "complete") evidenceGaps.push(`Run ${run.id} is ${run.status}; retained evidence is partial.`);
+    for (const c of regulatoryChecks) if (c.source === "fetch_plugging_records" && /shows this well as.*plugged/i.test(c.reason)) evidenceGaps.push(`${c.api}: GIS indicates a plugged well; certificate and remaining liability require review.`);
     const decision = decideLease({
       valuation, ownership, fitRSquared: window?.fit?.rSquared ?? null, monthsOfHistory: (fitPhase === "oil" ? reported.oil : reported.gas).length,
-      trailingUnreportedMonths: fitPhase === "gas" ? reported.trailingUnreportedGasMonths : reported.trailingUnreportedOilMonths,
+      trailingUnreportedMonths: age ?? 0,
       currentAnnualDeclinePct: window?.fit?.currentAnnualDeclinePct ?? null, producingWells: producing.count, prorationWells: prorationWells.length,
       shutInWells: prorationWells.filter(w => /SHUT/i.test(String(w["status"] ?? ""))).length, formsLackingWells: prorationWells.filter(w => w["forms_lacking"] === true).length,
       regulatoryCritical: fold(critical), regulatoryImportant: fold(important),
-      title: { status: title.status, readInstruments: title.readInstruments, indexedInstruments: title.indexedInstruments, reason: title.reason }, excludedMembers,
+      title: { status: title.status, readInstruments: title.readInstruments, indexedInstruments: title.indexedInstruments, reason: title.reason,
+        assessment: title.analysis?.status, findings: title.analysis?.findings.filter(f => f.severity !== "info" || f.type === "OCR_FAILED").map(f => f.title), openReviewItems: title.analysis?.reviewQueueOpenCount }, excludedMembers, evidenceGaps,
     });
 
     leases.push({
       key: stream.key, district: stream.district, leaseNumber: stream.leaseNumber, leaseType: stream.leaseType,
       leaseName: identity.wellName || null, field: identity.field || null, county: identity.county || null, operator: identity.operator || null, operatorNo: identity.operatorNo || null,
       apis: stream.apis, runIds: memberRuns.map(r => r.id), members: lm.map(m => ({ runId: m.runId!, api: m.api, input: m.input })), wells, producingWells: producing.count, producingWellsBasis: producing.basis,
-      production, lastReportedMonth: fitPhase === "gas" ? reported.gasLastReportedMonth : reported.oilLastReportedMonth,
-      trailingUnreportedMonths: fitPhase === "gas" ? reported.trailingUnreportedGasMonths : reported.trailingUnreportedOilMonths,
+      production, lastReportedMonth,
+      trailingUnreportedMonths: age ?? 0,
       fit: window?.fit ?? null, fitPhase, fitWindowNote: window?.reason ?? null,
       basin: basin ? { name: basin.name, loeRange: basin.loeUsdPerBoeRange, loeMidpoint: loeMidpoint(basin) } : null,
-      ownership, valuation, offers: offersFor(valuation), regulatory: { critical: fold(critical), important: fold(important) }, coverage, title, decision, sources: leaseSources,
+      ownership, valuation, offers: offersFor(valuation), regulatory: { critical: fold(critical), important: fold(important), coverage: regulatoryChecks }, coverage, title, decision, sources: leaseSources,
     });
   }
   leases.sort((a, b) => (b.valuation.totalsPv10?.base ?? 0) - (a.valuation.totalsPv10?.base ?? 0));
@@ -281,12 +316,20 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
   const grouped = new Set(leases.flatMap(l => l.apis));
   const excluded = record.inventory.members.filter(m => !m.api || !grouped.has(m.api) || m.status !== "reconciled")
     .map(m => ({ input: m.input, api: m.api, reason: m.reason ?? "Not reconciled to a lease production stream." }));
+  // The rollup also includes fixed operated-sale disclaimers. Preserve its
+  // actual inventory/identity/volume failures; assess title and economics
+  // against this report's evidence and selected interest instead.
+  const inventoryBlockers = record.decision.blockers.filter(b => /^(Entry \d+:|API |Claimed |Conflicting |Offered well count)/.test(b));
+  const blockers = [...new Set([...inventoryBlockers, ...excluded.map(m => `${m.input}: ${m.reason}`),
+    ...runs.filter(r => r.status !== "complete").map(r => `${r.original_input}: retrieval ${r.status}.`),
+    ...leases.filter(l => l.decision.verdict === "REVIEW").flatMap(l => l.decision.reasons.map(r => `${l.leaseName ?? l.leaseNumber}: ${r}`))])];
+  const completeness = { status: blockers.length ? "partial" as const : "complete" as const, blockers, valuedLeases: leases.filter(l => l.valuation.status === "valued").length, totalLeases: leases.length };
 
   return { ready: true, deal: {
-    packageId, generatedAt, submitted: record.inventory.submittedEntries, distinctApis: record.inventory.distinctValidApis, excluded, deck, deckLabel,
+    packageId, generatedAt, submitted: record.inventory.submittedEntries, distinctApis: record.inventory.distinctValidApis, excluded, deck, deckLabel, completeness,
     overrides: { oilUsdBbl: overrides.oilUsdBbl ?? null, gasUsdMcf: overrides.gasUsdMcf ?? null, loeUsdPerBoe: loeOverride },
     leases, totals: { royaltyAndOverridePv10: sum(royaltyPool), workingInterestPv10: sum(l => l.valuation.workingInterestPv10) },
-    decision: decideDeal(leases.map(l => ({ name: l.leaseName ?? `RRC ${l.district}-${l.leaseNumber}`, decision: l.decision }))), sources,
+    decision: decideDeal(leases.map(l => ({ name: l.leaseName ?? `RRC ${l.district}-${l.leaseNumber}`, decision: l.decision })), blockers), sources,
   } };
 }
 
@@ -294,7 +337,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
 export function summarizeDeal(d: Deal) {
   return {
     packageId: d.packageId, generatedAt: d.generatedAt, verdict: d.decision.verdict, reasons: d.decision.reasons, deckLabel: d.deckLabel,
-    submitted: d.submitted, excluded: d.excluded, totals: d.totals,
+    submitted: d.submitted, excluded: d.excluded, totals: d.totals, completeness: d.completeness,
     leases: d.leases.map(l => ({
       name: l.leaseName, district: l.district, leaseNumber: l.leaseNumber, county: l.county, operator: l.operator,
       apis: l.apis.length, prorationWells: l.wells.filter(w => w.onProration).length, producingWells: l.producingWells,

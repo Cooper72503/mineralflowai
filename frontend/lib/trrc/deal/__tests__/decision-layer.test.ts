@@ -104,3 +104,30 @@ describe("decision layer", () => {
     expect(lowerOil.verdict).toBe("PASS");
   });
 });
+
+// Each missing input independently gates BUY from a supported baseline.
+function supportedLease(): DealLease {
+  const l = lease();
+  l.title = { ...l.title, readInstruments: 4, analysis: { ...l.title.analysis!, status: "NO_SURFACE_DISCONTINUITIES_DETECTED", findings: [], limitations: [], reviewQueueOpenCount: 0 } };
+  l.ownership = { ...l.ownership, status: "matched", nameVerified: true, reason: null, tracts: [{ cadLeaseNumber: "T", productionShare: 1, irregular: false, owners: [], totals: { royalty: 0.25, overriding_royalty: 0, working_interest: 0.75, unknown: 0, all: 1 } }] as never };
+  l.regulatory = { critical: [], important: [], coverage: l.apis.flatMap(api => ["fetch_compliance_violations", "fetch_plugging_records", "fetch_orphan_well", "fetch_inactive_well_status", "fetch_injection_records"].map(source => ({ api, source, status: "verified" as const, reason: "Query completed", attemptedAt: "2026-09-28", url: null, sourceId: "4" }))) };
+  return l;
+}
+describe("evidence gates", () => {
+  it("retains BUY for a supported, affordable scenario", () => {
+    const l = supportedLease();
+    expect(decideLeaseRecord(l, evaluatePrototype(economicsAssetFromLease(l), defaults)).verdict).toBe("BUY");
+  });
+  it.each(["unread instruments", "unresearched tract", "unknown ownership", "stale production", "failed compliance"])("independently gates %s while retaining conditional calculations", (kind) => {
+    const l = supportedLease();
+    if (kind === "unread instruments") l.title.readInstruments = 1;
+    if (kind === "unresearched tract") l.title.analysis!.limitations = ["Section 25 has not been researched."];
+    if (kind === "unknown ownership") l.ownership = lease().ownership;
+    if (kind === "stale production") l.trailingUnreportedMonths = 24;
+    if (kind === "failed compliance") l.regulatory.coverage![0] = { ...l.regulatory.coverage![0], status: "unavailable", reason: "Compliance request failed" };
+    const r = decideLeaseRecord(l, evaluatePrototype(economicsAssetFromLease(l), defaults));
+    expect(r.verdict).toBe("REVIEW"); expect(r.economics.status).toBe("calculated");
+    const terms: Record<string, string> = { "unread instruments": "3 of 4", "unresearched tract": "Section 25", "unknown ownership": "Owners of record", "stale production": "24 completed months", "failed compliance": "Compliance request failed" };
+    expect(r.reasons.join(" ")).toContain(terms[kind]);
+  });
+});

@@ -1,3 +1,44 @@
+# Current cycle — evidence gates and automatic title handoff (2026-09-28)
+
+**GOLD reports validated: 0/10 complete acquisition decisions.**
+
+This checkpoint is based on production source f22797bc91c058c25c5ffd395194c08a9ed4facb.
+The operator reported live prototype acceptance for Buttercup (38/38), Kraken
+(46/46), Shockley (26/26), and Scharbauer (43/43). Those are prototype checks,
+not evidence that ten fully supported acquisition decisions passed. No live
+production/database run was performed in this checkpoint's environment.
+
+Implemented:
+- Per-API regulatory coverage distinguishes verified, limited GIS-only plugging,
+  and unavailable/partial checks; an empty flag list is not clearance.
+- Material title/ownership gaps prevent BUY while conditional calculations remain
+  available. Package exclusions and mixed lease decisions cannot become package BUY.
+- Production freshness uses completed calendar months, including omitted months.
+- Title remains active from retrieval into OCR; remaining pending documents or
+  failed persistence cannot silently publish a finished analysis.
+- Failed/review-paused title jobs cannot reuse an earlier analysis as current.
+- Claim linkage rejects ambiguous abstract matches and conflicting township
+  components; failed reads/writes stop publication.
+- Appraisal matching retains unit numbers, county, effective tax year and composite
+  tract identity. Multiple versions in one year require explicit resolution.
+- Lease-scoped title filters branches, evidence and findings and recomputes status.
+- Acceptance script now checks material evidence gaps against BUY, submission count,
+  and unrelated source failures even when identity is ambiguous.
+
+Local verification: frontend 977/977; worker 182/182; worker bundles built.
+See docs/novi-evidence-gates-deployment.md for production acceptance and limitations.
+
+Remaining live work:
+1. Deploy both tiers and full rebuilt worker dist; repeat authenticated intake,
+   close/reopen, recalculation and Decision Record download.
+2. Buttercup: establish Section 25 from documentary legal evidence; retrieve/read
+   remaining relevant recordings; resolve party identity findings with evidence.
+3. Verify an evidence-backed seller/interest selection; user-entered NRI remains
+   a scenario input, not proof of ownership or sale scope.
+4. Repeat the existing live demo acceptance for all four cases and the 1–50 API
+   boundary/failure cases. Do not promote fixture counts to live GOLD passes.
+
+---
 # Current cycle — authenticated retrieval resume
 
 **GOLD reports validated: 0/10.** No live acquisition acceptance added.

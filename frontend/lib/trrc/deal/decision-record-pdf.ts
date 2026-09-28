@@ -146,7 +146,8 @@ function Regulatory({ inp }: { inp: DecisionRecordInput }) {
       Sub(`${leaseTitle(l)}${refs(l.sources.wells)}`),
       ...l.regulatory.critical.map((f, j) => Bullet(`Critical: ${f}`, `c${j}`, C.red)),
       ...l.regulatory.important.map((f, j) => Bullet(`Important: ${f}`, `m${j}`, C.yellow)),
-      !l.regulatory.critical.length && !l.regulatory.important.length ? Body("No critical or important regulatory flags across the submitted wells' TRRC records.") : null,
+      !l.regulatory.critical.length && !l.regulatory.important.length ? Body(l.regulatory.coverage?.length && l.regulatory.coverage.every(c => c.status === "verified") ? "No critical or important flags identified in the verified sources." : "Regulatory clearance is not established. Limited or unavailable checks are listed below; no flagged finding does not mean a clean result.") : null,
+      ...(l.regulatory.coverage ?? []).filter(c => c.status !== "verified").map((c, j) => Bullet(`${c.api}: ${c.status.toUpperCase()} — ${c.reason} [${c.sourceId}]`, `gap${j}`, c.status === "unavailable" ? C.red : C.yellow)),
       e(Th, { cols: [["TRRC source", 170], ["Retrieved", 70, "right"], ["Last failure", 250]] }),
       ...l.coverage.map((c, j) => e(Tr, { key: j, i: j, cols: [[SOURCE_LABEL[c.source] ?? c.source, 170], [`${c.retrieved} of ${c.wells}`, 70, "right", c.retrieved < c.wells ? C.yellow : undefined], [c.retrieved < c.wells ? (c.lastError ?? "").slice(0, 90) : "—", 250]] })),
       Note("Compliance violations are searched by each well's API in TRRC's RRC OIL system (records from August 1, 2015). Plugging status comes from TRRC's GIS well layer; the online W-3 query is retired, so no W-3 certificate is asserted either way."))));
@@ -186,10 +187,10 @@ function Title({ inp, only }: { inp: DecisionRecordInput; only: number }) {
     Sub(`${leaseTitle(l)} — owners of record${refs(l.sources.roll)}`),
     l.ownership.status === "matched"
       ? e(View, {},
-          Note(`Owners and decimals as carried by the ${l.ownership.sources.map(s => `${s.county} County appraisal roll, tax year ${s.taxYear}`).join("; ")}, taken from operator division orders. Values are PV at ${r.economics.assumptions.discountRatePct}% under this record's assumptions. Mailing addresses are not printed.`),
+          Note(`Owners and decimals as carried by the ${l.ownership.sources.map(s => `${s.county} County appraisal roll, tax year ${s.taxYear}`).join("; ")}. An appraisal roll does not establish legal title or the seller’s conveyable interest. Values are PV at ${r.economics.assumptions.discountRatePct}% under this record's assumptions. Mailing addresses are not printed.`),
           e(Th, { cols: [["Owner", 220], ["Interest", 90], ["Decimal", 80, "right"], ["Value (base)", 90, "right"]] }),
           ...l.ownership.tracts.flatMap(tr => tr.owners).map((o, j) => {
-            const v = values.get(`${o.cadLeaseNumber ?? ""}|${o.sourceRow}`);
+            const v = values.get(`${o.tractKey ?? o.cadLeaseNumber ?? ""}|${o.sourceRow}`);
             return e(Tr, { key: j, i: j, cols: [[o.ownerName, 220], [TYPE_LABEL[o.interestType], 90], [fmtDec(o.decimal), 80, "right"], [v === null || v === undefined ? "—" : fmtUsd(v), 90, "right"]] });
           }))
       : Bullet(`Owners of record not established: ${(l.ownership.reason ?? "no roll matched").replace(/\.+$/, "")}. The interest in this record is the one entered by the user.`, "no", C.yellow));
@@ -203,6 +204,7 @@ function Forecast({ inp }: { inp: DecisionRecordInput }) {
       const f = r.economics.forecast, s = r.economics.scenarios, p = refs(l.sources.production);
       return e(View, { key: i, style: { marginBottom: 10 } },
         Sub(leaseTitle(l)),
+        Note(`Forecast origin: the month after the last reported production month (${l.lastReportedMonth ?? "unavailable"}). Values are conditional at that origin, not automatically rolled forward to the report date.${p}`),
         f.fit ? kv(`Decline fit (${f.phase})`, `qi ${num(f.fit.qi)}/month, initial decline ${f.fit.diAnnualPct.toFixed(1)}%/yr, b ${f.fit.b.toFixed(2)}, R² ${f.fit.rSquared.toFixed(2)}; current decline ${f.fit.currentAnnualDeclinePct.toFixed(1)}%/yr${p}`) : kv("Decline fit", "Unavailable"),
         s ? kv("Remaining (gross, base)", `${num(f.remainingGrossOilBbl)} bbl oil, ${num(f.remainingGrossGasMcf)} mcf gas over ${s.base.lifeMonths} months${s.base.atHorizonCap ? " (still economic at the 40-year cap)" : ""}`) : null,
         s ? kv("Economic life", `${s.downside.lifeMonths} months downside  |  ${s.base.lifeMonths} base  |  ${s.upside.lifeMonths} upside`) : null,
@@ -337,7 +339,7 @@ function Appendix({ inp }: { inp: DecisionRecordInput }) {
     ...[
       "Production is lease-level as reported to TRRC; well-level allocation is not attempted.",
       "The chain of title reports county clerk records; only instruments marked Read were extracted from the recorded image. It is not a title opinion.",
-      "Owner decimals, where shown, are the appraisal district's, taken from operator division orders.",
+      "Owner decimals, where shown, are reported by the appraisal district and require verification against conveyances and division orders.",
       "Forecasts are screening decline fits, not certified reserves; values are screening values, not an appraisal.",
       `Retrieval runs: ${deal.leases.flatMap(l => l.runIds).map(r => r.slice(0, 8)).join(", ") || "none"}.`,
     ].map((t, i) => Bullet(t, `s${i}`)));

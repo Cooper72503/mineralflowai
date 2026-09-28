@@ -15,6 +15,7 @@ import { CONFLICT_FINDING_TYPES, GAP_FINDING_TYPES } from "../title/chain-types"
 import { evaluatePrototype, defaultAssumptions, validateAssumptions, type EconomicsAssumptions, type AssumptionBasis, type EconomicsAsset, type EconomicsResult } from "../economics-provider";
 import type { Deal, DealLease } from "./build";
 import type { Verdict } from "./underwriting";
+import { MAX_UNREPORTED_COMPLETED_MONTHS } from "./readiness";
 
 export interface Finding { kind: "contradiction" | "missing"; severity: 1 | 2 | 3; text: string; sources: string[] }
 export interface Risk { severity: 1 | 2 | 3; text: string }
@@ -133,6 +134,17 @@ export function exitAnalysis(e: EconomicsResult, entry: EntryAnalysis | null): E
 export function reconcile(l: DealLease, e: EconomicsResult): { contradictions: Finding[]; missing: Finding[] } {
   const contradictions: Finding[] = [], missing: Finding[] = [];
   const src = l.sources;
+  for (const c of l.regulatory.coverage ?? []) {
+    if (c.status !== "verified") missing.push({ kind: "missing", severity: c.status === "unavailable" ? 3 : 1,
+      text: `${c.api}: ${c.source}: ${c.reason}`, sources: [c.sourceId] });
+  }
+  for (const c of l.coverage ?? []) if (c.retrieved < c.wells)
+    missing.push({ kind: "missing", severity: 3, text: `${c.source} was verified for ${c.retrieved} of ${c.wells} wells: ${c.lastError ?? "retrieval incomplete"}.`, sources: src.wells });
+  if (!l.regulatory.coverage?.length) missing.push({ kind: "missing", severity: 3, text: "Per-well regulatory coverage has not been established for this report version.", sources: src.wells });
+  if (l.ownership.status === "matched" && !l.ownership.nameVerified)
+    missing.push({ kind: "missing", severity: 3, text: "Appraisal ownership is not verified against this lease's identity.", sources: src.roll });
+  for (const tr of l.ownership.tracts.filter(t => t.irregular))
+    contradictions.push({ kind: "contradiction", severity: 3, text: `Appraisal tract ${tr.cadLeaseNumber} decimals do not reconcile.`, sources: src.roll });
   const opTrrc = norm(l.operator);
   const rollOps = [...new Set(l.ownership.tracts.map(t => t.operatorName).filter((x): x is string => !!x))];
   for (const op of rollOps) {
@@ -147,6 +159,8 @@ export function reconcile(l: DealLease, e: EconomicsResult): { contradictions: F
 
   const t = l.title.analysis;
   if (t) {
+    if (t.status !== "NO_SURFACE_DISCONTINUITIES_DETECTED") missing.push({ kind: "missing", severity: 3, text: `Title assessment: ${t.statusDisplay ?? t.status ?? "not established"}.`, sources: src.title });
+    if (t.reviewQueueOpenCount > 0) missing.push({ kind: "missing", severity: 3, text: `${t.reviewQueueOpenCount} title review item(s) remain unresolved in the linked research scope.`, sources: src.title });
     // One line per kind of finding, with its count: the analysis records one finding per instance.
     const findings = t.findings;
     const grouped = (types: string[], text: (f: typeof findings[number], n: number) => string, kind: Finding["kind"]) => {
@@ -176,7 +190,7 @@ export function reconcile(l: DealLease, e: EconomicsResult): { contradictions: F
     missing.push({ kind: "missing", severity: 2, text: `Owners of record not established from an appraisal roll (${(l.ownership.reason ?? "not matched").replace(/\.+$/, "")}); the entered interest (${e.assumptions.netRevenueInterest}) is the user's and is unverified.`, sources: src.roll });
   }
   missing.push({ kind: "missing", severity: 1, text: "Production is reported to TRRC by lease; well-level allocation is not attempted here.", sources: src.production });
-  if (l.trailingUnreportedMonths >= 3) missing.push({ kind: "missing", severity: 2, text: `${l.trailingUnreportedMonths} recent months have no reported production.`, sources: src.production });
+  if (l.trailingUnreportedMonths > MAX_UNREPORTED_COMPLETED_MONTHS) missing.push({ kind: "missing", severity: 3, text: `${l.trailingUnreportedMonths} completed months have no reported production; current valuation requires updated evidence.`, sources: src.production });
   missing.push({ kind: "missing", severity: 1, text: "A title opinion and the seller's division order are required before closing; the chain here is evidence of the record.", sources: [] });
   if (!e.assumptions.askingPriceUsd) missing.push({ kind: "missing", severity: 1, text: "No asking price entered: IRR, payout and the entry position are not calculated.", sources: [] });
   return { contradictions, missing };
@@ -196,7 +210,9 @@ export function decideLeaseRecord(l: DealLease, e: EconomicsResult): LeaseDecisi
   else if (l.fit.rSquared < 0.6) review.push(`The decline fit explains little of the history (R-squared ${l.fit.rSquared.toFixed(2)}).`);
   for (const f of l.regulatory.critical) review.push(`Regulatory: ${f}`);
   for (const c of contradictions.filter(c => c.severity === 3)) review.push(c.text);
-  for (const m of missing.filter(m => m.severity === 3)) conditions.push(m.text);
+  for (const m of missing.filter(m => m.severity >= 2)) { review.push(m.text); conditions.push(m.text); }
+  // Even medium-severity title conflicts cannot be left outside the verdict.
+  for (const c of contradictions.filter(c => c.text.startsWith("Title:") && c.severity < 3)) review.push(c.text);
   conditions.push("Close subject to title examination and the seller's division order.");
   if (entry?.position === "above range, under ceiling") conditions.push(`Negotiate toward $${Math.round(entry.rangeHigh).toLocaleString("en-US")}: the asking price is above the recommended range but under the ceiling.`);
 
@@ -227,12 +243,15 @@ export function assembleDecision(deal: Deal, assumptionsByLease: Record<string, 
     const a = assumptionsByLease[l.key] ?? defaultsForLease(l, deal).assumptions;
     return decideLeaseRecord(l, evaluatePrototype(economicsAssetFromLease(l), a));
   });
-  const dealFindings: Finding[] = deal.excluded.map(x => ({ kind: "missing", severity: 2, text: `${x.input}: ${x.reason}`, sources: [] }));
+  const dealFindings: Finding[] = deal.excluded.map(x => ({ kind: "missing", severity: 3, text: `${x.input}: ${x.reason}`, sources: [] }));
+  for (const reason of deal.completeness?.blockers ?? []) if (!dealFindings.some(f => f.text === reason))
+    dealFindings.push({ kind: "missing", severity: 3, text: reason, sources: [] });
+  if (deal.deck.source === "static_fallback") dealFindings.push({ kind: "missing", severity: 3, text: "No sourced EIA deck is available. Starting prices are fallback assumptions; displayed economics are conditional, not a supported acquisition value.", sources: [] });
   const buy = leases.filter(l => l.verdict === "BUY"), review = leases.filter(l => l.verdict === "REVIEW"), pass = leases.filter(l => l.verdict === "PASS");
-  const verdict: Verdict = buy.length ? "BUY" : review.length || !leases.length ? "REVIEW" : "PASS";
+  const verdict: Verdict = dealFindings.some(f => f.severity >= 2) || review.length || (buy.length && pass.length) || !leases.length ? "REVIEW" : buy.length ? "BUY" : "PASS";
   const reasons = !leases.length ? ["No submitted API reconciled to a producing lease."]
     : verdict === "BUY" ? [`Buy ${buy.map(l => l.leaseName).join(", ")}.`, ...(review.length ? [`Hold ${review.map(l => l.leaseName).join(", ")} for review.`] : []), ...(pass.length ? [`Pass on ${pass.map(l => l.leaseName).join(", ")}.`] : [])]
-    : leases.flatMap(l => l.reasons.map(r => `${l.leaseName}: ${r}`));
+    : [...dealFindings.map(f => f.text), ...(buy.length && pass.length ? ["Mixed lease outcomes: the submitted package is not approved as a whole."] : []), ...leases.flatMap(l => l.reasons.map(r => `${l.leaseName}: ${r}`))];
   return { verdict, reasons, leases, dealFindings };
 }
 
@@ -245,7 +264,7 @@ export function ownerValuesUnder(l: DealLease, a: EconomicsAssumptions): Map<str
   const wiCache = new Map<number, number | null>();
   for (const t of l.ownership.tracts) {
     for (const o of t.owners) {
-      const key = `${o.cadLeaseNumber ?? ""}|${o.sourceRow}`;
+      const key = `${o.tractKey ?? o.cadLeaseNumber ?? ""}|${o.sourceRow}`;
       if (unit.status !== "calculated") { values.set(key, null); continue; }
       if (o.interestType === "royalty" || o.interestType === "overriding_royalty") values.set(key, unit.scenarios!.base.presentValue * t.productionShare * o.decimal);
       else if (o.interestType === "working_interest" && t.totals.working_interest > 0) {

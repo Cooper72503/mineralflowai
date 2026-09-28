@@ -110,9 +110,9 @@ export function valueLeaseInterests(
     if (!wiByNri.has(k)) wiByNri.set(k, each(s => pv(forecastNetCashFlowSeries({ ...base, operating: { workingInterest: 1, netRevenueInterest: Math.min(1, Math.max(0.0001, k)), variableLoeUsdPerBoe: loe!, workoverReserveUsdPerBoe: WORKOVER_USD_PER_BOE, ...taxes } }, deck.scenarios[s]).netCashFlowByMonth, 0.10)));
     return wiByNri.get(k)!;
   };
-  const shareOf = new Map(ownership.tracts.map(t => [t.cadLeaseNumber, t]));
+  const shareOf = new Map(ownership.tracts.map(t => [t.tractKey ?? t.cadLeaseNumber, t]));
   const owners: OwnerValue[] = ownership.owners.map(o => {
-    const t = shareOf.get(o.cadLeaseNumber);
+    const t = shareOf.get(o.tractKey ?? o.cadLeaseNumber);
     const share = t?.productionShare ?? 0;
     let v10: ByScenario | null = null, v15: ByScenario | null = null;
     if (o.interestType === "royalty" || o.interestType === "overriding_royalty") {

@@ -14,7 +14,7 @@ const owned: LeaseOwnership = { status: "matched", rrcLeaseNumber: "1", sources:
 const signals = (over: Partial<LeaseSignals> = {}): LeaseSignals => ({
   valuation: valued(), ownership: owned, fitRSquared: 0.9, monthsOfHistory: 36, trailingUnreportedMonths: 1, currentAnnualDeclinePct: 20,
   producingWells: 2, prorationWells: 2, shutInWells: 0, formsLackingWells: 0, regulatoryCritical: [], regulatoryImportant: [],
-  title: { status: "published", readInstruments: 5, indexedInstruments: 20, reason: null }, excludedMembers: 0, ...over,
+  title: { status: "published", readInstruments: 5, indexedInstruments: 20, reason: null, assessment: "NO_SURFACE_DISCONTINUITIES_DETECTED" }, excludedMembers: 0, ...over,
 });
 
 describe("offersFor", () => {
@@ -65,11 +65,11 @@ describe("decideLease", () => {
 });
 
 describe("decideDeal", () => {
-  it("buys the buyable leases and names what it holds or passes", () => {
+  it("does not buy a whole package when only a subset is buyable", () => {
     const buy = decideLease(signals()), pass = decideLease(signals({ valuation: valued({ economicLimitMonths: { stress: 1, base: 2, upside: 3 } }) }));
     const d = decideDeal([{ name: "A", decision: buy }, { name: "B", decision: pass }]);
-    expect(d.verdict).toBe("BUY");
-    expect(d.reasons).toEqual(["Buy A within the offer ranges.", "Pass on B."]);
+    expect(d.verdict).toBe("REVIEW");
+    expect(d.reasons.join(" ")).toContain("mixed outcomes");
     expect(buy.reasons[1]).toContain("close subject to title examination");
   });
   it("reviews when nothing reconciles", () => {

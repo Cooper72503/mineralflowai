@@ -772,8 +772,8 @@ export async function runTitleResearchJob(jobId: string, supabase: SupabaseClien
   if (await isCancelled()) return;
   const resolvedCount = ((refreshed ?? []) as JobWellRow[]).filter(w => w.resolution_status === "resolved").length;
   await setJob(supabase, jobId, {
-    status: "awaiting_tract_confirmation",
-    stage_detail: candidateCount > 0 ? "Review proposed surface surveys and confirm the subject tract(s) using supporting documents" : resolvedCount > 0 ? "Well resolved, but no supported tract candidate is available — supply a legal description or documents" : "No well could be resolved — supply a legal description or documents to continue",
-    progress_percent: 100,
+    status: "ingesting",
+    stage_detail: candidateCount ? "Retrieval finished; automatic document processing is pending" : `Retrieval finished (${resolvedCount} wells resolved); no supported tract candidate yet; automatic document processing is pending`,
+    progress_percent: 80,
   });
 }

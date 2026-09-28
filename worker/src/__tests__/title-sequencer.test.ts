@@ -137,7 +137,7 @@ describe("runTitleResearchJob (FIXTURE stubs)", () => {
     expect(providerLog!.source_url).toMatch(/texasfile/);
     expect(store.title_review_items.some(r => r.kind === "provider_unavailable")).toBe(true);
     expect((store.title_research_jobs[0].limitations_json as string[]).some(l => /Martin County/.test(l))).toBe(true);
-    expect(store.title_research_jobs[0].status).toBe("awaiting_tract_confirmation");
+    expect(store.title_research_jobs[0].status).toBe("ingesting");
     expect(store.title_search_log.filter(l => l.provider === "trrc_ewa").length).toBeGreaterThanOrEqual(3);
   });
 
@@ -190,7 +190,7 @@ describe("title handoff regression", () => {
     expect(store.title_canonical_tracts).toHaveLength(1);
     expect(store.title_canonical_tracts[0]).toMatchObject({ abstract_number: "A-1234", block_number: "35", section_name: "12", gross_acres: null, match_status: "proposed", needs_user_selection: true });
     expect(store.title_well_tract_associations[0]).toMatchObject({ well_id: "well-1", association_type: "surface_location", review_status: "proposed" });
-    expect(store.title_research_jobs[0].status).toBe("awaiting_tract_confirmation");
+    expect(store.title_research_jobs[0].status).toBe("ingesting");
     store.title_canonical_tracts[0].match_status = "confirmed";
     store.title_well_tract_associations[0].review_status = "confirmed";
     store.title_research_jobs[0].status = "pending";
