@@ -117,7 +117,7 @@ export interface OperatingCashFlowAssumptions {
   gasSeveranceFraction: number;
 }
 
-interface MonthlyEconomics {
+export interface MonthlyEconomics {
   grossRevenue: number; severanceTax: number; adValorem: number;
   loe: number; workoverReserve: number; swdDisposal: number; netCashFlow: number;
 }
@@ -405,6 +405,8 @@ export interface CashFlowSeries {
   economicLimitAtHorizonCap?: boolean;
   /** The operator's per-BOE operating cost used for the economic limit. */
   operatorLoeUsdPerBoe?: number | null;
+  /** Each forecast month's revenue, taxes and costs for the valued interest. */
+  components?: MonthlyEconomics[];
 }
 
 export function forecastNetCashFlowSeries(
@@ -472,7 +474,7 @@ export function forecastNetCashFlowSeries(
   // A cost-free interest (royalty: no operating cost supplied) never carries the floor.
   const chargesCost = !input.operating || input.operating.variableLoeUsdPerBoe > 0;
   const months = computeMonthlyEconomics(adjustedPrice, oilForecast, gasForecast, loeUsdPerBoe, avgMonthlyWaterBbl, input.nglAndBasis ?? null, input.operating ?? null, chargesCost ? floor : 0);
-  return { sufficientData: true, forecastOilByMonth: oilForecast.map(p=>p.rate), forecastGasByMonth: gasForecast.map(p=>p.rate), netCashFlowByMonth: months.map(m => m.netCashFlow), loeUsdPerBoe, oilFit, gasFit, economicLimitMonths, economicLimitAtHorizonCap, operatorLoeUsdPerBoe };
+  return { sufficientData: true, forecastOilByMonth: oilForecast.map(p=>p.rate), forecastGasByMonth: gasForecast.map(p=>p.rate), netCashFlowByMonth: months.map(m => m.netCashFlow), loeUsdPerBoe, oilFit, gasFit, economicLimitMonths, economicLimitAtHorizonCap, operatorLoeUsdPerBoe, components: months };
 }
 
 export function computeEconomics(

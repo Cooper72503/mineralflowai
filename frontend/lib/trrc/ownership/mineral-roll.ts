@@ -90,7 +90,7 @@ function empty(status: LeaseOwnership["status"], rrcLeaseNumber: string | null, 
   return { status, rrcLeaseNumber, sources, tracts: [], rejectedTracts, nameVerified: false, productionShareBasis: null, owners: [], reason };
 }
 
-export async function loadLeaseOwnership(supabase: SupabaseClient, lease: { leaseNumber: string | null; leaseName: string | null }): Promise<LeaseOwnership> {
+export async function loadLeaseOwnership(supabase: SupabaseClient, lease: { leaseNumber: string | null; leaseName: string | null; county?: string | null }): Promise<LeaseOwnership> {
   const rrc = lease.leaseNumber?.replace(/\D/g, "").replace(/^0+(?=\d)/, "") || null;
   if (!rrc) return empty("unavailable", null, "The API did not resolve to an RRC lease number, so the mineral roll cannot be matched.");
 
@@ -106,7 +106,15 @@ export async function loadLeaseOwnership(supabase: SupabaseClient, lease: { leas
 
   const allSources: RollSource[] = imports.map(i => ({ county: String(i.county), taxYear: Number(i.tax_year), fileName: String(i.source_file_name), sha256: String(i.source_sha256), interestTypeBasis: (i.interest_type_basis as string | null) ?? null }));
   const rollNames = allSources.map(s => `${s.county} ${s.taxYear}`).join(", ");
-  if (!rows.length) return empty("no_match", rrc, `No owner on the imported roll(s) (${rollNames}) carries RRC lease ${rrc}.`, allSources);
+  if (!rows.length) {
+    // Say the real reason when the lease's own county has no roll, and cite no other county's roll.
+    const county = (lease.county ?? "").trim().toUpperCase();
+    if (county && !allSources.some(src => src.county.toUpperCase() === county)) {
+      const name = county.charAt(0) + county.slice(1).toLowerCase();
+      return empty("no_roll", rrc, `No appraisal-district mineral roll is imported for ${name} County.`);
+    }
+    return empty("no_match", rrc, `No owner on the imported roll(s) (${rollNames}) carries RRC lease ${rrc}.`, allSources);
+  }
 
   // Group by import and appraisal tract.
   const groups = new Map<string, Record<string, unknown>[]>();

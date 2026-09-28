@@ -4,19 +4,22 @@
  *
  *   npx tsx scripts/demo-acceptance.ts <packageId> <userId> [outDir] [lease=apis ...] [--regression]
  *
- * --regression accepts a lease that cannot be valued only when the report
- * states why (for example, no mineral roll imported for its county) and the
- * verdict is REVIEW; the demo package itself is always checked strictly.
+ * --regression accepts wells TRRC carries on several leases (none current)
+ * when the package excludes them with a stated reason.
+ *
+ * Owners of record may be unestablished (no appraisal roll for the county)
+ * only when the Decision Record says so; the interest is then the user's.
  *
  * Needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (reads only).
- * Exit code 0 only when every check passes. Writes the acquisition report PDF
+ * Exit code 0 only when every check passes. Writes the Decision Record PDF
  * and a JSON of the deal to outDir. Nothing here changes the data.
  */
 import { createClient } from "@supabase/supabase-js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { loadDeal } from "../lib/trrc/deal/build";
-import { renderDealPdf } from "../lib/trrc/deal/pdf";
+import { applyAssumptionEdits, assembleDecision } from "../lib/trrc/deal/decision-layer";
+import { renderDecisionRecordPdf } from "../lib/trrc/deal/decision-record-pdf";
 
 const REQUIRED_SOURCES = ["search_by_api", "fetch_production", "fetch_oil_proration", "fetch_gis_plat", "fetch_plugging_records", "fetch_compliance_violations"];
 
@@ -89,26 +92,48 @@ async function main() {
   for (const l of deal.leases) {
     const tag = `${l.leaseName} ${l.district}-${l.leaseNumber}`;
     check("production", l.production.length >= 12 && !!l.fit, `${tag}: ${l.production.length} months through ${l.lastReportedMonth}, fit R² ${l.fit?.rSquared.toFixed(2) ?? "none"}`);
-    const statedGap = regression && l.ownership.status !== "matched" && !!l.ownership.reason && l.valuation.status !== "valued" && l.decision.verdict === "REVIEW";
-    check("ownership", statedGap || (l.ownership.status === "matched" && l.ownership.nameVerified && l.ownership.tracts.every(t => !t.irregular)), `${tag}: ${l.ownership.status}, ${l.ownership.owners.length} owners, ${l.ownership.tracts.length} tract(s), rejected ${l.ownership.rejectedTracts.length}${l.ownership.reason ? `, ${l.ownership.reason}` : ""}`);
-    const v = l.valuation;
-    const finite = v.status === "valued" && [v.royaltyUnitPv10, v.workingInterestPv10, v.totalsPv10].every(x => x && Object.values(x).every(Number.isFinite));
-    check("economics", statedGap || (finite && v.owners.every(o => o.interestType === "unknown" || o.pv10 !== null)), `${tag}: ${v.status}${v.reason ? ` (${v.reason})` : ""}, base PV-10 all owners $${Math.round(v.totalsPv10?.base ?? 0).toLocaleString("en-US")}, life ${v.economicLimitMonths?.base ?? "-"} mo`);
-    const offersOk = l.offers.status === "calculated" && l.offers.ranges.every(r => r.low <= r.high && r.high <= r.ceiling && r.low > 0);
-    check("decision", !!l.decision.verdict && l.decision.reasons.length > 0 && (l.valuation.status !== "valued" || offersOk), `${tag}: ${l.decision.verdict} — ${l.decision.reasons[0]}`);
+    const ownershipStated = l.ownership.status !== "matched" && !!l.ownership.reason;
+    check("ownership", ownershipStated || (l.ownership.status === "matched" && l.ownership.nameVerified && l.ownership.tracts.every(t => !t.irregular)), `${tag}: ${l.ownership.status}, ${l.ownership.owners.length} owners, ${l.ownership.tracts.length} tract(s), rejected ${l.ownership.rejectedTracts.length}${l.ownership.reason ? `, ${l.ownership.reason}` : ""}`);
     check("title", l.title.status === "published" ? l.title.indexedInstruments > 0 : !!l.title.reason, `${tag}: ${l.title.status}${l.title.status === "published" ? `, ${l.title.indexedInstruments} recordings, ${l.title.readInstruments} read` : `, ${l.title.reason}`}`);
     const cited = [...l.sources.production, ...l.sources.wells, ...l.sources.roll, ...l.sources.title];
     check("citations", cited.length >= 3 && cited.every(id => deal.sources.some(s => s.id === id)) && (l.title.status !== "published" || l.sources.title.length > 0), `${tag}: cites [${cited.join(", ")}]`);
   }
-  check("decision", !!deal.decision.verdict, `deal: ${deal.decision.verdict} — ${deal.decision.reasons.join(" ")}`);
+
+  // 8 Decision layer under the starting assumptions, and recalculation
+  const start = applyAssumptionEdits(deal, {});
+  check("assumptions", start.errors.length === 0, start.errors.join(" ") || "every lease's starting assumptions are valid and sourced");
+  const unsourced = Object.values(start.byLease).flatMap(v => Object.entries(v.basis).filter(([, b]) => !b).map(([k]) => k));
+  check("assumptions", unsourced.length === 0, unsourced.length ? `no basis for: ${unsourced.join(", ")}` : "every assumption states its basis");
+  const byLease = (edits: Record<string, Record<string, unknown>>) => Object.fromEntries(Object.entries(applyAssumptionEdits(deal, edits).byLease).map(([k, v]) => [k, v.assumptions]));
+  const record = assembleDecision(deal, byLease({}));
+  for (const r of record.leases) {
+    const s = r.economics.scenarios, e = r.entry, x = r.exit;
+    const ordered = !!s && s.downside.presentValue <= s.base.presentValue && s.base.presentValue <= s.upside.presentValue && [s.downside, s.base, s.upside].every(c => Number.isFinite(c.presentValue) && c.presentValue > 0);
+    check("economics", ordered, s ? `${r.leaseName}: PV ${[s.downside, s.base, s.upside].map(c => `$${Math.round(c.presentValue).toLocaleString("en-US")}`).join(" / ")}, life ${s.base.lifeMonths} mo (${r.economics.provider.name})` : `${r.leaseName}: ${r.economics.reason}`);
+    check("entry", !!e && e.rangeLow > 0 && e.rangeLow <= e.rangeHigh && e.rangeHigh <= e.ceiling, e ? `${r.leaseName}: range $${Math.round(e.rangeLow).toLocaleString("en-US")}–$${Math.round(e.rangeHigh).toLocaleString("en-US")}, ceiling $${Math.round(e.ceiling).toLocaleString("en-US")}` : `${r.leaseName}: no entry analysis`);
+    check("exit", !!x && Object.values(x.byScenario).every(v => Number.isFinite(v.total) && v.multiple !== null && v.irrPct !== null), x ? `${r.leaseName}: ${x.holdYears}-yr hold, base ${x.byScenario.base.multiple?.toFixed(2)}x, IRR ${x.byScenario.base.irrPct?.toFixed(1)}%` : `${r.leaseName}: no exit analysis`);
+    check("decision", !!r.verdict && r.reasons.length > 0, `${r.leaseName}: ${r.verdict} — ${r.reasons[0]}`);
+    const l = deal.leases.find(z => z.key === r.leaseKey)!;
+    if (l.ownership.status !== "matched") check("ownership", r.missing.some(m => m.text.startsWith("Owners of record not established")), `${r.leaseName}: the record states owners of record are not established and the interest is the user's`);
+    // Recalculate: doubling the decimal doubles the value; an asking price above the ceiling is a PASS.
+    const nri = start.byLease[r.leaseKey].assumptions.netRevenueInterest;
+    const doubled = assembleDecision(deal, byLease({ [r.leaseKey]: { netRevenueInterest: nri * 2 } })).leases.find(z => z.leaseKey === r.leaseKey)!;
+    const ratio = s && doubled.economics.scenarios ? doubled.economics.scenarios.base.presentValue / s.base.presentValue : NaN;
+    check("recalculate", Math.abs(ratio - 2) < 1e-9, `${r.leaseName}: doubling the decimal scales value ${ratio.toFixed(6)}x`);
+    if (e) {
+      const dear = assembleDecision(deal, byLease({ [r.leaseKey]: { askingPriceUsd: Math.round(e.ceiling * 1.2) } })).leases.find(z => z.leaseKey === r.leaseKey)!;
+      check("recalculate", dear.verdict === "PASS", `${r.leaseName}: asking 20% over the ceiling gives ${dear.verdict}`);
+    }
+  }
+  check("decision", !!record.verdict, `deal: ${record.verdict} — ${record.reasons.join(" ")}`);
   if (ambiguousApis.size) {
     const inputsFor = (api: string) => members.filter(m => m.input.replace(/\D/g, "").startsWith(api.replace(/\D/g, "").slice(0, 10)));
     const unlisted = [...ambiguousApis].filter(api => !inputsFor(api).every(m => deal.excluded.some(x => x.input === m.input && x.reason)));
     check("grouping", unlisted.length === 0, unlisted.length ? `ambiguous APIs not listed as excluded: ${unlisted.join(", ")}` : `${ambiguousApis.size} API(s) with ambiguous lease associations are excluded from valuation with a stated reason`);
   }
 
-  // 9 Report
-  const pdf = await renderDealPdf(deal);
+  // 9 Decision Record
+  const pdf = await renderDecisionRecordPdf({ deal, record, basisByLease: Object.fromEntries(Object.entries(start.byLease).map(([k, v]) => [k, v.basis])), editedByLease: {} });
   const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default as (b: Buffer, o?: Record<string, unknown>) => Promise<{ numpages: number; text: string }>;
   const pageText: string[] = [];
   const parsed = await pdfParse(pdf, { pagerender: async (page: { getTextContent: () => Promise<{ items: { str: string }[] }> }) => {
@@ -117,14 +142,14 @@ async function main() {
     return text;
   } });
   // A page holding only the running header and footer is a layout defect.
-  const bare = pageText.map((t, i) => [i + 1, t.replace(/MineralFlow AI — Acquisition Report|Package \S+ · \S+|CONFIDENTIAL — Public-record screening, not a title opinion, reserve report or appraisal|\d+ \/ \d+/g, "").trim().length] as const).filter(([, n]) => n < 40);
+  const bare = pageText.map((t, i) => [i + 1, t.replace(/MineralFlow AI — Decision Record|Package \S+ · \S+|CONFIDENTIAL — Public-record screening, not a title opinion, reserve report or appraisal|\d+ \/ \d+/g, "").trim().length] as const).filter(([, n]) => n < 40);
   check("report", bare.length === 0, bare.length ? `pages with no content: ${bare.map(([p]) => p).join(", ")}` : "no blank pages");
-  const needed = ["1. DECISION", "2. LEASE AND WELLS", "3. PRODUCTION AND FORECAST", "4. OWNERSHIP", "5. CHAIN OF TITLE", "6. REGULATORY", "7. EVIDENCE", ...deal.leases.map(l => l.leaseName ?? l.leaseNumber)];
+  const needed = ["1. EXECUTIVE DECISION SUMMARY", "2. ASSET AND API OVERVIEW", "3. WELL AND LEASE IDENTITY", "4. PRODUCTION", "5. RRC AND REGULATORY DILIGENCE", "6. TITLE AND OWNERSHIP", "7. FORECAST", "8. SCENARIO ASSUMPTIONS", "9. ECONOMICS", "10. MINERALFLOW ENTRY ANALYSIS", "11. MINERALFLOW EXIT ANALYSIS", "12. RISKS, CONTRADICTIONS AND MISSING DILIGENCE", "13. SOURCE AND EVIDENCE APPENDIX", ...deal.leases.map(l => l.leaseName ?? l.leaseNumber)];
   const flat = (t: string) => t.replace(/\s+/g, "");
   const absent = needed.filter(s => !flat(parsed.text).includes(flat(s)));
   const junk = ["undefined", "NaN", "[object", "Infinity"].filter(s => parsed.text.includes(s));
   if (/[^.]\.\.(?!\.)/.test(parsed.text)) junk.push("double period");
-  check("report", absent.length === 0, absent.length ? `missing: ${absent.join(", ")}` : `${parsed.numpages} pages, all seven sections and every lease present`);
+  check("report", absent.length === 0, absent.length ? `missing: ${absent.join(", ")}` : `${parsed.numpages} pages, all thirteen sections and every lease present`);
   check("report", junk.length === 0, junk.length ? `found: ${junk.join(", ")}` : "no undefined/NaN/[object] text");
   return finish(outDir, { deal, pdf });
 }
@@ -132,7 +157,7 @@ async function main() {
 function finish(outDir: string, out: { deal: unknown; pdf: Buffer } | null) {
   mkdirSync(outDir, { recursive: true });
   if (out) {
-    writeFileSync(path.join(outDir, "acquisition-report.pdf"), out.pdf);
+    writeFileSync(path.join(outDir, "decision-record.pdf"), out.pdf);
     writeFileSync(path.join(outDir, "deal.json"), JSON.stringify(out.deal, null, 1));
   }
   const failed = checks.filter(c => !c.ok);

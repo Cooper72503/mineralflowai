@@ -35,6 +35,8 @@ export interface DealLease {
   basin: { name: string; loeRange: [number, number]; loeMidpoint: number } | null;
   ownership: LeaseOwnership; valuation: InterestValuation; offers: Offers;
   regulatory: { critical: string[]; important: string[] };
+  /** Per TRRC source: how many of the lease's wells it was retrieved for, and the last failure if any. */
+  coverage: { source: string; retrieved: number; wells: number; lastError: string | null; lastAt: string | null }[];
   title: { status: "published" | "in_progress" | "not_found" | "unavailable"; reason: string | null; analysis: TitleChainAnalysis | null; readInstruments: number; indexedInstruments: number };
   decision: LeaseDecision;
   sources: Record<"production" | "wells" | "roll" | "title", string[]>;
@@ -100,6 +102,7 @@ export function scopeTitleToLease(analysis: TitleChainAnalysis, leaseApis: strin
     tracts: analysis.tracts.filter(t => tractIds.has(t.id)),
     wells: leaseWells,
     chronology: analysis.chronology.filter(r => labels.has(r.tractLabel)),
+    findings: analysis.findings.filter(f => !f.affectedTractId || tractIds.has(f.affectedTractId)),
     searchCoverage: coverage,
   } };
 }
@@ -185,7 +188,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     const window = fitPhase ? fitArpsDeclineWindowed(fitPhase === "oil" ? reported.oil : reported.gas) : null;
     const basin = classifyBasin(identity.field || null, identity.county || null);
 
-    const ownership = await loadLeaseOwnership(db, { leaseNumber: stream.leaseNumber, leaseName: identity.wellName || null });
+    const ownership = await loadLeaseOwnership(db, { leaseNumber: stream.leaseNumber, leaseName: identity.wellName || null, county: identity.county || null });
     const valuation = valueLeaseInterests(ownership, { monthlyOilBbl: reported.oil, monthlyGasMcf: reported.gas, fieldName: identity.field || null, county: identity.county || null }, deck, producing.count, loeOverride);
 
     // Regulatory flags across every well on the lease, each stated once.
@@ -206,6 +209,15 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       for (const f of flags.important) important.set(f, (important.get(f) ?? 0) + 1);
     }
     // A flag raised on every well is a lease-level fact; one raised on some wells says how many.
+    const coverageMap = new Map<string, { retrieved: number; wells: number; lastError: string | null; lastAt: string | null }>();
+    for (const run of memberRuns) for (const a of attemptsById.get(run.id) ?? []) {
+      if (a.status === "not_applicable") continue;
+      const c = coverageMap.get(a.source_name) ?? { retrieved: 0, wells: 0, lastError: null, lastAt: null };
+      c.wells++; if (a.status === "success") c.retrieved++; else c.lastError = a.error_message ?? a.status;
+      if (!c.lastAt || a.attempted_at > c.lastAt) c.lastAt = a.attempted_at;
+      coverageMap.set(a.source_name, c);
+    }
+    const coverage = [...coverageMap].map(([source, c]) => ({ source, ...c })).sort((a, b) => a.source.localeCompare(b.source));
     const fold = (m: Map<string, number>) => [...m].map(([f, n]) => n < memberRuns.length && memberRuns.length > 1 ? `${f} (${n} of ${memberRuns.length} submitted wells)` : f);
 
     // Chain of title: the lease's courthouse research scope.
@@ -254,7 +266,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       trailingUnreportedMonths: fitPhase === "gas" ? reported.trailingUnreportedGasMonths : reported.trailingUnreportedOilMonths,
       fit: window?.fit ?? null, fitPhase, fitWindowNote: window?.reason ?? null,
       basin: basin ? { name: basin.name, loeRange: basin.loeUsdPerBoeRange, loeMidpoint: loeMidpoint(basin) } : null,
-      ownership, valuation, offers: offersFor(valuation), regulatory: { critical: fold(critical), important: fold(important) }, title, decision, sources: leaseSources,
+      ownership, valuation, offers: offersFor(valuation), regulatory: { critical: fold(critical), important: fold(important) }, coverage, title, decision, sources: leaseSources,
     });
   }
   leases.sort((a, b) => (b.valuation.totalsPv10?.base ?? 0) - (a.valuation.totalsPv10?.base ?? 0));

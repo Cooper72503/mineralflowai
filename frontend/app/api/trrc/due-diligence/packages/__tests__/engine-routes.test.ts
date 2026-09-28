@@ -1,15 +1,19 @@
 import { it, expect, vi, beforeEach, describe } from "vitest";
 import { NextRequest } from "next/server";
 import { POST, GET as LIST } from "../route";
-import { GET as REPORT } from "../[packageId]/report/route";
+import { GET as REPORT, POST as RECORD } from "../[packageId]/report/route";
 import { createSupabaseFromRouteRequest } from "@/lib/supabase/from-route-request";
 import { loadDeal, summarizeDeal } from "@/lib/trrc/deal/build";
 import { renderDealPdf } from "@/lib/trrc/deal/pdf";
+import { renderDecisionRecordPdf } from "@/lib/trrc/deal/decision-record-pdf";
+import { applyAssumptionEdits, assembleDecision } from "@/lib/trrc/deal/decision-layer";
 
 vi.mock("@/lib/supabase/from-route-request", () => ({ createSupabaseFromRouteRequest: vi.fn() }));
 vi.mock("@/lib/trrc/source-registry", () => ({ isTrrcDdEnabled: () => true }));
 vi.mock("@/lib/trrc/deal/build", () => ({ loadDeal: vi.fn(), summarizeDeal: vi.fn() }));
 vi.mock("@/lib/trrc/deal/pdf", () => ({ renderDealPdf: vi.fn() }));
+vi.mock("@/lib/trrc/deal/decision-record-pdf", () => ({ renderDecisionRecordPdf: vi.fn() }));
+vi.mock("@/lib/trrc/deal/decision-layer", () => ({ applyAssumptionEdits: vi.fn(), assembleDecision: vi.fn() }));
 
 const pkg = "00000000-0000-4000-8000-000000000001";
 const key = "00000000-0000-4000-8000-000000000002";
@@ -67,16 +71,54 @@ describe("engine report", () => {
     expect((await r.json()).summary.verdict).toBe("BUY");
     expect(renderDealPdf).not.toHaveBeenCalled();
   });
-  it("downloads the PDF with a filename", async () => {
+  const deal = { packageId: pkg, generatedAt: "2026-09-26T20:00:00Z", leases: [{ key: "TX:8:O:1", leaseName: "WASHINGTON 5" }] };
+  const starting = { "TX:8:O:1": { assumptions: { oilPriceUsdBbl: 80 }, basis: { oilPriceUsdBbl: "EIA" }, edited: [] } };
+  it("downloads the Decision Record under the starting assumptions", async () => {
     db();
-    vi.mocked(loadDeal).mockResolvedValue({ ready: true, deal: { packageId: pkg, generatedAt: "2026-09-26T20:00:00Z", leases: [{ leaseName: "WASHINGTON 5" }] } as never });
-    vi.mocked(renderDealPdf).mockResolvedValue(Buffer.from("%PDF-test"));
+    vi.mocked(loadDeal).mockResolvedValue({ ready: true, deal: deal as never });
+    vi.mocked(applyAssumptionEdits).mockReturnValue({ errors: [], byLease: starting as never });
+    vi.mocked(renderDecisionRecordPdf).mockResolvedValue(Buffer.from("%PDF-test"));
     const r = await REPORT(get(`/api/x`), params);
     expect(r.headers.get("Content-Type")).toBe("application/pdf");
-    expect(r.headers.get("Content-Disposition")).toContain("MineralFlow-WASHINGTON-5-Acquisition-Report-2026-09-26.pdf");
+    expect(r.headers.get("Content-Disposition")).toContain("MineralFlow-WASHINGTON-5-Decision-Record-2026-09-26.pdf");
+    expect(applyAssumptionEdits).toHaveBeenCalledWith(deal, {});
+    expect(renderDealPdf).not.toHaveBeenCalled();
+  });
+  it("still serves the acquisition report on request", async () => {
+    db();
+    vi.mocked(loadDeal).mockResolvedValue({ ready: true, deal: deal as never });
+    vi.mocked(renderDealPdf).mockResolvedValue(Buffer.from("%PDF-test"));
+    const r = await REPORT(get(`/api/x?format=acquisition`), params);
+    expect(r.headers.get("Content-Disposition")).toContain("Acquisition-Report");
+  });
+  it("returns the deal with each lease's starting assumptions and basis", async () => {
+    db();
+    vi.mocked(loadDeal).mockResolvedValue({ ready: true, deal: deal as never });
+    vi.mocked(applyAssumptionEdits).mockReturnValue({ errors: [], byLease: starting as never });
+    const body = await (await REPORT(get(`/api/x?format=engine`), params)).json();
+    expect(body.starting["TX:8:O:1"]).toEqual({ assumptions: { oilPriceUsdBbl: 80 }, basis: { oilPriceUsdBbl: "EIA" } });
+  });
+  it("generates the Decision Record under the user's assumptions, and refuses invalid ones", async () => {
+    db();
+    vi.mocked(loadDeal).mockResolvedValue({ ready: true, deal: deal as never });
+    vi.mocked(renderDecisionRecordPdf).mockResolvedValue(Buffer.from("%PDF-test"));
+    const edits = { "TX:8:O:1": { oilPriceUsdBbl: 65 } };
+    vi.mocked(applyAssumptionEdits).mockReturnValue({ errors: [], byLease: { "TX:8:O:1": { assumptions: { oilPriceUsdBbl: 65 }, basis: {}, edited: ["oilPriceUsdBbl"] } } as never });
+    const post = (b: unknown) => new NextRequest("http://localhost/api/x", { method: "POST", body: JSON.stringify(b) });
+    const ok = await RECORD(post({ assumptions: edits }), params);
+    expect(ok.status).toBe(200);
+    expect(applyAssumptionEdits).toHaveBeenCalledWith(deal, edits);
+    expect(assembleDecision).toHaveBeenCalledWith(deal, { "TX:8:O:1": { oilPriceUsdBbl: 65 } });
+    expect(vi.mocked(renderDecisionRecordPdf).mock.calls[0][0].editedByLease).toEqual({ "TX:8:O:1": ["oilPriceUsdBbl"] });
+    vi.mocked(applyAssumptionEdits).mockReturnValue({ errors: ["WASHINGTON 5: Oil price must be greater than zero."], byLease: {} });
+    const bad = await RECORD(post({ assumptions: { "TX:8:O:1": { oilPriceUsdBbl: 0 } } }), params);
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toContain("Oil price must be greater than zero");
+    expect((await RECORD(post({ assumptions: "x" }), params)).status).toBe(400);
   });
   it("rejects bad overrides and unknown packages", async () => {
     db();
+    vi.mocked(applyAssumptionEdits).mockReturnValue({ errors: [], byLease: {} });
     expect((await REPORT(get(`/api/x?oil=-5`), params)).status).toBe(400);
     vi.mocked(loadDeal).mockRejectedValue(Error("Package not found."));
     expect((await REPORT(get(`/api/x`), params)).status).toBe(404);

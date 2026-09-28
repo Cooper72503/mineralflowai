@@ -9,6 +9,7 @@ const analysis = {
     { api14: "42317430160000", countyName: "Martin", associations: [] },
   ],
   chronology: [{ tractLabel: "T&P RR, Blk 34 T2N, Sec 10, Howard County", contentVerified: false }, { tractLabel: "elsewhere", contentVerified: true }],
+  findings: [{ title: "on tract", affectedTractId: "h" }, { title: "other lease", affectedTractId: "k" }, { title: "package-wide", affectedTractId: null }],
   searchCoverage: [{ provider: "county:tyler_technologies", county: "Howard", status: "success" }, { provider: "none", county: "Martin", status: "provider_unavailable" }, { provider: "trrc_ewa", county: "Martin", status: "success" }],
 } as unknown as TitleChainAnalysis;
 
@@ -18,6 +19,7 @@ describe("scopeTitleToLease", () => {
     expect(r.analysis!.tracts.map(t => t.id)).toEqual(["h"]);
     expect(r.analysis!.chronology).toHaveLength(1);
     expect(r.analysis!.searchCoverage.map(c => c.county)).toEqual(["Howard"]);
+    expect(r.analysis!.findings.map(f => f.title)).toEqual(["on tract", "package-wide"]);
   });
   it("gives a lease with no confirmed tract no chain, and says why for its county", () => {
     const r = scopeTitleToLease(analysis, ["4231743016"], []);

@@ -96,6 +96,10 @@ describe("loadLeaseOwnership", () => {
     expect((await loadLeaseOwnership(db({}) as never, { leaseNumber: "38991", leaseName: null })).status).toBe("no_roll");
     expect((await loadLeaseOwnership(db({ mineral_roll_imports: [IMPORT] }) as never, { leaseNumber: "38991", leaseName: null })).status).toBe("no_match");
     expect((await loadLeaseOwnership(db({}) as never, { leaseNumber: null, leaseName: null })).status).toBe("unavailable");
+    const otherCounty = await loadLeaseOwnership(db({ mineral_roll_imports: [IMPORT] }) as never, { leaseNumber: "59990", leaseName: null, county: "MIDLAND" });
+    expect(otherCounty.status).toBe("no_roll");
+    expect(otherCounty.reason).toBe("No appraisal-district mineral roll is imported for Midland County.");
+    expect(otherCounty.sources).toEqual([]);
   });
 });
 
