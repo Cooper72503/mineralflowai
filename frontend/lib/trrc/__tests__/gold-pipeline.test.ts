@@ -26,6 +26,14 @@ describe("standalone worker → retained evidence → GOLD engines",()=>{
   const [run]=snapshot.trrc_due_diligence_runs;
   const attempts=snapshot.trrc_source_attempts;
   const production=snapshot.trrc_production_monthly;
+  // A capture whose lease production timed out is an outage: the worker
+  // retries that run instead of completing it without the lease's records.
+  const prodError=String((data("fetch_production") as {error?:string}|null)?.error ?? "");
+  if(/timeout|aborted|fetch failed|HTTP 5\d\d/i.test(prodError)&&(data("search_by_api") as {lease_number?:string|null}).lease_number){
+   await expect(runLandmanSequencer("r",c.case.api10,db)).rejects.toThrow(/lease records unavailable/);
+   expect(run.status).not.toBe("complete");
+   return;
+  }
   await runLandmanSequencer("r",c.case.api10,db);
   expect(run.status).toBe("complete");
   const gold=assembleGoldRecord({...run,id:"r",original_input:c.case.api10},attempts as unknown as LiteSourceAttempt[]);
