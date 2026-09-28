@@ -18,3 +18,17 @@ export async function POST(request:NextRequest){
  if(result.error||!result.data){console.error("[package intake]",result.error);return NextResponse.json({ok:false,error:"Package could not be confirmed. Retry the same submission key; do not create a new submission."},{status:503});}
  return NextResponse.json({ok:true,data:{id:result.data}},{status:202,headers:{"Cache-Control":"private, no-store"}});
 }
+
+/** The signed-in user's recent deals, newest first, so a finished deal can be reopened. */
+export async function GET(request:NextRequest){
+ const db=await createSupabaseFromRouteRequest(request);
+ const {data:{user},error}=await db.auth.getUser();
+ if(error||!user)return NextResponse.json({ok:false,error:"Not authenticated."},{status:401});
+ const result=await db.from("trrc_packages").select("id,status,members_json,created_at,updated_at").eq("user_id",user.id).order("created_at",{ascending:false}).limit(25);
+ if(result.error)return NextResponse.json({ok:false,error:"Deals could not be loaded."},{status:503});
+ const deals=(result.data??[]).map(p=>{
+  const members=(p.members_json??[]) as {input:string}[];
+  return {id:p.id,status:p.status,createdAt:p.created_at,updatedAt:p.updated_at,apiCount:members.length,firstInputs:members.slice(0,3).map(m=>m.input)};
+ });
+ return NextResponse.json({ok:true,data:deals},{headers:{"Cache-Control":"private, no-store"}});
+}

@@ -45,6 +45,7 @@ export default function DueDiligenceEnginePage() {
   const [extracting, setExtracting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const [recent, setRecent] = useState<{ id: string; status: string; createdAt: string; apiCount: number; firstInputs: string[] }[] | null>(null);
 
   const inputs = Array.from(new Set(rawText.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean)));
 
@@ -52,6 +53,17 @@ export default function DueDiligenceEnginePage() {
     const url = new URL(window.location.href);
     setPackageId(url.searchParams.get("package"));
   }, []);
+
+  // Earlier deals, so a finished one can be reopened (and shown if a source is down).
+  useEffect(() => {
+    if (packageId) return;
+    apiFetch("/api/trrc/due-diligence/packages").then(r => r.json()).then(b => { if (b.ok) setRecent(b.data); }).catch(() => setRecent([]));
+  }, [packageId, apiFetch]);
+
+  const openDeal = (id: string) => {
+    setPackageId(id); setMembers([]); setSummary(null); setStage(null); setError(null);
+    const url = new URL(window.location.href); url.searchParams.set("package", id); window.history.replaceState(null, "", url);
+  };
 
   const upload = useCallback(async (file: File) => {
     setExtracting(true); setError(null);
@@ -111,8 +123,11 @@ export default function DueDiligenceEnginePage() {
   // The decision, once retrieval and courthouse research are done.
   useEffect(() => {
     if (!packageId || !retrievalDone || summary) return;
-    let stopped = false;
+    let stopped = false, inFlight = false;
     const check = async () => {
+      // Building the decision takes several seconds; never start a second one alongside it.
+      if (inFlight) return;
+      inFlight = true;
       try {
         const res = await apiFetch(`/api/trrc/due-diligence/packages/${packageId}/report?format=summary`);
         const body = await res.json();
@@ -121,6 +136,7 @@ export default function DueDiligenceEnginePage() {
         if (!body.ok) throw Error(body.error ?? "The decision could not be built.");
         setSummary(body.summary); setStage(null); setError(null);
       } catch (e) { if (!stopped) setError(e instanceof Error ? e.message : "The decision could not be built."); }
+      finally { inFlight = false; }
     };
     setStage("Tracing ownership and valuing the leases");
     void check();
@@ -177,6 +193,21 @@ export default function DueDiligenceEnginePage() {
                 {submitting ? "Starting…" : "Run due diligence"}
               </button>
             </div>
+          </div>
+        )}
+
+        {!packageId && recent && recent.length > 0 && (
+          <div style={{ ...card, padding: 0, overflow: "hidden" }}>
+            <div style={{ ...label, padding: "0.8rem 1rem 0.4rem" }}>Recent deals</div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+              <tbody>{recent.map(d => (
+                <tr key={d.id} style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                  <td style={{ padding: "0.55rem 1rem", color: COLORS.textMuted, whiteSpace: "nowrap" }}>{new Date(d.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+                  <td style={{ padding: "0.55rem 1rem", color: COLORS.text, fontFamily: "ui-monospace, monospace" }}>{d.firstInputs.join(", ")}{d.apiCount > d.firstInputs.length ? ` + ${d.apiCount - d.firstInputs.length} more` : ""}</td>
+                  <td style={{ padding: "0.55rem 1rem", color: d.status === "failed" ? COLORS.red : d.status === "evidence_ready" ? COLORS.green : COLORS.accent, whiteSpace: "nowrap" }}>{d.status === "evidence_ready" ? "Complete" : d.status === "failed" ? "Needs attention" : "In progress"}</td>
+                  <td style={{ padding: "0.55rem 1rem", textAlign: "right" }}><button onClick={() => openDeal(d.id)} style={{ ...quiet, padding: "0.3rem 0.7rem", color: COLORS.accent }}>Open</button></td>
+                </tr>))}</tbody>
+            </table>
           </div>
         )}
 
