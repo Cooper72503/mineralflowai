@@ -56,3 +56,20 @@ describe("missing referenced instruments, index-only, provider unavailable", () 
     expect(cross.every(x => x.nextAction.length > 0)).toBe(true);
   });
 });
+
+describe("company names and the clerk's index (live CMC BUTTERCUP pairs)", () => {
+  const party = (name: string, i: number) => ({ id: `p${i}`, instrumentId: `i${i}`, name, role: "grantor" as never, capacity: "unknown" as never, capacityDetail: null, canonicalPartyId: null, page: null, excerpt: null });
+  const pairs = (names: string[]) => findIdentityCandidates(names.map(party)).map(c => [c.a.name, c.b.name].sort().join(" / "));
+  it("flags spelling variants of one company, and nothing else", () => {
+    const found = pairs(["GRANDPRIX PIPELINE LLC", "GRAND PRIX PIPELINE LLC", "US INTERNAL REVENUE SERVICE", "U S INTERNAL REVENUE SERVICE",
+      "TEXAS", "TEXAS STATE BANK BRECKENRIDGE TEXAS", "J B D COMPANY", "JOHN DEERE COMPANY", "MAGNOLIA PIPE LINE COMPANY", "MAGNOLIA PETROLEUM COMPANY",
+      "WEST TEXAS STATE BANK", "WEST TEXAS NATIONAL BANK", "TEXAS NEW MEXICO PIPE LINE COMPANY", "TEXAS ELECTRIC SERVICE COMPANY"]);
+    expect(found).toEqual(["GRAND PRIX PIPELINE LLC / GRANDPRIX PIPELINE LLC", "U S INTERNAL REVENUE SERVICE / US INTERNAL REVENUE SERVICE"]);
+  });
+  it("never pairs a company with a person, and ignores initials-only fragments", () => {
+    expect(pairs(["R A M A INC", "ROBERTSON MELANIE A", "VOGLER CODY R", "V R"])).toEqual([]);
+  });
+  it("still proposes a person recorded with and without a middle name", () => {
+    expect(pairs(["MIDKIFF HERD", "MIDKIFF ROBERT HERD"])).toEqual(["MIDKIFF HERD / MIDKIFF ROBERT HERD"]);
+  });
+});

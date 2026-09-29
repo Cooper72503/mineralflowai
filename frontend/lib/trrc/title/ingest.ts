@@ -120,6 +120,11 @@ function matchCanonicalTract(t: ExtractedTract, tracts: CandidateTract[]): { tra
     const sameAbs = fields.abstractNumber && c.abstractNumber && fields.abstractNumber.replace(/\D/g, "") === c.abstractNumber.replace(/\D/g, "");
     if (sameCounty && sameAbs) return { tractId: c.id, created: null, reason: `Matched ${c.tractLabel} on county + abstract number` };
   }
+  // Propose a tract only from a real survey identity. OCR runs of contract
+  // text ("...shall provide a copy of the Survey", "Midland County") carry
+  // none and would otherwise become candidate tracts.
+  const identified = !!fields.abstractNumber?.replace(/\D/g, "") || (!!fields.sectionName && (!!fields.blockNumber || !!fields.surveyName));
+  if (!identified) return { tractId: null, created: null, reason: "Instrument tract names no abstract, or section with a block or survey; not proposed as a tract" };
   const created: CandidateTract = {
     id: randomUUID(), tractLabel: tractLabelFor(fields), county: fields.county, abstractNumber: fields.abstractNumber, surveyName: fields.surveyName,
     blockNumber: fields.blockNumber, sectionName: fields.sectionName, legalDescription: fields.legalDescription, grossAcres: fields.grossAcres,
@@ -247,7 +252,7 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
             tracts.push(match.created);
             await checkedIngestionQuery(supabase.from("title_canonical_tracts").insert(tractToRow(match.created, jobId)));
             await addReviewItem(supabase, jobId, userId, { kind: "tract_match", title: `Instrument describes a tract not yet linked to a well: ${match.created.tractLabel}`, detail: `From "${doc.file_name ?? doc.id}". Confirm whether this is one of the subject tracts, or reject it.`, payload: { canonicalTractId: match.created.id, documentId: doc.id, instrumentId } });
-          } else if (!match.tractId) {
+          } else if (!match.tractId && !match.reason.startsWith("Instrument tract names no")) {
             await addReviewItem(supabase, jobId, userId, { kind: "tract_match", title: `Instrument tract could not be matched (${inst.instrumentType.replace(/_/g, " ")} in "${doc.file_name ?? doc.id}")`, detail: match.reason, payload: { documentId: doc.id, instrumentId } });
           }
           const { data: tractRow, error: tractErr } = await checkedIngestionQuery(supabase.from("title_instrument_tracts").insert({

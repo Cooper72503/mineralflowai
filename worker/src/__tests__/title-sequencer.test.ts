@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { runTitleResearchJob, searchCountyRecordsForJob, storeIndexEntries, type TitleJobDeps } from "../title-sequencer.js";
+import { runTitleResearchJob, searchCountyRecordsForJob, storeIndexEntries, MAX_COUNTY_QUERIES_PER_JOB, type TitleJobDeps } from "../title-sequencer.js";
 
 vi.mock("../tools/browser.js", () => ({ getCodaDocuments: vi.fn(), getBrowser: vi.fn(), closeBrowser: vi.fn() }));
 vi.mock("../tools/ewa.js", () => ({ searchWellbore: vi.fn(), getGisLocation: vi.fn(), getDrillingPermits: vi.fn(), getCompletionRecords: vi.fn(), PDA_BASE: "https://webapps2.rrc.texas.gov/EWA" }));
@@ -304,8 +304,8 @@ describe("county search coverage", () => {
   it("records the unfinished search plan when distinct leases exceed the budget", async () => {
     const { supabase, store } = makeSupabase(seedJob());
     const fetch = vi.fn(async (_county: string, value: string) => empty(value));
-    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider: provider }), "job-1", "user-1", Array.from({ length: 16 }, (_, i) => ({ ...well, lease_name: `LEASE ${i}`, id: String(i) })));
-    expect(fetch.mock.calls.length).toBe(12);
+    await searchCountyRecordsForJob(supabase, deps({ getCountyRecords: fetch, findProvider: provider }), "job-1", "user-1", Array.from({ length: MAX_COUNTY_QUERIES_PER_JOB + 4 }, (_, i) => ({ ...well, lease_name: `LEASE ${i}`, id: String(i) })));
+    expect(fetch.mock.calls.length).toBe(MAX_COUNTY_QUERIES_PER_JOB);
     expect(store.title_search_log.some(r => r.status === "skipped_bounded")).toBe(true);
     expect(store.title_review_items.some(r => r.title === "County search budget reached")).toBe(true);
   });
@@ -343,5 +343,63 @@ describe("confirmed tract search priority and predecessor gating", () => {
     expect(fetch).not.toHaveBeenCalledWith("Midland", "WRONG TOWNSHIP");
     expect(fetch).not.toHaveBeenCalledWith("Midland", "STREET OWNER");
     expect(store.title_instruments.every(r => r.instrument_content_verified === false)).toBe(true);
+  });
+});
+
+describe("unit tracts from the TRRC lateral (FIXTURE stubs)", () => {
+  const lateral = { found: true, surface: { latitude: 32.1, longitude: -102.1 }, terminus: { latitude: 32.07, longitude: -102.09 }, query_url: "https://gis.example/9/query?API=31700001", message: "ok",
+    surveys: [
+      { abstract_number: "1234", survey_name: "T&P RR CO", block_number: "35", section_name: "12", share: 0.47 },
+      { abstract_number: "1235", survey_name: "T&P RR CO", block_number: "35", section_name: "13", share: 0.43 },
+      { abstract_number: "1240", survey_name: "T&P RR CO", block_number: "35", section_name: "24", share: 0.1 },
+    ] };
+  it("confirms every section the lateral runs through, reusing the surface tract and citing the GIS line", async () => {
+    const { supabase, store } = makeSupabase(seedJob());
+    await runTitleResearchJob("job-1", supabase, deps({ getLateralSurveys: vi.fn(async () => lateral) }));
+    const tracts = store.title_canonical_tracts;
+    // Section 12 is the surface survey too: one tract, now confirmed, not a duplicate.
+    expect(tracts.filter(t => t.section_name === "12")).toHaveLength(1);
+    expect(tracts.filter(t => t.match_status === "confirmed").map(t => t.section_name).sort()).toEqual(["12", "13", "24"]);
+    expect(tracts.find(t => t.section_name === "24")!.resolution_method).toBe("gis_lateral_path");
+    const assoc = store.title_well_tract_associations.filter(a => a.association_type === "well_path");
+    expect(assoc).toHaveLength(3);
+    expect(assoc.every(a => a.review_status === "confirmed" && (a.evidence_json as Array<{ sourceUrl: string; excerpt: string }>)[0].sourceUrl === lateral.query_url)).toBe(true);
+    expect((assoc[2].evidence_json as Array<{ excerpt: string }>)[0].excerpt).toContain("about 10% of its length");
+    expect(store.title_search_log.some(l => l.provider === "trrc_gis_lateral" && l.status === "success")).toBe(true);
+  });
+  it("adds the lateral to a well resolved before lateral lookup existed, when the job is re-run", async () => {
+    const seed = seedJob();
+    Object.assign(seed.title_job_wells[0], { resolution_status: "resolved", lease_name: "DOE UNIT", county_name: "Martin", well_path_json: { wellType: "Oil Well", surfacePoint: { latitude: 32.1, longitude: -102.1 }, lateral: null } });
+    const { supabase, store } = makeSupabase(seed);
+    const getLateralSurveys = vi.fn(async () => lateral);
+    const searchWellbore = vi.fn();
+    await runTitleResearchJob("job-1", supabase, deps({ getLateralSurveys, searchWellbore }));
+    expect(searchWellbore).not.toHaveBeenCalled();
+    expect(getLateralSurveys).toHaveBeenCalledTimes(1);
+    expect((store.title_job_wells[0].well_path_json as { lateral: { surveys: unknown[] } }).lateral.surveys).toHaveLength(3);
+    expect(store.title_canonical_tracts.filter(t => t.match_status === "confirmed").map(t => t.section_name).sort()).toEqual(["12", "13", "24"]);
+  });
+  it("never revives a rejected tract", async () => {
+    const seed = seedJob();
+    seed.title_canonical_tracts = [{ id: "t-rej", job_id: "job-1", county: "Martin", abstract_number: "A-1235", block_number: "35", section_name: "13", match_status: "rejected" }];
+    const { supabase, store } = makeSupabase(seed);
+    await runTitleResearchJob("job-1", supabase, deps({ getLateralSurveys: vi.fn(async () => lateral) }));
+    expect(store.title_canonical_tracts.find(t => t.id === "t-rej")!.match_status).toBe("rejected");
+    expect(store.title_canonical_tracts.filter(t => t.section_name === "13")).toHaveLength(1);
+  });
+});
+
+describe("county document reading order and budget", () => {
+  it("parses clerk dates so the newest instrument is read first", async () => {
+    const { recordedTime } = await import("../title-sequencer.js");
+    expect(recordedTime("12/27/1957")).toBeLessThan(recordedTime("4/9/2026"));
+    expect(recordedTime("4/16/1955")).toBeLessThan(recordedTime("12/27/1957"));
+    expect(recordedTime("")).toBe(Number.NEGATIVE_INFINITY);
+  });
+  it("scales the image budget with the unit's tracts, within a ceiling", async () => {
+    const { countyDocumentLimit } = await import("../title-sequencer.js");
+    expect(countyDocumentLimit(1)).toBe(40);
+    expect(countyDocumentLimit(3)).toBe(90);
+    expect(countyDocumentLimit(10)).toBe(120);
   });
 });

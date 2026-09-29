@@ -18,7 +18,8 @@ import { propagateLeaseAssociations } from "./lease-associations";
 import { linkUnmatchedClaims } from "./link-claims";
 import { runTitleChainAnalysis } from "./analysis";
 
-const MAX_INGEST_PASSES = 30;
+// 40 passes of 3 covers the worker's 120-image ceiling for a unit (MAX_COUNTY_DOCUMENTS_ANY_JOB).
+const MAX_INGEST_PASSES = 40;
 
 export interface ProcessTitleJobResult {
   documentsRead: number;

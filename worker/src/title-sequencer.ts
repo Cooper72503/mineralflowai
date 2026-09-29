@@ -1,5 +1,6 @@
 import { tractQueries, indexMatchesTract, type SearchTract } from "./title-tract-search.js";
-import { persistSurfaceTractCandidates } from "./title-tract-handoff.js";
+import { persistSurfaceTractCandidates, persistLateralTracts } from "./title-tract-handoff.js";
+import { getLateralSurveys } from "./tools/gis-lateral.js";
 import { checkedQuery, PipelinePersistenceError } from "./persistence.js";
 import { canonicalApi10 } from "./identity.js";
 /**
@@ -41,7 +42,8 @@ import { getCountyDocument } from "./tools/county-documents.js";
 
 export const TITLE_DOCUMENTS_BUCKET = "title-documents";
 export const MAX_CODA_DOCS_PER_WELL = 8;
-export const MAX_COUNTY_QUERIES_PER_JOB = 12;
+// Room for a unit's tract queries (three sections on CMC BUTTERCUP 25-37) plus lease, operator and survey queries.
+export const MAX_COUNTY_QUERIES_PER_JOB = 24;
 export const MAX_FOLLOWUP_QUERIES = 6;
 export const MAX_DOC_BYTES = 30 * 1024 * 1024;
 
@@ -55,6 +57,7 @@ interface JobWellRow {
   lease_name: string | null;
   survey_name: string | null;
   abstract_number: string | null;
+  well_path_json?: Record<string, unknown> | null;
 }
 
 export interface TitleJobDeps {
@@ -67,6 +70,7 @@ export interface TitleJobDeps {
   findProvider: typeof countyRecords.findProvider;
   fetchBytes: (url: string) => Promise<{ ok: boolean; bytes: Buffer; contentType: string | null; error?: string }>;
   getCountyDocument?: typeof getCountyDocument;
+  getLateralSurveys?: typeof getLateralSurveys;
   now: () => string;
 }
 
@@ -89,6 +93,7 @@ export const defaultDeps: TitleJobDeps = {
     }
   },
   getCountyDocument,
+  getLateralSurveys,
   now: () => new Date().toISOString(),
 };
 
@@ -123,8 +128,10 @@ async function logSearch(supabase: SupabaseClient, jobId: string, userId: string
 }
 
 async function alreadySearched(supabase: SupabaseClient, jobId: string, provider: string, queryType: string, queryValue: string): Promise<boolean> {
-  const { data } = await checkedQuery(supabase.from("title_search_log").select("id").eq("job_id", jobId).eq("provider", provider).eq("query_type", queryType).eq("query_value", queryValue).in("status", ["success", "empty"]).limit(1), "title_search_log");
-  return !!data && data.length > 0;
+  const { data } = await checkedQuery(supabase.from("title_search_log").select("id, status, result_count").eq("job_id", jobId).eq("provider", provider).eq("query_type", queryType).eq("query_value", queryValue).in("status", ["success", "empty"]).limit(1), "title_search_log");
+  // A logged search that filled whole pages (the county site's 50-row
+  // default) may have been cut off before paging existed: search it again.
+  return ((data ?? []) as Array<{ status: string; result_count: number | null }>).some(r => r.status === "empty" || Number(r.result_count ?? 0) % 50 !== 0);
 }
 
 async function addReviewItem(supabase: SupabaseClient, jobId: string, userId: string, kind: string, title: string, detail: string | null, payload: Record<string, unknown>): Promise<void> {
@@ -205,6 +212,10 @@ export async function resolveWell(supabase: SupabaseClient, deps: TitleJobDeps, 
     }
   }
 
+  // Horizontal lateral: the sections the drainhole runs through.
+  const withLateral = await lateralPath(supabase, deps, jobId, userId, well, api, (patch.well_path_json as Record<string, unknown> | null) ?? null);
+  if (withLateral) patch.well_path_json = withLateral;
+
   // Permits.
   const permits = await deps.getDrillingPermits(api).catch(e => ({ found: false, permits: [], message: String(e), error: String(e) }));
   const permitUrl = `${ewa.PDA_BASE}/drillingPermitsQueryAction.do?searchArgs.apiNoHndlr.inputValue=${api.slice(2, 10)}`;
@@ -237,6 +248,15 @@ export async function resolveWell(supabase: SupabaseClient, deps: TitleJobDeps, 
   patch.resolution_status = found ? "resolved" : (wb.error && gis.error) ? "error" : "not_found";
   patch.resolution_error = found ? null : (wb.error ?? gis.error ?? "Well not found in TRRC wellbore, GIS, permit, or completion records");
   await checkedQuery(supabase.from("title_job_wells").update(patch).eq("id", well.id), "title_job_wells");
+}
+
+/** The well path with its TRRC GIS lateral added, or null when there is no lateral to add. */
+async function lateralPath(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, well: JobWellRow, api: string, path: Record<string, unknown> | null): Promise<Record<string, unknown> | null> {
+  if (!deps.getLateralSurveys) return null;
+  const lat = await deps.getLateralSurveys(api).catch(e => ({ found: false, surveys: [], terminus: null, surface: null, query_url: "", message: String(e), error: String(e) }));
+  await logSearch(supabase, jobId, userId, { provider: "trrc_gis_lateral", county: well.county_name, queryType: "api", queryValue: `${api}:lateral`, status: lat.error ? "failed" : lat.found ? "success" : "empty", resultCount: lat.surveys.length, error: lat.error ?? null, sourceUrl: lat.query_url || null });
+  if (!lat.found) return null;
+  return { ...(path ?? { wellType: null, surfacePoint: lat.surface }), lateral: { surveys: lat.surveys, terminus: lat.terminus, source_url: lat.query_url, message: lat.message } };
 }
 
 async function storeRemoteDocument(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wellId: string | null, doc: { url: string; source: string; sourceIdentifier: string; category: string; fileName: string }): Promise<void> {
@@ -418,6 +438,20 @@ export async function storeIndexEntries(supabase: SupabaseClient, jobId: string,
 }
 
 export const MAX_COUNTY_DOCUMENTS_PER_JOB = 40;
+/** Images read per confirmed tract, and the ceiling for a whole job. */
+export const COUNTY_DOCUMENTS_PER_TRACT = 30;
+export const MAX_COUNTY_DOCUMENTS_ANY_JOB = 120;
+export function countyDocumentLimit(confirmedTracts: number): number {
+  return Math.min(MAX_COUNTY_DOCUMENTS_ANY_JOB, Math.max(MAX_COUNTY_DOCUMENTS_PER_JOB, COUNTY_DOCUMENTS_PER_TRACT * confirmedTracts));
+}
+
+/** A clerk's recorded date (M/D/YYYY or YYYY-MM-DD) as a sortable time; unparseable dates sort last. */
+export function recordedTime(value: string | null | undefined): number {
+  const v = String(value ?? "").trim();
+  const us = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  const t = us ? Date.UTC(Number(us[3]), Number(us[1]) - 1, Number(us[2])) : Date.parse(v);
+  return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
+}
 
 /**
  * Reading priority for a county index row, lower first; null = not read.
@@ -481,8 +515,10 @@ export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps:
     if (have.has(entry.document_url) || byUrl.has(entry.document_url)) continue;
     byUrl.set(entry.document_url, { entry, county, priority });
   }
-  const queue = [...byUrl.values()].sort((a, b) => a.priority - b.priority || String(a.entry.recorded_date).localeCompare(String(b.entry.recorded_date)));
-  const budget = Math.max(0, MAX_COUNTY_DOCUMENTS_PER_JOB - have.size);
+  // Newest first within a priority: recent instruments decide who holds title now.
+  const queue = [...byUrl.values()].sort((a, b) => a.priority - b.priority || recordedTime(b.entry.recorded_date) - recordedTime(a.entry.recorded_date));
+  const limit = countyDocumentLimit(confirmed.length);
+  const budget = Math.max(0, limit - have.size);
   let fetched = 0;
   for (const { entry, county } of queue.slice(0, budget)) {
     const document = await deps.getCountyDocument(entry.document_url!).catch(e => ({ ok: false as const, error: String(e) }));
@@ -498,7 +534,7 @@ export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps:
     fetched++;
   }
   if (fetched) await appendLimitation(supabase, jobId, "County public preview images were retrieved automatically. They are not certified copies.");
-  if (queue.length > budget) await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", `${queue.length - budget} further ownership-relevant recordings on the lease were not read within the ${MAX_COUNTY_DOCUMENTS_PER_JOB}-document limit.`, { remaining: queue.length - budget });
+  if (queue.length > budget) await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", `${queue.length - budget} further ownership-relevant recordings on the lease were not read within the ${limit}-document limit.`, { remaining: queue.length - budget });
   if (unreadable) await addReviewItem(supabase, jobId, userId, "document_retrieval", `${unreadable} recording(s) on the tract expose no retrieval link`, "They remain in the chain as index entries; their images must be obtained from the clerk.", { count: unreadable });
   if (notOwnership) await appendLimitation(supabase, jobId, `${notOwnership} surface, easement or midstream recording(s) on the tract are reported from the county index and were not read; they do not move mineral title.`);
   return fetched;
@@ -699,7 +735,7 @@ export async function runTitleResearchJob(jobId: string, supabase: SupabaseClien
 
   await setJob(supabase, jobId, { status: "resolving_wells", stage_detail: "Resolving wells with TRRC", progress_percent: 5, attempt_count: (job.attempt_count as number) + 1, started_at: new Date().toISOString() });
 
-  const { data: wellRows } = await checkedQuery(supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number").eq("job_id", jobId), "title_job_wells");
+  const { data: wellRows } = await checkedQuery(supabase.from("title_job_wells").select("id, api10, api14, county_name, resolution_status, operator_name, lease_name, survey_name, abstract_number, well_path_json").eq("job_id", jobId), "title_job_wells");
   const wells = ((wellRows ?? []) as JobWellRow[]).filter(w => !!w.api10);
   if (wells.length === 0) {
     await setJob(supabase, jobId, { status: "failed", error_summary: "Title job has no valid persisted API inputs. Recreate the job after atomic job creation is deployed.", stage_detail: "Missing well inputs; research did not run" });
@@ -719,10 +755,18 @@ export async function runTitleResearchJob(jobId: string, supabase: SupabaseClien
     }
   }
 
+  // Wells resolved before lateral lookup existed: add their laterals now.
+  for (const w of wells.filter(x => x.resolution_status === "resolved" && !pendingWells.includes(x) && !(x.well_path_json as { lateral?: unknown } | null)?.lateral)) {
+    if (await isCancelled()) return;
+    const withLateral = await lateralPath(supabase, deps, jobId, userId, w, w.api10!, w.well_path_json ?? null);
+    if (withLateral) await checkedQuery(supabase.from("title_job_wells").update({ well_path_json: withLateral }).eq("id", w.id), "title_job_wells");
+  }
+
   if (await isCancelled()) return;
   await setJob(supabase, jobId, { status: "searching_records", stage_detail: "Searching county records", progress_percent: 60 });
   const { data: refreshed } = await checkedQuery(supabase.from("title_job_wells").select("*").eq("job_id", jobId), "title_job_wells");
   const candidateCount = await persistSurfaceTractCandidates(supabase, jobId, userId, (refreshed ?? []) as Record<string, unknown>[]);
+  await persistLateralTracts(supabase, jobId, userId, (refreshed ?? []) as Record<string, unknown>[]);
   await searchCountyRecordsForJob(supabase, deps, jobId, userId, (refreshed ?? []) as JobWellRow[]);
 
   if (await isCancelled()) return;

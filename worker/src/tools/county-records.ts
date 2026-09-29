@@ -111,6 +111,10 @@ function todayStamp(): string {
 // county coverage from 4 to 48 of Texas's 254 counties in one pass, using
 // the same already-built connector — no new scraping code needed, only
 // real research into which counties are actually on this platform.
+/** Rows per results page (the site's default is 50) and a bound on pages read per search. */
+export const PUBLICSEARCH_PAGE_SIZE = 250;
+export const PUBLICSEARCH_MAX_PAGES = 8;
+
 const publicSearchUsProvider: CountyRecordsProvider = {
   id: "publicsearch_us",
   name: "PublicSearch.us (Neumo)",
@@ -174,63 +178,72 @@ const publicSearchUsProvider: CountyRecordsProvider = {
         userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       });
       const page = await context.newPage();
-      await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 30_000 });
+      const records: CountyRecordEntry[] = [];
+      let total: number | null = null;
+      // The site shows 50 rows by default; it accepts limit/offset and states
+      // the true total ("1-129 of 129 results"). Page until every row is read.
+      for (let pageNo = 0; pageNo < PUBLICSEARCH_MAX_PAGES; pageNo++) {
+        await page.goto(`${searchUrl}&limit=${PUBLICSEARCH_PAGE_SIZE}&offset=${pageNo * PUBLICSEARCH_PAGE_SIZE}`, { waitUntil: "networkidle", timeout: 60_000 });
+        // Either real result rows appear, or the page settles on a genuine
+        // "no results" state — race a bounded wait against both so an empty
+        // result doesn't hang for the full timeout.
+        await Promise.race([
+          page.waitForFunction(() => document.querySelectorAll('table tr[role="row"]').length > 1, { timeout: 20_000 }).catch(() => null),
+          page.waitForTimeout(8_000),
+        ]);
+        const snapshot = await page.evaluate(() => {
+          const trs = Array.from(document.querySelectorAll('table tr[role="row"]'));
+          return {
+            rows: trs.map(tr => Array.from(tr.querySelectorAll("td")).map(td => (td.textContent ?? "").trim())),
+            text: document.body.innerText,
+            documentIds: trs.map(tr => tr.querySelector('input[type="checkbox"]')?.getAttribute("aria-label")?.match(/Document (\d+),/)?.[1] ?? null),
+          };
+        });
+        const stated = snapshot.text.match(/\bof\s+([\d,]+)\s+results?\b/i);
+        if (stated) total = Number(stated[1].replace(/,/g, ""));
+        const pageRecords: CountyRecordEntry[] = snapshot.rows
+          .map((r, i) => ({ r, url: snapshot.documentIds?.[i] ? `https://${slug}.tx.publicsearch.us/doc/${snapshot.documentIds[i]}` : undefined }))
+          .filter(({ r }) => r.length >= 10)
+          .map(({ r, url }) => ({
+            document_url: url,
+            grantor: r[3] ?? "",
+            grantee: r[4] ?? "",
+            doc_type: r[5] ?? "",
+            recorded_date: r[6] ?? "",
+            doc_number: r[7] ?? "",
+            book_volume_page: r[8] ?? "",
+            legal_description: r[9] ?? "",
+          }))
+          .filter(r => r.grantor || r.grantee);
 
-      // Either real result rows appear, or the page settles on a genuine
-      // "no results" state — race a bounded wait against both so an empty
-      // result doesn't hang for the full timeout.
-      await Promise.race([
-        page.waitForFunction(() => document.querySelectorAll('table tr[role="row"]').length > 1, { timeout: 20_000 }).catch(() => null),
-        page.waitForTimeout(8_000),
-      ]);
-
-      const snapshot = await page.evaluate(() => {
-        const trs = Array.from(document.querySelectorAll('table tr[role="row"]'));
-        return {
-          rows: trs.map(tr => Array.from(tr.querySelectorAll("td")).map(td => (td.textContent ?? "").trim())),
-          text: document.body.innerText,
-          documentIds: trs.map(tr => tr.querySelector('input[type="checkbox"]')?.getAttribute("aria-label")?.match(/Document (\d+),/)?.[1] ?? null),
-        };
-      });
-      const rawRows = snapshot.rows;
-      const links = new Map(rawRows.map((r, i) => [r, snapshot.documentIds?.[i] ? `https://${slug}.tx.publicsearch.us/doc/${snapshot.documentIds[i]}` : undefined]));
-
-      const records: CountyRecordEntry[] = rawRows
-        .filter(r => r.length >= 10)
-        .map(r => ({
-          document_url: links.get(r),
-          grantor: r[3] ?? "",
-          grantee: r[4] ?? "",
-          doc_type: r[5] ?? "",
-          recorded_date: r[6] ?? "",
-          doc_number: r[7] ?? "",
-          book_volume_page: r[8] ?? "",
-          legal_description: r[9] ?? "",
-        }))
-        .filter(r => r.grantor || r.grantee);
-
-      // An empty DOM is not evidence of an empty search. Loading pages,
-      // login/challenge pages and changed table layouts must remain failures.
-      // Require an explicit rendered no-results message for a confirmed empty.
-      if (records.length === 0) {
-        const hasDataCells = rawRows.some(row => row.length > 0);
-        const explicitEmpty = /\bno (?:search )?results(?: found)?\b|\bno records found\b|\b0 results\b/i.test(snapshot.text);
-        if (hasDataCells || !explicitEmpty) {
-          throw new Error("County search outcome unverified: no parseable records and no unambiguous empty result. The page may not have loaded or its layout may have changed.");
+        // An empty DOM is not evidence of an empty search. Loading pages,
+        // login/challenge pages and changed table layouts must remain failures.
+        // Require an explicit rendered no-results message for a confirmed empty.
+        if (pageNo === 0 && pageRecords.length === 0) {
+          const hasDataCells = snapshot.rows.some(row => row.length > 0);
+          const explicitEmpty = /\bno (?:search )?results(?: found)?\b|\bno records found\b|\b0 results\b/i.test(snapshot.text);
+          if (hasDataCells || !explicitEmpty) {
+            throw new Error("County search outcome unverified: no parseable records and no unambiguous empty result. The page may not have loaded or its layout may have changed.");
+          }
         }
+        records.push(...pageRecords);
+        if (pageRecords.length < PUBLICSEARCH_PAGE_SIZE || (total !== null && records.length >= total)) break;
       }
 
+      // Without a stated total, a count that fills a page (the site's 50-row
+      // default, or ours) cannot be shown to be everything.
+      const complete = total !== null ? records.length >= total : records.length % 50 !== 0 || records.length === 0;
       return {
         found: records.length > 0,
         status: "automated",
         county: countyDisplayName,
         provider: "publicsearch.us",
-        records: records.slice(0, 100),
-        total_count: records.length,
-        coverage_incomplete: records.length >= 50,
+        records,
+        total_count: total ?? records.length,
+        coverage_incomplete: !complete,
         search_url: searchUrl,
         message: records.length > 0
-          ? `${records.length} record(s) found for "${searchValue}" in ${countyDisplayName} County.`
+          ? `${records.length}${total !== null && total !== records.length ? ` of ${total}` : ""} record(s) found for "${searchValue}" in ${countyDisplayName} County.`
           : `No records found for "${searchValue}" in ${countyDisplayName} County.`,
       };
     } catch (e) {

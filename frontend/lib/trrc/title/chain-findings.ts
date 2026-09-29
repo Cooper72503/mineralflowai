@@ -55,11 +55,50 @@ export function findIdentityCandidates(parties: GraphParty[]): Array<{ a: GraphP
       if (ka === kb) continue;
       const pairKey = [ka, kb].sort().join("||");
       if (seen.has(pairKey)) continue;
-      const reason = similarityReason(ka, kb);
+      const entityA = isEntityName(a.name), entityB = isEntityName(b.name);
+      // A company is never "the same person" as an individual, and person-name
+      // rules (first name, initials) mean nothing for a company.
+      const reason = entityA || entityB ? (entityA && entityB ? entitySimilarityReason(a.name, b.name) : null) : similarityReason(ka, kb);
       if (reason) { seen.add(pairKey); out.push({ a, b, reason }); }
     }
   }
   return out;
+}
+
+const ENTITY = /\b(LLC|L L C|INC|INCORPORATED|CO|COMPANY|CORP|CORPORATION|LP|L P|LTD|LIMITED|BANK|TRUST CO|PIPE ?LINE|PIPELINE|ENERGY|OIL|GAS|PETROLEUM|PARTNERS|PARTNERSHIP|SERVICES?|UNIT|SURVEY|RAILROAD|RR|RY|STATE|TEXAS|COUNTY|CITY|UNITED STATES|USA|U S A|U S|ASSOCIATION|CHURCH|FOUNDATION|RANCH|RANCHES|FARMS|HOLDINGS|RESOURCES|OPERATING|PRODUCTION|EXPLORATION|MIDSTREAM|ROYALTIES|MINERALS|FUND|AUTHORITY|DISTRICT|DEPARTMENT)\b/;
+export function isEntityName(name: string): boolean {
+  return ENTITY.test(name.toUpperCase().replace(/[.,]/g, " ").replace(/\s+/g, " "));
+}
+
+/** Edit distance, stopping early once it exceeds `max`. */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]);
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Two company names that are the same name as indexed, spelled differently:
+ * spacing ("GRANDPRIX" / "GRAND PRIX") or one letter ("WESTS" / "WEST",
+ * "U S A" / "U S"). Different words are different companies.
+ */
+export function entitySimilarityReason(a: string, b: string): string | null {
+  const compact = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const ca = compact(a), cb = compact(b);
+  if (!ca || !cb || ca === cb && a.toUpperCase().replace(/\s+/g, " ").trim() === b.toUpperCase().replace(/\s+/g, " ").trim()) return null;
+  if (ca === cb) return "Company names differ only in spacing or punctuation";
+  if (Math.min(ca.length, cb.length) >= 8 && editDistance(ca, cb, 1) === 1) return "Company names differ by one letter, as a clerk's index often does";
+  return null;
 }
 
 function similarityReason(a: string, b: string): string | null {
@@ -68,6 +107,8 @@ function similarityReason(a: string, b: string): string | null {
   const A = strip(a), B = strip(b);
   const ta = A.tokens, tb = B.tokens;
   if (ta.length === 0 || tb.length === 0) return null;
+  // Initials alone ("V R") do not identify a person.
+  if (!ta.some(t => t.length >= 3) || !tb.some(t => t.length >= 3)) return null;
   const lastA = ta[ta.length - 1], lastB = tb[tb.length - 1];
   const firstA = ta[0], firstB = tb[0];
   if (lastA !== lastB) return null;

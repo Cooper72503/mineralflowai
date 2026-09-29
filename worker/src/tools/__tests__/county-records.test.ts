@@ -140,6 +140,22 @@ describe("publicsearch search outcome evidence", () => {
     expect(result.coverage_incomplete).toBe(true);
   });
 
+  it("pages past the site's 50-row default until the stated total is read", async () => {
+    const row = (i: number) => ["", "", "", "A", "B", "DEED", "2020-01-01", String(i), "1/2", "SECTION 37 BLOCK 39 T4S"];
+    const close = vi.fn().mockResolvedValue(undefined);
+    const pages = [Array.from({ length: 250 }, (_, i) => row(i)), Array.from({ length: 50 }, (_, i) => row(250 + i))];
+    const goto = vi.fn().mockResolvedValue(undefined);
+    let n = 0;
+    const page = { goto, waitForFunction: vi.fn().mockResolvedValue(undefined), waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      evaluate: vi.fn(async () => ({ rows: pages[n++] ?? [], text: `1-250 of 300 results for "SECTION 37 BLOCK 39 T4S"`, documentIds: [] })) };
+    vi.mocked(getBrowser).mockResolvedValue({ newContext: async () => ({ newPage: async () => page, close }) } as unknown as Awaited<ReturnType<typeof getBrowser>>);
+    const result = await getCountyRecords("Midland", "SECTION 37 BLOCK 39 T4S");
+    expect(result.records).toHaveLength(300);
+    expect(result.total_count).toBe(300);
+    expect(result.coverage_incomplete).toBe(false);
+    expect(goto.mock.calls.map(c => String(c[0]).match(/limit=\d+&offset=\d+/)?.[0])).toEqual(["limit=250&offset=0", "limit=250&offset=250"]);
+  });
+
   it("preserves retrieved index entries", async () => {
     const result = await searchSnapshot([["", "", "", "A", "B", "DEED", "2020-01-01", "123", "1/2", "Section 25"]], "1 result", ["39265019"]);
     expect(result.error).toBeUndefined();
