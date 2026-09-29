@@ -21,4 +21,14 @@ describe("whole-document text coverage",()=>{
   const result=await extractDocumentText(Buffer.from("pdf"),"application/pdf","deed.pdf");
   expect(result.ocrStatus).toBe("failed");expect(result.error).toContain("Page 2 of 2");expect(terminate).toHaveBeenCalled();expect(destroy).toHaveBeenCalled();
  });
+ it("reads a 26-page instrument in full rather than rejecting the old bound",async()=>{
+  f.parse.mockResolvedValue({text:"",numpages:26});
+  const cleanup=vi.fn(),terminate=vi.fn(),destroy=vi.fn(),recognize=vi.fn(async()=>({data:{text:"Complete legible instrument page with sufficient words for extraction."}}));
+  f.createWorker.mockResolvedValue({recognize,terminate});
+  f.getDocument.mockReturnValue({promise:Promise.resolve({numPages:26,destroy,getPage:async()=>({cleanup,getViewport:()=>({width:100,height:100}),render:()=>({promise:Promise.resolve()})})})});
+  const result=await extractDocumentText(Buffer.from("pdf"),"application/pdf","unit.pdf");
+  expect(result.ocrStatus).toBe("done");expect(result.pageCount).toBe(26);
+  expect(result.text.split("\f")).toHaveLength(26);expect(cleanup).toHaveBeenCalledTimes(26);expect(recognize).toHaveBeenCalledTimes(26);
+ });
+
 });

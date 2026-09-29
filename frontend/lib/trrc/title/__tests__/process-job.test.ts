@@ -34,3 +34,31 @@ describe("automatic title processing", () => {
     expect(d.patches.filter(p => p.status).map(p => p.status)).toEqual(["ingesting", "analyzing"]);
   });
 });
+
+
+describe("OCR-driven discovery orchestration", () => {
+  const ingested = { processed: 1, instrumentsCreated: 1, errors: [], remaining: 0 };
+  it("reads newly discovered documents before publishing any analysis", async () => {
+    const order: string[] = [];
+    vi.mocked(ingestPendingDocuments).mockImplementation(async () => { order.push("read"); return ingested as never; });
+    const discover = vi.fn().mockImplementationOnce(async () => { order.push("discover"); return true; }).mockImplementationOnce(async () => { order.push("discover"); return false; });
+    vi.mocked(runTitleChainAnalysis).mockImplementation(async () => { order.push("publish"); return { ok: true, analysis: { analysisId: "a", status: "POTENTIAL_GAPS_DETECTED" } } as never; });
+    const r = await processTitleJob(db().client, "j", "u", { discoverAfterIngestion: discover });
+    expect(order).toEqual(["read", "discover", "read", "discover", "publish"]);
+    expect(r.documentsRead).toBe(2);
+  });
+  it("withholds publication if county discovery fails", async () => {
+    vi.mocked(ingestPendingDocuments).mockResolvedValue(ingested as never);
+    const r = await processTitleJob(db().client, "j", "u", { discoverAfterIngestion: async () => { throw Error("County discovery persistence failed"); } });
+    expect(r.error).toContain("County discovery persistence failed");
+    expect(runTitleChainAnalysis).not.toHaveBeenCalled();
+  });
+  it("bounds expanding discovery with an explicit resumable failure", async () => {
+    vi.mocked(ingestPendingDocuments).mockResolvedValue(ingested as never);
+    const discover = vi.fn(async () => true);
+    const r = await processTitleJob(db().client, "j", "u", { discoverAfterIngestion: discover });
+    expect(discover).toHaveBeenCalledTimes(4);
+    expect(r.error).toContain("resume retrieval");
+    expect(runTitleChainAnalysis).not.toHaveBeenCalled();
+  });
+});

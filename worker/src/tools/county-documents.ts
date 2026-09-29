@@ -1,6 +1,8 @@
 import { getBrowser } from "./browser.js";
 import { PDFDocument } from "pdf-lib";
 
+export const MAX_PUBLIC_PREVIEW_PAGES = 100;
+
 export type CountyDocument = { ok: true; bytes: Buffer; pageCount: number; sourceUrl: string } | { ok: false; error: string };
 export function validatePreviewUrl(value: string, documentUrl: string): string {
   const doc = new URL(documentUrl), image = new URL(value);
@@ -27,7 +29,7 @@ export async function getCountyDocument(sourceUrl: string): Promise<CountyDocume
     const control = page.locator('section[aria-label="Document viewer"] input[type="number"]');
     await control.waitFor({ state: "visible", timeout: 20_000 });
     const pageCount = Number(await control.getAttribute("max"));
-    if (!Number.isInteger(pageCount) || pageCount < 1 || pageCount > 20) throw new Error("County document page count unavailable or exceeds 20-page retrieval limit");
+    if (!Number.isInteger(pageCount) || pageCount < 1 || pageCount > MAX_PUBLIC_PREVIEW_PAGES) throw new Error(`County document page count unavailable or exceeds ${MAX_PUBLIC_PREVIEW_PAGES}-page retrieval limit`);
     const pdf = await PDFDocument.create();
     pdf.setCreationDate(new Date(0));
     pdf.setModificationDate(new Date(0));

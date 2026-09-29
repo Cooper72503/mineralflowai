@@ -30,7 +30,11 @@ export interface ProcessTitleJobResult {
   error: string | null;
 }
 
-export async function processTitleJob(supabase: SupabaseClient, jobId: string, userId: string): Promise<ProcessTitleJobResult> {
+export interface TitleDiscoveryOptions {
+  /** Worker-owned county discovery after OCR learns additional legal descriptions. */
+  discoverAfterIngestion?: () => Promise<boolean>;
+}
+export async function processTitleJob(supabase: SupabaseClient, jobId: string, userId: string, options: TitleDiscoveryOptions = {}): Promise<ProcessTitleJobResult> {
   const out: ProcessTitleJobResult = { documentsRead: 0, instrumentsCreated: 0, extractionErrors: 0, analysisId: null, classification: null, error: null };
   const setJob = async (patch: Record<string, unknown>) => {
     const result = await supabase.from("title_research_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", jobId).neq("status", "cancelled").select("id");
@@ -40,15 +44,23 @@ export async function processTitleJob(supabase: SupabaseClient, jobId: string, u
 
   try {
     await setJob({ status: "ingesting", stage_detail: "Reading retrieved courthouse documents" });
-    let remaining = 0;
-    for (let pass = 0; pass < MAX_INGEST_PASSES; pass++) {
-      const r = await ingestPendingDocuments(supabase, userId, jobId, { limit: 3 });
-      out.documentsRead += r.processed; out.instrumentsCreated += r.instrumentsCreated; out.extractionErrors += r.errors.length;
-      remaining = r.remaining;
-      await setJob({ stage_detail: `Reading retrieved courthouse documents (${out.documentsRead} read)` });
-      if (r.remaining === 0 || r.processed === 0) break;
+    for (let discovery = 0; discovery < 4; discovery++) {
+      let remaining = 0;
+      for (let pass = 0; pass < MAX_INGEST_PASSES; pass++) {
+        const r = await ingestPendingDocuments(supabase, userId, jobId, { limit: 3 });
+        out.documentsRead += r.processed; out.instrumentsCreated += r.instrumentsCreated; out.extractionErrors += r.errors.length;
+        remaining = r.remaining;
+        await setJob({ stage_detail: `Reading retrieved courthouse documents (${out.documentsRead} read)` });
+        if (r.remaining === 0 || r.processed === 0) break;
+      }
+      if (remaining > 0) throw Error(`${remaining} retrieved documents still await processing; no analysis was published.`);
+      if (!options.discoverAfterIngestion) break;
+      await setJob({ status: "searching_records", stage_detail: `Searching county records using extracted tract evidence (pass ${discovery + 1})` });
+      const more = await options.discoverAfterIngestion();
+      if (!more) break;
+      if (discovery === 3) throw Error("New documents remain after four discovery passes; resume retrieval to continue. No final analysis was published.");
+      await setJob({ status: "ingesting", stage_detail: "Reading newly discovered courthouse documents" });
     }
-    if (remaining > 0) throw Error(`${remaining} retrieved documents still await processing; no analysis was published.`);
     await setJob({ status: "analyzing", stage_detail: "Reconstructing the chain of title" });
     await supersedeIndexedCopies(supabase, jobId);
     await propagateLeaseAssociations(supabase, jobId, userId);

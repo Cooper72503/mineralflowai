@@ -20,7 +20,8 @@ export interface DocumentTextResult {
   error: string | null;
 }
 
-export const MAX_OCR_PAGES = 25;
+// Match the public-preview limit; never silently read only the first pages.
+export const MAX_OCR_PAGES = 100;
 
 export function sha256Hex(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -103,6 +104,7 @@ async function ocrPdfPages(buffer: Buffer, maxPages: number): Promise<{ text: st
       const text = data.text ?? "";
       if (text.replace(/\s+/g, " ").trim().length < 40) throw new Error(`Page ${i} of ${pageCount} yielded insufficient text; complete document review required`);
       pages.push(text);
+      page.cleanup?.();
     }
   } finally {
     await worker.terminate();

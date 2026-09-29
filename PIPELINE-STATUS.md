@@ -1,3 +1,31 @@
+# Current cycle — Buttercup title discovery orchestration (2026-09-29)
+
+**GOLD reports validated: 0/10. No new live acceptance claimed.**
+
+Scope: the 12 Buttercup APIs producing one Decision Record with title evidence.
+Production was verified at f22797b by GitHub read; these changes are local pending
+Claude deployment because this connection's GitHub write returned HTTP 403.
+
+- Removed party-name exclusions that could discard a mineral deed from a pipeline
+  company. Tract-matching easements/surface instruments remain in the read queue
+  after conveyances; an index label does not prove their effect on title.
+- Non-rejected candidate legal descriptions can lead to document retrieval without
+  being confirmed or being used as ownership proof.
+- Retrieval continues beyond forty stored images on later passes; forty is now a
+  pass budget rather than a permanent job ceiling.
+- One retry for transient preview failures; access/size failures remain explicit.
+- A preview must produce PDF bytes and be stored before retrieval counts success.
+- Worker now re-searches county records after OCR learns tract descriptions, reads
+  newly found documents, and only then publishes the analysis. Four discovery
+  passes bound the work; continued expansion becomes a resumable failure.
+- Preview and whole-document OCR limits agree at 100 pages; 30 MB retrieval bound
+  remains. No partial-page OCR success is accepted.
+
+Local validation and deployment instructions: docs/buttercup-title-cycle.md.
+Still unverified: live retrieval/read counts, Section 25 documentary resolution,
+party identity findings, and the final signed-in Buttercup report after deployment.
+
+---
 # Current cycle — evidence gates and automatic title handoff (2026-09-28)
 
 **GOLD reports validated: 0/10 complete acquisition decisions.**

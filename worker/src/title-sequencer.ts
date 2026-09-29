@@ -23,9 +23,9 @@ import { canonicalApi10 } from "./identity.js";
  *                          names discovered in the index results. Every
  *                          query is logged in title_search_log; index hits
  *                          become index-level (unverified) instruments.
- *   3. -> awaiting_tract_confirmation: the frontend proposes candidate
- *      tracts from this data and the user confirms before any chain is
- *      asserted.
+ *   3. -> ingesting: the shared title engine reads documents, then the
+ *      worker searches again using extracted legal descriptions. Candidate
+ *      discovery never itself establishes ownership.
  *
  * Nothing here interprets conveyance language — an index entry is stored
  * with instrument_content_verified=false and stays that way until an image
@@ -259,33 +259,33 @@ async function lateralPath(supabase: SupabaseClient, deps: TitleJobDeps, jobId: 
   return { ...(path ?? { wellType: null, surfacePoint: lat.surface }), lateral: { surveys: lat.surveys, terminus: lat.terminus, source_url: lat.query_url, message: lat.message } };
 }
 
-async function storeRemoteDocument(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wellId: string | null, doc: { url: string; source: string; sourceIdentifier: string; category: string; fileName: string }): Promise<void> {
+async function storeRemoteDocument(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wellId: string | null, doc: { url: string; source: string; sourceIdentifier: string; category: string; fileName: string }): Promise<boolean> {
   const fetched = await deps.fetchBytes(doc.url);
   if (!fetched.ok || fetched.bytes.length === 0) {
     await logSearch(supabase, jobId, userId, { provider: doc.source, county: null, queryType: "document", queryValue: doc.url, status: "failed", resultCount: 0, error: fetched.error ?? "empty response", sourceUrl: doc.url });
-    return;
+    return false;
   }
   if (fetched.bytes.length > MAX_DOC_BYTES) {
     await logSearch(supabase, jobId, userId, { provider: doc.source, county: null, queryType: "document", queryValue: doc.url, status: "failed", resultCount: 0, error: `document exceeds ${MAX_DOC_BYTES} bytes`, sourceUrl: doc.url });
-    return;
+    return false;
   }
   const isPdf = fetched.bytes.subarray(0, 5).toString("latin1") === "%PDF-";
   const contentType = isPdf ? "application/pdf" : (fetched.contentType ?? "application/octet-stream").split(";")[0];
   if (!isPdf && /text\/html/.test(contentType)) {
     // A viewer page, not the image — keep the link in the log, don't store HTML as a document.
     await logSearch(supabase, jobId, userId, { provider: doc.source, county: null, queryType: "document", queryValue: doc.url, status: "empty", resultCount: 0, error: "link resolved to an HTML viewer page, not a document image", sourceUrl: doc.url });
-    return;
+    return false;
   }
   const hash = sha256(fetched.bytes);
   const { data: existing } = await checkedQuery(supabase.from("title_documents").select("id").eq("job_id", jobId).eq("content_hash", hash).maybeSingle(), "title_documents");
-  if (existing) return; // same bytes already stored for this job (e.g. two wells sharing a unit plat)
+  if (existing) return true; // same bytes already stored for this job (e.g. two wells sharing a unit plat)
 
   const ext = isPdf ? "pdf" : contentType.includes("tiff") ? "tif" : contentType.includes("png") ? "png" : contentType.includes("jpeg") ? "jpg" : "bin";
   const storagePath = `${userId}/${jobId}/${hash}.${ext}`;
   const { error: upErr } = await checkedQuery(supabase.storage.from(TITLE_DOCUMENTS_BUCKET).upload(storagePath, fetched.bytes, { contentType, upsert: true }), "title storage");
   if (upErr) {
     await logSearch(supabase, jobId, userId, { provider: doc.source, county: null, queryType: "document", queryValue: doc.url, status: "failed", resultCount: 0, error: `storage upload failed: ${upErr.message}`, sourceUrl: doc.url });
-    return;
+    return false;
   }
   await checkedQuery(supabase.from("title_documents").insert({
     job_id: jobId, user_id: userId, well_id: wellId, source: doc.source, source_identifier: doc.sourceIdentifier, source_url: doc.url, retrieved_at: deps.now(),
@@ -293,6 +293,7 @@ async function storeRemoteDocument(supabase: SupabaseClient, deps: TitleJobDeps,
     content_hash: hash, ocr_status: "pending", extraction_status: "pending",
   }), "title_documents");
   await logSearch(supabase, jobId, userId, { provider: doc.source, county: null, queryType: "document", queryValue: doc.url, status: "success", resultCount: 1, sourceUrl: doc.url });
+  return true;
 }
 
 // ─── Stage 2: county index ───────────────────────────────────────────────────
@@ -454,7 +455,7 @@ export function recordedTime(value: string | null | undefined): number {
 }
 
 /**
- * Reading priority for a county index row, lower first; null = not read.
+ * Reading priority for a tract-matching county index row, lower first.
  *
  * Before this, images were fetched in search-result order and capped at
  * eight, so on the Buttercup tract all eight went to releases and pipeline
@@ -466,9 +467,10 @@ export function recordedTime(value: string | null | undefined): number {
 export function ownershipReadPriority(entry: { doc_type?: string | null; grantor?: string | null; grantee?: string | null }): number | null {
   const type = (entry.doc_type ?? "").toUpperCase();
   const parties = `${entry.grantor ?? ""} ${entry.grantee ?? ""}`.toUpperCase();
-  // Surface and midstream instruments do not move mineral title.
-  if (/EASEMENT|RIGHT OF WAY|\bROW\b|SURFACE/.test(type)) return null;
-  if (/PIPELINE|MIDSTREAM|GATHERING|TELEPHONE|ELECTRIC|COOPERATIVE/.test(parties) && !/UNIT\b/.test(parties)) return null;
+  // Index labels and party names cannot establish what rights a document affects.
+  // Read tract-matching burdens too, after conveyances; never exclude a deed
+  // merely because a grantor happens to be a midstream company.
+  if (/EASEMENT|RIGHT OF WAY|\bROW\b|SURFACE/.test(type)) return 6;
   if (/MINERAL DEED|ROYALTY|WARRANTY DEED|QUITCLAIM|\bDEED\b(?! OF TRUST)|CONVEYANCE|CORRECTION/.test(type)) return 0;
   if (/HEIRSHIP|PROBATE|\bWILL\b|LETTERS|ESTATE|JUDGMENT/.test(type)) return 0;
   if (/\bUNIT\b|POOL|RATIF|DESIGNATION/.test(type) || /\bUNIT\b/.test(parties)) return 1;
@@ -481,15 +483,27 @@ export function ownershipReadPriority(entry: { doc_type?: string | null; grantor
 }
 
 /**
- * Read the courthouse images for the recordings on the job's confirmed
- * tracts, ownership conveyances first. Built from every stored index row,
+ * Read courthouse images matching non-rejected candidate tract descriptions,
+ * ownership conveyances first. This is discovery, not tract confirmation. Built from every stored index row,
  * not just this pass's results, so a resumed job whose searches are already
  * logged still reads what it has not read.
  */
-export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[] = []): Promise<number> {
+/**
+ * Images one execution of a title job may read, shared by the first retrieval
+ * pass and every discovery round after OCR. Set from the unit's size on first
+ * use. A later execution (a resume or re-run) starts a new budget and
+ * continues the queue, so the limit bounds one run's time, never the title.
+ */
+export interface DocumentBudget { remaining: number | null }
+
+export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[] = [], documentBudget?: DocumentBudget): Promise<number> {
   if (!deps.getCountyDocument) return 0;
-  const { data: tractRows } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status").eq("job_id", jobId).eq("match_status", "confirmed"), "title search tracts");
-  const confirmed = (tractRows ?? []) as SearchTract[];
+  const { data: tractRows } = await checkedQuery(supabase.from("title_canonical_tracts").select("id, county, section_name, block_number, match_status").eq("job_id", jobId).neq("match_status", "rejected"), "title search tracts");
+  // Candidate descriptions are retrieval leads only. Reading an image does
+  // not confirm the tract or link an ownership claim.
+  const confirmed = ((tractRows ?? []) as SearchTract[]).map(t => ({ ...t, match_status: "confirmed" }));
+  // Only tracts actually confirmed size the pass; candidates widen what is matched, not how much is read.
+  const confirmedCount = ((tractRows ?? []) as SearchTract[]).filter(t => t.match_status === "confirmed").length;
   // A recording indexed by the unit's own name (a unit designation or
   // ratification) belongs to the unit's title even without a section call.
   // Exact normalized match only: a discovery rule, never tract proof.
@@ -502,7 +516,7 @@ export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps:
 
   type Candidate = { entry: IndexEntry; county: string; priority: number };
   const byUrl = new Map<string, Candidate>();
-  let unreadable = 0, notOwnership = 0;
+  let unreadable = 0;
   for (const r of rows) {
     const entry = (r.extraction_json as { index?: IndexEntry } | null)?.index;
     const county = String(r.county ?? "");
@@ -510,33 +524,44 @@ export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps:
     const onTract = confirmed.some(t => t.county?.toUpperCase() === county.toUpperCase() && indexMatchesTract(entry.legal_description, t));
     if (!onTract && !unitNames.has(`${county.toUpperCase()}|${normalize(entry.legal_description)}`)) continue;
     const priority = ownershipReadPriority(entry);
-    if (priority === null) { notOwnership++; continue; }
+    if (priority === null) continue;
     if (!entry.document_url) { unreadable++; continue; }
     if (have.has(entry.document_url) || byUrl.has(entry.document_url)) continue;
     byUrl.set(entry.document_url, { entry, county, priority });
   }
   // Newest first within a priority: recent instruments decide who holds title now.
   const queue = [...byUrl.values()].sort((a, b) => a.priority - b.priority || recordedTime(b.entry.recorded_date) - recordedTime(a.entry.recorded_date));
-  const limit = countyDocumentLimit(confirmed.length);
-  const budget = Math.max(0, limit - have.size);
+  // A pass budget sized to the unit, not a lifetime ceiling that permanently blocks resumes.
+  const passLimit = countyDocumentLimit(confirmedCount);
+  if (documentBudget && documentBudget.remaining === null) documentBudget.remaining = passLimit;
+  const budget = documentBudget ? Math.max(0, Math.min(passLimit, documentBudget.remaining!)) : passLimit;
   let fetched = 0;
   for (const { entry, county } of queue.slice(0, budget)) {
-    const document = await deps.getCountyDocument(entry.document_url!).catch(e => ({ ok: false as const, error: String(e) }));
+    let document = await deps.getCountyDocument(entry.document_url!).catch(() => ({ ok: false as const, error: "County preview request failed" }));
+    // One bounded retry for transient viewer/transport failures; access and
+    // format/size limits remain explicit failures, never bypassed.
+    if (!document.ok && !/Unsupported|Untrusted|exceeds|HTTP (?:400|401|403|404)/i.test(document.error))
+      document = await deps.getCountyDocument(entry.document_url!).catch(() => ({ ok: false as const, error: "County preview request failed after retry" }));
     if (!document.ok) {
       await logSearch(supabase, jobId, userId, { provider: "county_public_preview", county, queryType: "document", queryValue: entry.document_url!, status: "failed", resultCount: 0, error: document.error, sourceUrl: entry.document_url! });
       await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} could not be retrieved`, document.error, { county, sourceUrl: entry.document_url });
       continue;
     }
-    await logSearch(supabase, jobId, userId, { provider: "county_public_preview", county, queryType: "document", queryValue: entry.document_url!, status: "success", resultCount: 1, error: null, sourceUrl: entry.document_url! });
-    await storeRemoteDocument(supabase, { ...deps, fetchBytes: async () => ({ ok: true, bytes: document.bytes, contentType: "application/pdf" }) }, jobId, userId, null, {
+    if (document.bytes.subarray(0, 5).toString("latin1") !== "%PDF-") {
+      await logSearch(supabase, jobId, userId, { provider: "county_public_preview", county, queryType: "document", queryValue: entry.document_url!, status: "failed", resultCount: 0, error: "County preview did not produce a PDF", sourceUrl: entry.document_url! });
+      await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} is not a PDF`, "No instrument content was stored or verified.", { county, sourceUrl: entry.document_url });
+      continue;
+    }
+    const stored = await storeRemoteDocument(supabase, { ...deps, fetchBytes: async () => ({ ok: true, bytes: document.bytes, contentType: "application/pdf" }) }, jobId, userId, null, {
       url: entry.document_url!, source: "county_public_preview", sourceIdentifier: `${county}:${entry.doc_number}:public-preview:${document.pageCount}-pages`, category: "other", fileName: `${entry.doc_number.replace(/[^a-z0-9-]/gi, "_")}-public-preview.pdf`,
     });
-    fetched++;
+    if (stored) fetched++;
+    else await addReviewItem(supabase, jobId, userId, "document_retrieval", `County document ${entry.doc_number} was not stored`, "The downloaded response was empty, oversized or not a document image. See the failed document attempt.", { county, sourceUrl: entry.document_url });
   }
+  if (documentBudget) documentBudget.remaining = Math.max(0, documentBudget.remaining! - fetched);
   if (fetched) await appendLimitation(supabase, jobId, "County public preview images were retrieved automatically. They are not certified copies.");
-  if (queue.length > budget) await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", `${queue.length - budget} further ownership-relevant recordings on the lease were not read within the ${limit}-document limit.`, { remaining: queue.length - budget });
+  if (queue.length > budget) await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", `${queue.length - budget} further ownership-relevant recordings on the lease were not read within this run's ${documentBudget ? passLimit : budget}-document limit. Re-running the title job continues the queue.`, { remaining: queue.length - budget });
   if (unreadable) await addReviewItem(supabase, jobId, userId, "document_retrieval", `${unreadable} recording(s) on the tract expose no retrieval link`, "They remain in the chain as index entries; their images must be obtained from the clerk.", { count: unreadable });
-  if (notOwnership) await appendLimitation(supabase, jobId, `${notOwnership} surface, easement or midstream recording(s) on the tract are reported from the county index and were not read; they do not move mineral title.`);
   return fetched;
 }
 
@@ -576,7 +601,7 @@ export async function corroborateCandidateTracts(supabase: SupabaseClient, jobId
   return confirmed;
 }
 
-export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[]): Promise<void> {
+export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: TitleJobDeps, jobId: string, userId: string, wells: JobWellRow[], documentBudget?: DocumentBudget): Promise<void> {
   await repairIndexParties(supabase, jobId);
   // Searching is discovery, so proposed tracts are searched as well as
   // confirmed ones; reading images and linking use confirmed tracts only.
@@ -704,7 +729,7 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
     if (r.records.length > 0) await storeIndexEntries(supabase, jobId, f.county, r.search_url, r.records);
   }
   await corroborateCandidateTracts(supabase, jobId, userId, wells);
-  if (deps.getCountyDocument) await retrieveOwnershipDocuments(supabase, deps, jobId, userId, wells);
+  if (deps.getCountyDocument) await retrieveOwnershipDocuments(supabase, deps, jobId, userId, wells, documentBudget);
   if (bounded) {
     await addReviewItem(supabase, jobId, userId, "search_incomplete", "County search budget reached", "Some planned searches were not executed. See skipped_bounded entries; this job does not establish exhaustive county coverage.", { queryLimit: MAX_COUNTY_QUERIES_PER_JOB });
   }
@@ -721,7 +746,7 @@ export async function searchCountyRecordsForJob(supabase: SupabaseClient, deps: 
 
 // ─── Orchestration ───────────────────────────────────────────────────────────
 
-export async function runTitleResearchJob(jobId: string, supabase: SupabaseClient, deps: TitleJobDeps = defaultDeps): Promise<void> {
+export async function runTitleResearchJob(jobId: string, supabase: SupabaseClient, deps: TitleJobDeps = defaultDeps, documentBudget?: DocumentBudget): Promise<void> {
   const { data: job } = await checkedQuery(supabase.from("title_research_jobs").select("id, user_id, status, attempt_count").eq("id", jobId).single(), "title_research_jobs");
   if (!job) return;
   // Do not restart cancelled, completed, or human-review jobs on a stale poll.
@@ -767,7 +792,7 @@ export async function runTitleResearchJob(jobId: string, supabase: SupabaseClien
   const { data: refreshed } = await checkedQuery(supabase.from("title_job_wells").select("*").eq("job_id", jobId), "title_job_wells");
   const candidateCount = await persistSurfaceTractCandidates(supabase, jobId, userId, (refreshed ?? []) as Record<string, unknown>[]);
   await persistLateralTracts(supabase, jobId, userId, (refreshed ?? []) as Record<string, unknown>[]);
-  await searchCountyRecordsForJob(supabase, deps, jobId, userId, (refreshed ?? []) as JobWellRow[]);
+  await searchCountyRecordsForJob(supabase, deps, jobId, userId, (refreshed ?? []) as JobWellRow[], documentBudget);
 
   if (await isCancelled()) return;
   const resolvedCount = ((refreshed ?? []) as JobWellRow[]).filter(w => w.resolution_status === "resolved").length;

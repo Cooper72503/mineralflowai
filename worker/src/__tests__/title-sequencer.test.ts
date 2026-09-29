@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { runTitleResearchJob, searchCountyRecordsForJob, storeIndexEntries, MAX_COUNTY_QUERIES_PER_JOB, type TitleJobDeps } from "../title-sequencer.js";
+import { runTitleResearchJob, searchCountyRecordsForJob, storeIndexEntries, retrieveOwnershipDocuments, ownershipReadPriority, MAX_COUNTY_QUERIES_PER_JOB, type TitleJobDeps } from "../title-sequencer.js";
 
 vi.mock("../tools/browser.js", () => ({ getCodaDocuments: vi.fn(), getBrowser: vi.fn(), closeBrowser: vi.fn() }));
 vi.mock("../tools/ewa.js", () => ({ searchWellbore: vi.fn(), getGisLocation: vi.fn(), getDrillingPermits: vi.fn(), getCompletionRecords: vi.fn(), PDA_BASE: "https://webapps2.rrc.texas.gov/EWA" }));
@@ -401,5 +401,63 @@ describe("county document reading order and budget", () => {
     expect(countyDocumentLimit(1)).toBe(40);
     expect(countyDocumentLimit(3)).toBe(90);
     expect(countyDocumentLimit(10)).toBe(120);
+  });
+});
+
+describe("county document continuation", () => {
+  const countySeed = (status = "confirmed", count = 1): Store => ({
+    ...seedJob(),
+    title_canonical_tracts: [{ id: "t", job_id: "job-1", county: "MIDLAND", section_name: "37", block_number: "39 T4S", match_status: status }],
+    title_instruments: Array.from({ length: count }, (_, i) => ({ id: `i${i}`, job_id: "job-1", county: "MIDLAND", document_id: null, extraction_json: { index: {
+      doc_number: `D${i}`, doc_type: "MINERAL DEED", grantor: "PIPELINE COMPANY", grantee: "BUYER", legal_description: "SEC 37 BLK 39 T4S", document_url: `https://midland.tx.publicsearch.us/doc/${i+1}`, recorded_date: "2020-01-01",
+    } } })),
+  });
+  const preview = vi.fn(async (url: string) => ({ ok: true as const, bytes: Buffer.concat([PDF, Buffer.from(url)]), pageCount: 1, sourceUrl: url }));
+  it("reads a mineral conveyance regardless of a midstream party name", () => {
+    expect(ownershipReadPriority({ doc_type: "MINERAL DEED", grantor: "PIPELINE COMPANY" })).toBe(0);
+    expect(ownershipReadPriority({ doc_type: "SURFACE EASEMENT" })).toBe(6);
+  });
+  it("reads proposed tract leads without changing their confirmation", async () => {
+    const { supabase, store } = makeSupabase(countySeed("proposed"));
+    expect(await retrieveOwnershipDocuments(supabase, deps({ getCountyDocument: preview }), "job-1", "user-1")).toBe(1);
+    expect(store.title_canonical_tracts[0].match_status).toBe("proposed");
+    expect(store.title_documents[0].extraction_status).toBe("pending");
+  });
+  it("never follows rejected tract leads", async () => {
+    const { supabase } = makeSupabase(countySeed("rejected"));
+    expect(await retrieveOwnershipDocuments(supabase, deps({ getCountyDocument: preview }), "job-1", "user-1")).toBe(0);
+  });
+  it("continues beyond forty stored documents on the next pass", async () => {
+    const { supabase, store } = makeSupabase(countySeed("confirmed", 41));
+    const d = deps({ getCountyDocument: preview });
+    expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1")).toBe(40);
+    expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1")).toBe(1);
+    expect(store.title_documents).toHaveLength(41);
+    expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1")).toBe(0);
+  });
+  it("shares one image budget across a run's passes, and a new run continues the queue", async () => {
+    const { supabase, store } = makeSupabase(countySeed("confirmed", 90));
+    const d = deps({ getCountyDocument: preview });
+    const run1 = { remaining: null as number | null };
+    expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1", [], run1)).toBe(40);
+    // A discovery round in the same run reads nothing more: the run's 40 are spent.
+    expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1", [], run1)).toBe(0);
+    expect(store.title_review_items.some(r => r.title === "County document retrieval limit reached")).toBe(true);
+    const run2 = { remaining: null as number | null };
+    expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1", [], run2)).toBe(40);
+    expect(store.title_documents).toHaveLength(80);
+  });
+  it("retries a transient preview failure once", async () => {
+    const { supabase } = makeSupabase(countySeed());
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: false, error: "Viewer unavailable" }).mockImplementation(preview);
+    expect(await retrieveOwnershipDocuments(supabase, deps({ getCountyDocument: fetch }), "job-1", "user-1")).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("does not report success for an empty or non-PDF preview", async () => {
+    const { supabase, store } = makeSupabase(countySeed());
+    const fetch = vi.fn(async () => ({ ok: true as const, bytes: Buffer.from("<html>login</html>"), pageCount: 1, sourceUrl: "x" }));
+    expect(await retrieveOwnershipDocuments(supabase, deps({ getCountyDocument: fetch }), "job-1", "user-1")).toBe(0);
+    expect(store.title_documents ?? []).toHaveLength(0);
+    expect(store.title_search_log.some(r => r.query_type === "document" && r.status === "success")).toBe(false);
   });
 });

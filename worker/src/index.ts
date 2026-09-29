@@ -76,9 +76,9 @@ const activeTitleJobs = new Set<string>();
 
 // ─── Title-chain research jobs (migration 028) ───────────────────────────────
 // Same claim-then-run discipline as due-diligence runs, against
-// title_research_jobs. The frontend owns everything after retrieval
-// (tract confirmation, document ingestion, analysis); this loop only does
-// the network-bound stages.
+// title_research_jobs. The shared title engine performs ingestion and
+// analysis; this worker orchestrates retrieval and subsequent discovery
+// from extracted tract evidence while retaining the active-job claim.
 async function claimAndRunTitleJob(jobId: string): Promise<void> {
   if (activeTitleJobs.has(jobId)) return;
   const { data: claimed } = await checkedQuery(supabase
@@ -92,11 +92,13 @@ async function claimAndRunTitleJob(jobId: string): Promise<void> {
   activeTitleJobs.add(jobId);
   console.log(`[worker] starting title job ${jobId}`);
   try {
-    await runTitleResearchJob(jobId, supabase);
+    // One image budget for this execution: first retrieval and every discovery round.
+    const documentBudget = { remaining: null };
+    await runTitleResearchJob(jobId, supabase, undefined, documentBudget);
     console.log(`[worker] title job ${jobId} retrieval finished; reading documents`);
     // Keep the job in the active set while documents are read, so the stale
     // sweep never mistakes a long OCR pass for a stalled job.
-    const processed = await processRetrievedTitleJob(supabase, jobId);
+    const processed = await processRetrievedTitleJob(supabase, jobId, undefined, documentBudget);
     if (processed) console.log(`[worker] title job ${jobId} processed: ${processed.documentsRead} document(s) read, ${processed.instrumentsCreated} instrument(s), analysis ${processed.analysisId ?? "not published"}${processed.error ? ` — ${processed.error}` : ""}`);
   } catch (err) {
     console.error(`[worker] title job ${jobId} failed:`, err);
