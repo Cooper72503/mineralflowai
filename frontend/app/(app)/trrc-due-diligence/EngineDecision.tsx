@@ -12,6 +12,8 @@ import Link from "next/link";
 import type { Deal, DealLease } from "@/lib/trrc/deal/build";
 import { assembleDecision, type LeaseDecisionRecord, type Finding } from "@/lib/trrc/deal/decision-layer";
 import { validateAssumptions, type EconomicsAssumptions, type AssumptionBasis } from "@/lib/trrc/economics-provider";
+import { economicsAssetFromLease } from "@/lib/trrc/deal/decision-layer";
+import { oilSensitivity, costScenario, SENSITIVITY_DISCLOSURE } from "@/lib/trrc/deal/oil-sensitivity";
 import { COLORS } from "./colors";
 
 export interface EngineData { deal: Deal; starting: Record<string, { assumptions: EconomicsAssumptions; basis: AssumptionBasis }> }
@@ -130,6 +132,7 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
   const s = r.economics.scenarios;
   const a = r.economics.assumptions;
   const edited = new Set(Object.keys(edits));
+  const sensitivity = useMemo(() => oilSensitivity(economicsAssetFromLease(l), r.economics.assumptions), [l, r.economics.assumptions]);
 
   return (
     <div style={card}>
@@ -165,6 +168,15 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
                 : { interestType: t, workingInterest: 0.01, netRevenueInterest: Math.round(0.01 * current.operatorNri * 1e6) / 1e6 })} style={{ ...quiet, flex: 1, color: current.interestType === t ? COLORS.text : COLORS.textFaint, background: current.interestType === t ? COLORS.accentDim : "transparent", borderColor: current.interestType === t ? COLORS.accent : COLORS.border }}>
                 {t === "royalty" ? "Royalty interest" : "Working interest"}
               </button>))}
+          </div>
+          <div style={{ fontSize: "0.75rem", color: COLORS.textMuted, marginBottom: 10 }}>
+            <strong>Cost context: {l.operator ?? "Operator unavailable"} · {l.county ?? "County unavailable"}</strong>
+            <div>{start.basis.loeUsdPerBoe}. Operator-specific actual costs are not established; select a sensitivity or enter supported costs below.</div>
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              {[["Lower cost (−20%)", 0.8], ["Location baseline", 1], ["Higher cost (+20%)", 1.2]].map(([name, factor]) =>
+                <button key={name} style={quiet} onClick={() => { setDraft({}); onApply({ ...edits, ...costScenario(start.assumptions, Number(factor)) }); }}>{name}</button>)}
+            </div>
+            <div>Multipliers are illustrative sensitivities, not measured differences between named operators. Royalty interests bear no direct operating costs; costs still affect economic life.</div>
           </div>
           {GROUPS.map(g => (
             <div key={g.title} style={{ marginBottom: "0.55rem" }}>
@@ -231,6 +243,18 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
             </>
           )}
         </div>
+      </div>
+
+      <div style={{ marginTop: 18, overflowX: "auto" }}>
+        <div style={label}>Oil price sensitivity · {a.holdYears}-year hold · {a.discountRatePct}% hurdle</div>
+        <p style={{ fontSize: "0.75rem", color: COLORS.textMuted }}>{SENSITIVITY_DISCLOSURE}</p>
+        <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
+          <thead><tr>{["Oil $/bbl", "Year 1 net", "Entry ceiling", "Hold cash", "Exit value", "IRR"].map(h => <th key={h} style={{ ...cell, ...num, color: COLORS.textMuted, padding: 6 }}>{h}</th>)}</tr></thead>
+          <tbody>{sensitivity.map(row => <tr key={row.oilPriceUsdBbl}>
+            {[`$${row.oilPriceUsdBbl}`, ...[row.annualNet, row.ceiling, row.holdCash, row.exitValue].map(v => v === null ? "Unavailable" : usd(v)), pct(row.irrPct)].map((v, i) => <td key={i} title={row.reason ?? undefined} style={{ ...cell, ...num, color: COLORS.text, padding: 6 }}>{v}</td>)}
+          </tr>)}</tbody>
+        </table>
+        {sensitivity.find(row => row.reason)?.reason && <p style={{ color: COLORS.yellow }}>{sensitivity.find(row => row.reason)?.reason}</p>}
       </div>
 
       <FindingList title="Contradictions in the record" items={r.contradictions} />

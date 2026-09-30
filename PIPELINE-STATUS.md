@@ -1,3 +1,7 @@
+## September 30 — focused Buttercup price/cost report checkpoint
+
+GOLD reports validated: 0/10 (unchanged; no new live acceptance). Added 13 oil-price rows ($40–$100 at $5 increments) to existing page/PDF, using unchanged engines. Operator/location context and illustrative cost presets added; actual operator expense data unavailable. Title work remains in Claude’s pending merge, untouched here. See docs/buttercup-price-sensitivity.md.
+
 # Current cycle — Buttercup title discovery orchestration (2026-09-29)
 
 **GOLD reports validated: 0/10. No new live acceptance claimed.**

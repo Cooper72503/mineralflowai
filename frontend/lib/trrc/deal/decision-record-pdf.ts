@@ -7,6 +7,7 @@
  * that resolves in the appendix; assumptions carry their basis.
  */
 import React from "react";
+import { oilSensitivity, SENSITIVITY_DISCLOSURE } from "./oil-sensitivity";
 import { Document, Page, Text, View, Link, renderToBuffer } from "@react-pdf/renderer";
 import { C, S, kv, fmtUsd, fmtDec, TYPE_LABEL, ProductionChart } from "../report-builder";
 import type { Deal, DealLease } from "./build";
@@ -273,6 +274,23 @@ function Economics({ inp }: { inp: DecisionRecordInput }) {
     }));
 }
 
+function OilSensitivity({ inp, only }: { inp: DecisionRecordInput; only: number }) {
+  const l = inp.deal.leases[only], r = leaseRec(inp, l), a = r.economics.assumptions;
+  const rows = oilSensitivity(r.economics.asset, a);
+  return e(View, {}, Section("9. ECONOMICS — OIL PRICE SENSITIVITY"),
+    Sub(`${leaseTitle(l)}${refs([...l.sources.production, stdRef(inp.deal)])}`),
+    kv("Operator / location", `${l.operator ?? "Unavailable"} / ${l.county ?? "Unavailable"} County`),
+    kv("Selected costs", `LOE $${a.loeUsdPerBoe}/BOE; fixed $${a.fixedOpexUsdPerWellMonth}/producing well/month; workover $${a.workoverUsdPerBoe}/BOE`),
+    kv("Interest / hold / hurdle", `${a.interestType}; NRI ${a.netRevenueInterest}; WI ${a.workingInterest}; ${a.holdYears} years; ${a.discountRatePct}%`),
+    Note("Costs use the location benchmark or user inputs disclosed in Section 8. No operator-specific actual expense is asserted. Lower/higher cost presets are illustrative ±20% sensitivities. Royalty interests bear no direct operating costs; costs affect the operator's economic limit."),
+    Note(SENSITIVITY_DISCLOSURE),
+    e(Th, { cols: [["Oil $/bbl", 55], ["Year 1 net", 90, "right"], ["Entry ceiling", 95, "right"], ["Hold cash", 90, "right"], ["Exit value", 95, "right"], ["IRR", 65, "right"]] }),
+    ...rows.map((row, i) => e(Tr, { key: i, i, cols: [[String(row.oilPriceUsdBbl), 55],
+      ...([['annualNet',90],['ceiling',95],['holdCash',90],['exitValue',95]] as const).map(([k,w]): [string, number, "right"] => [row[k] === null ? "Unavailable" : fmtUsd(row[k]!), w, "right"]), [pct(row.irrPct),65,"right"]] })),
+    ...[...new Set(rows.map(row => row.reason).filter(Boolean))].map((reason, i) => Bullet(`Unavailable: ${reason}`, i, C.yellow)),
+    Note("Conditional scenario results do not clear title gaps or authorize an acquisition. Entry/exit formulas and return basis are described in Sections 10–11."));
+}
+
 // 10 ────────────────────────────────────────────────────────────────────────
 function Entry({ inp }: { inp: DecisionRecordInput }) {
   return e(View, {}, Section("10. MINERALFLOW ENTRY ANALYSIS"),
@@ -352,6 +370,6 @@ export async function renderDecisionRecordPdf(inp: DecisionRecordInput): Promise
     deal.leases.map((_, i) => e(Chrome, { key: `${key}${i}`, deal }, e(C2, { inp, only: i })));
   const doc = e(Document, { title: `MineralFlow Decision Record ${deal.packageId.slice(0, 8)}`, author: "MineralFlow AI" },
     one(Executive, "1"), one(Overview, "2"), one(Identity, "3"), ...perLease(Production, "4"), one(Regulatory, "5"), ...perLease(Title, "6"),
-    one(Forecast, "7"), one(Assumptions, "8"), one(Economics, "9"), one(Entry, "10"), one(Exit, "11"), one(Risks, "12"), one(Appendix, "13"));
+    one(Forecast, "7"), one(Assumptions, "8"), one(Economics, "9"), ...perLease(OilSensitivity, "9s"), one(Entry, "10"), one(Exit, "11"), one(Risks, "12"), one(Appendix, "13"));
   return renderToBuffer(doc as never);
 }
