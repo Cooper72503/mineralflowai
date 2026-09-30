@@ -66,6 +66,10 @@ describe("company names and the clerk's index (live CMC BUTTERCUP pairs)", () =>
       "WEST TEXAS STATE BANK", "WEST TEXAS NATIONAL BANK", "TEXAS NEW MEXICO PIPE LINE COMPANY", "TEXAS ELECTRIC SERVICE COMPANY"]);
     expect(found).toEqual(["GRAND PRIX PIPELINE LLC / GRANDPRIX PIPELINE LLC", "U S INTERNAL REVENUE SERVICE / US INTERNAL REVENUE SERVICE"]);
   });
+  it("never pairs differently numbered or lettered entities (live Section 36 index)", () => {
+    expect(pairs(["NOBLES 4H UNIT", "NOBLES 2H UNIT", "TXL 20 UNIT 1", "TXL 20 UNIT 2", "BRADFORD TRUST A UNIT 2", "BRADFORD TRUST B UNIT 2", "LEONARD REVOCABLE TRUST UNIT 3", "LEONARD REVOCABLE TRUST UNIT 1"])).toEqual([]);
+    expect(pairs(["CHEVRON USA INC", "CHEVRON USA ONC", "PIONEER NATURAL RESOURCES USA INC", "PINONEER NATURAL RESOURCES USA INC"])).toEqual(["CHEVRON USA INC / CHEVRON USA ONC", "PINONEER NATURAL RESOURCES USA INC / PIONEER NATURAL RESOURCES USA INC"]);
+  });
   it("never pairs a company with a person, and ignores initials-only fragments", () => {
     expect(pairs(["R A M A INC", "ROBERTSON MELANIE A", "VOGLER CODY R", "V R"])).toEqual([]);
   });

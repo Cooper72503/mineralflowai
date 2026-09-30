@@ -106,6 +106,16 @@ function tractFieldsFromExtracted(t: ExtractedTract) {
   return { county: t.county, abstractNumber: t.abstractNumber, surveyName: t.surveyName, blockNumber: t.blockNumber, sectionName: t.sectionName, legalDescription: t.legalDescriptionVerbatim, grossAcres: t.grossAcres };
 }
 
+/**
+ * A description that names a real survey location: a section with its block
+ * or survey, or an abstract of three or more digits. OCR runs of contract
+ * text ("...shall provide a copy of the Survey", "Midland County", "A-1")
+ * carry none and are never proposed as tracts; the text stays on the record.
+ */
+export function hasSurveyIdentity(f: { abstractNumber?: string | null; sectionName?: string | null; blockNumber?: string | null; surveyName?: string | null }): boolean {
+  return (f.abstractNumber?.replace(/\D/g, "").length ?? 0) >= 3 || (!!f.sectionName && (!!f.blockNumber || !!f.surveyName));
+}
+
 /** Matches an extracted tract to the job's canonical tracts; proposes a new one when the description carries enough signal. */
 function matchCanonicalTract(t: ExtractedTract, tracts: CandidateTract[]): { tractId: string | null; created: CandidateTract | null; reason: string } {
   const fields = tractFieldsFromExtracted(t);
@@ -123,8 +133,7 @@ function matchCanonicalTract(t: ExtractedTract, tracts: CandidateTract[]): { tra
   // Propose a tract only from a real survey identity. OCR runs of contract
   // text ("...shall provide a copy of the Survey", "Midland County") carry
   // none and would otherwise become candidate tracts.
-  const identified = !!fields.abstractNumber?.replace(/\D/g, "") || (!!fields.sectionName && (!!fields.blockNumber || !!fields.surveyName));
-  if (!identified) return { tractId: null, created: null, reason: "Instrument tract names no abstract, or section with a block or survey; not proposed as a tract" };
+  if (!hasSurveyIdentity(fields)) return { tractId: null, created: null, reason: "Instrument tract names no abstract, or section with a block or survey; not proposed as a tract" };
   const created: CandidateTract = {
     id: randomUUID(), tractLabel: tractLabelFor(fields), county: fields.county, abstractNumber: fields.abstractNumber, surveyName: fields.surveyName,
     blockNumber: fields.blockNumber, sectionName: fields.sectionName, legalDescription: fields.legalDescription, grossAcres: fields.grossAcres,
@@ -180,10 +189,11 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
       if (extractedDoc.instruments.length === 0 && extractedDoc.legalDescriptions.length === 0) throw new Error("No instrument or legal description could be extracted; document interpretation requires review");
 
       // 3. Non-instrument legal descriptions -> tract candidates + well associations.
-      if (extractedDoc.legalDescriptions.length > 0) {
+      const identifiedLegals = extractedDoc.legalDescriptions.filter(t => hasSurveyIdentity(t));
+      if (identifiedLegals.length > 0) {
         const proposal = proposeTracts({
           wells,
-          documentLegals: extractedDoc.legalDescriptions.map(t => ({ wellId: doc.well_id, documentId: doc.id, sourceUrl: doc.source_url, tract: t, category: extractedDoc.documentKind })),
+          documentLegals: identifiedLegals.map(t => ({ wellId: doc.well_id, documentId: doc.id, sourceUrl: doc.source_url, tract: t, category: extractedDoc.documentKind })),
           existingTracts: tracts,
         });
         for (const t of proposal.tracts) {
@@ -213,12 +223,13 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
       }
 
       // 5. Instruments.
+      let storedHere = 0, duplicatesHere = 0;
       for (const inst of extractedDoc.instruments) {
         const dedupeKey = instrumentDedupeKey(inst);
         const { data: existing } = await checkedIngestionQuery(supabase.from("title_instruments").select("id, document_id, instrument_content_verified").eq("job_id", jobId).eq("dedupe_key", dedupeKey).limit(1));
         if (existing && existing.length > 0) {
           if (existing[0].instrument_content_verified !== true) throw new Error("An incomplete prior instrument extraction exists; repair is required before retrying this document");
-          result.duplicatesSkipped++;
+          result.duplicatesSkipped++; duplicatesHere++;
           if (existing[0].document_id !== doc.id) {
             await addReviewItem(supabase, jobId, userId, { kind: "extraction_ambiguity", title: `Duplicate instrument in "${doc.file_name ?? doc.id}"`, detail: "This document contains an instrument already ingested from another document (same type, recording reference, dates, and parties). It was not stored twice.", payload: { documentId: doc.id, existingInstrumentId: existing[0].id } });
           }
@@ -276,9 +287,16 @@ export async function ingestPendingDocuments(supabase: SupabaseClient, userId: s
           await addReviewItem(supabase, jobId, userId, { kind: "extraction_ambiguity", title: `Ambiguous ${alt.field.replace(/_/g, " ")} in ${inst.instrumentType.replace(/_/g, " ")} (${inst.instrumentNumber ?? inst.bookVolumePage ?? doc.file_name ?? doc.id})`, detail: `${alt.reason} Readings: ${alt.interpretations.join(" | ")}`, payload: { instrumentId, documentId: doc.id, field: alt.field, interpretations: alt.interpretations } });
         }
         await checkedIngestionQuery(supabase.from("title_instruments").update({ evidence_level: "instrument_verified", instrument_content_verified: true }).eq("id", instrumentId));
+        storedHere++;
       }
 
-      await checkedIngestionQuery(supabase.from("title_documents").update({ extraction_status: "done", extraction_error: null }).eq("id", doc.id));
+      // A document read without adding an instrument says why, rather than
+      // reading as a silent success.
+      const outcome = storedHere > 0 ? null
+        : duplicatesHere > 0 ? `Read; no new instrument: ${duplicatesHere} instrument(s) duplicate one already read from another document`
+        : `Read; no instrument recognized in the text. ${extractedDoc.legalDescriptions.length} legal description(s) found, ${identifiedLegals.length} with a survey identity proposed as tract candidates`;
+      if (outcome) await addReviewItem(supabase, jobId, userId, { kind: "document_review", title: `Read without an instrument: "${doc.file_name ?? doc.id}"`, detail: `${outcome}. Review the image to classify it.`, payload: { documentId: doc.id } });
+      await checkedIngestionQuery(supabase.from("title_documents").update({ extraction_status: "done", extraction_error: outcome }).eq("id", doc.id));
       result.processed++;
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e).slice(0, 400);

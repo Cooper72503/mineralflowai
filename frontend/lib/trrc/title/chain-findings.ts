@@ -97,6 +97,17 @@ export function entitySimilarityReason(a: string, b: string): string | null {
   const ca = compact(a), cb = compact(b);
   if (!ca || !cb || ca === cb && a.toUpperCase().replace(/\s+/g, " ").trim() === b.toUpperCase().replace(/\s+/g, " ").trim()) return null;
   if (ca === cb) return "Company names differ only in spacing or punctuation";
+  // A different number or one-letter designator names a different entity:
+  // NOBLES 2H UNIT and NOBLES 4H UNIT, BRADFORD TRUST A UNIT 2 and B UNIT 2.
+  let i = 0; while (i < ca.length && i < cb.length && ca[i] === cb[i]) i++;
+  let j = 0; while (j < ca.length - i && j < cb.length - i && ca[ca.length - 1 - j] === cb[cb.length - 1 - j]) j++;
+  if (/\d/.test(ca.slice(i, ca.length - j) + cb.slice(i, cb.length - j))) return null;
+  const tokens = (s: string) => s.toUpperCase().replace(/[^A-Z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+  const ta = tokens(a), tb = tokens(b);
+  if (ta.length === tb.length) {
+    const diff = ta.map((t, k) => [t, tb[k]]).filter(([x, y]) => x !== y);
+    if (diff.length === 1 && diff[0][0].length === 1 && diff[0][1].length === 1) return null;
+  }
   if (Math.min(ca.length, cb.length) >= 8 && editDistance(ca, cb, 1) === 1) return "Company names differ by one letter, as a clerk's index often does";
   return null;
 }
