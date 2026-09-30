@@ -1,7 +1,8 @@
 import { getBrowser } from "./browser.js";
 import { PDFDocument } from "pdf-lib";
 
-export const MAX_PUBLIC_PREVIEW_PAGES = 100;
+// Same bound as OCR (frontend MAX_OCR_PAGES): an image that cannot be read is not downloaded.
+export const MAX_PUBLIC_PREVIEW_PAGES = 40;
 
 export type CountyDocument = { ok: true; bytes: Buffer; pageCount: number; sourceUrl: string } | { ok: false; error: string };
 export function validatePreviewUrl(value: string, documentUrl: string): string {

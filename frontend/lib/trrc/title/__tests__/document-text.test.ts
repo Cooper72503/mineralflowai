@@ -13,6 +13,13 @@ describe("whole-document text coverage",()=>{
   const result=await extractDocumentText(Buffer.from("pdf"),"application/pdf","deed.pdf");
   expect(result.ocrStatus).toBe("failed");expect(result.error).toContain("No partial extraction");expect(f.createWorker).not.toHaveBeenCalled();expect(destroy).toHaveBeenCalled();
  });
+ it("refuses the live 92-page Buttercup preview with its reason, within the 1.6 GB worker's 40-page bound",async()=>{
+  expect(MAX_OCR_PAGES).toBe(40);
+  f.parse.mockResolvedValue({text:"",numpages:92});const destroy=vi.fn();
+  f.getDocument.mockReturnValue({promise:Promise.resolve({numPages:92,destroy})});
+  const result=await extractDocumentText(Buffer.from("pdf"),"application/pdf","2024-630-public-preview.pdf");
+  expect(result.ocrStatus).toBe("failed");expect(result.error).toContain("92 pages; exceeds 40-page OCR limit");expect(f.createWorker).not.toHaveBeenCalled();
+ });
  it("does not accept a readable first page with an unreadable later page",async()=>{
   f.parse.mockResolvedValue({text:"readable first page ".repeat(5)+"\f",numpages:2});
   const terminate=vi.fn(),destroy=vi.fn();

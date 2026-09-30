@@ -21,7 +21,10 @@ export interface DocumentTextResult {
 }
 
 // Match the public-preview limit; never silently read only the first pages.
-export const MAX_OCR_PAGES = 100;
+// 40 pages fits the 1.6 GB worker: a 92-page Buttercup preview ran an hour
+// and pushed the worker to 2.3 GB with the droplet swapping (2026-09-30).
+// A longer document is an explicit exception to be obtained from the clerk.
+export const MAX_OCR_PAGES = 40;
 
 export function sha256Hex(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
