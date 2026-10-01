@@ -50,17 +50,21 @@ export async function supersedeIndexedCopies(supabase: SupabaseClient, jobId: st
   // Confirmed and rejected tracts are never moved.
   const undecided = new Set(canon.filter(c => c.matchStatus === "proposed").map(c => c.id));
   const urlByDoc = new Map((docs.data ?? []).map(d => [String(d.id), d.source_url as string | null]));
-  const indexByUrl = new Map<string, Record<string, unknown>>();
+  // A recording can carry several index rows, one per grantor/grantee pair
+  // (live: Buttercup 1994-1140, John H Buchanan Trust to two grantees). The
+  // read copy supersedes every one of them and carries all their parties.
+  const indexByUrl = new Map<string, Record<string, unknown>[]>();
   for (const row of (index.data ?? []) as Record<string, unknown>[]) {
     const url = ((row.extraction_json as { index?: { document_url?: unknown } } | null)?.index?.document_url);
-    if (typeof url === "string" && url) indexByUrl.set(url, row);
+    if (typeof url === "string" && url) indexByUrl.set(url, [...(indexByUrl.get(url) ?? []), row]);
   }
 
   let superseded = 0;
   for (const r of (read.data ?? []) as Record<string, unknown>[]) {
     const url = urlByDoc.get(String(r.document_id));
-    const idx = url ? indexByUrl.get(url) : undefined;
-    if (!idx) continue;
+    const rows = url ? indexByUrl.get(url) ?? [] : [];
+    if (!rows.length) continue;
+    const idx = rows[0];
     const indexNumber = (idx.instrument_number as string | null) ?? (idx.doc_number as string | null) ?? null;
 
     // The document was downloaded from this exact index entry, so the
@@ -85,8 +89,8 @@ export async function supersedeIndexedCopies(supabase: SupabaseClient, jobId: st
     // Apply it only to the read copy's tracts that are unmatched or parked
     // on an undecided proposal; a tract a person confirmed or rejected keeps
     // its assignment.
-    const indexLegal = ((idx.extraction_json as { index?: { legal_description?: unknown } } | null)?.index?.legal_description);
-    const covers = typeof indexLegal === "string" ? confirmed.filter(c => legalDescriptionCoversTract(indexLegal, c)) : [];
+    const indexLegals = rows.map(x => (x.extraction_json as { index?: { legal_description?: unknown } } | null)?.index?.legal_description).filter((v): v is string => typeof v === "string");
+    const covers = confirmed.filter(c => indexLegals.some(l => legalDescriptionCoversTract(l, c)));
     if (covers.length === 1) {
       const { data: own, error: ownTractError } = await supabase.from("title_instrument_tracts").select("id, canonical_tract_id").eq("instrument_id", r.id);
       if (ownTractError) throw new Error(`Could not load read instrument tracts: ${ownTractError.message}`);
@@ -120,12 +124,17 @@ export async function supersedeIndexedCopies(supabase: SupabaseClient, jobId: st
     // record a landman runs a chain from. Watermarked OCR yields fragments
     // ("WOO, successors, assigns, Atlas Pipeline Mid: Cofifid"); the index
     // yields "BOB AND TONI MIDKIFF LTD". The text is read for terms.
-    const { data: indexed, error: indexedError } = await supabase.from("title_instrument_parties")
-      .select("party_name, party_name_verbatim, role").eq("instrument_id", idx.id);
+    const { data: indexedRows, error: indexedError } = await supabase.from("title_instrument_parties")
+      .select("party_name, party_name_verbatim, role").in("instrument_id", rows.map(x => x.id));
     if (indexedError) throw new Error(`Could not load index parties: ${indexedError.message}`);
+    const seenParty = new Set<string>();
+    const indexed = ((indexedRows ?? []) as Array<{ party_name: string; party_name_verbatim: string | null; role: string }>).filter(p => {
+      const k = `${p.role}|${p.party_name}`; if (seenParty.has(k)) return false; seenParty.add(k); return true;
+    });
     const { data: own, error: ownError } = await supabase.from("title_instrument_parties").select("id, source_excerpt").eq("instrument_id", r.id);
     if (ownError) throw new Error(`Could not load read instrument parties: ${ownError.message}`);
-    const alreadyIndexed = (own ?? []).length > 0 && (own ?? []).every(p => p.source_excerpt === INDEX_PARTY_EXCERPT);
+    // Re-copy when an earlier pass copied fewer index parties than the recording's rows carry.
+    const alreadyIndexed = (own ?? []).length === indexed.length && (own ?? []).every(p => p.source_excerpt === INDEX_PARTY_EXCERPT);
     if (indexed?.length && !alreadyIndexed) {
       if ((own ?? []).length) {
         const { error: deleteError } = await supabase.from("title_instrument_parties").delete().eq("instrument_id", r.id);
@@ -138,8 +147,9 @@ export async function supersedeIndexedCopies(supabase: SupabaseClient, jobId: st
       if (error) throw new Error(`Could not copy index parties: ${error.message}`);
     }
 
-    if (idx.evidence_level !== SUPERSEDED_EVIDENCE_LEVEL) {
-      const { error } = await supabase.from("title_instruments").update({ evidence_level: SUPERSEDED_EVIDENCE_LEVEL }).eq("id", idx.id);
+    for (const row of rows) {
+      if (row.evidence_level === SUPERSEDED_EVIDENCE_LEVEL) continue;
+      const { error } = await supabase.from("title_instruments").update({ evidence_level: SUPERSEDED_EVIDENCE_LEVEL }).eq("id", row.id);
       if (error) throw new Error(`Could not mark index row superseded: ${error.message}`);
       superseded++;
     }
