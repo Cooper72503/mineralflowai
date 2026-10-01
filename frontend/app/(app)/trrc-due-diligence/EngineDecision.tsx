@@ -174,7 +174,12 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
             <div>{start.basis.loeUsdPerBoe}. Operator-specific actual costs are not established; select a sensitivity or enter supported costs below.</div>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               {[["Lower cost (−20%)", 0.8], ["Location baseline", 1], ["Higher cost (+20%)", 1.2]].map(([name, factor]) =>
-                <button key={name} style={quiet} onClick={() => { setDraft({}); onApply({ ...edits, ...costScenario(start.assumptions, Number(factor)) }); }}>{name}</button>)}
+                <button key={name} style={quiet} onClick={() => {
+                  // Record only values that differ from the start, so the baseline is not labeled "Entered by user".
+                  const next: Partial<EconomicsAssumptions> = { ...edits, ...costScenario(start.assumptions, Number(factor)) };
+                  for (const k of Object.keys(next) as Field[]) if (next[k] === start.assumptions[k]) delete next[k];
+                  setDraft({}); onApply(next);
+                }}>{name}</button>)}
             </div>
             <div>Multipliers are illustrative sensitivities, not measured differences between named operators. Royalty interests bear no direct operating costs; costs still affect economic life.</div>
           </div>
@@ -249,9 +254,9 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
         <div style={label}>Oil price sensitivity · {a.holdYears}-year hold · {a.discountRatePct}% hurdle</div>
         <p style={{ fontSize: "0.75rem", color: COLORS.textMuted }}>{SENSITIVITY_DISCLOSURE}</p>
         <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
-          <thead><tr>{["Oil $/bbl", "Year 1 net", "Entry ceiling", "Hold cash", "Exit value", "IRR"].map(h => <th key={h} style={{ ...cell, ...num, color: COLORS.textMuted, padding: 6 }}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Oil $/bbl", "Year 1 net", "Entry ceiling", "Hold cash", "Exit value", "IRR at asking price"].map(h => <th key={h} style={{ ...cell, ...num, color: COLORS.textMuted, padding: 6 }}>{h}</th>)}</tr></thead>
           <tbody>{sensitivity.map(row => <tr key={row.oilPriceUsdBbl}>
-            {[`$${row.oilPriceUsdBbl}`, ...[row.annualNet, row.ceiling, row.holdCash, row.exitValue].map(v => v === null ? "Unavailable" : usd(v)), pct(row.irrPct)].map((v, i) => <td key={i} title={row.reason ?? undefined} style={{ ...cell, ...num, color: COLORS.text, padding: 6 }}>{v}</td>)}
+            {[`$${row.oilPriceUsdBbl}`, ...[row.annualNet, row.ceiling, row.holdCash, row.exitValue].map(v => v === null ? "Unavailable" : usd(v)), a.askingPriceUsd ? pct(row.irrPct) : "Set an asking price"].map((v, i) => <td key={i} title={row.reason ?? undefined} style={{ ...cell, ...num, color: COLORS.text, padding: 6 }}>{v}</td>)}
           </tr>)}</tbody>
         </table>
         {sensitivity.find(row => row.reason)?.reason && <p style={{ color: COLORS.yellow }}>{sensitivity.find(row => row.reason)?.reason}</p>}

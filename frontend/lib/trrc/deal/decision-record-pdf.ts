@@ -284,9 +284,9 @@ function OilSensitivity({ inp, only }: { inp: DecisionRecordInput; only: number 
     kv("Interest / hold / hurdle", `${a.interestType}; NRI ${a.netRevenueInterest}; WI ${a.workingInterest}; ${a.holdYears} years; ${a.discountRatePct}%`),
     Note("Costs use the location benchmark or user inputs disclosed in Section 8. No operator-specific actual expense is asserted. Lower/higher cost presets are illustrative ±20% sensitivities. Royalty interests bear no direct operating costs; costs affect the operator's economic limit."),
     Note(SENSITIVITY_DISCLOSURE),
-    e(Th, { cols: [["Oil $/bbl", 55], ["Year 1 net", 90, "right"], ["Entry ceiling", 95, "right"], ["Hold cash", 90, "right"], ["Exit value", 95, "right"], ["IRR", 65, "right"]] }),
+    e(Th, { cols: [["Oil $/bbl", 55], ["Year 1 net", 90, "right"], ["Entry ceiling", 95, "right"], ["Hold cash", 90, "right"], ["Exit value", 95, "right"], ["IRR at asking", 65, "right"]] }),
     ...rows.map((row, i) => e(Tr, { key: i, i, cols: [[String(row.oilPriceUsdBbl), 55],
-      ...([['annualNet',90],['ceiling',95],['holdCash',90],['exitValue',95]] as const).map(([k,w]): [string, number, "right"] => [row[k] === null ? "Unavailable" : fmtUsd(row[k]!), w, "right"]), [pct(row.irrPct),65,"right"]] })),
+      ...([['annualNet',90],['ceiling',95],['holdCash',90],['exitValue',95]] as const).map(([k,w]): [string, number, "right"] => [row[k] === null ? "Unavailable" : fmtUsd(row[k]!), w, "right"]), [a.askingPriceUsd ? pct(row.irrPct) : "No asking price",65,"right"]] })),
     ...[...new Set(rows.map(row => row.reason).filter(Boolean))].map((reason, i) => Bullet(`Unavailable: ${reason}`, i, C.yellow)),
     Note("Conditional scenario results do not clear title gaps or authorize an acquisition. Entry/exit formulas and return basis are described in Sections 10–11."));
 }

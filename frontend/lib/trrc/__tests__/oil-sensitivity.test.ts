@@ -24,3 +24,10 @@ it('explains unavailable forecasts at every price',()=>{
  expect(rows).toHaveLength(13);
  expect(rows.every(r=>r.reason && r.ceiling===null && r.exitValue===null)).toBe(true);
 });
+it('reports IRR only against an entered asking price',()=>{
+ expect(oilSensitivity(asset,a).every(r=>r.irrPct===null)).toBe(true);
+ const ceiling=entryAnalysis(evaluatePrototype(asset,a))!.ceiling;
+ const priced=oilSensitivity(asset,{...a,askingPriceUsd:Math.round(ceiling*0.8)});
+ expect(priced.every(r=>r.irrPct!==null)).toBe(true);
+ expect(priced[0].irrPct!).toBeLessThan(priced[12].irrPct!);
+});
