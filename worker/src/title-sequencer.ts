@@ -140,6 +140,26 @@ async function addReviewItem(supabase: SupabaseClient, jobId: string, userId: st
   await checkedQuery(supabase.from("title_review_items").insert({ job_id: jobId, user_id: userId, kind, title, detail, payload_json: payload }), "title_review_items");
 }
 
+/**
+ * Replace this job's limitations matching `match` with `limitation` (or remove
+ * them). For statements that describe the latest run, so an earlier run's
+ * count is never left standing beside, or instead of, the current one.
+ */
+async function setLimitation(supabase: SupabaseClient, jobId: string, match: RegExp, limitation: string | null): Promise<void> {
+  const { data } = await checkedQuery(supabase.from("title_research_jobs").select("limitations_json").eq("id", jobId).maybeSingle(), "title_research_jobs");
+  const current = ((data?.limitations_json as string[] | null) ?? []);
+  const next = [...current.filter(l => !match.test(l)), ...(limitation ? [limitation] : [])];
+  if (JSON.stringify(next) === JSON.stringify(current)) return;
+  await checkedQuery(supabase.from("title_research_jobs").update({ limitations_json: next }).eq("id", jobId), "title_research_jobs");
+}
+
+/** A review item whose detail is restated by each run rather than kept from the first. */
+async function upsertReviewItem(supabase: SupabaseClient, jobId: string, userId: string, kind: string, title: string, detail: string, payload: Record<string, unknown>): Promise<void> {
+  const { data } = await checkedQuery(supabase.from("title_review_items").select("id").eq("job_id", jobId).eq("kind", kind).eq("title", title).limit(1), "title_review_items");
+  if (data && data.length > 0) await checkedQuery(supabase.from("title_review_items").update({ detail, payload_json: payload }).eq("id", (data[0] as { id: string }).id), "title_review_items");
+  else await checkedQuery(supabase.from("title_review_items").insert({ job_id: jobId, user_id: userId, kind, title, detail, payload_json: payload }), "title_review_items");
+}
+
 async function appendLimitation(supabase: SupabaseClient, jobId: string, limitation: string): Promise<void> {
   const { data } = await checkedQuery(supabase.from("title_research_jobs").select("limitations_json").eq("id", jobId).maybeSingle(), "title_research_jobs");
   const current = ((data?.limitations_json as string[] | null) ?? []);
@@ -560,7 +580,15 @@ export async function retrieveOwnershipDocuments(supabase: SupabaseClient, deps:
   }
   if (documentBudget) documentBudget.remaining = Math.max(0, documentBudget.remaining! - fetched);
   if (fetched) await appendLimitation(supabase, jobId, "County public preview images were retrieved automatically. They are not certified copies.");
-  if (queue.length > budget) await addReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", `${queue.length - budget} further ownership-relevant recordings on the lease were not read within this run's ${documentBudget ? passLimit : budget}-document limit. Re-running the title job continues the queue.`, { remaining: queue.length - budget });
+  // Restated by every pass: the latest count of unread tract recordings, or nothing once the queue is read.
+  const unreadQueue = Math.max(0, queue.length - fetched);
+  const limit = documentBudget ? passLimit : budget;
+  await setLimitation(supabase, jobId, /^County document reading limit:/, unreadQueue > 0
+    ? `County document reading limit: ${unreadQueue} further recording(s) on the tracts were not read in the latest run (limit ${limit} images a run). Re-running the title job continues the queue.`
+    : null);
+  // Easement and midstream recordings are now read after conveyances; the older note that they were not read no longer holds.
+  await setLimitation(supabase, jobId, /surface, easement or midstream recording\(s\) on the tract are reported from the county index and were not read/, null);
+  if (unreadQueue > 0) await upsertReviewItem(supabase, jobId, userId, "document_retrieval", "County document retrieval limit reached", `${unreadQueue} further recording(s) on the tracts were not read within the latest run's ${limit}-image limit. Re-running the title job continues the queue.`, { remaining: unreadQueue, limit });
   if (unreadable) await addReviewItem(supabase, jobId, userId, "document_retrieval", `${unreadable} recording(s) on the tract expose no retrieval link`, "They remain in the chain as index entries; their images must be obtained from the clerk.", { count: unreadable });
   return fetched;
 }

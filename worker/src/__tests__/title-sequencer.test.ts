@@ -446,6 +446,13 @@ describe("county document continuation", () => {
     const run2 = { remaining: null as number | null };
     expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1", [], run2)).toBe(40);
     expect(store.title_documents).toHaveLength(80);
+    // The limitation states the latest run's shortfall, and the review item is restated, not kept from run 1.
+    const lims = () => (store.title_research_jobs[0].limitations_json as string[]).filter(l => l.startsWith("County document reading limit:"));
+    expect(lims()).toEqual(["County document reading limit: 10 further recording(s) on the tracts were not read in the latest run (limit 40 images a run). Re-running the title job continues the queue."]);
+    expect(store.title_review_items.filter(r => r.title === "County document retrieval limit reached")).toHaveLength(1);
+    expect(store.title_review_items.find(r => r.title === "County document retrieval limit reached")!.detail).toContain("10 further");
+    expect(await retrieveOwnershipDocuments(supabase, d, "job-1", "user-1", [], { remaining: null })).toBe(10);
+    expect(lims()).toEqual([]);
   });
   it("retries a transient preview failure once", async () => {
     const { supabase } = makeSupabase(countySeed());
