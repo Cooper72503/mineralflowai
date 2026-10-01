@@ -309,3 +309,28 @@ export function applyAssumptionEdits(deal: Deal, edits: Record<string, Record<st
   }
   return { errors, byLease };
 }
+
+/**
+ * Decision reasons for a summary: exact repeats dropped, per-well repeats
+ * ("4232946216: <reason>") stated once with the number of wells, and the list
+ * capped with a pointer to where the rest are printed in full.
+ */
+export function summarizeReasons(reasons: string[], max = 8, rest = "Section 12"): string[] {
+  const perWell = new Map<string, { apis: Set<string>; first: string }>();
+  const order: string[] = [];
+  for (const r of reasons) {
+    const m = r.match(/^(?:(.+?): )?(\d{10}): (.+)$/);
+    const key = m ? `well|${m[1] ?? ""}|${m[3]}` : `text|${r}`;
+    const g = perWell.get(key);
+    if (g) { if (m) g.apis.add(m[2]); continue; }
+    perWell.set(key, { apis: new Set(m ? [m[2]] : []), first: r });
+    order.push(key);
+  }
+  const all = order.map(k => {
+    const g = perWell.get(k)!;
+    if (g.apis.size <= 1) return g.first;
+    const m = g.first.match(/^(?:(.+?): )?(\d{10}): (.+)$/)!;
+    return `${m[1] ? `${m[1]}: ` : ""}${m[3].replace(/\.$/, "")} (${g.apis.size} wells).`;
+  });
+  return all.length > max ? [...all.slice(0, max), `${all.length - max} further reason(s) are listed in ${rest}.`] : all;
+}

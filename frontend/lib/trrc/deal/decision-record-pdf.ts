@@ -12,7 +12,7 @@ import { Document, Page, Text, View, Link, renderToBuffer } from "@react-pdf/ren
 import { C, S, kv, fmtUsd, fmtDec, TYPE_LABEL, ProductionChart } from "../report-builder";
 import type { Deal, DealLease } from "./build";
 import type { DealDecisionRecord, LeaseDecisionRecord, Finding } from "./decision-layer";
-import { ownerValuesUnder } from "./decision-layer";
+import { ownerValuesUnder, summarizeReasons } from "./decision-layer";
 import type { AssumptionBasis, EconomicsAssumptions } from "../economics-provider";
 import type { Verdict } from "./underwriting";
 
@@ -69,14 +69,15 @@ function Executive({ inp }: { inp: DecisionRecordInput }) {
   const { deal, record } = inp;
   return e(View, {}, Section("1. EXECUTIVE DECISION SUMMARY"),
     e(View, { style: { flexDirection: "row", alignItems: "center", marginBottom: 8 } }, e(Badge, { verdict: record.verdict, large: true }),
-      e(Text, { style: { fontSize: 10, fontFamily: "Helvetica-Bold", color: C.navy, marginLeft: 10, flex: 1 } }, record.reasons[0] ?? "")),
-    ...record.reasons.slice(1).map((r, i) => Body(r) && e(Text, { key: i, style: S.bodyText }, r)),
+      e(Text, { style: { fontSize: 10, fontFamily: "Helvetica-Bold", color: C.navy, marginLeft: 10, flex: 1 } }, summarizeReasons(record.reasons)[0] ?? "")),
+    ...summarizeReasons(record.reasons).slice(1).map((r, i) => e(Text, { key: i, style: S.bodyText }, r)),
     ...record.leases.map((r, i) => {
       const l = deal.leases.find(x => x.key === r.leaseKey)!;
       const s = r.economics.scenarios, a = r.economics.assumptions;
-      return e(View, { key: i, wrap: false, style: { marginTop: 8, borderTopWidth: 0.5, borderTopColor: C.border, paddingTop: 6 } },
-        e(View, { style: { flexDirection: "row", alignItems: "center", marginBottom: 4 } }, e(Badge, { verdict: r.verdict }), e(Text, { style: { fontSize: 9, fontFamily: "Helvetica-Bold", marginLeft: 6 } }, leaseTitle(l))),
-        ...r.reasons.map((t, j) => Bullet(t, `r${j}`)),
+      // The block may break across pages; a long reason list must never be cut off or leave a blank page.
+      return e(View, { key: i, style: { marginTop: 8, borderTopWidth: 0.5, borderTopColor: C.border, paddingTop: 6 } },
+        e(View, { wrap: false, minPresenceAhead: 60, style: { flexDirection: "row", alignItems: "center", marginBottom: 4 } }, e(Badge, { verdict: r.verdict }), e(Text, { style: { fontSize: 9, fontFamily: "Helvetica-Bold", marginLeft: 6 } }, leaseTitle(l))),
+        ...summarizeReasons(r.reasons, 6).map((t, j) => Bullet(t, `r${j}`)),
         kv("Interest evaluated", `${a.interestType === "royalty" ? "Royalty" : "Working interest"}, ${a.netRevenueInterest} revenue decimal${a.interestType === "working" ? `, ${a.workingInterest} working interest` : ""}`),
         s ? kv(`Value at ${a.discountRatePct}%`, `${fmtUsd(s.downside.presentValue)} downside  |  ${fmtUsd(s.base.presentValue)} base  |  ${fmtUsd(s.upside.presentValue)} upside${refs([deckRef(deal), stdRef(deal), ...l.sources.production])}`) : kv("Value", `Not calculated: ${r.economics.reason}`),
         r.entry ? kv("Entry", `Range ${fmtUsd(r.entry.rangeLow)} – ${fmtUsd(r.entry.rangeHigh)}; walk-away ceiling ${fmtUsd(r.entry.ceiling)}${r.entry.askingPriceUsd ? `; asking ${fmtUsd(r.entry.askingPriceUsd)} is ${r.entry.position}` : ""}`) : null,
@@ -349,7 +350,7 @@ function Appendix({ inp }: { inp: DecisionRecordInput }) {
     Note("Every bracketed number in this record refers to a source below."),
     ...deal.sources.map((s, i) => e(View, { key: i, style: { marginBottom: 5 }, wrap: false },
       e(Text, { style: { fontSize: 8, fontFamily: "Helvetica-Bold" } }, `[${s.id}] ${s.label}`),
-      e(Text, { style: S.flagItem }, `${s.detail}${s.retrievedAt ? `. Retrieved ${s.retrievedAt.slice(0, 16).replace("T", " ")} UTC` : ""}.`),
+      e(Text, { style: S.flagItem }, `${s.detail.replace(/\.+$/, "")}${s.retrievedAt ? `. Retrieved ${s.retrievedAt.slice(0, 16).replace("T", " ")} UTC` : ""}.`),
       s.url ? e(Link, { src: s.url, style: S.trrcLink }, s.url) : null)),
     Sub("Economics provider"),
     ...[...new Set(inp.record.leases.map(r => `${r.economics.provider.name} (id "${r.economics.provider.id}", version ${r.economics.provider.version}). Supplied through MineralFlow's EconomicsProvider interface; a partner forecast and economics plug in at the same point.`))].map((t, i) => Bullet(t, `p${i}`)),

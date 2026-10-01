@@ -16,6 +16,13 @@ describe("evidence readiness", () => {
     const c = regulatoryCoverage([attempt("fetch_compliance_violations", { found: false, open_count: 0 }, "success", "2026-09-27T12:00:00Z"), attempt("fetch_compliance_violations", {}, "failed_transient"), attempt("fetch_plugging_records", { found: false, w3_certificate_checked: false })]);
     expect(c[0].status).toBe("unavailable"); expect(c[1].status).toBe("limited");
   });
+  it("accepts TRRC's confirmed-empty inactive-well answer, and still refuses a failed one (live Buttercup)", () => {
+    const ok = regulatoryCoverage([attempt("fetch_inactive_well_status", { message: "Not in inactive well report", records: [], is_inactive: false, plugging_deadline: null })]);
+    expect(ok.find(c => c.source === "fetch_inactive_well_status")!.status).toBe("verified");
+    const bad = regulatoryCoverage([attempt("fetch_inactive_well_status", { message: "Inactive well query rejected the search criteria", error: "rejected", is_inactive: false })]);
+    expect(bad.find(c => c.source === "fetch_inactive_well_status")!.status).toBe("unavailable");
+    expect(regulatoryCoverage([attempt("fetch_inactive_well_status", { message: "?" })]).find(c => c.source === "fetch_inactive_well_status")!.status).toBe("unavailable");
+  });
   it("detects missing calendar months even when the server omitted rows entirely", () => {
     expect(unreportedMonths("2026-01", "2026-09-28")).toBe(7);
     expect(unreportedMonths("2024-01", "2026-09-28")).toBe(31);

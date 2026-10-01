@@ -10,7 +10,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Deal, DealLease } from "@/lib/trrc/deal/build";
-import { assembleDecision, type LeaseDecisionRecord, type Finding } from "@/lib/trrc/deal/decision-layer";
+import { assembleDecision, summarizeReasons, type LeaseDecisionRecord, type Finding } from "@/lib/trrc/deal/decision-layer";
 import { validateAssumptions, type EconomicsAssumptions, type AssumptionBasis } from "@/lib/trrc/economics-provider";
 import { economicsAssetFromLease } from "@/lib/trrc/deal/decision-layer";
 import { oilSensitivity, costScenario, SENSITIVITY_DISCLOSURE } from "@/lib/trrc/deal/oil-sensitivity";
@@ -80,7 +80,7 @@ export function EngineDecision({ data, fetcher, onError }: { data: EngineData; f
       <div style={{ ...card, display: "flex", alignItems: "flex-start", gap: "1rem", flexWrap: "wrap" }}>
         <span style={{ background: verdictBg(record.verdict), color: verdictColor(record.verdict), fontWeight: 700, fontSize: "1rem", borderRadius: 6, padding: "0.35rem 0.8rem", letterSpacing: "0.04em" }}>{record.verdict}</span>
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-          {record.reasons.map((r, i) => <div key={i} style={{ color: i === 0 ? COLORS.text : COLORS.textMuted, fontSize: i === 0 ? "0.95rem" : "0.82rem", fontWeight: i === 0 ? 600 : 400, marginBottom: 4 }}>{r}</div>)}
+          {summarizeReasons(record.reasons, 8, "the lease details below").map((r, i) => <div key={i} style={{ color: i === 0 ? COLORS.text : COLORS.textMuted, fontSize: i === 0 ? "0.95rem" : "0.82rem", fontWeight: i === 0 ? 600 : 400, marginBottom: 4 }}>{r}</div>)}
           <div style={{ fontSize: "0.75rem", color: COLORS.textFaint, marginTop: 6 }}>{deal.submitted} APIs · {deal.leases.length} lease{deal.leases.length === 1 ? "" : "s"} · Economics: {record.leases[0]?.economics.provider.name ?? "—"}</div>
         </div>
         <button onClick={generate} disabled={generating || invalid} title={invalid ? "Correct the highlighted assumptions first." : undefined} style={primary(!generating && !invalid)}>{generating ? "Building Decision Record…" : "Generate Decision Record"}</button>
@@ -141,7 +141,7 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
         <span style={{ color: COLORS.text, fontWeight: 600 }}>{l.leaseName ?? "Lease"}</span>
         <span style={{ color: COLORS.textFaint, fontSize: "0.8rem" }}>RRC {l.district}-{l.leaseNumber} · {l.county} County · {l.operator}</span>
       </div>
-      {r.reasons.map((t, i) => <div key={i} style={{ fontSize: "0.85rem", color: i === 0 ? COLORS.text : COLORS.textMuted, marginBottom: 3 }}>{t}</div>)}
+      {summarizeReasons(r.reasons, 6, "Missing diligence below").map((t, i) => <div key={i} style={{ fontSize: "0.85rem", color: i === 0 ? COLORS.text : COLORS.textMuted, marginBottom: 3 }}>{t}</div>)}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.6rem", margin: "0.8rem 0 1rem" }}>
         <Stat k="Wells" v={`${l.apis.length} submitted · ${l.producingWells} producing`} />

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decideLeaseRecord, economicsAssetFromLease, entryAnalysis, exitAnalysis, reconcile, irrAnnualPct } from "../decision-layer";
+import { decideLeaseRecord, economicsAssetFromLease, entryAnalysis, exitAnalysis, reconcile, irrAnnualPct, summarizeReasons } from "../decision-layer";
 import { evaluatePrototype, defaultAssumptions } from "../../economics-provider";
 import type { DealLease } from "../build";
 
@@ -129,5 +129,16 @@ describe("evidence gates", () => {
     expect(r.verdict).toBe("REVIEW"); expect(r.economics.status).toBe("calculated");
     const terms: Record<string, string> = { "unread instruments": "3 of 4", "unresearched tract": "Section 25", "unknown ownership": "Owners of record", "stale production": "24 completed months", "failed compliance": "Compliance request failed" };
     expect(r.reasons.join(" ")).toContain(terms[kind]);
+  });
+});
+
+describe("decision summaries (live Buttercup REVIEW reasons)", () => {
+  it("states a per-well reason once with the count, keeps single-well text, and caps the list", () => {
+    const apis = ["4232946216", "4232946217", "4232946218"];
+    const reasons = ["Offered well count has not been supplied.", ...apis.map(a => `CMC BUTTERCUP 25-37 UNIT: Evidence unavailable: ${a}: fetch_x: no confirmed result.`),
+      "4232946771: fetch_y: timed out.", "Offered well count has not been supplied."];
+    expect(summarizeReasons(reasons)).toEqual(["Offered well count has not been supplied.", "CMC BUTTERCUP 25-37 UNIT: Evidence unavailable: fetch_x: no confirmed result (3 wells).", "4232946771: fetch_y: timed out."]);
+    expect(summarizeReasons(Array.from({ length: 12 }, (_, i) => `Reason ${i}.`), 8)).toHaveLength(9);
+    expect(summarizeReasons(Array.from({ length: 12 }, (_, i) => `Reason ${i}.`), 8)[8]).toBe("4 further reason(s) are listed in Section 12.");
   });
 });

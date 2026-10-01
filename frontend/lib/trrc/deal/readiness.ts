@@ -23,7 +23,11 @@ export function regulatoryCoverage(attempts: LiteSourceAttempt[]): RegulatoryCov
       return { ...base, status: "unavailable", reason: "Compliance records were returned, but the open-violation count is unknown or truncated." };
     if (source === "fetch_plugging_records" && d.w3_certificate_checked === false)
       return { ...base, status: "limited", reason: `${String(d.message || "Plugging status from the TRRC GIS symbol only.")} W-3 certificate content was not checked.` };
-    if (typeof d.found !== "boolean" && source !== "fetch_orphan_well")
+    // The inactive-well query answers with is_inactive: "Not in inactive well
+    // report" follows TRRC's explicit "no results found" for the operator and
+    // API, which is a confirmed empty search (all 12 Buttercup wells).
+    const established = typeof d.found === "boolean" || (source === "fetch_inactive_well_status" && typeof d.is_inactive === "boolean");
+    if (!established && source !== "fetch_orphan_well")
       return { ...base, status: "unavailable", reason: "The source response does not establish a result or a confirmed empty search." };
     return { ...base, status: "verified", reason: String(d.message || "Query completed; findings are reported separately.") };
   });
