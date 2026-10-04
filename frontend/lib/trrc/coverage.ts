@@ -55,6 +55,21 @@ export const TOOL_COVERAGE_MAP: Record<string, { category: string; label: string
   fetch_county_records:       { category: "county_records",     label: "County Real Property Records (Deeds/Leases)" },
 };
 
+/**
+ * A source failure as one plain line for a reader. Browser automation errors
+ * carry a call log and page logs ("Call log: - navigating to ... ===== logs
+ * =====") that leaked into Buttercup's Decision Record on 2026-10-04.
+ */
+export function plainSourceError(raw: string | null | undefined): string {
+  const first = String(raw ?? "").split(/\n\s*(?:Call log:|=+ ?logs ?=+)|\n/)[0].replace(/\s+/g, " ").trim();
+  const ms = first.match(/Timeout (\d+)\s*ms exceeded/i);
+  if (ms) return `TRRC did not respond within ${Math.round(Number(ms[1]) / 1000)} s`;
+  if (/operation was aborted due to timeout|ETIMEDOUT|timed? ?out/i.test(first)) return "TRRC did not respond in time";
+  if (/fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up/i.test(first)) return "Connection to TRRC failed";
+  const text = first.replace(/^(?:[A-Za-z]*Error|Error):\s*/, "").replace(/\.+$/, "");
+  return (text || "Query failed").slice(0, 160);
+}
+
 export function deriveCoverageFromAttempts(attempts: LiteSourceAttempt[]): SourceCoverageStatus[] {
   const coverage: SourceCoverageStatus[] = [];
   const seen = new Set<string>();
@@ -74,10 +89,10 @@ export function deriveCoverageFromAttempts(attempts: LiteSourceAttempt[]): Sourc
 
     if (a.status === "failed_transient" || a.status === "failed_permanent") {
       status = "retrieval_failed";
-      notes = a.error_message?.slice(0, 120) ?? "Query failed.";
+      notes = a.error_message ? plainSourceError(a.error_message) : "Query failed.";
     } else if (typeof data["error"] === "string" && data["error"]) {
       status = "retrieval_failed";
-      notes = data["error"] as string;
+      notes = plainSourceError(data["error"] as string);
     } else if (Array.isArray(data["partial_errors"]) && data["partial_errors"].length > 0) {
       status = "partial";
       notes = data["partial_errors"].join("; ");

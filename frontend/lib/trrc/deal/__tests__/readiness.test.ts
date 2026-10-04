@@ -31,3 +31,18 @@ describe("evidence readiness", () => {
     expect(unreportedMonths("2027-01", "2026-09-28")).toBeNull();
   });
 });
+
+describe("source failures read as one plain line (live 2026-10-04)", () => {
+  it("strips browser call logs and states the cause", async () => {
+    const { plainSourceError } = await import("../../coverage");
+    expect(plainSourceError('TimeoutError: page.goto: Timeout 45000ms exceeded.\nCall log:\n  - navigating to "https://webapps2.rrc.texas.gov/PDA/ice/pdaIceHome.xhtml", waiting until "networkidle"\n=========================== logs ===========================\n  "domcontentloaded" event fired')).toBe("TRRC did not respond within 45 s");
+    expect(plainSourceError("TimeoutError: The operation was aborted due to timeout")).toBe("TRRC did not respond in time");
+    expect(plainSourceError("TypeError: fetch failed")).toBe("Connection to TRRC failed");
+    expect(plainSourceError("Operator number required for inactive well lookup — not resolved yet")).toBe("Operator number required for inactive well lookup — not resolved yet");
+    expect(plainSourceError(null)).toBe("Query failed");
+  });
+  it("keeps raw logs out of the readiness reason", () => {
+    const c = regulatoryCoverage([attempt("fetch_compliance_violations", {}, "failed_transient")].map(a => ({ ...a, error_message: "TimeoutError: page.goto: Timeout 45000ms exceeded.\nCall log:\n  - navigating to x" })));
+    expect(c[0].reason).toBe("TRRC did not respond within 45 s");
+  });
+});

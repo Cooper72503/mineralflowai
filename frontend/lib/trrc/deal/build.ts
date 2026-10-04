@@ -8,7 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadPortfolioInputs } from "../portfolio/load";
 import { buildPortfolioRecord } from "../portfolio/record";
-import { latestSourceAttempts, type LiteSourceAttempt } from "../coverage";
+import { latestSourceAttempts, type LiteSourceAttempt, plainSourceError } from "../coverage";
 import { computeProductionAnalytics, extractIdentity, generateFlags, getAttempt, type WellIdentity } from "../report-builder";
 import { currentProduction, reportedProductionSeries } from "../production-series";
 import { fitArpsDeclineWindowed, type DeclineCurveFit } from "../decline-curve";
@@ -239,7 +239,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     for (const run of memberRuns) for (const a of attemptsById.get(run.id) ?? []) {
       if (a.status === "not_applicable") continue;
       const c = coverageMap.get(a.source_name) ?? { retrieved: 0, wells: 0, lastError: null, lastAt: null };
-      c.wells++; if (a.status === "success") c.retrieved++; else c.lastError = a.error_message ?? a.status;
+      c.wells++; if (a.status === "success") c.retrieved++; else c.lastError = a.error_message ? plainSourceError(a.error_message) : a.status;
       if (!c.lastAt || a.attempted_at > c.lastAt) c.lastAt = a.attempted_at;
       coverageMap.set(a.source_name, c);
     }

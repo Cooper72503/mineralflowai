@@ -1,4 +1,4 @@
-import { latestSourceAttempts, type LiteSourceAttempt } from "../coverage";
+import { latestSourceAttempts, plainSourceError, type LiteSourceAttempt } from "../coverage";
 
 export interface RegulatoryCoverage {
   source: string;
@@ -16,7 +16,7 @@ export function regulatoryCoverage(attempts: LiteSourceAttempt[]): RegulatoryCov
     const d = a?.result_data_json;
     const base = { source, attemptedAt: a?.attempted_at ?? null, url: typeof d?.query_url === "string" ? d.query_url : typeof d?.trrc_source_url === "string" ? d.trrc_source_url : null };
     if (!a || a.status !== "success" || !d || d.error || d.data_gap || d.endpoint_available === false)
-      return { ...base, status: "unavailable", reason: a?.error_message || String(d?.error || d?.message || "This source was not successfully verified.") };
+      return { ...base, status: "unavailable", reason: a?.error_message ? plainSourceError(a.error_message) : d?.error ? plainSourceError(String(d.error)) : String(d?.message || "This source was not successfully verified.") };
     if (d.coverage_incomplete || (Array.isArray(d.partial_errors) && d.partial_errors.length))
       return { ...base, status: "unavailable", reason: "Only partial source coverage was retrieved; completeness is not established." };
     if (source === "fetch_compliance_violations" && (typeof d.open_count !== "number" || !Number.isFinite(d.open_count)))
