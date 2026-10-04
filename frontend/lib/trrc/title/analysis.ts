@@ -142,11 +142,14 @@ export async function runTitleChainAnalysis(supabase: SupabaseClient, userId: st
   // Fingerprint for idempotency.
   const byId=(rows:Record<string,unknown>[])=>[...rows].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
   const fingerprint = titleInputFingerprint({
+    // v5: next actions verify the recording county and number on the cited
+    // source image (Astra report audit 9e5dbc2 and scope follow-up); without
+    // this bump Buttercup's published analysis kept "from Of Midland records".
     // v4: unit tracts named but not confirmed are disclosed. v3: every event
     // (read or index-only) carries the clerk's document type, superseded index rows are
     // excluded and bulk reads are paged. The fingerprint must change when the
     // analysis output changes, or an unchanged input reuses a stale analysis.
-    algorithm:"complete-title-input-v4",schema:TITLE_CHAIN_SCHEMA_VERSION,
+    algorithm:"complete-title-input-v5",schema:TITLE_CHAIN_SCHEMA_VERSION,
     scope:job.interest_scope,start:job.research_start_date,asOf:job.as_of_date,limitations:job.limitations_json,
     instruments:byId(instRows),parties:byId(partyRows),instrumentTracts:byId(tractRows),claims:byId(claimRows),
     wells,tracts,associations,documents,reviewItems,searchLog,
