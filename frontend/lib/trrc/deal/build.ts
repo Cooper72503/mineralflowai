@@ -22,6 +22,7 @@ import type { TrrcDDProductionRow, TrrcDueDiligenceRun } from "../types";
 import { decideDeal, decideLease, offersFor, type LeaseDecision, type Offers, type Verdict } from "./underwriting";
 import { regulatoryCoverage, unreportedMonths, type RegulatoryCoverage } from "./readiness";
 import { aggregateStatus } from "../title/chain-findings";
+import { titleRecordingCounts } from "./report-scope";
 import { STATUS_DISPLAY } from "../title/chain-types";
 
 export interface Source { id: string; label: string; detail: string; retrievedAt: string | null; url: string | null }
@@ -167,7 +168,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
   const deckLabel = deck.source === "eia_live" ? `EIA spot prices, ${deck.asOf}: WTI Cushing $${deck.wtiSpotUsdBbl.toFixed(2)}/bbl, Henry Hub $${deck.henryHubUsdMcf.toFixed(2)}/MMBtu${deck.fromSnapshot ? ` (live EIA unavailable at report time; EIA values as retrieved ${String(deck.retrievedAt).slice(0, 16).replace("T", " ")} UTC)` : ""}`
     : deck.source === "user_input" ? `Supplied prices: oil $${deck.wtiSpotUsdBbl.toFixed(2)}/bbl, gas $${deck.henryHubUsdMcf.toFixed(2)}/mcf` : `Placeholder prices as of ${deck.asOf} (live EIA prices unavailable)`;
   cite({ label: "Price deck", detail: deckLabel, retrievedAt: deck.retrievedAt ?? generatedAt, url: deck.source === "eia_live" ? "https://www.eia.gov/opendata/" : null });
-  cite({ label: "MineralFlow standard assumptions", detail: "Texas severance tax rates per Tex. Tax Code §202.052 (oil, 4.6%) and §201.052 (gas, 7.5%); ad valorem, operating cost, workover reserve, economic limit, discounting, offer policy and decision rules as stated in Section 1", retrievedAt: null, url: "https://statutes.capitol.texas.gov/Docs/TX/htm/TX.202.htm" });
+  cite({ label: "MineralFlow standard assumptions", detail: "Texas severance tax rates per Tex. Tax Code §202.052 (oil, 4.6%) and §201.052 (gas, 7.5%); ad valorem, operating cost, workover reserve, economic limit, discounting, offer policy and decision rules as stated in Sections 8–11", retrievedAt: null, url: "https://statutes.capitol.texas.gov/Docs/TX/htm/TX.202.htm" });
 
   const leases: DealLease[] = [];
   for (const stream of record.production.leaseStreams) {
@@ -257,7 +258,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       } else if (t.title) {
         const scoped = scopeTitleToLease(t.title, stream.apis, wells);
         title = scoped.analysis
-          ? { status: "published", reason: null, analysis: scoped.analysis, readInstruments: scoped.analysis.chronology.filter(r => r.contentVerified).length, indexedInstruments: scoped.analysis.chronology.length }
+          ? { status: "published", reason: null, analysis: scoped.analysis, ...titleRecordingCounts(scoped.analysis.chronology) }
           : { status: "not_found", reason: scoped.reason, analysis: null, readInstruments: 0, indexedInstruments: 0 };
       } else title = { status: t.status === "in_progress" ? "in_progress" : t.status === "not_found" ? "not_found" : "unavailable", reason: t.reason, analysis: null, readInstruments: 0, indexedInstruments: 0 };
     }

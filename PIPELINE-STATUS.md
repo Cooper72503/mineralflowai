@@ -1,3 +1,27 @@
+## October 2 — Buttercup report defect audit
+
+**GOLD reports validated: 0/10 (unchanged; no new authenticated live run).**
+
+Base inspected: production main `3d4e9c94e6520372bd43b7ca2bad88312c7d749e`.
+This checkpoint fixes conditional-value labels, interest/cost/gas-unit disclosures,
+unique title instrument counts, county-qualified reviewed-reference matching,
+tract/interest branch visibility, and PDF font/layout defects.
+
+Verified locally: frontend 1006/1006; worker 202/202; TypeScript clean;
+worker bundles built. Frontend production build passes with the Google Inter
+font download replaced by a local test response (network is restricted here).
+The ordinary build cannot download Google Fonts. The package report's traced
+manifest includes both existing Nimbus font files and their license.
+Synthetic report rendered and inspected; this is not live Buttercup validation.
+
+Remaining: deploy; regenerate the live report; republish title analysis to run
+the new reference checks; review source OCR before correcting any suspicious
+recording number; verify the signed-in assumptions/recalculation/download flow.
+No ownership acceptance, missing deed, actual operator expenses, or measured gas
+heat content has been fabricated or declared resolved.
+
+See `docs/buttercup-report-audit-deployment.md`.
+
 ## September 30 — focused Buttercup price/cost report checkpoint
 
 GOLD reports validated: 0/10 (unchanged; no new live acceptance). Added 13 oil-price rows ($40–$100 at $5 increments) to existing page/PDF, using unchanged engines. Operator/location context and illustrative cost presets added; actual operator expense data unavailable. Title work remains in Claude’s pending merge, untouched here. See docs/buttercup-price-sensitivity.md.

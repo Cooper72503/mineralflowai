@@ -8,15 +8,33 @@
  */
 import React from "react";
 import { oilSensitivity, SENSITIVITY_DISCLOSURE } from "./oil-sensitivity";
-import { Document, Page, Text, View, Link, renderToBuffer } from "@react-pdf/renderer";
-import { C, S, kv, fmtUsd, fmtDec, TYPE_LABEL, ProductionChart } from "../report-builder";
+import path from "node:path";
+import { Document, Page, Text, View, Link, Font, renderToBuffer } from "@react-pdf/renderer";
+import { C, S as baseStyles, fmtUsd, fmtDec, TYPE_LABEL, ProductionChart } from "../report-builder";
 import type { Deal, DealLease } from "./build";
 import type { DealDecisionRecord, LeaseDecisionRecord, Finding } from "./decision-layer";
 import { ownerValuesUnder, summarizeReasons } from "./decision-layer";
 import type { AssumptionBasis, EconomicsAssumptions } from "../economics-provider";
 import type { Verdict } from "./underwriting";
 
+import { formatShare } from "../title/report";
+import { scenarioScope, scenarioStatus } from "./report-scope";
+
 const e = React.createElement;
+// Reuse the repository's licensed GOLD fonts. Embed them so the viewer does
+// not substitute Helvetica with incompatible character metrics.
+const fontDir = path.join(process.cwd(), "lib", "trrc", "gold", "fonts");
+Font.register({ family: "DecisionSans", fonts: [
+  { src: path.join(fontDir, "NimbusSans-Regular.otf"), fontWeight: 400 },
+  { src: path.join(fontDir, "NimbusSans-Bold.otf"), fontWeight: 700 },
+] });
+const S = Object.fromEntries(Object.entries(baseStyles).map(([key, value]) => [key, {
+  ...value,
+  ...("fontFamily" in value ? { fontFamily: "DecisionSans", fontWeight: value.fontFamily === "Helvetica-Bold" ? 700 : 400 } : {}),
+}])) as typeof baseStyles;
+function kv(label: string, value: string | null | undefined) {
+  return e(View, { style: S.kvRow }, e(Text, { style: S.kvLabel }, label), e(Text, { style: S.kvValue }, value ?? "Unavailable"));
+}
 const VERDICT: Record<Verdict, { bg: string; fg: string }> = { BUY: { bg: C.greenBg, fg: C.green }, REVIEW: { bg: C.yellowBg, fg: C.yellow }, PASS: { bg: C.redBg, fg: C.red } };
 const refs = (ids: string[]) => ids.length ? ` [${[...new Set(ids)].join(", ")}]` : "";
 const num = (v: number) => Math.round(v).toLocaleString("en-US");
@@ -36,7 +54,7 @@ export interface DecisionRecordInput {
 function Chrome({ deal, children }: { deal: Deal; children?: React.ReactNode }) {
   return e(Page, { size: "LETTER", style: S.page, wrap: true },
     e(View, { fixed: true, style: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: C.border } },
-      e(Text, { style: { fontSize: 7, fontFamily: "Helvetica-Bold", color: C.navy } }, "MineralFlow AI — Decision Record"),
+      e(Text, { style: { fontSize: 7, fontFamily: "DecisionSans", fontWeight: 700, color: C.navy } }, "MineralFlow AI — Decision Record"),
       e(Text, { style: { fontSize: 7, color: C.gray } }, `Package ${deal.packageId.slice(0, 8)} · ${deal.generatedAt.slice(0, 10)}`)),
     children,
     e(View, { fixed: true, style: S.footer },
@@ -52,8 +70,8 @@ function Tr({ i, cols }: { i: number; cols: [string, number, ("left" | "right")?
 }
 const Note = (t: string) => e(Text, { style: S.noteText }, t);
 const Body = (t: string) => e(Text, { style: S.bodyText }, t);
-const Sub = (t: string) => e(Text, { style: S.subTitle, minPresenceAhead: 120 }, t);
-const Section = (t: string) => e(Text, { style: [S.sectionTitle, { marginTop: 0 }], minPresenceAhead: 160 }, t);
+const Sub = (t: string) => e(Text, { style: S.subTitle, minPresenceAhead: 50 }, t);
+const Section = (t: string) => e(Text, { style: [S.sectionTitle, { marginTop: 0 }], minPresenceAhead: 65 }, t);
 const Bullet = (t: string, key: string | number, color: string = C.dark) => e(Text, { key, style: [S.flagItem, { color }] }, `• ${t}`);
 const sevColor = (s: 1 | 2 | 3) => s === 3 ? C.red : s === 2 ? C.yellow : C.dark;
 function Badge({ verdict, large = false }: { verdict: Verdict; large?: boolean }) {
@@ -69,23 +87,24 @@ function Executive({ inp }: { inp: DecisionRecordInput }) {
   const { deal, record } = inp;
   return e(View, {}, Section("1. EXECUTIVE DECISION SUMMARY"),
     e(View, { style: { flexDirection: "row", alignItems: "center", marginBottom: 8 } }, e(Badge, { verdict: record.verdict, large: true }),
-      e(Text, { style: { fontSize: 10, fontFamily: "Helvetica-Bold", color: C.navy, marginLeft: 10, flex: 1 } }, summarizeReasons(record.reasons)[0] ?? "")),
-    ...summarizeReasons(record.reasons).slice(1).map((r, i) => e(Text, { key: i, style: S.bodyText }, r)),
+      e(Text, { style: { fontSize: 10, fontFamily: "DecisionSans", fontWeight: 700, color: C.navy, marginLeft: 10, flex: 1 } }, summarizeReasons(record.reasons)[0] ?? "")),
+    ...summarizeReasons(record.reasons, 3).slice(1).map((r, i) => e(Text, { key: i, style: S.bodyText }, r)),
     ...record.leases.map((r, i) => {
       const l = deal.leases.find(x => x.key === r.leaseKey)!;
       const s = r.economics.scenarios, a = r.economics.assumptions;
       // The block may break across pages; a long reason list must never be cut off or leave a blank page.
       return e(View, { key: i, style: { marginTop: 8, borderTopWidth: 0.5, borderTopColor: C.border, paddingTop: 6 } },
-        e(View, { wrap: false, minPresenceAhead: 60, style: { flexDirection: "row", alignItems: "center", marginBottom: 4 } }, e(Badge, { verdict: r.verdict }), e(Text, { style: { fontSize: 9, fontFamily: "Helvetica-Bold", marginLeft: 6 } }, leaseTitle(l))),
-        ...summarizeReasons(r.reasons, 6).map((t, j) => Bullet(t, `r${j}`)),
+        e(View, { wrap: false, minPresenceAhead: 60, style: { flexDirection: "row", alignItems: "center", marginBottom: 4 } }, e(Badge, { verdict: r.verdict }), e(Text, { style: { fontSize: 9, fontFamily: "DecisionSans", fontWeight: 700, marginLeft: 6 } }, leaseTitle(l))),
+        ...summarizeReasons(r.reasons, 3).map((t, j) => Bullet(t, `r${j}`)),
+        Note(scenarioScope(a, l.lastReportedMonth)),
         kv("Interest evaluated", `${a.interestType === "royalty" ? "Royalty" : "Working interest"}, ${a.netRevenueInterest} revenue decimal${a.interestType === "working" ? `, ${a.workingInterest} working interest` : ""}`),
-        s ? kv(`Value at ${a.discountRatePct}%`, `${fmtUsd(s.downside.presentValue)} downside  |  ${fmtUsd(s.base.presentValue)} base  |  ${fmtUsd(s.upside.presentValue)} upside${refs([deckRef(deal), stdRef(deal), ...l.sources.production])}`) : kv("Value", `Not calculated: ${r.economics.reason}`),
+        s ? kv(`Conditional value at ${a.discountRatePct}%`, `${fmtUsd(s.downside.presentValue)} downside  |  ${fmtUsd(s.base.presentValue)} base  |  ${fmtUsd(s.upside.presentValue)} upside${refs([deckRef(deal), stdRef(deal), ...l.sources.production])}`) : kv("Value", `Not calculated: ${r.economics.reason}`),
         r.entry ? kv("Entry", `Range ${fmtUsd(r.entry.rangeLow)} – ${fmtUsd(r.entry.rangeHigh)}; walk-away ceiling ${fmtUsd(r.entry.ceiling)}${r.entry.askingPriceUsd ? `; asking ${fmtUsd(r.entry.askingPriceUsd)} is ${r.entry.position}` : ""}`) : null,
         r.exit ? kv(`Exit after ${r.exit.holdYears} years`, `${r.exit.byScenario.base.multiple?.toFixed(2) ?? "—"}x, IRR ${pct(r.exit.byScenario.base.irrPct)} at base prices from the ${r.exit.entryBasisLabel}`) : null,
         r.risks.length ? e(Text, { style: [S.flagLabel, { color: C.gray, marginTop: 3 }] }, "TOP RISKS") : null,
         ...r.risks.slice(0, 5).map((k, j) => Bullet(k.text, `k${j}`, sevColor(k.severity))),
         e(Text, { style: [S.flagLabel, { color: C.gray, marginTop: 3 }] }, "CONDITIONS"),
-        ...r.conditions.map((c, j) => Bullet(c, `c${j}`)));
+        ...summarizeReasons(r.conditions, 3).map((c, j) => Bullet(c, `c${j}`)));
     }));
 }
 
@@ -93,12 +112,12 @@ function Executive({ inp }: { inp: DecisionRecordInput }) {
 function Overview({ inp }: { inp: DecisionRecordInput }) {
   const { deal } = inp;
   const rows = [
-    ...deal.leases.flatMap(l => l.members.map(m => ({ input: m.input, api: m.api ?? "", lease: `${l.leaseName ?? ""} (${l.district}-${l.leaseNumber})`, operator: l.operator ?? "—", county: l.county ?? "—", status: l.wells.find(w => w.api10 === m.api)?.status ?? (l.wells.find(w => w.api10 === m.api)?.onProration === false ? "Not on proration schedule" : "—"), included: "Valued" }))),
+    ...deal.leases.flatMap(l => l.members.map(m => ({ input: m.input, api: m.api ?? "", lease: `${l.leaseName ?? ""} (${l.district}-${l.leaseNumber})`, operator: l.operator ?? "—", county: l.county ?? "—", status: l.wells.find(w => w.api10 === m.api)?.status ?? (l.wells.find(w => w.api10 === m.api)?.onProration === false ? "Not on proration schedule" : "—"), included: scenarioStatus(inp.record.leases.find(r => r.leaseKey === l.key)) }))),
     ...deal.excluded.map(x => ({ input: x.input, api: x.api ?? "", lease: "—", operator: "—", county: "—", status: "—", included: `Excluded: ${x.reason}` })),
   ];
   return e(View, {}, Section("2. ASSET AND API OVERVIEW"),
-    Body(`${deal.submitted} API numbers submitted (${deal.distinctApis} distinct). ${deal.leases.length} producing lease${deal.leases.length === 1 ? "" : "s"} identified; each lease's production is counted once however many of its wells were submitted.${refs(deal.leases.flatMap(l => l.sources.wells))}`),
-    e(Th, { cols: [["API", 72], ["Lease", 150], ["Operator", 100], ["County", 50], ["Proration status", 70], ["In valuation", 90]] }),
+    Body(`${deal.submitted} API numbers submitted (${deal.distinctApis} distinct). ${deal.leases.length} resolved lease${deal.leases.length === 1 ? "" : "s"} identified; each lease's production is counted once however many of its wells were submitted.${refs(deal.leases.flatMap(l => l.sources.wells))}`),
+    e(Th, { cols: [["API", 72], ["Lease", 150], ["Operator", 100], ["County", 50], ["Proration status", 70], ["Scenario status", 90]] }),
     ...rows.map((r, i) => e(Tr, { key: i, i, cols: [[r.input, 72], [r.lease, 150], [r.operator, 100], [r.county, 50], [r.status, 70, "left", /SHUT/i.test(r.status) ? C.yellow : undefined], [r.included, 90, "left", r.included.startsWith("Excluded") ? C.red : undefined]] })));
 }
 
@@ -166,27 +185,37 @@ function Title({ inp, only }: { inp: DecisionRecordInput; only: number }) {
   const ran = [...latest.values()].filter(q => q.status !== "skipped_bounded");
   return e(View, {},
     only === 0 ? Section("6. TITLE AND OWNERSHIP") : null,
-    only === 0 ? Note("The chain is built from county clerk records. \"Read\" instruments were extracted from the recorded image and cite their page; \"Index\" rows are the clerk's index entries. This is evidence of the record, not a title opinion; ownership fractions are never inferred from the chain.") : null,
-    Sub(`${leaseTitle(l)} — chain of title${refs(l.sources.title)}`),
+    only === 0 ? Note("Title research is assembled from county clerk records; a chronology alone does not establish continuous ownership. \"Read\" instruments were extracted from the recorded image and cite their page; \"Index\" rows are the clerk's index entries. This is evidence of the record, not a title opinion; ownership fractions are never inferred from the chain.") : null,
+    Sub(`${leaseTitle(l)} — title evidence and branches${refs(l.sources.title)}`),
     t ? e(View, {},
       kv("Tracts", t.tracts.filter(x => x.matchStatus === "confirmed").map(x => x.tractLabel).join("; ") || "No confirmed tract"),
       kv("Recordings", `${l.title.indexedInstruments} on the tract; ${l.title.readInstruments} read from the recorded image${refs(l.sources.title)}`),
       kv("Assessment", `${t.statusDisplay} (analysis v${t.version}, ${t.generatedAt.slice(0, 10)})`),
+      Sub("Tract / interest branches"),
+      Note("Earliest and apparent holders below are the graph's evidence states, not certified owners. Unsupported or partial transitions remain open; an earliest/root record does not prove earlier title."),
+      ...(t.branches ?? []).map((b, j) => e(View, { key: `branch${j}`, style: { marginBottom: 8 } },
+        Body(`${b.tractLabel} — ${b.interestType.replace(/_/g, " ")}`),
+        Note(`Earliest evidenced: ${b.earliestEvidencedHolders.map(p => p.displayName).join("; ") || "Not established"}. Apparent holders: ${b.apparentHolders.map(h => `${h.parties.map(p => p.displayName).join(" & ")} (${h.status.replace(/_/g, " ")}; ${formatShare(h)})`).join("; ") || "Not established"}.`),
+        Note(`${b.events.length} events; ${b.events.filter(e => e.support === "unsupported" || e.support === "partial" || e.support === "not_evaluated").length} unsupported, partial or unevaluated transitions; ${b.unresolvedAllocations.length} unresolved allocations.`))),
+      Sub("Recording chronology"),
+      Note("A recording may appear in several tract/interest branches. Each row identifies its branch and event support; Read means extracted text, not accepted ownership."),
       e(Th, { cols: [["Recorded", 58], ["Instrument", 104], ["Grantor  >  Grantee", 226], ["Evidence", 40], ["Reference", 82]] }),
       ...t.chronology.map((row, j) => {
         const cite = row.citations.find(c => c.sourceUrl) ?? row.citations[0];
         const ref = [row.recordingReference ?? cite?.label ?? "", row.contentVerified && cite?.page ? `p. ${cite.page}` : ""].filter(Boolean).join(" | ");
+        const event = (t.branches ?? []).flatMap(b => b.events).find(ev => ev.eventId === row.rowId);
+        const context = `${row.tractLabel} | ${row.interestType.replace(/_/g, " ")} | ${row.effect.replace(/_/g, " ")} | ${event?.support ?? "support not established"}`;
         return e(View, { key: j, style: j % 2 === 0 ? S.tableRow : S.tableRowAlt, wrap: false },
           e(Text, { style: [S.tableCell, { width: 58 }] }, row.recordedDate ?? row.executionDate ?? "—"),
           e(Text, { style: [S.tableCell, { width: 104, paddingRight: 4 }] }, row.clerkDocType ?? String(row.instrumentType).replace(/_/g, " ")),
-          e(Text, { style: [S.tableCell, { width: 226, paddingRight: 4 }] }, `${row.fromParties.map(p => p.displayName).join("; ") || "—"}  >  ${row.toParties.map(p => p.displayName).join("; ") || "—"}${row.fraction ? `  (interest stated: ${row.fraction})` : ""}`),
-          e(Text, { style: [S.tableCell, { width: 40, color: row.contentVerified ? C.green : C.gray, fontFamily: row.contentVerified ? "Helvetica-Bold" : "Helvetica" }] }, row.contentVerified ? "Read" : "Index"),
+          e(Text, { style: [S.tableCell, { width: 226, paddingRight: 4 }] }, `${context}\n${row.fromParties.map(p => p.displayName).join("; ") || "—"}  >  ${row.toParties.map(p => p.displayName).join("; ") || "—"}${row.fraction ? `  (interest stated: ${row.fraction})` : ""}`),
+          e(Text, { style: [S.tableCell, { width: 40, color: row.contentVerified ? C.green : C.gray, fontFamily: "DecisionSans", fontWeight: row.contentVerified ? 700 : 400 }] }, row.contentVerified ? "Read" : "Index"),
           row.contentVerified && cite?.sourceUrl ? e(Link, { src: cite.sourceUrl, style: [S.tableCell, { width: 82, color: C.link }] }, ref || "Source") : e(Text, { style: [S.tableCell, { width: 82 }] }, ref || "—"));
       }),
       Note(`County clerk searches run: ${ran.length}; ${ran.filter(q => q.status === "success").length} returned recordings.`),
       ...t.limitations.map((x, j) => e(Text, { key: `l${j}`, style: S.noteText }, `Limitation: ${x}`)))
       : Bullet(`No chain of title: ${l.title.reason}`, "nt", C.yellow),
-    Sub(`${leaseTitle(l)} — owners of record${refs(l.sources.roll)}`),
+    Sub(`${leaseTitle(l)} — appraisal-roll cross-check${refs(l.sources.roll)}`),
     l.ownership.status === "matched"
       ? e(View, {},
           Note(`Owners and decimals as carried by the ${l.ownership.sources.map(s => `${s.county} County appraisal roll, tax year ${s.taxYear}`).join("; ")}. An appraisal roll does not establish legal title or the seller’s conveyable interest. Values are PV at ${r.economics.assumptions.discountRatePct}% under this record's assumptions. Mailing addresses are not printed.`),
@@ -195,7 +224,7 @@ function Title({ inp, only }: { inp: DecisionRecordInput; only: number }) {
             const v = values.get(`${o.tractKey ?? o.cadLeaseNumber ?? ""}|${o.sourceRow}`);
             return e(Tr, { key: j, i: j, cols: [[o.ownerName, 220], [TYPE_LABEL[o.interestType], 90], [fmtDec(o.decimal), 80, "right"], [v === null || v === undefined ? "—" : fmtUsd(v), 90, "right"]] });
           }))
-      : Bullet(`Owners of record not established: ${(l.ownership.reason ?? "no roll matched").replace(/\.+$/, "")}. The interest in this record is the one entered by the user.`, "no", C.yellow));
+      : Bullet(`Appraisal-roll cross-check unavailable: ${(l.ownership.reason ?? "no roll matched").replace(/\.+$/, "")}. This is separate from the clerk-document ownership analysis above. The economics use the stated assumption; no seller interest is established by that assumption.`, "no", C.yellow));
 }
 
 // 7 ─────────────────────────────────────────────────────────────────────────
@@ -240,8 +269,9 @@ function Assumptions({ inp }: { inp: DecisionRecordInput }) {
       const s = r.economics.scenarios;
       return e(View, { key: i, style: { marginBottom: 10 } },
         Sub(r.leaseName),
+        Note(scenarioScope(a, r.economics.asset.lastReportedMonth)),
         e(Th, { cols: [["Assumption", 160], ["Value", 100], ["Basis", 260]] }),
-        ...ASSUMPTION_ROWS.filter(([k]) => a.interestType === "working" || k !== "workingInterest").map(([k, label, fmt], j) => e(Tr, { key: j, i: j, cols: [[label, 160], [fmt(a[k]), 100], [edited.has(k) ? "Entered by user" : `${basis?.[k] ?? "—"}${a.interestType === "royalty" ? ROYALTY_NOTE[k] ?? "" : ""}`, 260, "left", edited.has(k) ? C.accent : undefined]] })),
+        ...ASSUMPTION_ROWS.filter(([k]) => a.interestType === "working" || k !== "workingInterest").map(([k, label, fmt], j) => e(Tr, { key: j, i: j, cols: [[label, 160], [fmt(a[k]), 100], [edited.has(k) ? `Entered by user${a.interestType === "royalty" ? ROYALTY_NOTE[k] ?? "" : ""}` : `${basis?.[k] ?? "—"}${a.interestType === "royalty" ? ROYALTY_NOTE[k] ?? "" : ""}`, 260, "left", edited.has(k) ? C.accent : undefined]] })),
         s ? e(View, { style: { marginTop: 6 } },
           e(Th, { cols: [["Case", 100], ["Oil", 100, "right"], ["Gas", 100, "right"]] }),
           ...(["downside", "base", "upside"] as const).map((k, j) => e(Tr, { key: k, i: j, cols: [[k[0].toUpperCase() + k.slice(1), 100], [`$${s[k].oilPriceUsdBbl.toFixed(2)}/bbl`, 100, "right"], [`$${s[k].gasPriceUsdMcf.toFixed(2)}/mcf`, 100, "right"]] }))) : null);
@@ -259,6 +289,7 @@ function Economics({ inp }: { inp: DecisionRecordInput }) {
       if (!s) return e(View, { key: i }, Sub(r.leaseName), Bullet(`Not calculated: ${r.economics.reason}`, "x", C.yellow));
       return e(View, { key: i, style: { marginBottom: 10 } },
         Sub(`${r.leaseName}${refs([deckRef(deal), stdRef(deal), ...l.sources.production])}`),
+        Note(scenarioScope(a, l.lastReportedMonth)),
         kv("Provider", `${r.economics.provider.name} (EconomicsProvider "${r.economics.provider.id}", v${r.economics.provider.version})`),
         e(Th, { cols: [["", 150], ["Downside", 110, "right"], ["Base", 110, "right"], ["Upside", 110, "right"]] }),
         ...([
@@ -280,6 +311,7 @@ function OilSensitivity({ inp, only }: { inp: DecisionRecordInput; only: number 
   const rows = oilSensitivity(r.economics.asset, a);
   return e(View, {}, Section("9. ECONOMICS — OIL PRICE SENSITIVITY"),
     Sub(`${leaseTitle(l)}${refs([...l.sources.production, stdRef(inp.deal)])}`),
+    Note(scenarioScope(a, l.lastReportedMonth)),
     kv("Operator / location", `${l.operator ?? "Unavailable"} / ${l.county ?? "Unavailable"} County`),
     kv("Selected costs", `LOE $${a.loeUsdPerBoe}/BOE; fixed $${a.fixedOpexUsdPerWellMonth}/producing well/month; workover $${a.workoverUsdPerBoe}/BOE`),
     kv("Interest / hold / hurdle", `${a.interestType}; NRI ${a.netRevenueInterest}; WI ${a.workingInterest}; ${a.holdYears} years; ${a.discountRatePct}%`),
@@ -300,6 +332,7 @@ function Entry({ inp }: { inp: DecisionRecordInput }) {
       const x = r.entry;
       if (!x) return e(View, { key: i }, Sub(r.leaseName), Bullet("Not calculated: the economics are unavailable.", "x", C.yellow));
       return e(View, { key: i, style: { marginBottom: 10 } }, Sub(r.leaseName),
+        Note(scenarioScope(r.economics.assumptions, r.economics.asset.lastReportedMonth)),
         kv("Hurdle (discount rate)", `${x.hurdlePct}%`),
         kv("Recommended range", `${fmtUsd(x.rangeLow)} – ${fmtUsd(x.rangeHigh)}`),
         kv("Walk-away ceiling", fmtUsd(x.ceiling)),
@@ -340,7 +373,7 @@ function Risks({ inp }: { inp: DecisionRecordInput }) {
       ...r.risks.map((k, j) => Bullet(k.text, `r${j}`, sevColor(k.severity))),
       list("CONTRADICTIONS IN THE RECORD", r.contradictions, "c"),
       list("MISSING DILIGENCE", r.missing, "m"))),
-    list("SUBMITTED APIS NOT IN THE VALUATION", inp.record.dealFindings, "d"));
+    list("PACKAGE EVIDENCE AND EXCLUDED INPUTS", inp.record.dealFindings, "d"));
 }
 
 // 13 ────────────────────────────────────────────────────────────────────────
@@ -349,7 +382,7 @@ function Appendix({ inp }: { inp: DecisionRecordInput }) {
   return e(View, {}, Section("13. SOURCE AND EVIDENCE APPENDIX"),
     Note("Every bracketed number in this record refers to a source below."),
     ...deal.sources.map((s, i) => e(View, { key: i, style: { marginBottom: 5 }, wrap: false },
-      e(Text, { style: { fontSize: 8, fontFamily: "Helvetica-Bold" } }, `[${s.id}] ${s.label}`),
+      e(Text, { style: { fontSize: 8, fontFamily: "DecisionSans", fontWeight: 700 } }, `[${s.id}] ${s.label}`),
       e(Text, { style: S.flagItem }, `${s.detail.replace(/\.+$/, "")}${s.retrievedAt ? `. Retrieved ${s.retrievedAt.slice(0, 16).replace("T", " ")} UTC` : ""}.`),
       s.url ? e(Link, { src: s.url, style: S.trrcLink }, s.url) : null)),
     Sub("Economics provider"),
@@ -371,6 +404,6 @@ export async function renderDecisionRecordPdf(inp: DecisionRecordInput): Promise
     deal.leases.map((_, i) => e(Chrome, { key: `${key}${i}`, deal }, e(C2, { inp, only: i })));
   const doc = e(Document, { title: `MineralFlow Decision Record ${deal.packageId.slice(0, 8)}`, author: "MineralFlow AI" },
     one(Executive, "1"), one(Overview, "2"), one(Identity, "3"), ...perLease(Production, "4"), one(Regulatory, "5"), ...perLease(Title, "6"),
-    one(Forecast, "7"), one(Assumptions, "8"), one(Economics, "9"), ...perLease(OilSensitivity, "9s"), one(Entry, "10"), one(Exit, "11"), one(Risks, "12"), one(Appendix, "13"));
+    one(Forecast, "7"), one(Assumptions, "8"), one(Economics, "9"), ...perLease(OilSensitivity, "9s"), e(Chrome, { key: "10-11", deal }, e(Entry, { inp }), e(View, { style: { marginTop: 18 } }, e(Exit, { inp }))), one(Risks, "12"), one(Appendix, "13"));
   return renderToBuffer(doc as never);
 }

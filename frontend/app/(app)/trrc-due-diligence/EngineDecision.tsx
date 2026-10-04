@@ -20,6 +20,8 @@ export interface EngineData { deal: Deal; starting: Record<string, { assumptions
 type Edits = Record<string, Partial<EconomicsAssumptions>>;
 type Field = keyof EconomicsAssumptions;
 
+import { scenarioScope } from "@/lib/trrc/deal/report-scope";
+
 const usd = (v: number) => `${v < 0 ? "−" : ""}$${Math.abs(Math.round(v)).toLocaleString("en-US")}`;
 const pct = (v: number | null) => v === null || !Number.isFinite(v) ? "—" : `${v.toFixed(1)}%`;
 const mult = (v: number | null) => v === null ? "—" : `${v.toFixed(2)}x`;
@@ -141,13 +143,14 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
         <span style={{ color: COLORS.text, fontWeight: 600 }}>{l.leaseName ?? "Lease"}</span>
         <span style={{ color: COLORS.textFaint, fontSize: "0.8rem" }}>RRC {l.district}-{l.leaseNumber} · {l.county} County · {l.operator}</span>
       </div>
+      <p style={{ color: COLORS.textMuted, fontSize: "0.8rem", lineHeight: 1.5 }}>{scenarioScope(a, l.lastReportedMonth)}</p>
       {summarizeReasons(r.reasons, 6, "Missing diligence below").map((t, i) => <div key={i} style={{ fontSize: "0.85rem", color: i === 0 ? COLORS.text : COLORS.textMuted, marginBottom: 3 }}>{t}</div>)}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.6rem", margin: "0.8rem 0 1rem" }}>
         <Stat k="Wells" v={`${l.apis.length} submitted · ${l.producingWells} producing`} />
         <Stat k="Production" v={`${l.production.length} months to ${l.lastReportedMonth ?? "—"}`} />
-        <Stat k="Owners of record" v={l.ownership.status === "matched" ? `${l.ownership.tracts.reduce((n, t) => n + t.owners.length, 0)} on the roll` : "Not established"} />
-        <Stat k="Chain of title" v={l.title.analysis ? `${l.title.indexedInstruments} recordings · ${l.title.readInstruments} read` : "Not established"} />
+        <Stat k="Appraisal-roll owners" v={l.ownership.status === "matched" ? `${l.ownership.tracts.reduce((n, t) => n + t.owners.length, 0)} on the roll` : "Not established"} />
+        <Stat k="Title evidence" v={l.title.analysis ? `${l.title.indexedInstruments} recordings · ${l.title.readInstruments} read` : "Not established"} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1.25rem" }}>

@@ -1,3 +1,4 @@
+import { recordingIdentity, texasCounty } from "./recording-identity";
 /**
  * Cross-cutting findings and status aggregation for the title-chain
  * analysis. The ownership graph (ownership-graph.ts) reports what it can
@@ -159,20 +160,26 @@ export function buildCrossCuttingFindings(input: CrossCuttingInput): ChainFindin
   // Referenced instruments not in the reviewed set.
   const knownRefs = new Set<string>();
   for (const i of input.instruments) {
-    if (i.instrumentNumber) knownRefs.add(`n:${i.instrumentNumber.replace(/\D/g, "")}`);
-    if (i.bookVolumePage) knownRefs.add(`v:${i.bookVolumePage.replace(/\D/g, "")}`);
+    // An index hit is a retrieval lead, not a reviewed predecessor instrument.
+    const key = recordingIdentity(i.county, i.instrumentNumber, i.bookVolumePage);
+    if (i.contentVerified && key) knownRefs.add(key);
+    const bookKey = recordingIdentity(i.county, null, i.bookVolumePage);
+    if (i.contentVerified && bookKey) knownRefs.add(bookKey);
   }
   const reported = new Set<string>();
   for (const i of input.instruments) {
     for (const r of i.references) {
       if (r.relation !== "predecessor" && r.relation !== "prior_lease" && r.relation !== "corrected_instrument") continue;
-      const key = r.instrumentNumber ? `n:${r.instrumentNumber.replace(/\D/g, "")}` : r.bookVolumePage ? `v:${r.bookVolumePage.replace(/\D/g, "")}` : null;
-      if (!key || knownRefs.has(key) || reported.has(key)) continue;
-      reported.add(key);
+      if (!r.instrumentNumber && !r.bookVolumePage) continue;
+      // Never assume an unqualified reference belongs to the source deed's county.
+      const key = recordingIdentity(r.county, r.instrumentNumber, r.bookVolumePage);
+      const reportKey = key ?? `unresolved:${i.id}:${r.instrumentNumber ?? r.bookVolumePage}`;
+      if ((key && knownRefs.has(key)) || reported.has(reportKey)) continue;
+      reported.add(reportKey);
       const tract = tractFor(i.id);
       findings.push(finding("MISSING_REFERENCED_INSTRUMENT", "medium", "Referenced instrument not in reviewed records",
         `${i.instrumentType.replace(/_/g, " ")} ${i.instrumentNumber ?? i.bookVolumePage ?? i.id} refers to ${r.instrumentNumber ? `Instrument No. ${r.instrumentNumber}` : r.bookVolumePage} (${r.relation.replace(/_/g, " ")}), which was not among the documents reviewed.`,
-        `Retrieve ${r.instrumentNumber ? `Instrument No. ${r.instrumentNumber}` : r.bookVolumePage} from ${r.county ?? i.county ?? "the county"} records and add it to this job.`,
+        `Retrieve and read ${r.instrumentNumber ? `Instrument No. ${r.instrumentNumber}` : r.bookVolumePage}${texasCounty(r.county) ? ` from ${texasCounty(r.county)} County records` : "; verify the recording county from the cited source first"}, then add it to this job.`,
         { affectedTractId: tract?.id ?? null, affectedTractLabel: tract?.tractLabel ?? null, affectedInterestType: interestFor(i.id), instrumentIds: [i.id],
           citations: [{ documentId: i.documentId, instrumentId: i.id, page: r.page, excerpt: r.description, sourceUrl: i.sourceUrl, label: r.instrumentNumber ?? r.bookVolumePage }] }));
     }

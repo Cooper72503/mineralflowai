@@ -64,12 +64,19 @@ export function economicsAssetFromLease(l: DealLease): EconomicsAsset {
 
 export function defaultsForLease(l: DealLease, deal: Pick<Deal, "deck" | "deckLabel">): { assumptions: EconomicsAssumptions; basis: AssumptionBasis } {
   const v = l.valuation;
-  return defaultAssumptions({
+  const start = defaultAssumptions({
     oilPriceUsdBbl: deal.deck.scenarios.base.oilUsdBbl, gasPriceUsdMcf: deal.deck.scenarios.base.gasUsdMcf, priceBasis: deal.deckLabel,
     fieldName: l.field, county: l.county,
     operatorNri: v.leaseNri && v.leaseNriBasis && !/No working-interest/.test(v.leaseNriBasis) ? round4(v.leaseNri) : null,
     operatorNriBasis: v.leaseNri && v.leaseNriBasis && !/No working-interest/.test(v.leaseNriBasis) ? `Appraisal roll working-interest decimal (${round4(v.leaseNri)})` : null,
   });
+  if (deal.deck.source === "eia_live") {
+    start.basis.gasPriceUsdMcf = `${deal.deckLabel}. Conversion assumption: 1.000 MMBtu/Mcf, so $/MMBtu × 1.000 = $/Mcf. Lease heating value is unavailable; enter a realized $/Mcf price when known.`;
+  }
+  const location = `${l.operator ?? "Operator unavailable"} / ${l.county ?? "County unavailable"}`;
+  for (const key of ["loeUsdPerBoe", "fixedOpexUsdPerWellMonth", "workoverUsdPerBoe"] as const)
+    start.basis[key] += `. Scenario for ${location}; not verified operator expenses`;
+  return start;
 }
 
 const round4 = (x: number) => Math.round(x * 1e4) / 1e4;
@@ -192,7 +199,7 @@ export function reconcile(l: DealLease, e: EconomicsResult): { contradictions: F
   missing.push({ kind: "missing", severity: 1, text: "Production is reported to TRRC by lease; well-level allocation is not attempted here.", sources: src.production });
   if (l.trailingUnreportedMonths > MAX_UNREPORTED_COMPLETED_MONTHS) missing.push({ kind: "missing", severity: 3, text: `${l.trailingUnreportedMonths} completed months have no reported production; current valuation requires updated evidence.`, sources: src.production });
   missing.push({ kind: "missing", severity: 1, text: "A title opinion and the seller's division order are required before closing; the chain here is evidence of the record.", sources: [] });
-  if (!e.assumptions.askingPriceUsd) missing.push({ kind: "missing", severity: 1, text: "No asking price entered: IRR, payout and the entry position are not calculated.", sources: [] });
+  if (!e.assumptions.askingPriceUsd) missing.push({ kind: "missing", severity: 1, text: "No asking price entered: IRR at asking, payout at asking and the asking-price position are unavailable. Exit analysis may show an illustrative IRR at the explicitly labeled entry basis.", sources: [] });
   return { contradictions, missing };
 }
 
@@ -245,7 +252,7 @@ export function assembleDecision(deal: Deal, assumptionsByLease: Record<string, 
   });
   const dealFindings: Finding[] = deal.excluded.map(x => ({ kind: "missing", severity: 3, text: `${x.input}: ${x.reason}`, sources: [] }));
   for (const reason of deal.completeness?.blockers ?? []) if (!dealFindings.some(f => f.text === reason))
-    dealFindings.push({ kind: "missing", severity: 3, text: reason, sources: [] });
+    dealFindings.push({ kind: "missing", severity: 3, text: reason.replace(/Not valued:/g, "Ownership-based valuation unavailable:"), sources: [] });
   if (deal.deck.source === "static_fallback") dealFindings.push({ kind: "missing", severity: 3, text: "No sourced EIA deck is available. Starting prices are fallback assumptions; displayed economics are conditional, not a supported acquisition value.", sources: [] });
   const buy = leases.filter(l => l.verdict === "BUY"), review = leases.filter(l => l.verdict === "REVIEW"), pass = leases.filter(l => l.verdict === "PASS");
   const verdict: Verdict = dealFindings.some(f => f.severity >= 2) || review.length || (buy.length && pass.length) || !leases.length ? "REVIEW" : buy.length ? "BUY" : "PASS";

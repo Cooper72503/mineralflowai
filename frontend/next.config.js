@@ -17,6 +17,7 @@ const nextConfig = {
     // path.join(), so without this the fonts are missing from the
     // serverless bundle and @react-pdf/renderer fails at render time.
     outputFileTracingIncludes: {
+      "/api/trrc/due-diligence/packages/[packageId]/report": ["./lib/trrc/gold/fonts/**/*"],
       "/api/trrc/due-diligence/[runId]/report": ["./lib/trrc/gold/fonts/**/*"],
       // Title-document text extraction loads three things by RUNTIME path,
       // which Next's output file tracing cannot follow, so they must be

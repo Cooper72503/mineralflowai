@@ -22,6 +22,7 @@ import type {
   ExtractedDocument, ExtractedInstrument, ExtractedParty, ExtractedTract, ExtractedReference, ExtractedDate,
 } from "./instrument-schema";
 import { Fraction } from "./fraction";
+import { referenceCounty } from "./recording-identity";
 
 type InstrumentType = ExtractedInstrument["instrumentType"];
 type PartyRole = ExtractedParty["role"];
@@ -458,7 +459,7 @@ function extractReferences(text: string, ownRefs: { instrumentNumber: string | n
       description: excerptAround(text, r.index, 90),
       instrumentNumber: r.kind === "doc_no" ? value : null,
       bookVolumePage: r.kind === "vol_page" ? value : null,
-      county: ctx.match(/([a-z]+(?:\s+[a-z]+)?)\s+county/)?.[1]?.replace(/\b\w/g, c => c.toUpperCase()) ?? null,
+      county: referenceCounty(ctx),
       relation,
       page: r.page,
     });

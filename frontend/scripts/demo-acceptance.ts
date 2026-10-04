@@ -153,6 +153,20 @@ async function main() {
   if (/[^.]\.\.(?!\.)/.test(parsed.text)) junk.push("double period");
   check("report", absent.length === 0, absent.length ? `missing: ${absent.join(", ")}` : `${parsed.numpages} pages, all thirteen sections and every lease present`);
   check("report", junk.length === 0, junk.length ? `found: ${junk.join(", ")}` : "no undefined/NaN/[object] text");
+  check("report", !parsed.text.includes("Not valued:") && !parsed.text.includes("SUBMITTED APIS NOT IN THE VALUATION"), "conditional scenario status must not contradict acquisition-evidence status");
+  for (const l of deal.leases) {
+    const r = record.leases.find(x => x.leaseKey === l.key)!;
+    check("report", flat(parsed.text).includes(flat(`NRI ${r.economics.assumptions.netRevenueInterest}`)), `${l.leaseName}: evaluated revenue decimal appears in the report`);
+    if (l.title.analysis) {
+      const rows = l.title.analysis.chronology;
+      const unique = new Map<string, boolean>();
+      for (const row of rows) unique.set(row.instrumentId, (unique.get(row.instrumentId) ?? true) && row.contentVerified);
+      check("title", l.title.indexedInstruments === unique.size && l.title.readInstruments === [...unique.values()].filter(Boolean).length,
+        `${l.leaseName}: ${unique.size} unique instruments across ${rows.length} tract/interest events`);
+      check("report", flat(parsed.text).includes("Tract/interestbranches"), "title report displays branch context as well as chronology");
+    }
+  }
+  if (deal.deck.source === "eia_live") check("report", flat(parsed.text).includes("1.000MMBtu/Mcf"), "unmeasured gas heat-content conversion is disclosed");
   return finish(outDir, { deal, pdf });
 }
 

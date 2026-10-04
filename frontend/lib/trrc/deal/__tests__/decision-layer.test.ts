@@ -1,5 +1,6 @@
+import { titleRecordingCounts, scenarioScope, scenarioStatus } from "../report-scope";
 import { describe, it, expect } from "vitest";
-import { decideLeaseRecord, economicsAssetFromLease, entryAnalysis, exitAnalysis, reconcile, irrAnnualPct, summarizeReasons } from "../decision-layer";
+import { decideLeaseRecord, economicsAssetFromLease, entryAnalysis, exitAnalysis, reconcile, irrAnnualPct, summarizeReasons, defaultsForLease, assembleDecision } from "../decision-layer";
 import { evaluatePrototype, defaultAssumptions } from "../../economics-provider";
 import type { DealLease } from "../build";
 
@@ -141,4 +142,41 @@ describe("decision summaries (live Buttercup REVIEW reasons)", () => {
     expect(summarizeReasons(Array.from({ length: 12 }, (_, i) => `Reason ${i}.`), 8)).toHaveLength(9);
     expect(summarizeReasons(Array.from({ length: 12 }, (_, i) => `Reason ${i}.`), 8)[8]).toBe("4 further reason(s) are listed in Section 12.");
   });
+});
+
+
+describe("report audit regressions", () => {
+  const deck = { source: "eia_live", asOf: "2026-08", wtiSpotUsdBbl: 83.9, henryHubUsdMcf: 2.78,
+    scenarios: Object.fromEntries(["stress", "base", "strip", "upside"].map(k => [k, { oilUsdBbl: 83.9, gasUsdMcf: 2.78 }])) } as never;
+  it("discloses the assumed energy/volume conversion and never calls it measured heat content", () => {
+    const start = defaultsForLease(lease(), { deck, deckLabel: "Henry Hub $2.78/MMBtu" });
+    expect(start.assumptions.gasPriceUsdMcf).toBe(2.78);
+    expect(start.basis.gasPriceUsdMcf).toContain("1.000 MMBtu/Mcf");
+    expect(start.basis.gasPriceUsdMcf).toContain("Lease heating value is unavailable");
+    expect(start.basis.loeUsdPerBoe).toContain("CHEVRON U. S. A. INC. / MIDLAND");
+    expect(start.basis.loeUsdPerBoe).toContain("not verified operator expenses");
+  });
+  it("does not relabel user-supplied volume prices as EIA energy prices", () => {
+    const start = defaultsForLease(lease(), { deck: { ...(deck as object), source: "user_input" } as never, deckLabel: "Supplied $/Mcf" });
+    expect(start.basis.gasPriceUsdMcf).toBe("Supplied $/Mcf");
+  });
+  it("preserves the ownership gate without contradicting conditional economics", () => {
+    const record = assembleDecision({ leases: [lease()], excluded: [], deck,
+      completeness: { blockers: ["TEST UNIT: Not valued: No effective appraisal roll"] } } as never, {});
+    expect(record.verdict).toBe("REVIEW");
+    expect(record.leases[0].economics.status).toBe("calculated");
+    expect(record.dealFindings[0].text).toContain("Ownership-based valuation unavailable");
+    expect(record.reasons.join(" ")).not.toContain("Not valued:");
+    expect(record.leases[0].missing.find(f => f.text.startsWith("No asking"))?.text).toContain("illustrative IRR");
+  });
+});
+
+it("counts repeated title events once per instrument and keeps conflicting read states unresolved", () => {
+  expect(titleRecordingCounts([{ instrumentId: "a", contentVerified: true }, { instrumentId: "a", contentVerified: true }, { instrumentId: "b", contentVerified: false }])).toEqual({ indexedInstruments: 2, readInstruments: 1 });
+  expect(titleRecordingCounts([{ instrumentId: "a", contentVerified: true }, { instrumentId: "a", contentVerified: false }]).readInstruments).toBe(0);
+});
+it("labels unavailable economics and the assumed interest independently of ownership", () => {
+  expect(scenarioStatus(undefined)).toBe("Economics unavailable");
+  expect(scenarioScope(defaults, "2026-07")).toContain("1.00% of lease revenue");
+  expect(scenarioScope(defaults, "2026-07")).toContain("not a price for the whole lease");
 });
