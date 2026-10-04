@@ -30,3 +30,12 @@ describe("reference identity and reviewed predecessor evidence", () => {
     expect(findings.filter(f => f.type === "MISSING_REFERENCED_INSTRUMENT")).toHaveLength(count);
   });
 });
+
+it("keeps Glasscock as an unverified lead pending source-image review", () => {
+  const input = buildGraphInput([{ number: "2020-0001", from: ["A"], to: ["B"], references: [{ description: "Glasscock County records", instrumentNumber: "2009-2", bookVolumePage: null, county: "Glasscock", relation: "predecessor", page: 2 }], claims: [{ interest: "mineral" }] }]);
+  const findings = buildCrossCuttingFindings({ ...input, tracts: [TRACT_A], limitations: [], providerUnavailableCounties: [], ocrFailedDocumentIds: [] });
+  const missing = findings.find(f => f.type === "MISSING_REFERENCED_INSTRUMENT")!;
+  expect(missing.nextAction).toContain("Verify the recording number and county on the cited source image first");
+  expect(missing.nextAction).toContain("extracted county: Glasscock; not independently confirmed");
+  expect(missing.citations[0]).toMatchObject({ page: 2, excerpt: "Glasscock County records" });
+});

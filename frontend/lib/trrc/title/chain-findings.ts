@@ -179,7 +179,7 @@ export function buildCrossCuttingFindings(input: CrossCuttingInput): ChainFindin
       const tract = tractFor(i.id);
       findings.push(finding("MISSING_REFERENCED_INSTRUMENT", "medium", "Referenced instrument not in reviewed records",
         `${i.instrumentType.replace(/_/g, " ")} ${i.instrumentNumber ?? i.bookVolumePage ?? i.id} refers to ${r.instrumentNumber ? `Instrument No. ${r.instrumentNumber}` : r.bookVolumePage} (${r.relation.replace(/_/g, " ")}), which was not among the documents reviewed.`,
-        `Retrieve and read ${r.instrumentNumber ? `Instrument No. ${r.instrumentNumber}` : r.bookVolumePage}${texasCounty(r.county) ? ` from ${texasCounty(r.county)} County records` : "; verify the recording county from the cited source first"}, then add it to this job.`,
+        `Verify the recording number and county on the cited source image first${texasCounty(r.county) ? ` (extracted county: ${texasCounty(r.county)}; not independently confirmed)` : " (recording county unresolved)"}. Then retrieve and read ${r.instrumentNumber ? `Instrument No. ${r.instrumentNumber}` : r.bookVolumePage} from the confirmed county and add it to this job.`,
         { affectedTractId: tract?.id ?? null, affectedTractLabel: tract?.tractLabel ?? null, affectedInterestType: interestFor(i.id), instrumentIds: [i.id],
           citations: [{ documentId: i.documentId, instrumentId: i.id, page: r.page, excerpt: r.description, sourceUrl: i.sourceUrl, label: r.instrumentNumber ?? r.bookVolumePage }] }));
     }

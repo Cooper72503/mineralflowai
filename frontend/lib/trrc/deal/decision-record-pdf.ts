@@ -117,6 +117,7 @@ function Overview({ inp }: { inp: DecisionRecordInput }) {
   ];
   return e(View, {}, Section("2. ASSET AND API OVERVIEW"),
     Body(`${deal.submitted} API numbers submitted (${deal.distinctApis} distinct). ${deal.leases.length} resolved lease${deal.leases.length === 1 ? "" : "s"} identified; each lease's production is counted once however many of its wells were submitted.${refs(deal.leases.flatMap(l => l.sources.wells))}`),
+    Note("Scope is the submitted API list. This report does not establish that the list includes every asset offered by a seller."),
     e(Th, { cols: [["API", 72], ["Lease", 150], ["Operator", 100], ["County", 50], ["Proration status", 70], ["Scenario status", 90]] }),
     ...rows.map((r, i) => e(Tr, { key: i, i, cols: [[r.input, 72], [r.lease, 150], [r.operator, 100], [r.county, 50], [r.status, 70, "left", /SHUT/i.test(r.status) ? C.yellow : undefined], [r.included, 90, "left", r.included.startsWith("Excluded") ? C.red : undefined]] })));
 }

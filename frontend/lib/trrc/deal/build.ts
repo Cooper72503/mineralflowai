@@ -22,7 +22,7 @@ import type { TrrcDDProductionRow, TrrcDueDiligenceRun } from "../types";
 import { decideDeal, decideLease, offersFor, type LeaseDecision, type Offers, type Verdict } from "./underwriting";
 import { regulatoryCoverage, unreportedMonths, type RegulatoryCoverage } from "./readiness";
 import { aggregateStatus } from "../title/chain-findings";
-import { titleRecordingCounts } from "./report-scope";
+import { titleRecordingCounts, inventoryDecisionBlockers } from "./report-scope";
 import { STATUS_DISPLAY } from "../title/chain-types";
 
 export interface Source { id: string; label: string; detail: string; retrievedAt: string | null; url: string | null }
@@ -320,7 +320,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
   // The rollup also includes fixed operated-sale disclaimers. Preserve its
   // actual inventory/identity/volume failures; assess title and economics
   // against this report's evidence and selected interest instead.
-  const inventoryBlockers = record.decision.blockers.filter(b => /^(Entry \d+:|API |Claimed |Conflicting |Offered well count)/.test(b));
+  const inventoryBlockers = inventoryDecisionBlockers(record.decision.blockers);
   const blockers = [...new Set([...inventoryBlockers, ...excluded.map(m => `${m.input}: ${m.reason}`),
     ...runs.filter(r => r.status !== "complete").map(r => `${r.original_input}: retrieval ${r.status}.`),
     ...leases.filter(l => l.decision.verdict === "REVIEW").flatMap(l => l.decision.reasons.map(r => `${l.leaseName ?? l.leaseNumber}: ${r}`))])];

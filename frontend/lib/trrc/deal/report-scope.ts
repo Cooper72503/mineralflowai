@@ -17,3 +17,8 @@ export function scenarioStatus(record: LeaseDecisionRecord | undefined): string 
   return record?.economics.status === "calculated" && record.economics.scenarios
     ? "Conditional lease scenario" : "Economics unavailable";
 }
+
+/** Submitted APIs define report scope; a seller's separate inventory claim is optional. */
+export function inventoryDecisionBlockers(blockers: string[]): string[] {
+  return blockers.filter(b => /^(Entry \d+:|API |Claimed |Conflicting )/.test(b));
+}

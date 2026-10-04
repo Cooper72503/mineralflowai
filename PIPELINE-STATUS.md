@@ -1,3 +1,9 @@
+## October 4 follow-up: submitted scope and recording-county verification
+
+GOLD reports validated: 0/10 (unchanged; no live acceptance here).
+Removed the optional offered-count warning from API report decision blockers; actual claimed-count mismatches and identity/production failures remain. Added submitted-list scope disclosure. Missing-reference actions now require checking county/recording number on the cited image before directing retrieval. Glasscock itself remains unverified; no stored evidence was edited.
+Verification: 37 targeted tests passed; frontend TypeScript clean. Not deployed.
+
 ## October 2 — Buttercup report defect audit
 
 **GOLD reports validated: 0/10 (unchanged; no new authenticated live run).**
