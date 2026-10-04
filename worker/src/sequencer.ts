@@ -534,10 +534,19 @@ export async function runLandmanSequencer(
   // Lease records lost to an outage get the same treatment as identity:
   // retry the run rather than complete it without the lease's production.
   {
-    const { data: lease } = await supabase.from("trrc_source_attempts").select("source_name,status,error_message")
+    const { data: lease } = await supabase.from("trrc_source_attempts").select("source_name,status,error_message,attempted_at")
       .eq("run_id", runId).in("source_name", ["fetch_production", "fetch_oil_proration"]);
     const transport = (m: string | null) => /timeout|timed out|aborted|fetch failed|ECONN|EAI_AGAIN|socket|HTTP 5\d\d/i.test(m ?? "");
-    const lost = (lease ?? []).filter(r => r["status"] !== "success" && transport(r["error_message"] as string | null));
+    // Judge each source by its latest attempt. A retried run keeps the failed
+    // rows of its earlier executions; reading them made every retry fail
+    // again although the lease records had just been retrieved (live
+    // 2026-10-04, five Buttercup wells after TRRC's overnight outage).
+    const latest = new Map<string, Record<string, unknown>>();
+    for (const r of (lease ?? []) as Record<string, unknown>[]) {
+      const prev = latest.get(String(r["source_name"]));
+      if (!prev || String(r["attempted_at"] ?? "") >= String(prev["attempted_at"] ?? "")) latest.set(String(r["source_name"]), r);
+    }
+    const lost = [...latest.values()].filter(r => r["status"] !== "success" && transport(r["error_message"] as string | null));
     if (lost.length) throw new TransientRetrievalError(`TRRC lease records unavailable (${lost.map(r => r["source_name"]).join(", ")}): ${String(lost[0]["error_message"] ?? "").slice(0, 120)}`);
   }
 

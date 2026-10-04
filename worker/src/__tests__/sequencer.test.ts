@@ -311,4 +311,14 @@ describe("TRRC outage on lease records", () => {
     const { supabase } = makeMockSupabase({ resolved_primary_api: "16502733" });
     await expect(runLandmanSequencer(RUN_ID, "16502733", supabase)).rejects.toThrow(/lease records unavailable/);
   });
+  it("completes a retried run whose earlier execution timed out, once the records arrive (live 2026-10-04)", async () => {
+    vi.mocked(ewa.searchWellbore).mockResolvedValue({ found: true, wells: [{ api_no: "16502733" }], lease_number: "10289", district: "8A", county: "GAINES" } as never);
+    vi.mocked(ewa.getProduction).mockResolvedValue({ found: true, rows: [], lease_number: "10289", district: "8A", message: "41 months of production history" } as never);
+    vi.mocked(ewa.getOilProration).mockResolvedValue({ found: true, wells: [], message: "10 well(s) on lease" } as never);
+    const { supabase, attempts } = makeMockSupabase({ resolved_primary_api: "16502733" });
+    // The earlier, failed execution of the same run is still stored.
+    for (const source_name of ["fetch_production", "fetch_oil_proration"])
+      attempts.push({ run_id: RUN_ID, source_name, status: "failed_transient", error_message: "TimeoutError: The operation was aborted due to timeout", attempted_at: "2026-10-04T04:55:00.000Z" });
+    await expect(runLandmanSequencer(RUN_ID, "16502733", supabase)).resolves.toBeUndefined();
+  });
 });
