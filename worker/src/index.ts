@@ -1,4 +1,4 @@
-import { checkedQuery, TransientRetrievalError } from "./persistence.js";
+import { checkedQuery, TransientRetrievalError, isTransientInfrastructureError } from "./persistence.js";
 /**
  * MineralFlow TRRC Worker
  *
@@ -69,10 +69,14 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const activeRuns = new Set<string>();
 const MAX_TRANSIENT_RETRIES = 3;
+/** Database/network interruptions: more attempts, the same growing cooldown (2, 4, 6... minutes). */
+const MAX_INFRASTRUCTURE_RETRIES = 6;
 const TRANSIENT_COOLDOWN_MS = 2 * 60 * 1000;
 const transientRetries = new Map<string, number>();
 const cooldownUntil = new Map<string, number>();
 const activeTitleJobs = new Set<string>();
+const titleRetries = new Map<string, number>();
+const titleCooldownUntil = new Map<string, number>();
 
 // ─── Title-chain research jobs (migration 028) ───────────────────────────────
 // Same claim-then-run discipline as due-diligence runs, against
@@ -101,6 +105,19 @@ async function claimAndRunTitleJob(jobId: string): Promise<void> {
     const processed = await processRetrievedTitleJob(supabase, jobId, undefined, documentBudget);
     if (processed) console.log(`[worker] title job ${jobId} processed: ${processed.documentsRead} document(s) read, ${processed.instrumentsCreated} instrument(s), analysis ${processed.analysisId ?? "not published"}${processed.error ? ` — ${processed.error}` : ""}`);
   } catch (err) {
+    // A database interruption: resume the job later; stored documents and
+    // tracts are kept and the run continues where it stopped.
+    if (isTransientInfrastructureError(err) && (titleRetries.get(jobId) ?? 0) < MAX_INFRASTRUCTURE_RETRIES) {
+      const n = (titleRetries.get(jobId) ?? 0) + 1;
+      titleRetries.set(jobId, n);
+      titleCooldownUntil.set(jobId, Date.now() + TRANSIENT_COOLDOWN_MS * n);
+      console.warn(`[worker] title job ${jobId}: ${err instanceof Error ? err.message : String(err)}; resume ${n} of ${MAX_INFRASTRUCTURE_RETRIES} after ${(TRANSIENT_COOLDOWN_MS * n) / 1000}s`);
+      try {
+        await checkedQuery(supabase.from("title_research_jobs").update({ status: "pending", stage_detail: "Resuming after a database interruption", updated_at: new Date().toISOString() })
+          .eq("id", jobId).neq("status", "cancelled"), "Title transient resume");
+      } catch (writeErr) { console.error(`[worker] title job ${jobId}: resume status not saved; the stale sweep will recover it`, writeErr); }
+      return;
+    }
     console.error(`[worker] title job ${jobId} failed:`, err);
     await checkedQuery(supabase.from("title_research_jobs").update({
       status: "failed",
@@ -128,7 +145,12 @@ async function pollTitleJobs(): Promise<void> {
     if (!/relation .* does not exist/i.test(error.message)) console.error("[worker] title poll error:", error.message);
     return;
   }
-  for (const job of (jobs ?? [])) claimAndRunTitleJob(String(job["id"])).catch(console.error);
+  for (const job of (jobs ?? [])) {
+    const id = String(job["id"]);
+    if ((titleCooldownUntil.get(id) ?? 0) > Date.now()) continue;
+    titleCooldownUntil.delete(id);
+    claimAndRunTitleJob(id).catch(console.error);
+  }
 }
 
 async function claimAndRun(runId: string, input: string): Promise<void> {
@@ -160,13 +182,18 @@ async function claimAndRun(runId: string, input: string): Promise<void> {
   } catch (err) {
     // A TRRC outage while identifying the well: retry after a cooldown,
     // three attempts in all, instead of completing a run tied to no lease.
-    if (err instanceof TransientRetrievalError && (transientRetries.get(runId) ?? 0) < MAX_TRANSIENT_RETRIES) {
+    // A database or network interruption gets the same treatment, with more attempts.
+    const infrastructure = isTransientInfrastructureError(err);
+    const limit = err instanceof TransientRetrievalError ? MAX_TRANSIENT_RETRIES : infrastructure ? MAX_INFRASTRUCTURE_RETRIES : 0;
+    if (limit > 0 && (transientRetries.get(runId) ?? 0) < limit) {
       const n = (transientRetries.get(runId) ?? 0) + 1;
       transientRetries.set(runId, n);
       cooldownUntil.set(runId, Date.now() + TRANSIENT_COOLDOWN_MS * n);
-      console.warn(`[worker] run ${runId}: ${err.message}; retry ${n} of ${MAX_TRANSIENT_RETRIES} after ${(TRANSIENT_COOLDOWN_MS * n) / 1000}s`);
-      await checkedQuery(supabase.from("trrc_due_diligence_runs").update({ status: "pending", progress_percent: 0, updated_at: new Date().toISOString() })
-        .eq("id", runId).neq("status", "cancelled"), "Diligence transient retry");
+      console.warn(`[worker] run ${runId}: ${err instanceof Error ? err.message : String(err)}; retry ${n} of ${limit} after ${(TRANSIENT_COOLDOWN_MS * n) / 1000}s`);
+      try {
+        await checkedQuery(supabase.from("trrc_due_diligence_runs").update({ status: "pending", progress_percent: 0, updated_at: new Date().toISOString() })
+          .eq("id", runId).neq("status", "cancelled"), "Diligence transient retry");
+      } catch (writeErr) { console.error(`[worker] run ${runId}: retry status not saved; the stale-run sweep will re-queue it`, writeErr); }
       return;
     }
     console.error(`[worker] run ${runId} failed:`, err);

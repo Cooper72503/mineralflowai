@@ -1,6 +1,6 @@
 import type {SupabaseClient} from "@supabase/supabase-js";
 import {randomUUID} from "node:crypto";
-import {checkedQuery} from "./persistence.js";
+import {checkedQuery,isTransientInfrastructureError} from "./persistence.js";
 type Engine=(db:SupabaseClient,userId:string,input:unknown)=>Promise<{input:unknown;record:unknown;goldRecords:unknown;versions:unknown}>;
 const engineUrl=new URL("../dist/report-engine.mjs",import.meta.url).href;
 const defaultEngine:Engine=async(...args)=>(await import(engineUrl)).assemblePackage(...args);
@@ -41,7 +41,8 @@ export async function processPackages(db:SupabaseClient,engine:Engine=defaultEng
    await checkedQuery(db.rpc("finish_api_package",{p_id:pkg.id,p_token:token,p_input:result.input,p_record:result.record,p_gold:result.goldRecords,p_versions:result.versions}),"Package publication");
   }catch(error){
    console.error(`[package ${pkg.id}]`,error);
-   await checkedQuery(db.from("trrc_packages").update({status:pkg.attempts>=4?"failed":"queued",claim_token:null,lease_until:new Date(Date.now()+60_000).toISOString(),error_summary:error instanceof Error?error.message:String(error),updated_at:new Date().toISOString()}).eq("id",pkg.id).eq("claim_token",token),"Package retry status");
+   await checkedQuery(db.from("trrc_packages").update({// A database interruption never exhausts the attempts; only a real assembly error does.
+   status:pkg.attempts>=4&&!isTransientInfrastructureError(error)?"failed":"queued",claim_token:null,lease_until:new Date(Date.now()+60_000).toISOString(),error_summary:error instanceof Error?error.message:String(error),updated_at:new Date().toISOString()}).eq("id",pkg.id).eq("claim_token",token),"Package retry status");
   }
   } catch(error) {
    console.error(`[package ${pkg.id}] orchestration failed`,error);

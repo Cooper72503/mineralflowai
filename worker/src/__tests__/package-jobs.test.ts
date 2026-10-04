@@ -27,3 +27,7 @@ it.each([0,4])("records failed generation without publication, attempt %i",async
  const {db,writes}=database({attempts});await processPackages(db,async()=>{throw Error("Evidence changed");});
  expect(db.rpc).not.toHaveBeenCalled();expect(writes.at(-1)).toMatchObject({status:attempts===4?"failed":"queued",error_summary:"Evidence changed",claim_token:null});
 });
+it("never exhausts a package's attempts on a database interruption (live 2026-10-04)",async()=>{
+ const {db,writes}=database({attempts:4});await processPackages(db,async()=>{throw Error("Run progress persistence failed: upstream request timeout");});
+ expect(writes.at(-1)).toMatchObject({status:"queued",claim_token:null});
+});
