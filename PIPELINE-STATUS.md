@@ -622,3 +622,18 @@ See `AUDIT-DECISION-PIPELINE.md` for implementation details, validation boundari
 **PARTNERSHIP BOUNDARY:** Novi supplies data/analytics. MineralFlow normalizes, cross-checks, reconciles, calculates, compares, exposes contradictions/missing diligence, traces evidence and generates work product. The acquisition professional makes the final decision. See `NOVI-INTEGRATION.md`.
 
 **RECOVERY:** The workspace reverted to an older snapshot. The saved 02c6727 content was recovered as commit f4064c9; the older local working files were preserved in a git stash. Integration changes after that saved checkpoint were reconstructed and tested.
+
+## 2026-10-05 — Prototype executive-summary presentation
+
+- Base: main bfb5fa7. Existing package Decision Record renderer updated; calculations,
+  assumptions, retrieval workers and evidence gates unchanged.
+- One executive memo per lease: asset, decision status, scoped conditional values,
+  grouped title/regulatory/forecast findings, and next actions.
+- Four new rendered-PDF regressions: 100% royalty disclosure and one-page memo;
+  unavailable title/economics; separate multi-lease scope and exclusions; no leases.
+- Ownership audit: this prototype's `deal/build.ts` still uses appraisal-roll ownership,
+  not the separate GOLD2 reviewed-position loader. See docs/prototype-executive-summary.md.
+- GOLD reports validated: **0/10 complete acquisition decisions verified in this cycle**.
+  No live ownership acceptance or new production benchmark was performed.
+- Verification completed: 1,014 frontend tests / 115 files passed; production build
+  and its type validation passed; synthetic executive-page rendering inspected.

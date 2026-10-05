@@ -83,29 +83,69 @@ const stdRef = (deal: Deal) => deal.sources.find(s => s.label === "MineralFlow s
 const leaseRec = (inp: DecisionRecordInput, l: DealLease) => inp.record.leases.find(r => r.leaseKey === l.key)!;
 
 // 1 ─────────────────────────────────────────────────────────────────────────
-function Executive({ inp }: { inp: DecisionRecordInput }) {
+// Presentation only: never change the decision, assumptions, or calculated values.
+// One lease per executive page avoids mixing different interests or price bases.
+function Executive({ inp, only = 0 }: { inp: DecisionRecordInput; only?: number }) {
   const { deal, record } = inp;
-  return e(View, {}, Section("1. EXECUTIVE DECISION SUMMARY"),
-    e(View, { style: { flexDirection: "row", alignItems: "center", marginBottom: 8 } }, e(Badge, { verdict: record.verdict, large: true }),
-      e(Text, { style: { fontSize: 10, fontFamily: "DecisionSans", fontWeight: 700, color: C.navy, marginLeft: 10, flex: 1 } }, summarizeReasons(record.reasons)[0] ?? "")),
-    ...summarizeReasons(record.reasons, 3).slice(1).map((r, i) => e(Text, { key: i, style: S.bodyText }, r)),
-    ...record.leases.map((r, i) => {
-      const l = deal.leases.find(x => x.key === r.leaseKey)!;
-      const s = r.economics.scenarios, a = r.economics.assumptions;
-      // The block may break across pages; a long reason list must never be cut off or leave a blank page.
-      return e(View, { key: i, style: { marginTop: 8, borderTopWidth: 0.5, borderTopColor: C.border, paddingTop: 6 } },
-        e(View, { wrap: false, minPresenceAhead: 60, style: { flexDirection: "row", alignItems: "center", marginBottom: 4 } }, e(Badge, { verdict: r.verdict }), e(Text, { style: { fontSize: 9, fontFamily: "DecisionSans", fontWeight: 700, marginLeft: 6 } }, leaseTitle(l))),
-        ...summarizeReasons(r.reasons, 3).map((t, j) => Bullet(t, `r${j}`)),
-        Note(scenarioScope(a, l.lastReportedMonth)),
-        kv("Interest evaluated", `${a.interestType === "royalty" ? "Royalty" : "Working interest"}, ${a.netRevenueInterest} revenue decimal${a.interestType === "working" ? `, ${a.workingInterest} working interest` : ""}`),
-        s ? kv(`Conditional value at ${a.discountRatePct}%`, `${fmtUsd(s.downside.presentValue)} downside  |  ${fmtUsd(s.base.presentValue)} base  |  ${fmtUsd(s.upside.presentValue)} upside${refs([deckRef(deal), stdRef(deal), ...l.sources.production])}`) : kv("Value", `Not calculated: ${r.economics.reason}`),
-        r.entry ? kv("Entry", `Range ${fmtUsd(r.entry.rangeLow)} – ${fmtUsd(r.entry.rangeHigh)}; walk-away ceiling ${fmtUsd(r.entry.ceiling)}${r.entry.askingPriceUsd ? `; asking ${fmtUsd(r.entry.askingPriceUsd)} is ${r.entry.position}` : ""}`) : null,
-        r.exit ? kv(`Exit after ${r.exit.holdYears} years`, `${r.exit.byScenario.base.multiple?.toFixed(2) ?? "—"}x, IRR ${pct(r.exit.byScenario.base.irrPct)} at base prices from the ${r.exit.entryBasisLabel}`) : null,
-        r.risks.length ? e(Text, { style: [S.flagLabel, { color: C.gray, marginTop: 3 }] }, "TOP RISKS") : null,
-        ...r.risks.slice(0, 5).map((k, j) => Bullet(k.text, `k${j}`, sevColor(k.severity))),
-        e(Text, { style: [S.flagLabel, { color: C.gray, marginTop: 3 }] }, "CONDITIONS"),
-        ...summarizeReasons(r.conditions, 3).map((c, j) => Bullet(c, `c${j}`)));
-    }));
+  const l = deal.leases[only];
+  const r = l ? record.leases.find(x => x.leaseKey === l.key) : undefined;
+  const heading = (text: string) => e(Text, { style: { fontFamily: "DecisionSans", fontWeight: 700, fontSize: 9, color: C.navy, marginTop: 12, marginBottom: 6 } }, text);
+  const copy = (text: string) => e(Text, { style: { fontSize: 8.5, lineHeight: 1.35, marginBottom: 5, color: C.dark } }, text);
+  const finding = (title: string, text: string) => e(View, { wrap: false, style: { marginBottom: 5 } },
+    e(Text, { style: { fontSize: 8.5, fontWeight: 700, marginBottom: 2 } }, title), copy(text));
+  const verdict = only === 0 ? record.verdict : (r?.verdict ?? record.verdict);
+  const headline = verdict === "REVIEW" ? "Evidence gaps require review before acquisition approval."
+    : verdict === "PASS" ? "The current record does not support proceeding under these assumptions."
+    : "The decision engine supports this scenario, subject to its stated conditions.";
+  const banner = e(View, { style: { backgroundColor: VERDICT[verdict].bg, padding: 10, flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 3 } },
+    e(Badge, { verdict, large: true }),
+    e(Text, { style: { flex: 1, marginLeft: 10, fontSize: 10, fontWeight: 700, color: C.navy } }, headline));
+  const packageScope = `${deal.submitted} submitted APIs (${deal.distinctApis} distinct); ${deal.leases.length} resolved lease(s); ${deal.excluded.length} excluded input(s). Shared lease production is counted once.`;
+  if (!l || !r) return e(View, {}, Section("1. EXECUTIVE DECISION SUMMARY"), banner, heading("THE ASSET"), copy(packageScope),
+    heading("CONDITIONAL ECONOMICS"), copy("Unavailable: no matched lease decision is available. No value is asserted."),
+    heading("NEXT ACTIONS"), copy("Resolve excluded inputs and retrieve the missing identity and evidence before generating a new decision."),
+    Note("All exclusions and reasons remain in Sections 2 and 12."));
+  const a = r.economics.assumptions, s = r.economics.scenarios;
+  const t = l.title.analysis;
+  const title = t ? `${l.title.indexedInstruments} tract-associated recordings; ${l.title.readInstruments} read; ${Math.max(0, l.title.indexedInstruments - l.title.readInstruments)} index-only. Assessment: ${t.statusDisplay}. ${t.reviewQueueOpenCount ?? "Unknown number of"} open review items.`
+    : `Title analysis unavailable: ${l.title.reason ?? l.title.status}.`;
+  const forms = l.wells.filter(w => w.formsLacking).length;
+  const shut = l.wells.filter(w => /SHUT/i.test(w.status ?? "")).length;
+  const off = l.wells.filter(w => w.inPackage && !w.onProration).length;
+  const coverage = l.regulatory.coverage ?? [];
+  const incomplete = l.coverage.filter(c => c.retrieved < c.wells).length;
+  const limited = coverage.filter(c => c.status !== "verified").length;
+  const reg = `${forms} well(s) with forms lacking; ${off} submitted well(s) absent from proration; ${shut} shut in. ${l.regulatory.critical.length} critical and ${l.regulatory.important.length} important flag(s). ${incomplete} incomplete source group(s); ${coverage.length ? `${limited} limited/unavailable checks` : "per-well regulatory coverage unavailable"}.`;
+  const forecast = s ? `Base forecast: ${s.base.lifeMonths} months${s.base.atHorizonCap ? " (model horizon cap reached)" : " to the modeled economic limit"}. ${l.trailingUnreportedMonths} later month(s) unreported. Values depend on assumed prices, costs and the production tail; not certified reserves.`
+    : `Forecast/economics unavailable: ${r.economics.reason ?? "Insufficient supported inputs"}.`;
+  const sources = refs([deckRef(deal), stdRef(deal), ...l.sources.production].filter(Boolean));
+  return e(View, {},
+    e(Text, { style: { fontSize: 18, fontWeight: 700, color: C.navy, marginBottom: 5 } }, l.leaseName ?? `RRC ${l.district}-${l.leaseNumber}`),
+    e(Text, { style: { fontSize: 8, color: C.gray } }, `1. EXECUTIVE DECISION SUMMARY${deal.leases.length > 1 ? ` — LEASE ${only + 1} OF ${deal.leases.length}` : ""}`),
+    banner,
+    ...(verdict === "PASS" ? [Note(summarizeReasons(only === 0 ? record.reasons : r.reasons, 1)[0] ?? "See Section 12 for decision reasons.")] : []),
+    heading("THE ASSET"), copy(`${packageScope}${refs(l.sources.wells)}`),
+    copy(`${l.operator ?? "Operator unavailable"} | ${l.county ?? "County unavailable"} | RRC ${l.district}-${l.leaseNumber}. ${l.producingWells} well(s) carried as producing.`),
+    heading("CONDITIONAL ECONOMICS"),
+    e(View, { style: { backgroundColor: "#F0F4F8", padding: 8, marginBottom: 7 } },
+      copy(`Assumed ${a.interestType === "royalty" ? "royalty" : "working-interest"} scenario: NRI ${a.netRevenueInterest} (${(a.netRevenueInterest * 100).toFixed(2)}% of lease revenue)${a.interestType === "working" ? `; WI ${a.workingInterest}` : ""}.`),
+      e(Text, { style: { fontSize: 8, color: C.gray } }, "Entering a decimal does not verify ownership. These are conditional interest values, not an established price for the entire operated lease.")),
+    s ? e(View, { style: { flexDirection: "row", marginBottom: 7 } },
+      e(View, { style: { width: "45%" } }, Note(`Base value at ${a.discountRatePct}%`), e(Text, { style: { fontSize: 19, fontWeight: 700, color: C.navy } }, fmtUsd(s.base.presentValue))),
+      e(View, { style: { width: "55%" } }, Note("Conditional entry range"),
+        e(Text, { style: { fontSize: 12, fontWeight: 700, color: C.navy } }, r.entry ? `${fmtUsd(r.entry.rangeLow)} – ${fmtUsd(r.entry.rangeHigh)}` : "Unavailable"),
+        Note(r.entry ? `Walk-away ceiling: ${fmtUsd(r.entry.ceiling)}` : "No supported entry analysis")))
+      : copy(`Unavailable: ${r.economics.reason ?? "Insufficient supported inputs"}. No value is asserted.`),
+    r.exit ? copy(`${r.exit.holdYears}-year base exit: ${fmtUsd(r.exit.byScenario.base.exitValue)} | Hold cash: ${fmtUsd(r.exit.byScenario.base.holdCash)}. Return: ${r.exit.byScenario.base.multiple === null ? "Not calculated" : `${r.exit.byScenario.base.multiple.toFixed(2)}x`} / ${pct(r.exit.byScenario.base.irrPct)} IRR at ${fmtUsd(r.exit.entryBasisUsd)} (${r.exit.entryBasisLabel}).`) : null,
+    Note(`Asking price: ${a.askingPriceUsd === null ? "not supplied; IRR at asking unavailable" : fmtUsd(a.askingPriceUsd)}. Basis: $${a.oilPriceUsdBbl.toFixed(2)}/bbl oil; $${a.gasPriceUsdMcf.toFixed(2)}/Mcf gas; ${a.discountRatePct}% hurdle. ${a.interestType === "royalty" ? "Royalty bears no direct operating costs." : "Working interest bears its modeled costs."}${sources}`),
+    Note(`Valuation origin: month after ${l.lastReportedMonth ?? "unavailable production date"}; not rolled forward to the report date. Full assumptions: Section 8.`),
+    heading("THREE MATERIAL FINDINGS"),
+    finding("01  Title and ownership", `${title} A selected seller interest is not verified by these scenario inputs.${refs(l.sources.title)}`),
+    finding("02  Regulatory and well scope", `${reg}${refs(l.sources.wells)}`),
+    finding("03  Forecast dependence", `${forecast}${refs(l.sources.production)}`),
+    heading("NEXT ACTIONS"),
+    copy("1. Confirm the interest being evaluated against ownership evidence.\n2. Review priority title findings and cited images; resolve unsupported links.\n3. Validate material cost assumptions and any regulatory or scope discrepancies."),
+    Note("Full risks, contradictions, exclusions and decision conditions remain in Section 12. No summary item clears an unresolved finding."));
 }
 
 // 2 ─────────────────────────────────────────────────────────────────────────
@@ -404,7 +444,7 @@ export async function renderDecisionRecordPdf(inp: DecisionRecordInput): Promise
   const perLease = (C2: (p: { inp: DecisionRecordInput; only: number }) => React.ReactElement, key: string) =>
     deal.leases.map((_, i) => e(Chrome, { key: `${key}${i}`, deal }, e(C2, { inp, only: i })));
   const doc = e(Document, { title: `MineralFlow Decision Record ${deal.packageId.slice(0, 8)}`, author: "MineralFlow AI" },
-    one(Executive, "1"), one(Overview, "2"), one(Identity, "3"), ...perLease(Production, "4"), one(Regulatory, "5"), ...perLease(Title, "6"),
+    ...(deal.leases.length ? perLease(Executive, "1") : [one(Executive, "1")]), one(Overview, "2"), one(Identity, "3"), ...perLease(Production, "4"), one(Regulatory, "5"), ...perLease(Title, "6"),
     one(Forecast, "7"), one(Assumptions, "8"), one(Economics, "9"), ...perLease(OilSensitivity, "9s"), e(Chrome, { key: "10-11", deal }, e(Entry, { inp }), e(View, { style: { marginTop: 18 } }, e(Exit, { inp }))), one(Risks, "12"), one(Appendix, "13"));
   return renderToBuffer(doc as never);
 }
