@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ALL_COUNTY_NAMES } from "@/lib/trrc/permit-tracker/county-codes";
 import { COUNTY_GROUPS } from "@/lib/trrc/permit-tracker/county-groups";
 import type { PermitSearchRow } from "@/lib/trrc/permit-tracker/search-results";
+import type { PermitLocation } from "@/lib/trrc/permit-tracker/permit-location";
 import { createClient } from "@/lib/supabase/client";
 import { fetchTrialStatus } from "@/lib/trial/trial-status";
 
@@ -502,6 +503,37 @@ function AlertPanel() {
   );
 }
 
+function LocationCell({
+  docNo,
+  locations,
+  locating,
+}: {
+  docNo: string | null;
+  locations: Record<string, PermitLocation | null>;
+  locating: boolean;
+}) {
+  const muted = { color: "#9ca3af" };
+  if (!docNo) return <span style={muted}>—</span>;
+  if (!(docNo in locations)) return <span style={muted}>{locating ? "Locating…" : "Unavailable"}</span>;
+  const loc = locations[docNo];
+  if (!loc) return <span style={muted}>Not on permit</span>;
+  const query = `${loc.latitude},${loc.longitude}`;
+  return (
+    <div>
+      <a
+        href={`https://www.google.com/maps/search/?api=1&query=${query}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={loc.datum ? `As filed (${loc.datum}). Opens Google Maps.` : "Opens Google Maps."}
+        style={{ color: "#2563eb", textDecoration: "none", fontVariantNumeric: "tabular-nums" }}
+      >
+        {loc.latitude.toFixed(5)}, {loc.longitude.toFixed(5)}
+      </a>
+      {loc.directions && <div style={{ fontSize: "0.7rem", color: "#6b7280" }}>{loc.directions}</div>}
+    </div>
+  );
+}
+
 export default function PermitTrackerPage() {
   const [selectedCounties, setSelectedCounties] = useState<string[]>(["MIDLAND"]);
   const [since, setSince] = useState(daysAgoIso(14));
@@ -512,9 +544,36 @@ export default function PermitTrackerPage() {
   const [skippedCounties, setSkippedCounties] = useState<string[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [excludedOperators, setExcludedOperators] = useState<Set<string>>(new Set());
+  // docNo -> location, or null when the permit states none. Missing = not looked up yet.
+  const [locations, setLocations] = useState<Record<string, PermitLocation | null>>({});
+  const [locating, setLocating] = useState(false);
+  const searchGeneration = useRef(0);
 
   const visibleRows = rows?.filter((r) => !r.operatorNumber || !excludedOperators.has(r.operatorNumber)) ?? null;
   const hiddenCount = rows && visibleRows ? rows.length - visibleRows.length : 0;
+
+  /** Fills in surface coordinates a batch at a time, in table order; a newer search stops an older one. */
+  async function loadLocations(found: PermitSearchRow[]) {
+    const generation = ++searchGeneration.current;
+    const docNos = Array.from(new Set(found.map((r) => r.univDocNo).filter((d): d is string => !!d)));
+    setLocations({});
+    setLocating(docNos.length > 0);
+    for (let i = 0; i < docNos.length; i += 10) {
+      try {
+        const res = await fetch("/api/trrc/permit-tracker/locations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ docNos: docNos.slice(i, i + 10) }),
+        });
+        const json = await res.json();
+        if (generation !== searchGeneration.current) return;
+        if (json.ok) setLocations((prev) => ({ ...prev, ...json.data.locations }));
+      } catch {
+        if (generation !== searchGeneration.current) return;
+      }
+    }
+    if (generation === searchGeneration.current) setLocating(false);
+  }
 
   async function runSearch() {
     if (selectedCounties.length === 0) {
@@ -524,6 +583,8 @@ export default function PermitTrackerPage() {
     setLoading(true);
     setError(null);
     setRows(null);
+    searchGeneration.current++;
+    setLocating(false);
     try {
       const res = await fetch("/api/trrc/permit-tracker/search", {
         method: "POST",
@@ -536,6 +597,7 @@ export default function PermitTrackerPage() {
         return;
       }
       setRows(json.data.rows);
+      void loadLocations(json.data.rows);
       setSkippedCounties(json.data.skippedCounties ?? []);
       setTruncated(json.data.truncated ?? false);
     } catch {
@@ -688,7 +750,7 @@ export default function PermitTrackerPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
                   <thead>
                     <tr>
-                      {["Operator", "Phone", "Lease", "Well #", "County", "Dist.", "Profile", "Submitted", "Status"].map((h) => (
+                      {["Operator", "Phone", "Lease", "Well #", "County", "Location", "Dist.", "Profile", "Submitted", "Status"].map((h) => (
                         <th key={h} style={{
                           textAlign: "left", padding: "0.4rem 0.75rem", color: "#6b7280",
                           fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.06em",
@@ -712,6 +774,9 @@ export default function PermitTrackerPage() {
                           <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.leaseName ?? "—"}</td>
                           <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.wellNumber ?? "—"}</td>
                           <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.county ?? "—"}</td>
+                          <td style={{ padding: "0.5rem 0.75rem", color: "#111827", whiteSpace: "nowrap" }}>
+                            <LocationCell docNo={r.univDocNo} locations={locations} locating={locating} />
+                          </td>
                           <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.district ?? "—"}</td>
                           <td style={{ padding: "0.5rem 0.75rem", color: "#111827" }}>{r.wellboreProfile ?? "—"}</td>
                           <td style={{ padding: "0.5rem 0.75rem", whiteSpace: "nowrap", color: "#111827" }}>{r.applicationDate ?? "—"}</td>
@@ -732,6 +797,8 @@ export default function PermitTrackerPage() {
                 <p style={{ margin: "0.75rem 0 0 0", fontSize: "0.72rem", color: "#9ca3af" }}>
                   Phone numbers are the operator's TRRC P-5 registered contact number (Texas Oil &amp; Gas
                   Directory) — not necessarily the direct line for this specific well or lease.
+                  Locations are the surface coordinates filed on each W-1 (NAD 27), which can sit a few
+                  dozen meters from the same point on a web map.
                 </p>
               </div>
             )}

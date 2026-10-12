@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { univDocNoFromDetailUrl } from "./permit-location";
 
 export interface PermitSearchRow {
   /** RRC's own application tracking number (the "Status #" column). */
@@ -18,6 +19,8 @@ export interface PermitSearchRow {
   applicationDate: string | null; // parsed from "Submitted MM/DD/YYYY" in the first cell
   issuanceDate: string | null; // parsed from "Approved MM/DD/YYYY" in the first cell
   detailUrl: string | null;
+  /** RRC's document number for the permit, used to look up its surface location. */
+  univDocNo: string | null;
   /** Joined in by the API route from operator_directory — absent on a raw scrape result. */
   operatorPhone?: string | null;
   operatorEmergencyPhone?: string | null;
@@ -69,6 +72,7 @@ export function parseSearchResultsPage(html: string): PermitSearchRow[] {
       applicationDate: submittedMatch ? submittedMatch[1] : null,
       issuanceDate: approvedMatch ? approvedMatch[1] : null,
       detailUrl,
+      univDocNo: univDocNoFromDetailUrl(detailUrl),
     });
   });
 
