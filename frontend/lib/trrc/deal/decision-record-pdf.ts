@@ -19,6 +19,8 @@ import type { Verdict } from "./underwriting";
 
 import { formatShare } from "../title/report";
 import { scenarioScope, scenarioStatus } from "./report-scope";
+import { exposureSentence, inactiveSentence, monthLabel, reportingGapReason, stoppedSentence } from "./distress";
+import { differsSentence, filledSentence } from "../sales/reconcile";
 
 const e = React.createElement;
 // Reuse the repository's licensed GOLD fonts. Embed them so the viewer does
@@ -94,7 +96,13 @@ function Executive({ inp, only = 0 }: { inp: DecisionRecordInput; only?: number 
   const finding = (title: string, text: string) => e(View, { wrap: false, style: { marginBottom: 5 } },
     e(Text, { style: { fontSize: 8.5, fontWeight: 700, marginBottom: 2 } }, title), copy(text));
   const verdict = only === 0 ? record.verdict : (r?.verdict ?? record.verdict);
-  const headline = verdict === "REVIEW" ? "Evidence gaps require review before acquisition approval."
+  const d = r?.distress;
+  const filledMonths = (l?.seller?.months ?? []).filter(m => m.basis === "filled").map(m => m.month);
+  const gapReason = l && r && r.economics.status !== "calculated" ? reportingGapReason(l.production) : null;
+  const headline = filledMonths.length && verdict !== "BUY" ? `Run statements show production ${monthLabel(filledMonths[0])}–${monthLabel(filledMonths[filledMonths.length - 1])} that the operator never filed with TRRC${d?.inactive.denied ? `; ${d.inactive.denied} wells are inactive with plugging extensions denied` : ""}.`
+    : d?.stopped && verdict === "PASS" ? `TRRC's current filings show no production since ${monthLabel(d.lastProducingMonth)}; there is no production value to price.`
+    : d?.stopped ? `TRRC shows no production since ${monthLabel(d.lastProducingMonth)}; value requires the seller's run statements.`
+    : verdict === "REVIEW" ? "Evidence gaps require review before acquisition approval."
     : verdict === "PASS" ? "The current record does not support proceeding under these assumptions."
     : "The decision engine supports this scenario, subject to its stated conditions.";
   const banner = e(View, { style: { backgroundColor: VERDICT[verdict].bg, padding: 10, flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 3 } },
@@ -112,18 +120,23 @@ function Executive({ inp, only = 0 }: { inp: DecisionRecordInput; only?: number 
   const forms = l.wells.filter(w => w.formsLacking).length;
   const shut = l.wells.filter(w => /SHUT/i.test(w.status ?? "")).length;
   const off = l.wells.filter(w => w.inPackage && !w.onProration).length;
+  const facts = [d?.stopped ? stoppedSentence(d) : null, filledSentence(l.seller?.months ?? []), differsSentence(l.seller?.months ?? []), d ? inactiveSentence(d, l.apis.length) : null, exposureSentence(r.plugging, r.economics.assumptions)].filter((x): x is string => !!x);
   const coverage = l.regulatory.coverage ?? [];
   const incomplete = l.coverage.filter(c => c.retrieved < c.wells).length;
   const limited = coverage.filter(c => c.status !== "verified").length;
-  const reg = `${forms} well(s) with forms lacking; ${off} submitted well(s) absent from proration; ${shut} shut in. ${l.regulatory.critical.length} critical and ${l.regulatory.important.length} important flag(s). ${incomplete} incomplete source group(s); ${coverage.length ? `${limited} limited/unavailable checks` : "per-well regulatory coverage unavailable"}.`;
-  const forecast = s ? `Base forecast: ${s.base.lifeMonths} months${s.base.atHorizonCap ? " (model horizon cap reached)" : " to the modeled economic limit"}. ${l.trailingUnreportedMonths} later month(s) unreported. Values depend on assumed prices, costs and the production tail; not certified reserves.`
+  const inactive = d?.inactive.wells ? `${d.inactive.wells} on TRRC's inactive-well report${d.inactive.denied ? ` (${d.inactive.denied} with the plugging extension denied)` : ""}` : "0 on TRRC's inactive-well report";
+  const reg = `${forms} well(s) with forms lacking; ${off} submitted well(s) absent from proration; ${shut} shut in on the proration schedule; ${inactive}.${d?.inactiveViolationWells ? ` ${d.inactiveViolationWells} cited for an inactive unplugged well.` : ""} ${l.regulatory.critical.length} critical and ${l.regulatory.important.length} important flag(s). ${incomplete} incomplete source group(s); ${coverage.length ? `${limited} limited/unavailable checks` : "per-well regulatory coverage unavailable"}.`;
+  const forecast = d?.stopped ? `${stoppedSentence(d)} A decline curve cannot value a lease that reports no production.`
+    : gapReason ? `Forecast/economics unavailable: ${gapReason}`
+    : s ? `Base forecast: ${s.base.lifeMonths} months${s.base.atHorizonCap ? " (model horizon cap reached)" : " to the modeled economic limit"}. ${l.trailingUnreportedMonths} later month(s) unreported. Values depend on assumed prices, costs and the production tail; not certified reserves.`
     : `Forecast/economics unavailable: ${r.economics.reason ?? "Insufficient supported inputs"}.`;
   const sources = refs([deckRef(deal), stdRef(deal), ...l.sources.production].filter(Boolean));
   return e(View, {},
     e(Text, { style: { fontSize: 18, fontWeight: 700, color: C.navy, marginBottom: 5 } }, l.leaseName ?? `RRC ${l.district}-${l.leaseNumber}`),
     e(Text, { style: { fontSize: 8, color: C.gray } }, `1. EXECUTIVE DECISION SUMMARY${deal.leases.length > 1 ? ` — LEASE ${only + 1} OF ${deal.leases.length}` : ""}`),
     banner,
-    ...(verdict === "PASS" ? [Note(summarizeReasons(only === 0 ? record.reasons : r.reasons, 1)[0] ?? "See Section 12 for decision reasons.")] : []),
+    ...(facts.length ? [heading("WHAT THE RECORD SHOWS"), ...facts.map((f, i) => e(Text, { key: `f${i}`, style: { fontSize: 8.5, lineHeight: 1.35, marginBottom: 4, color: C.dark } }, `• ${f}`))]
+      : verdict === "PASS" ? [Note(summarizeReasons(only === 0 ? record.reasons : r.reasons, 1)[0] ?? "See Section 12 for decision reasons.")] : []),
     heading("THE ASSET"), copy(`${packageScope}${refs(l.sources.wells)}`),
     copy(`${l.operator ?? "Operator unavailable"} | ${l.county ?? "County unavailable"} | RRC ${l.district}-${l.leaseNumber}. ${l.producingWells} well(s) carried as producing.`),
     heading("CONDITIONAL ECONOMICS"),
@@ -135,7 +148,9 @@ function Executive({ inp, only = 0 }: { inp: DecisionRecordInput; only?: number 
       e(View, { style: { width: "55%" } }, Note("Conditional entry range"),
         e(Text, { style: { fontSize: 12, fontWeight: 700, color: C.navy } }, r.entry ? `${fmtUsd(r.entry.rangeLow)} – ${fmtUsd(r.entry.rangeHigh)}` : "Unavailable"),
         Note(r.entry ? `Walk-away ceiling: ${fmtUsd(r.entry.ceiling)}` : "No supported entry analysis")))
-      : copy(`Unavailable: ${r.economics.reason ?? "Insufficient supported inputs"}. No value is asserted.`),
+      : copy(d?.stopped ? `No production value is established from the public record. ${verdict === "PASS" ? "TRRC's current filings are zero." : "Volumes on the seller's run statements, reconciled to TRRC, are required before any value is stated."}`
+        : gapReason ? "Unavailable: too few consecutive reported months to fit a decline (see 03). No value is asserted."
+        : `Unavailable: ${(r.economics.reason ?? "Insufficient supported inputs").replace(/\.$/, "")}. No value is asserted.`),
     r.exit ? copy(`${r.exit.holdYears}-year base exit: ${fmtUsd(r.exit.byScenario.base.exitValue)} | Hold cash: ${fmtUsd(r.exit.byScenario.base.holdCash)}. Return: ${r.exit.byScenario.base.multiple === null ? "Not calculated" : `${r.exit.byScenario.base.multiple.toFixed(2)}x`} / ${pct(r.exit.byScenario.base.irrPct)} IRR at ${fmtUsd(r.exit.entryBasisUsd)} (${r.exit.entryBasisLabel}).`) : null,
     Note(`Asking price: ${a.askingPriceUsd === null ? "not supplied; IRR at asking unavailable" : fmtUsd(a.askingPriceUsd)}. Basis: $${a.oilPriceUsdBbl.toFixed(2)}/bbl oil; $${a.gasPriceUsdMcf.toFixed(2)}/Mcf gas; ${a.discountRatePct}% hurdle. ${a.interestType === "royalty" ? "Royalty bears no direct operating costs." : "Working interest bears its modeled costs."}${sources}`),
     Note(`Valuation origin: month after ${l.lastReportedMonth ?? "unavailable production date"}; not rolled forward to the report date. Full assumptions: Section 8.`),
@@ -144,13 +159,32 @@ function Executive({ inp, only = 0 }: { inp: DecisionRecordInput; only?: number 
     finding("02  Regulatory and well scope", `${reg}${refs(l.sources.wells)}`),
     finding("03  Forecast dependence", `${forecast}${refs(l.sources.production)}`),
     heading("NEXT ACTIONS"),
-    copy("1. Confirm the interest being evaluated against ownership evidence.\n2. Review priority title findings and cited images; resolve unsupported links.\n3. Validate material cost assumptions and any regulatory or scope discrepancies."),
+    copy(filledMonths.length || gapReason
+      ? `1. ${gapReason ? "Obtain run statements for the months with no report (see 03) so the lease can be valued; confirm each statement with the purchaser." : "Confirm the run-statement volumes with the purchaser."}\n2. Ask the operator to file the missing TRRC production reports and explain the gap; unfiled production is a compliance exposure that transfers with the operated interest.\n3. ${d?.inactive.wells ? `Obtain the operator's plugging schedule and plugging bids for the ${d.inactive.wells} inactive wells, and set who bears that cost at closing.` : "Confirm the interest being evaluated against ownership evidence."}`
+      : d?.stopped
+      ? `1. ${verdict === "PASS" ? "Do not proceed at the asking price on this record." : `Obtain the seller's purchaser run statements from ${monthLabel(d.lastProducingMonth)} forward and reconcile each month to TRRC.`}\n2. ${d.unreportedMonths > 3 ? `Ask the operator why no production report has been filed for ${d.unreportedMonths} months; unreported production is itself a compliance exposure.` : "Ask the operator whether the lease is shut in pending work or being abandoned."}\n3. ${d.inactive.wells ? "Obtain the operator's plugging schedule and plugging bids for the inactive wells, and confirm who bears that cost at closing." : "Confirm the interest being evaluated against ownership evidence."}`
+      : "1. Confirm the interest being evaluated against ownership evidence.\n2. Review priority title findings and cited images; resolve unsupported links.\n3. Validate material cost assumptions and any regulatory or scope discrepancies."),
     Note("Full risks, contradictions, exclusions and decision conditions remain in Section 12. No summary item clears an unresolved finding."));
 }
 
 // 2 ─────────────────────────────────────────────────────────────────────────
 function Overview({ inp }: { inp: DecisionRecordInput }) {
   const { deal } = inp;
+  // One row per lease; every well is listed in Section 3. A per-API table here repeated it.
+  const leaseRows = deal.leases.map(l => {
+    const r = inp.record.leases.find(x => x.leaseKey === l.key);
+    const sub = l.wells.filter(w => w.inPackage);
+    return { lease: `${l.leaseName ?? ""} (${l.district}-${l.leaseNumber})`, operator: l.operator ?? "—", county: l.county ?? "—", apis: String(l.apis.length),
+      proration: `${sub.filter(w => w.onProration).length} of ${sub.length}`, inactive: String(r?.distress.inactive.wells ?? sub.filter(w => w.inactive).length), status: scenarioStatus(r) };
+  });
+  if (deal.leases.length) return e(View, {}, Section("2. ASSET AND API OVERVIEW"),
+    Body(`${deal.submitted} API numbers submitted (${deal.distinctApis} distinct). ${deal.leases.length} resolved lease${deal.leases.length === 1 ? "" : "s"} identified; each lease's production is counted once however many of its wells were submitted. Each well is listed in Section 3.${refs(deal.leases.flatMap(l => l.sources.wells))}`),
+    Note("Scope is the submitted API list. This report does not establish that the list includes every asset offered by a seller."),
+    e(Th, { cols: [["Lease", 150], ["Operator", 100], ["County", 50], ["APIs", 32, "right"], ["On proration", 58, "right"], ["Inactive", 42, "right"], ["Scenario status", 88]] }),
+    ...leaseRows.map((r, i) => e(Tr, { key: i, i, cols: [[r.lease, 150], [r.operator, 100], [r.county, 50], [r.apis, 32, "right"], [r.proration, 58, "right"], [r.inactive, 42, "right", r.inactive !== "0" ? C.red : undefined], [r.status, 88]] })),
+    ...((deal.sellerStatements ?? []).length ? [Sub("Seller-supplied run statements"), ...(deal.sellerStatements ?? []).map((st, j) => Note(`${st.fileName} (${st.purchasers.join(", ") || "purchaser not stated"}, ${st.pageCount} pages): ${st.matched.map(m => `${m.leaseName ?? m.leaseKey} ${m.months.length} month(s)`).join("; ") || "no package lease matched"}.${st.unmatched.length ? ` Not in this package, so not used: ${st.unmatched.map(u => `${u.propertyName}${u.stateLease ? ` (state lease ${u.stateLease})` : ""}, ${u.months.length} month(s), ${u.netBbl.toLocaleString("en-US")} bbl`).join("; ")}.` : ""}${st.warnings.length ? ` ${st.warnings.join(" ")}` : ""}`))] : []),
+    ...(deal.excluded.length ? [Sub("Excluded inputs"), e(Th, { cols: [["Input", 110], ["Reason", 410]] }),
+      ...deal.excluded.map((x, i) => e(Tr, { key: `x${i}`, i, cols: [[x.input, 110], [x.reason, 410, "left", C.red]] }))] : []));
   const rows = [
     ...deal.leases.flatMap(l => l.members.map(m => ({ input: m.input, api: m.api ?? "", lease: `${l.leaseName ?? ""} (${l.district}-${l.leaseNumber})`, operator: l.operator ?? "—", county: l.county ?? "—", status: l.wells.find(w => w.api10 === m.api)?.status ?? (l.wells.find(w => w.api10 === m.api)?.onProration === false ? "Not on proration schedule" : "—"), included: scenarioStatus(inp.record.leases.find(r => r.leaseKey === l.key)) }))),
     ...deal.excluded.map(x => ({ input: x.input, api: x.api ?? "", lease: "—", operator: "—", county: "—", status: "—", included: `Excluded: ${x.reason}` })),
@@ -171,8 +205,10 @@ function Identity({ inp }: { inp: DecisionRecordInput }) {
       kv("Lease type", `${l.leaseType === "O" ? "Oil" : "Gas"} lease, district ${l.district}${refs(l.sources.wells)}`),
       kv("Field", l.field), kv("County", l.county), kv("Operator", `${l.operator ?? "—"}${l.operatorNo ? ` (P-5 ${l.operatorNo})` : ""}${refs(l.sources.wells)}`),
       kv("Producing wells", `${l.producingWellsBasis}${refs(l.sources.wells)}`),
-      e(Th, { cols: [["API", 90], ["Well", 50], ["Proration status", 160], ["Forms", 70], ["Submitted", 60]] }),
-      ...l.wells.map((w, j) => e(Tr, { key: j, i: j, cols: [[api(w.api10), 90], [w.wellNo ?? "—", 50], [w.onProration ? (w.status ?? "—") : "Not on the oil proration schedule", 160, "left", w.status && /SHUT/i.test(w.status) ? C.yellow : undefined], [w.formsLacking ? "Lacking" : w.onProration ? "Complete" : "—", 70, "left", w.formsLacking ? C.red : undefined], [w.inPackage ? "Yes" : "No", 60]] })))));
+      e(Th, { cols: [["API", 80], ["Well", 40], ["Proration status", 140], ["TRRC inactive report", 130], ["Forms", 55], ["Submitted", 50]] }),
+      ...l.wells.map((w, j) => e(Tr, { key: j, i: j, cols: [[api(w.api10), 80], [w.wellNo ?? "—", 40], [w.onProration ? (w.status ?? "—") : "Not on the oil proration schedule", 140, "left", w.status && /SHUT/i.test(w.status) ? C.yellow : undefined],
+        [w.inactive ? `Inactive since ${w.inactive.shutIn ?? "?"}${w.inactive.extension ? `; ext. ${w.inactive.extension.toLowerCase()}` : ""}` : w.inPackage && w.inactive === null ? "Not listed" : "—", 130, "left", w.inactive ? C.red : undefined],
+        [w.formsLacking ? "Lacking" : w.onProration ? "Complete" : "—", 55, "left", w.formsLacking ? C.red : undefined], [w.inPackage ? "Yes" : "No", 50]] })))));
 }
 
 // 4 ─────────────────────────────────────────────────────────────────────────
@@ -188,11 +224,16 @@ function Production({ inp, only }: { inp: DecisionRecordInput; only: number }) {
       e(ProductionChart, { months: chartRows, metricKey: "oil_bbl", title: "Oil, last 36 months", unit: "bbl/month", color: C.navy }),
       e(ProductionChart, { months: chartRows, metricKey: "gas_mcf", title: "Gas incl. casinghead, last 36 months", unit: "mcf/month", color: C.accent })),
     kv("Reported history", `${l.production.length} months through ${l.lastReportedMonth ?? "—"}${l.trailingUnreportedMonths ? `; ${l.trailingUnreportedMonths} later month(s) not yet reported` : ""}${p}`),
-    kv("Cumulative (reported window)", `${num(sum(l.production.map(r => r.oil_bbl ?? 0)))} bbl oil, ${num(sum(l.production.map(gasOf)))} mcf gas${p}`),
+    kv(l.seller?.months.some(m => m.basis === "filled") ? "Cumulative (TRRC and run statements)" : "Cumulative (reported window)", `${num(sum(l.production.map(r => r.oil_bbl ?? 0)))} bbl oil, ${num(sum(l.production.map(gasOf)))} mcf gas${p}${l.seller?.months.some(m => m.basis === "filled") ? refs(l.seller.sources) : ""}`),
     e(View, { style: { marginTop: 6 } },
-      e(Th, { cols: [["Month", 80], ["Oil, bbl", 90, "right"], ["Gas, mcf", 90, "right"], ["Casinghead, mcf", 90, "right"], ["Water, bbl", 90, "right"]] }),
-      ...l.production.slice(-24).reverse().map((r, j) => e(Tr, { key: j, i: j, cols: [[r.production_month, 80], [r.oil_bbl === null ? "Not reported" : num(r.oil_bbl), 90, "right"], [r.gas_mcf === null ? "—" : num(r.gas_mcf), 90, "right"], [r.casinghead_gas_mcf === null ? "—" : num(r.casinghead_gas_mcf), 90, "right"], [r.water_bbl === null ? "Not reported" : num(r.water_bbl), 90, "right"]] }))),
-    Note(`Lease-level volumes as reported to TRRC; each month counted once across the submitted wells. A blank month is not a zero. Well-level allocation is not attempted.${p}`));
+      e(Th, { cols: [["Month", 60], ["Oil, bbl", 70, "right"], ["Gas, mcf", 65, "right"], ["Casinghead, mcf", 75, "right"], ["Water, bbl", 65, "right"], ["Basis", 185]] }),
+      ...l.production.slice(-24).reverse().map((r, j) => {
+        const sm = l.seller?.months.find(m => m.month === r.production_month.slice(0, 7));
+        const basis = !sm ? (r.oil_bbl === null ? "No report filed with TRRC" : "TRRC") : sm.basis === "filled" ? `Run statement; no TRRC report${refs(sm.sourceIds)}` : sm.basis === "differs" ? `TRRC; statement shows ${num(sm.oilBbl)}${refs(sm.sourceIds)}` : `TRRC; statement agrees${refs(sm.sourceIds)}`;
+        return e(Tr, { key: j, i: j, cols: [[r.production_month, 60], [r.oil_bbl === null ? "Not reported" : num(r.oil_bbl), 70, "right"], [r.gas_mcf === null ? "—" : num(r.gas_mcf), 65, "right"], [r.casinghead_gas_mcf === null ? "—" : num(r.casinghead_gas_mcf), 75, "right"], [r.water_bbl === null ? "Not reported" : num(r.water_bbl), 65, "right"],
+          [basis, 185, "left", sm?.basis === "filled" ? C.accent : sm?.basis === "differs" ? C.red : undefined]] });
+      })),
+    Note(`Lease-level volumes as reported to TRRC; each month counted once across the submitted wells. A blank month is not a zero. Well-level allocation is not attempted.${l.seller?.months.some(m => m.basis === "filled") ? " Months marked “Run statement” are the purchaser’s sold volumes from seller-supplied statements, used where TRRC has no report; they are not TRRC records." : ""}${p}`));
 }
 
 // 5 ─────────────────────────────────────────────────────────────────────────
@@ -202,6 +243,36 @@ const SOURCE_LABEL: Record<string, string> = {
   fetch_orphan_well: "Orphan well list", fetch_injection_records: "Injection (H-10)", fetch_drilling_permits: "Drilling permits (W-1)", fetch_gis_plat: "GIS location and survey",
   fetch_coda_records: "Imaged well documents", search_by_operator: "Operator (P-5)", fetch_compliance_violations: "Compliance violations (RRC OIL)", fetch_county_records: "County records check", fetch_inactive_well_status: "Inactive well report",
 };
+/** Limited or unavailable checks, one line per distinct result with the wells it applies to. */
+function groupedGaps(l: DealLease) {
+  const groups = new Map<string, { status: string; reason: string; apis: string[]; sources: string[] }>();
+  for (const c of (l.regulatory.coverage ?? []).filter(c => c.status !== "verified")) {
+    const key = `${c.status}|${c.reason}`;
+    const g = groups.get(key) ?? { status: c.status, reason: c.reason, apis: [], sources: [] };
+    g.apis.push(c.api); g.sources.push(c.sourceId); groups.set(key, g);
+  }
+  return [...groups.values()];
+}
+
+/** Inactive, unplugged wells: the obligation a buyer of the working interest takes on. */
+function inactiveBlock(inp: DecisionRecordInput, l: DealLease) {
+  const r = leaseRec(inp, l);
+  const wells = l.wells.filter(w => w.inPackage && w.inactive);
+  if (!wells.length) return [];
+  const exposure = exposureSentence(r.plugging, r.economics.assumptions);
+  return [
+    e(Text, { key: "ih", style: [S.flagLabel, { color: C.red, marginTop: 6 }] }, "INACTIVE WELLS AND PLUGGING OBLIGATION"),
+    Body(inactiveSentence(r.distress, l.apis.length) ?? ""),
+    e(Th, { key: "it", cols: [["API", 80], ["Well", 45], ["Shut in", 60], ["Extension", 70], ["TRRC citation", 265]] }),
+    ...wells.map((w, j) => {
+      const v = (w.violations ?? []).find(x => /3\.14\(b\)\(2\)|inactive unplugged/i.test(`${x.rule} ${x.description}`));
+      return e(Tr, { key: `iw${j}`, i: j, cols: [[api(w.api10), 80], [w.wellNo ?? "—", 45], [w.inactive!.shutIn ?? "—", 60], [w.inactive!.extension ?? "—", 70, "left", /denied/i.test(w.inactive!.extension ?? "") ? C.red : undefined],
+        [v ? `${v.description} (${v.rule.replace(/\s*\[.*\]/, "")}); ${v.action ?? "action not stated"}${v.discovered ? `, ${v.discovered}` : ""}` : "—", 265]] });
+    }),
+    ...(exposure ? [Note(exposure)] : []),
+  ];
+}
+
 function Regulatory({ inp }: { inp: DecisionRecordInput }) {
   return e(View, {}, Section("5. RRC AND REGULATORY DILIGENCE"),
     ...inp.deal.leases.map((l, i) => e(View, { key: i, style: { marginBottom: 10 } },
@@ -209,7 +280,8 @@ function Regulatory({ inp }: { inp: DecisionRecordInput }) {
       ...l.regulatory.critical.map((f, j) => Bullet(`Critical: ${f}`, `c${j}`, C.red)),
       ...l.regulatory.important.map((f, j) => Bullet(`Important: ${f}`, `m${j}`, C.yellow)),
       !l.regulatory.critical.length && !l.regulatory.important.length ? Body(l.regulatory.coverage?.length && l.regulatory.coverage.every(c => c.status === "verified") ? "No critical or important flags identified in the verified sources." : "Regulatory clearance is not established. Limited or unavailable checks are listed below; no flagged finding does not mean a clean result.") : null,
-      ...(l.regulatory.coverage ?? []).filter(c => c.status !== "verified").map((c, j) => Bullet(`${c.api}: ${c.status.toUpperCase()} — ${c.reason} [${c.sourceId}]`, `gap${j}`, c.status === "unavailable" ? C.red : C.yellow)),
+      ...inactiveBlock(inp, l),
+      ...groupedGaps(l).map((g, j) => Bullet(`${g.apis.length === 1 ? `${g.apis[0]}: ` : ""}${g.status.toUpperCase()} — ${g.reason}${g.apis.length > 1 ? ` (${g.apis.length} wells)` : ""}${refs(g.sources.slice(0, 3))}${g.sources.length > 3 ? ` and ${g.sources.length - 3} more` : ""}`, `gap${j}`, g.status === "unavailable" ? C.red : C.yellow)),
       e(Th, { cols: [["TRRC source", 170], ["Retrieved", 70, "right"], ["Last failure", 250]] }),
       ...l.coverage.map((c, j) => e(Tr, { key: j, i: j, cols: [[SOURCE_LABEL[c.source] ?? c.source, 170], [`${c.retrieved} of ${c.wells}`, 70, "right", c.retrieved < c.wells ? C.yellow : undefined], [c.retrieved < c.wells ? (c.lastError ?? "").slice(0, 90) : "—", 250]] })),
       Note("Compliance violations are searched by each well's API in TRRC's RRC OIL system (records from August 1, 2015). Plugging status comes from TRRC's GIS well layer; the online W-3 query is retired, so no W-3 certificate is asserted either way."))));
@@ -293,6 +365,7 @@ const ASSUMPTION_ROWS: [keyof EconomicsAssumptions, string, (v: unknown) => stri
   ["gasDifferentialUsdMcf", "Gas differential (e.g. Waha)", v => `$${Number(v).toFixed(2)}/mcf`], ["nglYieldBblPerMmcf", "NGL yield", v => `${Number(v)} bbl/MMcf`], ["nglPriceUsdBbl", "NGL price", v => `$${Number(v).toFixed(2)}/bbl`],
   ["discountRatePct", "Discount rate", v => `${Number(v)}%`], ["oilSeverancePct", "Oil severance tax", v => `${Number(v)}%`], ["gasSeverancePct", "Gas severance tax", v => `${Number(v)}%`], ["adValoremPct", "Ad valorem tax", v => `${Number(v)}%`],
   ["loeUsdPerBoe", "Operating cost", v => `$${Number(v).toFixed(2)}/BOE`], ["fixedOpexUsdPerWellMonth", "Fixed cost per producing well", v => `$${num(Number(v))}/month`], ["workoverUsdPerBoe", "Workover reserve", v => `$${Number(v).toFixed(2)}/BOE`],
+  ["pluggingCostUsdPerWell", "Plugging cost per inactive well", v => `$${num(Number(v))}`],
   ["interestType", "Interest type", v => v === "royalty" ? "Royalty" : "Working interest"], ["netRevenueInterest", "Net revenue interest", v => String(v)], ["workingInterest", "Working interest", v => String(v)],
   ["operatorNri", "Operator revenue share (economic limit)", v => String(v)], ["downsidePricePct", "Downside price change", v => `${Number(v)}%`], ["upsidePricePct", "Upside price change", v => `+${Number(v)}%`],
   ["holdYears", "Hold period", v => `${Number(v)} years`], ["askingPriceUsd", "Asking price", v => v === null ? "Not entered" : fmtUsd(Number(v))],
@@ -301,6 +374,7 @@ const ROYALTY_NOTE: Partial<Record<keyof EconomicsAssumptions, string>> = {
   loeUsdPerBoe: ". Not charged to a royalty; sets when the operator stops producing",
   fixedOpexUsdPerWellMonth: ". Not charged to a royalty; sets when the operator stops producing",
   workoverUsdPerBoe: ". Not charged to a royalty",
+  pluggingCostUsdPerWell: ". Not borne by a royalty",
 };
 function Assumptions({ inp }: { inp: DecisionRecordInput }) {
   return e(View, {}, Section("8. SCENARIO ASSUMPTIONS"),
@@ -358,10 +432,11 @@ function OilSensitivity({ inp, only }: { inp: DecisionRecordInput; only: number 
     kv("Interest / hold / hurdle", `${a.interestType}; NRI ${a.netRevenueInterest}; WI ${a.workingInterest}; ${a.holdYears} years; ${a.discountRatePct}%`),
     Note("Costs use the location benchmark or user inputs disclosed in Section 8. No operator-specific actual expense is asserted. Lower/higher cost presets are illustrative ±20% sensitivities. Royalty interests bear no direct operating costs; costs affect the operator's economic limit."),
     Note(SENSITIVITY_DISCLOSURE),
+    ...(rows.every(row => row.annualNet === null) ? [Bullet(`Not calculated at any oil price: ${r.distress.stopped ? `${stoppedSentence(r.distress)} Price does not change a lease with no production.` : rows.find(row => row.reason)?.reason ?? r.economics.reason ?? "the economics are unavailable."}`, "na", C.yellow)] : [
     e(Th, { cols: [["Oil $/bbl", 55], ["Year 1 net", 90, "right"], ["Entry ceiling", 95, "right"], ["Hold cash", 90, "right"], ["Exit value", 95, "right"], ["IRR at asking", 65, "right"]] }),
     ...rows.map((row, i) => e(Tr, { key: i, i, cols: [[String(row.oilPriceUsdBbl), 55],
       ...([['annualNet',90],['ceiling',95],['holdCash',90],['exitValue',95]] as const).map(([k,w]): [string, number, "right"] => [row[k] === null ? "Unavailable" : fmtUsd(row[k]!), w, "right"]), [a.askingPriceUsd ? pct(row.irrPct) : "No asking price",65,"right"]] })),
-    ...[...new Set(rows.map(row => row.reason).filter(Boolean))].map((reason, i) => Bullet(`Unavailable: ${reason}`, i, C.yellow)),
+    ...[...new Set(rows.map(row => row.reason).filter(Boolean))].map((reason, i) => Bullet(`Unavailable: ${reason}`, i, C.yellow))]),
     Note("Conditional scenario results do not clear title gaps or authorize an acquisition. Entry/exit formulas and return basis are described in Sections 10–11."));
 }
 
@@ -404,6 +479,14 @@ function Exit({ inp }: { inp: DecisionRecordInput }) {
 }
 
 // 12 ────────────────────────────────────────────────────────────────────────
+/** Per-well repeats ("<lease>: …: 4216533187: <reason>") stated once with the number of wells. */
+function groupFindings(items: Finding[]): Finding[] {
+  const texts = summarizeReasons(items.map(f => f.text), Number.MAX_SAFE_INTEGER);
+  return texts.map(text => {
+    const from = items.filter(f => f.text === text || text.startsWith(f.text.replace(/\d{10}: /, "").replace(/\.$/, "").slice(0, 40)));
+    return { kind: "missing", severity: (Math.max(1, ...from.map(f => f.severity)) as 1 | 2 | 3), text, sources: [...new Set(from.flatMap(f => f.sources))] };
+  });
+}
 function Risks({ inp }: { inp: DecisionRecordInput }) {
   const list = (title: string, items: Finding[], key: string) => items.length ? e(View, { key },
     e(Text, { style: [S.flagLabel, { color: C.gray, marginTop: 4 }] }, title),
@@ -414,18 +497,52 @@ function Risks({ inp }: { inp: DecisionRecordInput }) {
       ...r.risks.map((k, j) => Bullet(k.text, `r${j}`, sevColor(k.severity))),
       list("CONTRADICTIONS IN THE RECORD", r.contradictions, "c"),
       list("MISSING DILIGENCE", r.missing, "m"))),
-    list("PACKAGE EVIDENCE AND EXCLUDED INPUTS", inp.record.dealFindings, "d"));
+    list("PACKAGE EVIDENCE AND EXCLUDED INPUTS", groupFindings(inp.record.dealFindings), "d"));
 }
 
 // 13 ────────────────────────────────────────────────────────────────────────
+const PER_WELL = /^(\d{10}|\d{2}-\d{3}-\d{5}): /;
+const CHECK_SHORT: Record<string, string> = {
+  "plugging records": "Plug", "orphan well": "Orph", "inactive well status": "Inact", "injection records": "Inj", "compliance violations": "Viol",
+  "drilling permits": "W-1", "completion records": "W-2", "coda records": "Docs", "gis plat": "GIS", "p4 records": "P-4", "severance records": "Sev",
+  "oil proration": "Pror", "production": "Prod", "county records": "Cnty", "well status": "Stat",
+};
+/**
+ * Per-well TRRC checks as one grid (well × check, each cell the linked
+ * source number) instead of one appendix entry per check per well, which
+ * ran a 47-well package's appendix to thirteen pages.
+ */
+function PerWellSources({ sources }: { sources: Deal["sources"] }) {
+  const byApi = new Map<string, Map<string, Deal["sources"][number]>>();
+  const checks = new Set<string>();
+  for (const s of sources) {
+    const api = PER_WELL.exec(s.detail)![1].replace(/\D/g, "");
+    const check = s.label.replace(/^TRRC /, "");
+    checks.add(check);
+    byApi.set(api, (byApi.get(api) ?? new Map()).set(check, s));
+  }
+  const cols = [...checks].sort();
+  const w = Math.max(22, Math.floor(440 / Math.max(1, cols.length)));
+  return e(View, {},
+    Sub("Per-well TRRC checks"),
+    Note(`Each cell is the source number for that well's check, linked to the TRRC record. Results are stated in Section 5. Columns: ${cols.map(c => `${CHECK_SHORT[c] ?? c.slice(0, 5)} = ${c}`).join("; ")}.`),
+    e(Th, { cols: [["API", 72], ...cols.map((c): [string, number, "right"] => [CHECK_SHORT[c] ?? c.slice(0, 5), w, "right"])] }),
+    ...[...byApi].sort(([a], [b]) => a.localeCompare(b)).map(([apiNo, m], i) => e(View, { key: apiNo, style: i % 2 === 0 ? S.tableRow : S.tableRowAlt, wrap: false },
+      e(Text, { style: [S.tableCell, { width: 72 }] }, api(apiNo)),
+      ...cols.map(c => { const src = m.get(c); return src?.url ? e(Link, { key: c, src: src.url, style: [S.tableCell, { width: w, textAlign: "right", color: C.link }] }, src.id) : e(Text, { key: c, style: [S.tableCell, { width: w, textAlign: "right" }] }, src?.id ?? "—"); }))));
+}
+
 function Appendix({ inp }: { inp: DecisionRecordInput }) {
   const { deal } = inp;
+  const perWell = deal.sources.filter(s => s.label.startsWith("TRRC ") && PER_WELL.test(s.detail));
+  const listed = perWell.length > 12 ? deal.sources.filter(s => !perWell.includes(s)) : deal.sources;
   return e(View, {}, Section("13. SOURCE AND EVIDENCE APPENDIX"),
     Note("Every bracketed number in this record refers to a source below."),
-    ...deal.sources.map((s, i) => e(View, { key: i, style: { marginBottom: 5 }, wrap: false },
+    ...listed.map((s, i) => e(View, { key: i, style: { marginBottom: 5 }, wrap: false },
       e(Text, { style: { fontSize: 8, fontFamily: "DecisionSans", fontWeight: 700 } }, `[${s.id}] ${s.label}`),
       e(Text, { style: S.flagItem }, `${s.detail.replace(/\.+$/, "")}${s.retrievedAt ? `. Retrieved ${s.retrievedAt.slice(0, 16).replace("T", " ")} UTC` : ""}.`),
       s.url ? e(Link, { src: s.url, style: S.trrcLink }, s.url) : null)),
+    perWell.length > 12 ? e(PerWellSources, { sources: perWell }) : null,
     Sub("Economics provider"),
     ...[...new Set(inp.record.leases.map(r => `${r.economics.provider.name} (id "${r.economics.provider.id}", version ${r.economics.provider.version}). Supplied through MineralFlow's EconomicsProvider interface; a partner forecast and economics plug in at the same point.`))].map((t, i) => Bullet(t, `p${i}`)),
     Sub("Scope"),
@@ -443,8 +560,14 @@ export async function renderDecisionRecordPdf(inp: DecisionRecordInput): Promise
   const one = (C2: (p: { inp: DecisionRecordInput }) => React.ReactElement, key: string) => e(Chrome, { key, deal }, e(C2, { inp }));
   const perLease = (C2: (p: { inp: DecisionRecordInput; only: number }) => React.ReactElement, key: string) =>
     deal.leases.map((_, i) => e(Chrome, { key: `${key}${i}`, deal }, e(C2, { inp, only: i })));
+  // With nothing calculated, sections 7 and 9–11 are each one line; they share a page.
+  const noEconomics = inp.record.leases.every(r => !r.economics.scenarios);
+  const gap = (el: React.ReactElement, key: string) => e(View, { key, style: { marginTop: 14 } }, el);
+  const economics = noEconomics
+    ? [e(Chrome, { key: "7-11", deal }, e(Forecast, { inp }), gap(e(Economics, { inp }), "9"), ...deal.leases.map((_, i) => gap(e(OilSensitivity, { inp, only: i }), `9s${i}`)), gap(e(Entry, { inp }), "10"), gap(e(Exit, { inp }), "11")), one(Assumptions, "8")]
+    : [one(Forecast, "7"), one(Assumptions, "8"), one(Economics, "9"), ...perLease(OilSensitivity, "9s"), e(Chrome, { key: "10-11", deal }, e(Entry, { inp }), e(View, { style: { marginTop: 18 } }, e(Exit, { inp })))];
   const doc = e(Document, { title: `MineralFlow Decision Record ${deal.packageId.slice(0, 8)}`, author: "MineralFlow AI" },
-    ...(deal.leases.length ? perLease(Executive, "1") : [one(Executive, "1")]), one(Overview, "2"), one(Identity, "3"), ...perLease(Production, "4"), one(Regulatory, "5"), ...perLease(Title, "6"),
-    one(Forecast, "7"), one(Assumptions, "8"), one(Economics, "9"), ...perLease(OilSensitivity, "9s"), e(Chrome, { key: "10-11", deal }, e(Entry, { inp }), e(View, { style: { marginTop: 18 } }, e(Exit, { inp }))), one(Risks, "12"), one(Appendix, "13"));
+    ...(deal.leases.length ? perLease(Executive, "1") : [one(Executive, "1")]), e(Chrome, { key: "2-3", deal }, e(Overview, { inp }), gap(e(Identity, { inp }), "3")), ...perLease(Production, "4"), one(Regulatory, "5"), ...perLease(Title, "6"),
+    ...economics, one(Risks, "12"), one(Appendix, "13"));
   return renderToBuffer(doc as never);
 }

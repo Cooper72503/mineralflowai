@@ -1,1 +1,4 @@
 .vercel
+
+# Copied from pdfjs-dist by scripts/copy-pdf-worker.mjs
+public/pdf.worker.min.mjs

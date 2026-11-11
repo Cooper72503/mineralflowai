@@ -34,6 +34,8 @@ export interface EconomicsAssumptions {
   loeUsdPerBoe: number;
   fixedOpexUsdPerWellMonth: number;
   workoverUsdPerBoe: number;
+  /** Cost to plug one well, applied to wells TRRC carries as inactive; borne by working-interest owners. */
+  pluggingCostUsdPerWell: number;
   /** The interest being evaluated. A royalty bears taxes only; a working interest bears costs. */
   interestType: "royalty" | "working";
   netRevenueInterest: number;
@@ -105,7 +107,7 @@ export function validateAssumptions(a: EconomicsAssumptions): string[] {
   nonneg("gasDifferentialUsdMcf", "Gas differential"); nonneg("nglYieldBblPerMmcf", "NGL yield"); nonneg("nglPriceUsdBbl", "NGL price");
   if (!(a.discountRatePct >= 0 && a.discountRatePct <= 50)) bad.push("Discount rate must be between 0% and 50%.");
   for (const [k, l] of [["oilSeverancePct", "Oil severance"], ["gasSeverancePct", "Gas severance"], ["adValoremPct", "Ad valorem"]] as const) if (!(a[k] >= 0 && a[k] <= 50)) bad.push(`${l} must be between 0% and 50%.`);
-  nonneg("loeUsdPerBoe", "Operating cost"); nonneg("fixedOpexUsdPerWellMonth", "Fixed cost per well"); nonneg("workoverUsdPerBoe", "Workover reserve");
+  nonneg("loeUsdPerBoe", "Operating cost"); nonneg("fixedOpexUsdPerWellMonth", "Fixed cost per well"); nonneg("workoverUsdPerBoe", "Workover reserve"); nonneg("pluggingCostUsdPerWell", "Plugging cost per well");
   frac("netRevenueInterest", "Net revenue interest"); frac("operatorNri", "Operator revenue share");
   if (!(a.netRevenueInterest > 0)) bad.push("Net revenue interest must be greater than zero.");
   if (a.interestType === "working") { frac("workingInterest", "Working interest"); if (a.netRevenueInterest > a.workingInterest) bad.push("Net revenue interest cannot exceed the working interest."); }
@@ -205,7 +207,7 @@ export function defaultAssumptions(p: {
   const assumptions: EconomicsAssumptions = {
     oilPriceUsdBbl: round2(p.oilPriceUsdBbl), gasPriceUsdMcf: round2(p.gasPriceUsdMcf), gasDifferentialUsdMcf: 0, nglYieldBblPerMmcf: 0, nglPriceUsdBbl: 0,
     discountRatePct: 10, oilSeverancePct: TX_SEVERANCE_TAX_OIL * 100, gasSeverancePct: TX_SEVERANCE_TAX_GAS * 100, adValoremPct: AD_VALOREM_PCT_OF_REVENUE * 100,
-    loeUsdPerBoe: loe, fixedOpexUsdPerWellMonth: FIXED_OPERATING_FLOOR_USD_PER_WELL_MONTH, workoverUsdPerBoe: WORKOVER_RESERVE_USD_PER_BOE,
+    loeUsdPerBoe: loe, fixedOpexUsdPerWellMonth: FIXED_OPERATING_FLOOR_USD_PER_WELL_MONTH, workoverUsdPerBoe: WORKOVER_RESERVE_USD_PER_BOE, pluggingCostUsdPerWell: PLUGGING_COST_USD_PER_WELL,
     interestType: "royalty", netRevenueInterest: 0.01, workingInterest: 1, operatorNri: p.operatorNri ?? 0.75,
     downsidePricePct: -25, upsidePricePct: 25, holdYears: 3, askingPriceUsd: null,
   };
@@ -216,6 +218,7 @@ export function defaultAssumptions(p: {
     discountRatePct: `${std} (PV-10)`, oilSeverancePct: "Texas statute, Tax Code §202.052", gasSeverancePct: "Texas statute, Tax Code §201.052", adValoremPct: `${std} estimate`,
     loeUsdPerBoe: basin ? `${basin.name} basin midpoint ($${basin.loeUsdPerBoeRange[0]}–$${basin.loeUsdPerBoeRange[1]}/BOE)` : `${std} generic`,
     fixedOpexUsdPerWellMonth: std, workoverUsdPerBoe: std,
+    pluggingCostUsdPerWell: `${std} screening estimate, not a bid; replace with a plugging contractor's bid or the operator's estimate`,
     interestType: "Example; set the interest being bought", netRevenueInterest: "Example 0.01 decimal; set the interest being bought", workingInterest: "Applies to a working interest only",
     operatorNri: p.operatorNriBasis ?? `${std} (0.75)`, downsidePricePct: std, upsidePricePct: std, holdYears: std, askingPriceUsd: "Not supplied",
   };
@@ -223,3 +226,6 @@ export function defaultAssumptions(p: {
 }
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
+
+/** Screening cost to plug one onshore Texas well; a placeholder for a bid, printed as such wherever it is used. */
+export const PLUGGING_COST_USD_PER_WELL = 40000;

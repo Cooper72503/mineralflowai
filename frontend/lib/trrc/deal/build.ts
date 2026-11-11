@@ -24,9 +24,19 @@ import { regulatoryCoverage, unreportedMonths, type RegulatoryCoverage } from ".
 import { aggregateStatus } from "../title/chain-findings";
 import { titleRecordingCounts, inventoryDecisionBlockers } from "./report-scope";
 import { STATUS_DISPLAY } from "../title/chain-types";
+import { assessDistress, distressPassReasons, distressReviewReasons, type LeaseDistress } from "./distress";
+import { defaultAssumptions } from "../economics-provider";
+import { overlaySellerSales, type SellerMonth } from "../sales/reconcile";
+import type { RunStatementRow } from "../sales/run-statements";
 
 export interface Source { id: string; label: string; detail: string; retrievedAt: string | null; url: string | null }
-export interface DealWell { api10: string; wellNo: string | null; status: string | null; formsLacking: boolean; inPackage: boolean; onProration: boolean }
+export interface DealWell {
+  api10: string; wellNo: string | null; status: string | null; formsLacking: boolean; inPackage: boolean; onProration: boolean;
+  /** On TRRC's inactive-well report (submitted wells only). */
+  inactive?: { shutIn: string | null; extension: string | null; pluggingDeadline: string | null } | null;
+  /** RRC OIL compliance violations on record for the well (submitted wells only). */
+  violations?: { rule: string; description: string; discovered: string | null; action: string | null }[];
+}
 
 export interface DealLease {
   key: string; district: string; leaseNumber: string; leaseType: string;
@@ -39,6 +49,10 @@ export interface DealLease {
   basin: { name: string; loeRange: [number, number]; loeMidpoint: number } | null;
   ownership: LeaseOwnership; valuation: InterestValuation; offers: Offers;
   regulatory: { critical: string[]; important: string[]; coverage?: Array<RegulatoryCoverage & { api: string; sourceId: string }> };
+  /** Stopped production and inactive, unplugged wells, from the retrieved records. Absent on reports built before it existed. */
+  distress?: LeaseDistress;
+  /** Months from the seller's purchaser run statements, reconciled to TRRC. */
+  seller?: { months: SellerMonth[]; sources: string[] };
   /** Per TRRC source: how many of the lease's wells it was retrieved for, and the last failure if any. */
   coverage: { source: string; retrieved: number; wells: number; lastError: string | null; lastAt: string | null }[];
   title: { status: "published" | "in_progress" | "not_found" | "unavailable"; reason: string | null; analysis: TitleChainAnalysis | null; readInstruments: number; indexedInstruments: number };
@@ -54,9 +68,17 @@ export interface Deal {
   deck: PriceDeck; deckLabel: string;
   overrides: { oilUsdBbl: number | null; gasUsdMcf: number | null; loeUsdPerBoe: number | null };
   leases: DealLease[];
+  /** Purchaser run statements uploaded for the package, and any property in them no package lease matched. */
+  sellerStatements?: SellerStatementSummary[];
   totals: { royaltyAndOverridePv10: ByScenario | null; workingInterestPv10: ByScenario | null };
   decision: { verdict: Verdict; reasons: string[] };
   sources: Source[];
+}
+
+export interface SellerStatementSummary {
+  id: string; fileName: string; purchasers: string[]; pageCount: number; pagesWithoutText: number; createdAt: string; warnings: string[];
+  matched: { leaseKey: string; leaseName: string | null; months: string[] }[];
+  unmatched: { propertyName: string; stateLease: string | null; county: string | null; months: string[]; netBbl: number }[];
 }
 
 export interface DealOverrides { oilUsdBbl?: number | null; gasUsdMcf?: number | null; loeUsdPerBoe?: number | null }
@@ -168,6 +190,15 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
   const deckLabel = deck.source === "eia_live" ? `EIA spot prices, ${deck.asOf}: WTI Cushing $${deck.wtiSpotUsdBbl.toFixed(2)}/bbl, Henry Hub $${deck.henryHubUsdMcf.toFixed(2)}/MMBtu${deck.fromSnapshot ? ` (live EIA unavailable at report time; EIA values as retrieved ${String(deck.retrievedAt).slice(0, 16).replace("T", " ")} UTC)` : ""}`
     : deck.source === "user_input" ? `Supplied prices: oil $${deck.wtiSpotUsdBbl.toFixed(2)}/bbl, gas $${deck.henryHubUsdMcf.toFixed(2)}/mcf` : `Placeholder prices as of ${deck.asOf} (live EIA prices unavailable)`;
   cite({ label: "Price deck", detail: deckLabel, retrievedAt: deck.retrievedAt ?? generatedAt, url: deck.source === "eia_live" ? "https://www.eia.gov/opendata/" : null });
+  // Purchaser run statements the user uploaded. A read failure leaves the deal on TRRC alone, and says so.
+  const statementLoad = await db.from("trrc_package_sales_statements").select("id, file_name, file_sha256, page_count, pages_without_text, purchasers, rows_json, warnings_json, created_at").eq("package_id", packageId).order("created_at");
+  if (statementLoad.error) console.error("[deal] run statements unavailable", packageId, statementLoad.error.message);
+  type StatementRecord = { id: string; file_name: string; file_sha256: string; page_count: number; pages_without_text: number; purchasers: string[]; rows_json: RunStatementRow[]; warnings_json: string[]; created_at: string };
+  const statements = (statementLoad.data ?? []) as StatementRecord[];
+  // Statement id -> lease key -> months used, and every row a lease took ("statementId|lease|month").
+  const usedRows = new Map<string, Map<string, { leaseKey: string; leaseName: string | null; months: string[] }>>();
+  const usedKeys = new Set<string>();
+  const rowKey = (statementId: string, r: RunStatementRow) => `${statementId}|${r.leaseNumber ?? r.propertyName}|${r.salesMonth}`;
   cite({ label: "MineralFlow standard assumptions", detail: "Texas severance tax rates per Tex. Tax Code §202.052 (oil, 4.6%) and §201.052 (gas, 7.5%); ad valorem, operating cost, workover reserve, economic limit, discounting, offer policy and decision rules as stated in Sections 8–11", retrievedAt: null, url: "https://statutes.capitol.texas.gov/Docs/TX/htm/TX.202.htm" });
 
   const leases: DealLease[] = [];
@@ -194,15 +225,41 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       const row = (Array.isArray(wb?.["wells"]) ? (wb!["wells"] as Record<string, unknown>[]) : []).find(w => `42${String(w["api_no"] ?? "").replace(/\D/g, "")}` === api);
       wells.push({ api10: api, wellNo: (row?.["well_no"] as string) ?? null, status: null, formsLacking: false, inPackage: true, onProration: false });
     }
+    // Each submitted well's inactive-well report entry and compliance record, from its own run.
+    for (const w of wells) {
+      const run = memberRuns.find(r => (r.resolved_primary_api ?? "").replace(/\D/g, "").slice(0, 10) === w.api10);
+      if (!run) continue;
+      const a = attemptsById.get(run.id) ?? [];
+      const inactive = getAttempt(a, "fetch_inactive_well_status");
+      const rec = (Array.isArray(inactive?.["records"]) ? inactive!["records"] as Record<string, unknown>[] : [])[0];
+      w.inactive = inactive?.["is_inactive"] === true
+        ? { shutIn: (rec?.["shut_in_date"] as string) ?? null, extension: (rec?.["extension_status"] as string) ?? null, pluggingDeadline: (inactive["plugging_deadline"] as string) ?? null }
+        : null;
+      const compliance = getAttempt(a, "fetch_compliance_violations");
+      w.violations = (Array.isArray(compliance?.["violations"]) ? compliance!["violations"] as Record<string, unknown>[] : []).map(v => ({
+        rule: String(v["violated_rule"] ?? ""), description: String(v["violated_rule_description"] ?? ""),
+        discovered: (v["violation_discovery_date"] as string) || null, action: (v["last_enforcement_action"] as string) || null,
+      }));
+    }
     wells.sort((a, b) => Number(b.inPackage) - Number(a.inPackage) || a.api10.localeCompare(b.api10));
     const producing = producingWellCount(prorationWells);
 
     // Lease production, each month once, from the reconciled lease stream.
-    const production: TrrcDDProductionRow[] = stream.months.map(m => ({
+    const trrcProduction: TrrcDDProductionRow[] = stream.months.map(m => ({
       entity_type: "lease", api_number: null, district: stream.district, lease_number: stream.leaseNumber, gas_id: null, operator_number: null,
       production_month: m.month, oil_bbl: m.volumes.oil_bbl.value, casinghead_gas_mcf: m.volumes.casinghead_gas_mcf.value, gas_mcf: m.volumes.gas_mcf.value,
       condensate_bbl: m.volumes.condensate_bbl.value, water_bbl: m.volumes.water_bbl.value,
     }));
+    // The seller's run statements for this lease: same RRC lease number, and the same county where both state one.
+    const sameCounty = (c: string | null) => !c || !identity.county || c.toUpperCase() === identity.county.toUpperCase();
+    const leaseStatements = statements.flatMap(st => (st.rows_json ?? []).filter(r => r.leaseNumber === String(Number(stream.leaseNumber)) && sameCounty(r.county)).map(row => {
+      const sourceId = cite({ label: "Purchaser run statements (seller-supplied)", detail: `${st.file_name}; ${st.purchasers.join(", ") || "purchaser not stated"}; SHA-256 ${st.file_sha256.slice(0, 16)}; read from the statement text, not a TRRC record`, retrievedAt: st.created_at, url: null });
+      const used = usedRows.get(st.id) ?? new Map(); const u = used.get(stream.key) ?? { leaseKey: stream.key, leaseName: identity.wellName || null, months: [] as string[] };
+      u.months.push(row.salesMonth); used.set(stream.key, u); usedRows.set(st.id, used); usedKeys.add(rowKey(st.id, row));
+      return { row, sourceId };
+    }));
+    const overlay = overlaySellerSales(trrcProduction, leaseStatements);
+    const production = overlay.production;
     const reported = reportedProductionSeries(production);
     const fitPhase = reported.oil.length >= 6 ? "oil" : reported.gas.length >= 6 ? "gas" : null;
     const window = fitPhase ? fitArpsDeclineWindowed(fitPhase === "oil" ? reported.oil : reported.gas) : null;
@@ -284,14 +341,21 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     if (!prorationAttempt) evidenceGaps.push("Proration inventory and producing-well count are unverified; any cost-floor estimate is conditional.");
     for (const run of memberRuns) if (run.status !== "complete") evidenceGaps.push(`Run ${run.id} is ${run.status}; retained evidence is partial.`);
     for (const c of regulatoryChecks) if (c.source === "fetch_plugging_records" && /shows this well as.*plugged/i.test(c.reason)) evidenceGaps.push(`${c.api}: GIS indicates a plugged well; certificate and remaining liability require review.`);
+    const distress = assessDistress(production, wells, age ?? 0);
+    const standard = defaultAssumptions({ oilPriceUsdBbl: deck.scenarios.base.oilUsdBbl, gasPriceUsdMcf: deck.scenarios.base.gasUsdMcf, priceBasis: "", fieldName: identity.field || null, county: identity.county || null, operatorNri: null, operatorNriBasis: null }).assumptions;
     const decision = decideLease({
-      valuation, ownership, fitRSquared: window?.fit?.rSquared ?? null, monthsOfHistory: (fitPhase === "oil" ? reported.oil : reported.gas).length,
+      valuation, ownership, fitRSquared: window?.fit?.rSquared ?? null,
+      // Months TRRC has a report for, whether or not they support a decline fit.
+      monthsOfHistory: fitPhase ? (fitPhase === "oil" ? reported.oil : reported.gas).length : production.filter(r => [r.oil_bbl, r.gas_mcf, r.casinghead_gas_mcf, r.condensate_bbl].some(v => typeof v === "number")).length,
       trailingUnreportedMonths: age ?? 0,
       currentAnnualDeclinePct: window?.fit?.currentAnnualDeclinePct ?? null, producingWells: producing.count, prorationWells: prorationWells.length,
       shutInWells: prorationWells.filter(w => /SHUT/i.test(String(w["status"] ?? ""))).length, formsLackingWells: prorationWells.filter(w => w["forms_lacking"] === true).length,
       regulatoryCritical: fold(critical), regulatoryImportant: fold(important),
       title: { status: title.status, readInstruments: title.readInstruments, indexedInstruments: title.indexedInstruments, reason: title.reason,
         assessment: title.analysis?.status, findings: title.analysis?.findings.filter(f => f.severity !== "info" || f.type === "OCR_FAILED").map(f => f.title), openReviewItems: title.analysis?.reviewQueueOpenCount }, excludedMembers, evidenceGaps,
+      // The decision layer restates these under the user's assumptions; here the MineralFlow standard ones apply.
+      distressReasons: distressPassReasons(distress, stream.apis.length, standard),
+      distressReviewReasons: distressReviewReasons(distress, stream.apis.length, standard),
     });
 
     leases.push({
@@ -302,7 +366,8 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       trailingUnreportedMonths: age ?? 0,
       fit: window?.fit ?? null, fitPhase, fitWindowNote: window?.reason ?? null,
       basin: basin ? { name: basin.name, loeRange: basin.loeUsdPerBoeRange, loeMidpoint: loeMidpoint(basin) } : null,
-      ownership, valuation, offers: offersFor(valuation), regulatory: { critical: fold(critical), important: fold(important), coverage: regulatoryChecks }, coverage, title, decision, sources: leaseSources,
+      ownership, valuation, offers: offersFor(valuation), regulatory: { critical: fold(critical), important: fold(important), coverage: regulatoryChecks }, distress, coverage, title, decision, sources: leaseSources,
+      ...(overlay.months.length ? { seller: { months: overlay.months, sources: [...new Set(overlay.months.flatMap(m => m.sourceIds))] } } : {}),
     });
   }
   leases.sort((a, b) => (b.valuation.totalsPv10?.base ?? 0) - (a.valuation.totalsPv10?.base ?? 0));
@@ -326,8 +391,20 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
     ...leases.filter(l => l.decision.verdict === "REVIEW").flatMap(l => l.decision.reasons.map(r => `${l.leaseName ?? l.leaseNumber}: ${r}`))])];
   const completeness = { status: blockers.length ? "partial" as const : "complete" as const, blockers, valuedLeases: leases.filter(l => l.valuation.status === "valued").length, totalLeases: leases.length };
 
+  const sellerStatements: SellerStatementSummary[] = statements.map(st => {
+    const matched = [...(usedRows.get(st.id)?.values() ?? [])];
+    const leftover = (st.rows_json ?? []).filter(r => !usedKeys.has(rowKey(st.id, r)));
+    const unmatched = new Map<string, SellerStatementSummary["unmatched"][number]>();
+    for (const r of leftover) {
+      const k = `${r.leaseNumber ?? r.propertyName}|${r.county ?? ""}`;
+      const u = unmatched.get(k) ?? { propertyName: r.propertyName, stateLease: r.stateLease, county: r.county, months: [], netBbl: 0 };
+      u.months.push(r.salesMonth); u.netBbl = Math.round((u.netBbl + r.netBbl) * 100) / 100; unmatched.set(k, u);
+    }
+    return { id: st.id, fileName: st.file_name, purchasers: st.purchasers, pageCount: st.page_count, pagesWithoutText: st.pages_without_text, createdAt: st.created_at, warnings: st.warnings_json ?? [], matched, unmatched: [...unmatched.values()] };
+  });
+
   return { ready: true, deal: {
-    packageId, generatedAt, submitted: record.inventory.submittedEntries, distinctApis: record.inventory.distinctValidApis, excluded, deck, deckLabel, completeness,
+    packageId, generatedAt, submitted: record.inventory.submittedEntries, distinctApis: record.inventory.distinctValidApis, excluded, deck, deckLabel, completeness, sellerStatements,
     overrides: { oilUsdBbl: overrides.oilUsdBbl ?? null, gasUsdMcf: overrides.gasUsdMcf ?? null, loeUsdPerBoe: loeOverride },
     leases, totals: { royaltyAndOverridePv10: sum(royaltyPool), workingInterestPv10: sum(l => l.valuation.workingInterestPv10) },
     decision: decideDeal(leases.map(l => ({ name: l.leaseName ?? `RRC ${l.district}-${l.leaseNumber}`, decision: l.decision })), blockers), sources,

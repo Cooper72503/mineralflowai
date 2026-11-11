@@ -66,12 +66,17 @@ export interface LeaseSignals {
   title: { status: "published" | "in_progress" | "not_found" | "unavailable"; readInstruments: number; indexedInstruments: number; reason: string | null; assessment?: string; findings?: string[]; openReviewItems?: number };
   excludedMembers: number;
   evidenceGaps?: string[];
+  /** Why the reported record shows the lease is no longer an asset (stopped production); empty when it is producing. */
+  distressReasons?: string[];
+  /** Why the record shows a stopped lease it cannot settle (the operator also stopped filing); leads the REVIEW. */
+  distressReviewReasons?: string[];
 }
 
 export interface Risk { severity: 1 | 2 | 3; text: string }
 export interface LeaseDecision { verdict: Verdict; reasons: string[]; conditions: string[]; risks: Risk[] }
 
 export const DECISION_RULES = [
+  "PASS when the reported record shows the lease has stopped producing: six or more consecutive reported months of zero oil and gas through the last reported month. This rests on TRRC's reported production, not on a forecast, so open title or ownership gaps do not hold it at REVIEW.",
   "PASS when the lease cannot return value: no forecast volume remains at the stated costs, or base-case economic life is under 12 months.",
   "REVIEW when the value is not supportable from the record: owners not matched on the mineral roll, a tract whose decimals do not reconcile, no decline fit or a fit with R-squared under 0.60, fewer than 12 months of history, or a critical regulatory flag.",
   "REVIEW when required retrieval is unverified, production is stale, title is absent/index-only or has unresolved findings, or submitted inventory is incomplete.",
@@ -81,7 +86,10 @@ export const DECISION_RULES = [
 export function decideLease(x: LeaseSignals): LeaseDecision {
   const pass: string[] = [], review: string[] = [], conditions: string[] = [], risks: Risk[] = [];
   const v = x.valuation;
-  if (v.status !== "valued") {
+  // When the record shows production stopped, that finding replaces the forecast's own failures.
+  const stopped = !!(x.distressReasons?.length || x.distressReviewReasons?.length);
+  if (stopped) { /* stated by the distress reasons below */ }
+  else if (v.status !== "valued") {
     if (/economic limit/i.test(v.reason ?? "")) pass.push(v.reason!);
     else review.push(`Not valued: ${v.reason}`);
   } else if ((v.economicLimitMonths?.base ?? 0) < 12) pass.push(`Base-case economic life is ${v.economicLimitMonths?.base ?? 0} months at the stated costs.`);
@@ -92,9 +100,9 @@ export function decideLease(x: LeaseSignals): LeaseDecision {
   for (const gap of x.evidenceGaps ?? []) review.push(`Evidence unavailable: ${gap}`);
   if (x.excludedMembers) review.push(`${x.excludedMembers} submitted API(s) could not be reconciled to this lease.`);
   if (x.trailingUnreportedMonths > MAX_UNREPORTED_COMPLETED_MONTHS) review.push(`Production is stale: ${x.trailingUnreportedMonths} completed months are unreported; current acquisition value is not established.`);
-  if (x.fitRSquared === null) review.push("No decline curve could be fit to the reported production.");
+  if (x.fitRSquared === null) { if (!stopped) review.push("No decline curve could be fit to the reported production."); }
   else if (x.fitRSquared < 0.6) review.push(`The decline fit explains little of the history (R-squared ${x.fitRSquared.toFixed(2)}).`);
-  if (x.monthsOfHistory < 12) review.push(`Only ${x.monthsOfHistory} months of reported production.`);
+  if (x.monthsOfHistory < 12 && !stopped) review.push(`Only ${x.monthsOfHistory} months of reported production.`);
   for (const f of x.regulatoryCritical) review.push(`Regulatory: ${f}`);
 
   const titleReason = (x.title.reason ?? "no published courthouse chain").replace(/[.\s]+$/, "");
@@ -127,9 +135,15 @@ export function decideLease(x: LeaseSignals): LeaseDecision {
   if (x.excludedMembers) risks.push({ severity: 2, text: `${x.excludedMembers} submitted API(s) on this lease could not be reconciled to its production.` });
   risks.sort((a, b) => b.severity - a.severity);
 
+  const distress = x.distressReasons ?? [];
+  const unsettled = x.distressReviewReasons ?? [];
+  if (distress.length || unsettled.length) risks.unshift({ severity: 3, text: (distress[0] ?? unsettled[0]) });
+  if (unsettled.length) review.unshift(...unsettled);
   // An incomplete record cannot justify either an affirmative purchase or a
-  // definitive rejection based on an unsupported economic result.
-  const verdict: Verdict = review.length ? "REVIEW" : pass.length ? "PASS" : "BUY";
+  // definitive rejection based on an unsupported economic result. A stopped
+  // lease is not an economic result: it is what TRRC's production reports say.
+  if (distress.length) pass.unshift(...distress);
+  const verdict: Verdict = distress.length ? "PASS" : review.length ? "REVIEW" : pass.length ? "PASS" : "BUY";
   const reasons = verdict === "PASS" ? pass : verdict === "REVIEW" ? review
     : [`Valued from ${x.monthsOfHistory} months of reported lease production, a decline fit with R-squared ${x.fitRSquared!.toFixed(2)}, and ${x.ownership.owners.length.toLocaleString("en-US")} owners of record whose decimals reconcile.`,
        x.title.status === "published" ? `Courthouse chain: ${x.title.readInstruments} of ${x.title.indexedInstruments} recordings read; close subject to title examination.` : `No courthouse chain of title (${titleReason}); close subject to title examination.`];

@@ -210,7 +210,7 @@ export default function DueDiligenceEnginePage() {
           </div>
         )}
 
-        {summary && <EngineDecision data={summary} fetcher={apiFetch} onError={setError} />}
+        {summary && <EngineDecision data={summary} fetcher={apiFetch} onError={setError} onReload={() => setSummary(null)} />}
 
         {packageId && (
           <>

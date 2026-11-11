@@ -7,7 +7,8 @@
  * printed. "Generate Decision Record" sends only the fields the user changed.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { readPdfText } from "@/lib/trrc/sales/read-pdf-client";
 import Link from "next/link";
 import type { Deal, DealLease } from "@/lib/trrc/deal/build";
 import { assembleDecision, summarizeReasons, type LeaseDecisionRecord, type Finding } from "@/lib/trrc/deal/decision-layer";
@@ -50,12 +51,12 @@ const GROUPS: { title: string; fields: { k: Field; label: string; unit: string; 
     { k: "discountRatePct", label: "Discount rate", unit: "%" }, { k: "oilSeverancePct", label: "Oil severance", unit: "%" }, { k: "gasSeverancePct", label: "Gas severance", unit: "%" }, { k: "adValoremPct", label: "Ad valorem", unit: "%" },
   ] },
   { title: "Operating costs", fields: [
-    { k: "loeUsdPerBoe", label: "Operating cost", unit: "$/BOE" }, { k: "fixedOpexUsdPerWellMonth", label: "Fixed per producing well", unit: "$/month" }, { k: "workoverUsdPerBoe", label: "Workover reserve", unit: "$/BOE" }, { k: "operatorNri", label: "Operator revenue share", unit: "decimal" },
+    { k: "loeUsdPerBoe", label: "Operating cost", unit: "$/BOE" }, { k: "fixedOpexUsdPerWellMonth", label: "Fixed per producing well", unit: "$/month" }, { k: "workoverUsdPerBoe", label: "Workover reserve", unit: "$/BOE" }, { k: "pluggingCostUsdPerWell", label: "Plugging cost per inactive well", unit: "$/well" }, { k: "operatorNri", label: "Operator revenue share", unit: "decimal" },
   ] },
   { title: "Scenarios", fields: [{ k: "downsidePricePct", label: "Downside price change", unit: "%" }, { k: "upsidePricePct", label: "Upside price change", unit: "%" }] },
 ];
 
-export function EngineDecision({ data, fetcher, onError }: { data: EngineData; fetcher: (url: string, init?: RequestInit) => Promise<Response>; onError: (m: string | null) => void }) {
+export function EngineDecision({ data, fetcher, onError, onReload }: { data: EngineData; fetcher: (url: string, init?: RequestInit) => Promise<Response>; onError: (m: string | null) => void; onReload: () => void }) {
   const { deal, starting } = data;
   const [edits, setEdits] = useState<Edits>({});
   const [generating, setGenerating] = useState(false);
@@ -93,6 +94,8 @@ export function EngineDecision({ data, fetcher, onError }: { data: EngineData; f
         return <LeaseWorkspace key={l.key} lease={l} rec={r} start={starting[l.key]} edits={edits[l.key] ?? {}}
           onApply={next => setEdits(prev => ({ ...prev, [l.key]: next }))} />;
       })}
+
+      <SellerEvidence deal={deal} fetcher={fetcher} onError={onError} onReload={onReload} />
 
       {record.dealFindings.length > 0 && (
         <div style={card}>
@@ -148,7 +151,9 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.6rem", margin: "0.8rem 0 1rem" }}>
         <Stat k="Wells" v={`${l.apis.length} submitted · ${l.producingWells} producing`} />
-        <Stat k="Production" v={`${l.production.length} months to ${l.lastReportedMonth ?? "—"}`} />
+        <Stat k="Production" v={r.distress.stopped ? `None reported since ${r.distress.lastProducingMonth ?? "—"}${r.distress.unreportedMonths > 3 ? ` · ${r.distress.unreportedMonths} mo unfiled` : ""}` : `${l.production.filter(p => p.oil_bbl !== null || p.gas_mcf !== null || p.casinghead_gas_mcf !== null).length} months to ${l.lastReportedMonth ?? "—"}${l.seller?.months.some(m => m.basis === "filled") ? ` · ${l.seller.months.filter(m => m.basis === "filled").length} from run statements` : ""}`} tone={r.distress.stopped ? COLORS.red : undefined} />
+        <Stat k="TRRC inactive wells" v={r.distress.inactive.wells ? `${r.distress.inactive.wells} of ${l.apis.length}${r.distress.inactive.denied ? ` · ${r.distress.inactive.denied} ext. denied` : ""}` : "None"} tone={r.distress.inactive.wells ? COLORS.red : undefined} />
+        {r.plugging.grossUsd > 0 && <Stat k="Plugging exposure" v={`${usd(r.plugging.grossUsd)} gross${current.interestType === "working" ? ` · ${usd(r.plugging.toInterestUsd)} to this WI` : " · not borne by a royalty"}`} tone={COLORS.red} />}
         <Stat k="Appraisal-roll owners" v={l.ownership.status === "matched" ? `${l.ownership.tracts.reduce((n, t) => n + t.owners.length, 0)} on the roll` : "Not established"} />
         <Stat k="Title evidence" v={l.title.analysis ? `${l.title.indexedInstruments} recordings · ${l.title.readInstruments} read` : "Not established"} />
       </div>
@@ -279,6 +284,59 @@ function LeaseWorkspace({ lease: l, rec: r, start, edits, onApply }: {
           {l.members.map(m => <Link key={m.runId} href={`/trrc-due-diligence/well?run=${m.runId}`} style={{ fontSize: "0.78rem", color: COLORS.accent, fontFamily: "ui-monospace, monospace", textDecoration: "none" }}>{m.input}</Link>)}
         </div>
       </details>
+    </div>
+  );
+}
+
+/** Purchaser run statements: read in the browser, parsed and stored on the server, then the decision is rebuilt. */
+function SellerEvidence({ deal, fetcher, onError, onReload }: { deal: Deal; fetcher: (url: string, init?: RequestInit) => Promise<Response>; onError: (m: string | null) => void; onReload: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const statements = deal.sellerStatements ?? [];
+  const upload = async (file: File) => {
+    onError(null);
+    try {
+      setBusy(`Reading ${file.name}…`);
+      const text = await readPdfText(file);
+      setBusy("Saving the statement…");
+      const res = await fetcher(`/api/trrc/due-diligence/packages/${deal.packageId}/sales-statements`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(text) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw Error(body?.error ?? "The statement could not be saved.");
+      onReload();
+    } catch (e) { onError(e instanceof Error ? e.message : "The PDF could not be read."); }
+    finally { setBusy(null); if (fileRef.current) fileRef.current.value = ""; }
+  };
+  const remove = async (id: string) => {
+    onError(null); setBusy("Removing…");
+    try {
+      const res = await fetcher(`/api/trrc/due-diligence/packages/${deal.packageId}/sales-statements?id=${id}`, { method: "DELETE" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) throw Error(body?.error ?? "The statement could not be removed.");
+      onReload();
+    } catch (e) { onError(e instanceof Error ? e.message : "The statement could not be removed."); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div style={card}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+        <div>
+          <div style={label}>Seller evidence</div>
+          <div style={{ fontSize: "0.8rem", color: COLORS.textMuted, marginTop: 4, maxWidth: 560 }}>Purchaser run statements fill months TRRC has no production report for, labeled as seller-supplied. A month TRRC reported keeps TRRC&apos;s volume and is flagged if the statement disagrees.</div>
+        </div>
+        <input ref={fileRef} id="run-statements" type="file" accept="application/pdf,.pdf" style={{ display: "none" }} disabled={!!busy} onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f); }} />
+        <label htmlFor="run-statements" style={{ ...quiet, color: COLORS.text, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>{busy ?? "Upload run statements (PDF)"}</label>
+      </div>
+      {statements.map(st => (
+        <div key={st.id} style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: "0.7rem", paddingTop: "0.6rem", fontSize: "0.8rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
+            <span style={{ color: COLORS.text, fontWeight: 600 }}>{st.fileName}</span>
+            <button onClick={() => remove(st.id)} disabled={!!busy} style={{ ...quiet, padding: "0.15rem 0.5rem", fontSize: "0.72rem" }}>Remove</button>
+          </div>
+          <div style={{ color: COLORS.textMuted, marginTop: 3 }}>{st.purchasers.join(", ") || "Purchaser not stated"} · {st.pageCount} pages{st.pagesWithoutText ? ` · ${st.pagesWithoutText} without text` : ""}</div>
+          {st.matched.map(m => <div key={m.leaseKey} style={{ color: COLORS.green, marginTop: 3 }}>Used for {m.leaseName ?? m.leaseKey}: {m.months.join(", ")}</div>)}
+          {st.unmatched.map((u, i) => <div key={i} style={{ color: COLORS.yellow, marginTop: 3 }}>Not in this deal, not used: {u.propertyName}{u.stateLease ? ` (state lease ${u.stateLease})` : ""} · {u.months.length} month(s) · {u.netBbl.toLocaleString("en-US")} bbl</div>)}
+          {st.warnings.map((w, i) => <div key={`w${i}`} style={{ color: COLORS.yellow, marginTop: 3 }}>{w}</div>)}
+        </div>))}
     </div>
   );
 }
