@@ -67,6 +67,9 @@ export interface LeaseIdentity {
   fieldName: string | null;
   /** Real column 6 (0-based) in the same response table — "Operator Name", confirmed live in the same 10-column layout documented on searchLeaseWells's doc comment (API/District/Lease No./Lease Name/Well No./Field Name/Operator Name/County/On Schedule/API Depth). Added for the Geological Due Diligence Engine's operator-concentration analysis (geology/activity.ts) — additive, existing callers that only read leaseNumber/district/fieldName are unaffected. Null if the row has fewer than 7 cells (older/shorter table layouts). */
   operatorName: string | null;
+  /** Columns 3 and 4 of the same row ("Lease Name", "Well No."); null when the row is shorter. Added for the well map. */
+  leaseName?: string | null;
+  wellNumber?: string | null;
 }
 
 /** Resolves an API number to its lease number + district (+ field name) via wellboreQueryAction.do — ported from worker/src/tools/ewa.ts's searchWellbore. */
@@ -112,6 +115,8 @@ export async function resolveWellboreToLease(apiNumber: string, signal?: AbortSi
   // this table, not the header/toolbar rows.
   let fieldName: string | null = null;
   let operatorName: string | null = null;
+  let leaseName: string | null = null;
+  let wellNumber: string | null = null;
   $("table").each((_, table) => {
     if (fieldName !== null) return;
     $(table).find("> tbody > tr, > tr").each((__, tr) => {
@@ -120,11 +125,13 @@ export async function resolveWellboreToLease(apiNumber: string, signal?: AbortSi
       if (cells.length >= 6 && /^\d{7,8}\b/.test(cells[0])) {
         fieldName = cells[5] || null;
         operatorName = cells.length >= 7 ? (cells[6] || null) : null;
+        leaseName = cells[3] || null;
+        wellNumber = cells[4] || null;
       }
     });
   });
 
-  return { leaseNumber: leaseMatch[1], district: distMatch[1], fieldName, operatorName };
+  return { leaseNumber: leaseMatch[1], district: distMatch[1], fieldName, operatorName, leaseName, wellNumber };
 }
 
 export interface AnalogProductionRow {
@@ -154,21 +161,39 @@ function parseNum(v: string): number | null {
 }
 
 /** Fetches monthly production for a lease via specificLeaseQueryAction.do — ported from worker/src/tools/ewa.ts's getProduction, including this session's O/G lease-type column-mapping fix (see ewa.ts's own doc comment on that bug for the live-verified column layout). */
-export async function fetchAnalogProduction(leaseNumber: string, district: string, signal?: AbortSignal): Promise<AnalogProductionResult> {
+export async function fetchAnalogProduction(leaseNumber: string, district: string, signal?: AbortSignal, options: { startYear?: number } = {}): Promise<AnalogProductionResult> {
   const warnings: WarningEntry[] = [];
   const effectiveSignal = withDefaultTimeout(signal, DEFAULT_CONFIG.providerTimeoutMs);
 
+  const now = new Date();
+  // Four years by default (analog fitting); the well map asks for the full online history (TRRC's query starts at 1993).
+  const rangeStart = options.startYear ? new Date(Date.UTC(options.startYear, 0, 1)) : new Date(Date.UTC(now.getUTCFullYear() - 4, now.getUTCMonth(), 1));
+  const rangeEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  // TRRC returns at most 200 months per query (live 2026-11-11: a 1993-on request stopped at 2009-08), so long ranges go in 16-year windows.
+  const windows: [Date, Date][] = [];
+  for (let s = rangeStart; s <= rangeEnd; s = new Date(Date.UTC(s.getUTCFullYear() + 16, s.getUTCMonth(), 1))) {
+    const e = new Date(Date.UTC(s.getUTCFullYear() + 16, s.getUTCMonth() - 1, 1));
+    windows.push([s, e < rangeEnd ? e : rangeEnd]);
+  }
   const tryType = async (lt: "O" | "G"): Promise<AnalogProductionRow[] | null> => {
+    const byMonth = new Map<string, AnalogProductionRow>();
+    for (const [start, end] of windows) {
+      const rows = await tryWindow(lt, start, end);
+      if (rows === null) return null;
+      for (const r of rows) byMonth.set(r.productionMonth, r);
+    }
+    return [...byMonth.values()].sort((a, b) => a.productionMonth.localeCompare(b.productionMonth));
+  };
+
+  const tryWindow = async (lt: "O" | "G", startDate: Date, endDate: Date): Promise<AnalogProductionRow[] | null> => {
     const url = `${EWA_BASE}/specificLeaseQueryAction.do`;
     const sessionRes = await fetch(url, { headers: BROWSER_HEADERS, signal: effectiveSignal });
     const jSessionMatch = sessionRes.headers.get("set-cookie")?.match(/JSESSIONID=([^;]+)/);
     const jSession = jSessionMatch?.[1] ?? null;
     const postUrl = jSession ? `${url};jsessionid=${jSession}` : url;
 
-    const now = new Date();
-    const endYear = String(now.getUTCFullYear());
-    const endMonth = String(now.getUTCMonth() + 1).padStart(2, "0");
-    const startDate = new Date(Date.UTC(now.getUTCFullYear() - 4, now.getUTCMonth(), 1));
+    const endYear = String(endDate.getUTCFullYear());
+    const endMonth = String(endDate.getUTCMonth() + 1).padStart(2, "0");
 
     const res = await fetch(postUrl, {
       method: "POST",

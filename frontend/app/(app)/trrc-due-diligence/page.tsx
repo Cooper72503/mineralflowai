@@ -49,6 +49,9 @@ export default function DueDiligenceEnginePage() {
   useEffect(() => {
     const url = new URL(window.location.href);
     setPackageId(url.searchParams.get("package"));
+    // "Run due diligence on this well" from the well map arrives as ?apis=42-165-02084[,…].
+    const apis = url.searchParams.get("apis");
+    if (apis && !url.searchParams.get("package")) setRawText(apis.split(/[,\s]+/).filter(Boolean).join("\n"));
   }, []);
 
   // Earlier deals, so a finished one can be reopened (and shown if a source is down).

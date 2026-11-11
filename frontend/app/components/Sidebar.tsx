@@ -26,6 +26,14 @@ function IconDueDiligence() {
     </svg>
   );
 }
+function IconWellMap() {
+  return (
+    <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 3.5l4-1.5 5 2 4-1.5v10l-4 1.5-5-2-4 1.5z"/>
+      <path d="M5.5 2v10M10.5 4v10"/>
+    </svg>
+  );
+}
 function IconPermitTracker() {
   return (
     <svg className="sidebar-nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -73,6 +81,7 @@ function IconBrandMark() {
 // One engine. Offsets and the chain of title are sections of its report, not separate tools.
 const primaryNav = [
   { href: "/trrc-due-diligence", label: "Due Diligence Engine", Icon: IconDueDiligence },
+  { href: "/well-map", label: "Well Map", Icon: IconWellMap, sub: true },
   { href: "/trrc-permit-tracker", label: "Permit Tracker", Icon: IconPermitTracker, sub: true },
 ] as const;
 

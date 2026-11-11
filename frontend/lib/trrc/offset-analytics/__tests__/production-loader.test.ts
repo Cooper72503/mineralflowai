@@ -35,7 +35,7 @@ describe("resolveWellboreToLease", () => {
   it("extracts lease number and district from the lease-detail link, not fragile cell text", async () => {
     mockFetchSequence([{ body: "<html></html>" }, { body: wellboreHtmlWithLease }]);
     const result = await resolveWellboreToLease("42-165-02733");
-    expect(result).toEqual({ leaseNumber: "52210", district: "08", fieldName: "SPRABERRY (TREND AREA)", operatorName: null });
+    expect(result).toEqual({ leaseNumber: "52210", district: "08", fieldName: "SPRABERRY (TREND AREA)", operatorName: null, leaseName: "BRADFORD TRUST A UNIT 2", wellNumber: "1" });
   });
 
   it("also captures field name from the real table column — needed for analog formation matching (Phase 7)", async () => {
@@ -69,7 +69,7 @@ describe("resolveWellboreToLease", () => {
   it("resolves a lease from the real 8-digit county+well API form real offset wells actually use — not just the 10-digit form", async () => {
     mockFetchSequence([{ body: "<html></html>" }, { body: wellboreHtmlWithLease }]);
     const result = await resolveWellboreToLease("16502733");
-    expect(result).toEqual({ leaseNumber: "52210", district: "08", fieldName: "SPRABERRY (TREND AREA)", operatorName: null });
+    expect(result).toEqual({ leaseNumber: "52210", district: "08", fieldName: "SPRABERRY (TREND AREA)", operatorName: null, leaseName: "BRADFORD TRUST A UNIT 2", wellNumber: "1" });
   });
 });
 
