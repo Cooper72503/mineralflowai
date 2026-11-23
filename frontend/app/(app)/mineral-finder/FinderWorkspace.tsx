@@ -27,19 +27,37 @@ export default function FinderWorkspace({ runId, api }: { runId?: string; api?: 
   const [run, setRun] = useState<Run | null>(null); const [history, setHistory] = useState<Run[]>([]);
   const [error, setError] = useState<string | null>(null); const [busy, setBusy] = useState(false);
   const [key, setKey] = useState<string | null>(null);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [stalled, setStalled] = useState(false);
   useEffect(() => {
-    let gone = false;
+    let gone = false, done = false, seq = 0, inFlightSince = 0, lastOk = Date.now();
     const load = async () => {
+      const mine = ++seq; inFlightSince = Date.now();
       try {
-        const r = await apiFetch(runId ? `/api/mineral-finder/${runId}` : "/api/mineral-finder"); const b = await r.json();
+        // Timestamped so no cache between this tab and the server can answer with an earlier state.
+        const r = await apiFetch(runId ? `/api/mineral-finder/${runId}?t=${Date.now()}` : "/api/mineral-finder"); const b = await r.json();
+        if (gone || mine !== seq) return; // a newer check superseded this one
         if (!r.ok) throw Error(b.error ?? "Could not load Mineral Finder");
-        if (gone) return;
-        if (runId) setRun(b.data); else setHistory(b.data);
-        setError(null);
-      } catch (e) { if (!gone) setError(e instanceof Error ? e.message : String(e)); }
+        if (runId) { setRun(b.data); done = b.data?.status === "complete" || b.data?.status === "failed"; } else setHistory(b.data);
+        lastOk = Date.now(); setCheckedAt(lastOk); setStalled(false); setError(null);
+      } catch (e) { if (!gone && mine === seq) setError(e instanceof Error ? e.message : String(e)); }
+      finally { if (mine === seq) inFlightSince = 0; }
     };
-    void load(); const timer = runId ? setInterval(() => void load(), 5000) : null;
-    return () => { gone = true; if (timer) clearInterval(timer); };
+    // A finished run is loaded once. While a run is active, check every 5 s; a check
+    // that has not answered in 20 s is abandoned and retried, and after 30 s without
+    // an answer the page says so instead of showing a stale stage as if it were live.
+    const tick = () => {
+      if (gone || done || !runId) return;
+      if (Date.now() - lastOk > 30_000) setStalled(true);
+      if (inFlightSince && Date.now() - inFlightSince < 20_000) return;
+      void load();
+    };
+    // Returning to the tab checks at once; a browser may have paused the timer while it was hidden.
+    const onVisible = () => { if (document.visibilityState === "visible" && !done && !gone) { lastOk = Date.now(); inFlightSince = 0; void load(); } };
+    void load();
+    const timer = runId ? setInterval(tick, 5000) : null;
+    document.addEventListener("visibilitychange", onVisible); window.addEventListener("focus", onVisible);
+    return () => { gone = true; if (timer) clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
   }, [apiFetch, runId]);
 
   async function submit(e: React.FormEvent) {
@@ -81,7 +99,8 @@ export default function FinderWorkspace({ runId, api }: { runId?: string; api?: 
       <p>{run.request_json.query}</p>
       <small>{county(run.request_json.criteria.county)} County · before {run.request_json.criteria.beforeYear} · {run.request_json.criteria.radiusMiles} mile radius · up to {run.request_json.criteria.limit} leads</small>
       {run.error_summary && <p className={styles.error}>{run.error_summary}</p>}
-      {!result && <p className={styles.note} style={{ margin: "0.8rem 0 0" }}>{run.status === "failed" ? "No completed result was published. Start a new run after resolving the recorded failure." : "The work continues on the server if this page is closed. This page refreshes automatically."}</p>}
+      {!result && <p className={styles.note} style={{ margin: "0.8rem 0 0" }}>{run.status === "failed" ? "No completed result was published. Start a new run after resolving the recorded failure." : `The work continues on the server if this page is closed. This page refreshes automatically${checkedAt ? `; last checked ${new Date(checkedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })}` : ""}.`}</p>}
+      {!result && stalled && run.status !== "failed" && <p className={styles.error}>This page has lost contact with the server, so the stage above may be out of date. Reload the page to see the current state; the research continues on the server.</p>}
     </div>}
     {result && <>
       <div className={styles.stats}><div><strong>{result.wells.toLocaleString()}</strong>county wells indexed</div><div><strong>{result.eligible.toLocaleString()}</strong>historical leads meeting filters</div><div><strong>{result.prospects.length}</strong>ranked for follow-up</div><div><strong>Review required</strong>geology, title and economics</div></div>
