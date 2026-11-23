@@ -637,3 +637,37 @@ See `AUDIT-DECISION-PIPELINE.md` for implementation details, validation boundari
   No live ownership acceptance or new production benchmark was performed.
 - Verification completed: 1,014 frontend tests / 115 files passed; production build
   and its type validation passed; synthetic executive-page rendering inspected.
+
+## 2026-11-23 — Mineral Finder Gaines discovery slice
+
+- Base: current remote main `40d383a` (existing well map and production feature).
+- New feature: existing app `/mineral-finder`; authenticated queue/history,
+  normalized county inventory, official bulk wellbore ingestion, paginated GIS
+  and BEG metadata, existing production/formation/Arps reuse, deterministic
+  research ranking, log acquisition recommendations, prospect map/pages/PDF,
+  and handoff to existing API package intake.
+- Live research capture: **16,267 Gaines RRC association rows; 13,827 GIS
+  features; 11,528 distinct well cores; 7,349 BEG catalog items**.
+- **1,331 evidence-qualified historical leads; 25 ranked research leads**,
+  including 10 plugged and 15 shut-in wells. 19 production queries returned
+  49 months each; five returned no reported rows. The 24 lease queries are
+  distinct streams, not 24 independently allocated subject wells.
+- **25/25 research leads** checked against actual captured RRC rows/locations
+  and BEG catalog records, including field/radius filters, score arithmetic,
+  approval-required purchase recommendations and unavailable economics.
+- Published scan-price probe: $10/log; 25 preliminary subject-log choices.
+  No purchase, scan download or geological interpretation performed.
+- Full frontend: **1,068 tests**; worker: **210 tests**. Both production
+  builds and type checks passed. SQL migration 044 guard tests passed in
+  isolated PostgreSQL (RLS, idempotency, account isolation, write grants,
+  claim/recovery/fencing and validation).
+- Does not add a validated GOLD acquisition decision or change the existing
+  GOLD acquisition-validation metric. All geological confidence is low;
+  producing intervals, reserves, rights and redevelopment economics are not
+  established by field proxies/catalog metadata.
+- NOT DEPLOYED. Requires migration 044, full worker bundle deployment,
+  frontend deployment and explicit feature flags. Commercial BEG metadata
+  access/retention needs confirmation. Signed-in production acceptance and
+  browser visual verification were not completed in this environment.
+- Remaining sequence and source/license findings:
+  `docs/mineral-finder-gaines-pilot.md`.

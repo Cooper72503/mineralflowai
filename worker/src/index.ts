@@ -30,6 +30,7 @@ import { recordEiaSnapshot } from "./eia-snapshots.js";
 import { processRetrievedTitleJob } from "./title-processing.js";
 import { runTitleResearchJob } from "./title-sequencer.js";
 import {processPackages} from "./package-jobs.js";
+import {processMineralFinder} from "./mineral-finder-jobs.js";
 import { closeBrowser } from "./tools/browser.js";
 
 const SUPABASE_URL             = process.env.SUPABASE_URL             ?? "";
@@ -291,6 +292,12 @@ async function sweepStaleRuns(): Promise<void> {
 }
 
 let packagePollActive=false;
+let finderPollActive=false;
+async function pollMineralFinder(){
+ if(process.env.MINERAL_FINDER_ENABLED!=="true"||finderPollActive)return;
+ finderPollActive=true;
+ try{await processMineralFinder(supabase);}finally{finderPollActive=false;}
+}
 async function pollPackages(){
  if(packagePollActive)return;
  packagePollActive=true;
@@ -331,6 +338,8 @@ async function main() {
   await pollTitleJobs();
   setInterval(()=>{pollPackages().catch(console.error);},POLL_INTERVAL_MS);
   await pollPackages().catch(console.error);
+  setInterval(()=>{pollMineralFinder().catch(console.error);},POLL_INTERVAL_MS);
+  await pollMineralFinder().catch(console.error);
 }
 
 main().catch(err => {

@@ -82,6 +82,7 @@ function IconBrandMark() {
 const primaryNav = [
   { href: "/trrc-due-diligence", label: "Due Diligence Engine", Icon: IconDueDiligence },
   { href: "/well-map", label: "Well Map", Icon: IconWellMap, sub: true },
+  { href: "/mineral-finder", label: "Mineral Finder", Icon: IconWellMap, sub: true },
   { href: "/trrc-permit-tracker", label: "Permit Tracker", Icon: IconPermitTracker, sub: true },
 ] as const;
 
