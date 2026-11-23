@@ -21,6 +21,7 @@ import { formatShare } from "../title/report";
 import { scenarioScope, scenarioStatus } from "./report-scope";
 import { exposureSentence, inactiveSentence, monthLabel, reportingGapReason, stoppedSentence } from "./distress";
 import { differsSentence, filledSentence } from "../sales/reconcile";
+import { describeRoz } from "../../geology/san-andres-roz";
 
 const e = React.createElement;
 // Reuse the repository's licensed GOLD fonts. Embed them so the viewer does
@@ -208,7 +209,22 @@ function Identity({ inp }: { inp: DecisionRecordInput }) {
       e(Th, { cols: [["API", 80], ["Well", 40], ["Proration status", 140], ["TRRC inactive report", 130], ["Forms", 55], ["Submitted", 50]] }),
       ...l.wells.map((w, j) => e(Tr, { key: j, i: j, cols: [[api(w.api10), 80], [w.wellNo ?? "—", 40], [w.onProration ? (w.status ?? "—") : "Not on the oil proration schedule", 140, "left", w.status && /SHUT/i.test(w.status) ? C.yellow : undefined],
         [w.inactive ? `Inactive since ${w.inactive.shutIn ?? "?"}${w.inactive.extension ? `; ext. ${w.inactive.extension.toLowerCase()}` : ""}` : w.inPackage && w.inactive === null ? "Not listed" : "—", 130, "left", w.inactive ? C.red : undefined],
-        [w.formsLacking ? "Lacking" : w.onProration ? "Complete" : "—", 55, "left", w.formsLacking ? C.red : undefined], [w.inPackage ? "Yes" : "No", 50]] })))));
+        [w.formsLacking ? "Lacking" : w.onProration ? "Complete" : "—", 55, "left", w.formsLacking ? C.red : undefined], [w.inPackage ? "Yes" : "No", 50]] })),
+      ...rozBlock(l))));
+}
+
+/** Published San Andres ROZ context for the lease's field. Context for review; it enters no value or verdict. */
+function rozBlock(l: DealLease) {
+  if (!l.roz) return [];
+  const d = describeRoz(l.roz.context, "lease");
+  const r = refs(l.roz.sources);
+  return [
+    e(Text, { key: "rozh", style: [S.flagLabel, { color: C.navy, marginTop: 8 }] }, "SAN ANDRES RESIDUAL OIL ZONE — PUBLISHED CONTEXT"),
+    e(View, { key: "rozs" }, Body(`${d.summary}${r}`)),
+    ...d.figures.map((f, j) => e(View, { key: `rozf${j}` }, kv(f.label, f.value))),
+    e(View, { key: "rozr" }, Note(d.reservoirNote)),
+    e(View, { key: "rozc" }, Note(d.caveat)),
+  ];
 }
 
 // 4 ─────────────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { normalizeFormation } from "../trrc/offset-analytics/formation-normalization";
 import { fitArpsDecline } from "../trrc/decline-curve";
 import { BEG_PRICES } from "./ingestion";
+import { sanAndresRozContext } from "../geology/san-andres-roz";
 import type {
   CatalogItem,
   Criteria,
@@ -341,6 +342,8 @@ export function screen(
       purchases,
       production: p,
       decline,
+      // Published ROZ context for the well's field; it informs review and never enters the score.
+      roz: sanAndresRozContext(w.county, w.association?.fieldName ?? null),
       scoreExplanation: explanation,
       gaps,
       risks: [

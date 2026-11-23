@@ -10,7 +10,9 @@ import {
   renderToBuffer,
 } from "@react-pdf/renderer";
 import path from "node:path";
-import type { FinderResult } from "./types";
+import type { FinderResult, Prospect } from "./types";
+import { rozOf } from "./roz";
+import { describeRoz, rozCitation } from "../geology/san-andres-roz";
 const e = React.createElement;
 const fontDir = path.join(process.cwd(), "lib", "trrc", "gold", "fonts");
 Font.register({
@@ -59,6 +61,21 @@ const styles = StyleSheet.create({
   },
 });
 const t = (text: string, style: any = styles.body) => e(Text, { style }, text);
+
+/** Published San Andres ROZ context for the lead's field; context only, never scored. */
+function rozSection(p: Prospect) {
+  const ctx = rozOf(p);
+  if (!ctx) return [];
+  const d = describeRoz(ctx, "well");
+  return [
+    t("San Andres residual oil zone - published context", styles.h2),
+    t(d.summary),
+    ...d.figures.map((f) => t(`${f.label}: ${f.value}.`)),
+    t(d.reservoirNote),
+    t(d.caveat, styles.note),
+    t(`Source: ${rozCitation(ctx)}`, { fontSize: 7.5, color: "#61758a", marginBottom: 6 }),
+  ];
+}
 
 export async function renderFinderReport(
   result: FinderResult,
@@ -154,6 +171,7 @@ export async function renderFinderReport(
             ? `Existing lease Arps screening fit: annual decline ${p.decline.annualPct.toFixed(1)}%, R-squared ${p.decline.rSquared.toFixed(2)}. Not a restart forecast.`
             : "Decline fit unavailable or inappropriate; no restart forecast supplied.",
         ),
+        ...rozSection(p),
         t("Offset comparisons", styles.h2),
         ...(p.offsets.length
           ? p.offsets.map((o) =>

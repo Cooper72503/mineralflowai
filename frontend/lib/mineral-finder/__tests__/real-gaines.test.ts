@@ -46,6 +46,12 @@ it("renders the real evidence with explicit limitations, source references, and 
   expect(doc.text).toContain("49 returned monthly slots");
   expect(doc.text).toContain("47 contain reported volumes");
   expect(doc.text).not.toMatch(/NaN|undefined/);
+  // Means North (Queen Sand) is not a field the DOE/NETL ROZ appraisal names: no partition, no figures, and the Queen sits above the San Andres.
+  expect(result.prospects[0].roz?.status).toBe("not_established");
+  expect(doc.text).toContain("San Andres residual oil zone - published context");
+  expect(doc.text).toContain("partition not established");
+  expect(doc.text).toContain("Queen, above the San Andres");
+  expect(doc.text).toContain("DOE/NETL-2020/2627");
   expect(pdf.length).toBeGreaterThan(15000);
   await expect(renderFinderReport(result, "4216500000")).rejects.toThrow(
     "not found",

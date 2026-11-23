@@ -16,6 +16,7 @@ import { validateAssumptions, type EconomicsAssumptions, type AssumptionBasis } 
 import { economicsAssetFromLease } from "@/lib/trrc/deal/decision-layer";
 import { oilSensitivity, costScenario, SENSITIVITY_DISCLOSURE } from "@/lib/trrc/deal/oil-sensitivity";
 import { COLORS } from "./colors";
+import { describeRoz, rozCitation } from "@/lib/geology/san-andres-roz";
 
 export interface EngineData { deal: Deal; starting: Record<string, { assumptions: EconomicsAssumptions; basis: AssumptionBasis }> }
 type Edits = Record<string, Partial<EconomicsAssumptions>>;
@@ -96,6 +97,8 @@ export function EngineDecision({ data, fetcher, onError, onReload }: { data: Eng
       })}
 
       <SellerEvidence deal={deal} fetcher={fetcher} onError={onError} onReload={onReload} />
+
+      <GeologyContext deal={deal} />
 
       {record.dealFindings.length > 0 && (
         <div style={card}>
@@ -337,6 +340,37 @@ function SellerEvidence({ deal, fetcher, onError, onReload }: { deal: Deal; fetc
           {st.unmatched.map((u, i) => <div key={i} style={{ color: COLORS.yellow, marginTop: 3 }}>Not in this deal, not used: {u.propertyName}{u.stateLease ? ` (state lease ${u.stateLease})` : ""} · {u.months.length} month(s) · {u.netBbl.toLocaleString("en-US")} bbl</div>)}
           {st.warnings.map((w, i) => <div key={`w${i}`} style={{ color: COLORS.yellow, marginTop: 3 }}>{w}</div>)}
         </div>))}
+    </div>
+  );
+}
+
+/** Published San Andres ROZ context for the deal's Gaines fields: shown for review, never part of the decision or its values. */
+function GeologyContext({ deal }: { deal: Deal }) {
+  const seen = new Set<string>();
+  const items = deal.leases.flatMap(l => {
+    const c = l.roz?.context;
+    if (!c || seen.has(c.fieldName)) return [];
+    seen.add(c.fieldName); return [c];
+  });
+  if (!items.length) return null;
+  return (
+    <div style={card}>
+      <div style={label}>San Andres residual oil zone · published context</div>
+      {items.map(c => {
+        const d = describeRoz(c, "lease");
+        return (
+          <div key={c.fieldName} style={{ marginTop: "0.6rem" }}>
+            <div style={{ fontSize: "0.85rem", color: COLORS.text, lineHeight: 1.5, marginBottom: "0.4rem" }}>{d.summary}</div>
+            {d.figures.length > 0 && <table style={{ width: "100%", borderCollapse: "collapse" }}><tbody>{d.figures.map(f => (
+              <tr key={f.label} style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                <td style={{ ...cell, color: COLORS.textMuted, fontSize: "0.8rem", padding: "0.35rem 0", width: "34%", verticalAlign: "top" }}>{f.label}</td>
+                <td style={{ ...cell, color: COLORS.text, fontSize: "0.8rem", padding: "0.35rem 0 0.35rem 0.5rem" }}>{f.value}</td>
+              </tr>))}</tbody></table>}
+            <div style={{ fontSize: "0.8rem", color: COLORS.textMuted, marginTop: "0.5rem" }}>{d.reservoirNote}</div>
+            <div style={{ fontSize: "0.75rem", color: COLORS.textFaint, marginTop: "0.35rem", lineHeight: 1.5 }}>{d.caveat} Source: {rozCitation(c)}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }

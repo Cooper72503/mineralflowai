@@ -28,6 +28,7 @@ import { assessDistress, distressPassReasons, distressReviewReasons, type LeaseD
 import { defaultAssumptions } from "../economics-provider";
 import { overlaySellerSales, type SellerMonth } from "../sales/reconcile";
 import type { RunStatementRow } from "../sales/run-statements";
+import { sanAndresRozContext, rozCitation, type RozContext } from "../../geology/san-andres-roz";
 
 export interface Source { id: string; label: string; detail: string; retrievedAt: string | null; url: string | null }
 export interface DealWell {
@@ -53,6 +54,8 @@ export interface DealLease {
   distress?: LeaseDistress;
   /** Months from the seller's purchaser run statements, reconciled to TRRC. */
   seller?: { months: SellerMonth[]; sources: string[] };
+  /** Published San Andres residual-oil-zone context for the lease's field (Gaines County only). Context, never an input to the decision or values. */
+  roz?: { context: RozContext; sources: string[] } | null;
   /** Per TRRC source: how many of the lease's wells it was retrieved for, and the last failure if any. */
   coverage: { source: string; retrieved: number; wells: number; lastError: string | null; lastAt: string | null }[];
   title: { status: "published" | "in_progress" | "not_found" | "unavailable"; reason: string | null; analysis: TitleChainAnalysis | null; readInstruments: number; indexedInstruments: number };
@@ -358,6 +361,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       distressReviewReasons: distressReviewReasons(distress, stream.apis.length, standard),
     });
 
+    const rozContext = sanAndresRozContext(identity.county || null, identity.field || null);
     leases.push({
       key: stream.key, district: stream.district, leaseNumber: stream.leaseNumber, leaseType: stream.leaseType,
       leaseName: identity.wellName || null, field: identity.field || null, county: identity.county || null, operator: identity.operator || null, operatorNo: identity.operatorNo || null,
@@ -368,6 +372,7 @@ export async function loadDeal(db: SupabaseClient, userId: string, packageId: st
       basin: basin ? { name: basin.name, loeRange: basin.loeUsdPerBoeRange, loeMidpoint: loeMidpoint(basin) } : null,
       ownership, valuation, offers: offersFor(valuation), regulatory: { critical: fold(critical), important: fold(important), coverage: regulatoryChecks }, distress, coverage, title, decision, sources: leaseSources,
       ...(overlay.months.length ? { seller: { months: overlay.months, sources: [...new Set(overlay.months.flatMap(m => m.sourceIds))] } } : {}),
+      roz: rozContext ? { context: rozContext, sources: rozContext.status === "assigned" ? [cite({ label: "DOE/NETL San Andres residual oil zone appraisal", detail: rozCitation(rozContext).replace(/\.$/, ""), retrievedAt: null, url: null })] : [] } : null,
     });
   }
   leases.sort((a, b) => (b.valuation.totalsPv10?.base ?? 0) - (a.valuation.totalsPv10?.base ?? 0));

@@ -1,4 +1,5 @@
 /** Mineral Finder v1: research leads, never reserves or an acquisition approval. */
+import type { RozContext } from "../geology/san-andres-roz";
 export type County = "GAINES" | "FISHER";
 export type WellStatus =
   | "plugged"
@@ -126,6 +127,11 @@ export interface Prospect {
   purchases: Purchase[];
   production: Production | null;
   decline: { annualPct: number; rSquared: number } | null;
+  /**
+   * Published San Andres residual-oil-zone context for the well's field (DOE/NETL-2020/2627);
+   * null outside its coverage. Absent on results sealed before it existed: use `rozOf`.
+   */
+  roz?: RozContext | null;
   scoreExplanation: { criterion: string; points: number; evidence: string[] }[];
   gaps: string[];
   risks: string[];
