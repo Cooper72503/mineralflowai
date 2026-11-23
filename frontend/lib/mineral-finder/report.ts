@@ -13,6 +13,10 @@ import path from "node:path";
 import type { FinderResult, Prospect } from "./types";
 import { rozOf } from "./roz";
 import { describeRoz, rozCitation } from "../geology/san-andres-roz";
+import { buildReservoirStudy, type ReservoirStudy } from "../geology/reservoir-study";
+import { reservoirsForField } from "../geology/reservoirs";
+import { bigNumber, studyText } from "../geology/study-text";
+import { DOCUMENTS } from "../geology/evidence/registry";
 const e = React.createElement;
 const fontDir = path.join(process.cwd(), "lib", "trrc", "gold", "fonts");
 Font.register({
@@ -61,6 +65,53 @@ const styles = StyleSheet.create({
   },
 });
 const t = (text: string, style: any = styles.body) => e(Text, { style }, text);
+
+const small = { fontSize: 7.5, color: "#61758a", marginBottom: 3 };
+const bold = { fontWeight: 700, marginBottom: 2 };
+const TONE = { green: "#167a3a", yellow: "#9a6a00", red: "#b42318" } as const;
+
+/** A reservoir volumetric study as PDF content: the result, or exactly which measurements are missing. */
+export function studySection(s: ReservoirStudy, full = false): React.ReactElement[] {
+  const x = studyText(s);
+  return [
+    t("Reservoir volumetric study", styles.h2),
+    t(s.reservoir.name, { fontSize: 11, fontWeight: 700, marginBottom: 3 }),
+    t(x.status.label, { ...bold, color: TONE[x.status.tone] }),
+    ...x.results.map((r) => t(`${r.label}: low ${r.low === null ? "—" : bigNumber(r.low)}  |  central ${bigNumber(r.central)}  |  high ${r.high === null ? "—" : bigNumber(r.high)} ${r.unit}`, bold)),
+    ...(x.perAcre ? [t(x.perAcre)] : []),
+    ...x.stopped.map((line) => t(line, { color: TONE.red, marginBottom: 4 })),
+    t(`Equations: ${x.equations.join("   |   ")}`, { fontSize: 8, marginBottom: 4 }),
+    ...x.flags.map((f) => t(f, small)),
+    t("Measurements used", { ...bold, marginTop: 6 }),
+    ...(x.inputs.length ? x.inputs.flatMap((i) => [t(`${i.label}: ${i.value}`), t(`${i.applies}. ${i.source}`, small), ...i.notes.map((n) => t(`- ${n}`, small))]) : [t("No measurement in the registered sources applies to this reservoir at its own scope.")]),
+    ...(x.missing.length ? [t("Missing measurements", { ...bold, marginTop: 6, color: TONE.red }), ...x.missing.flatMap((m) => [t(m.label, bold), t(m.detail), t(`Needed: ${m.needed}.`, small)])] : []),
+    ...(full ? [
+      ...(x.notUsed.length ? [t("Found but not used", { ...bold, marginTop: 6 }), ...x.notUsed.flatMap((u) => [t(`${u.label}: ${u.value} — ${u.reason}`), t(`${u.applies}. ${u.source}`, small)])] : []),
+      ...(x.comparisons.length ? [t("Published comparison", { ...bold, marginTop: 6 }), ...x.comparisons.flatMap((c) => [t(`${c.label}: ${c.value}. ${c.note}`), t(c.source, small)])] : []),
+      ...(x.calibrations.length ? [t("Calibrations held for this reservoir's log analysis", { ...bold, marginTop: 6 }), ...x.calibrations.flatMap((c) => [t(c.name, bold), t(c.expression, { fontSize: 8 }), t(c.sources, small), ...c.limitations.map((l) => t(`- ${l}`, small))])] : []),
+      ...(x.context.length ? [t("Reservoir context", { ...bold, marginTop: 6 }), ...x.context.map((c) => t(`${c.text} (${c.source})`))] : []),
+    ] : [t(`Full study: /mineral-finder/reservoir/${s.reservoir.id}`, small)]),
+    t(x.reproducibility, { ...small, marginTop: 4 }),
+  ];
+}
+
+/** The standalone reservoir study PDF, with its source documents listed. */
+export async function renderReservoirStudyPdf(s: ReservoirStudy): Promise<Buffer> {
+  const docs = DOCUMENTS.filter((d) => JSON.stringify(s).includes(`"${d.id}"`));
+  const footer = e(View, { fixed: true, style: styles.footer },
+    t("MineralFlow volumetric study | Published measurements only - professional review required", { fontSize: 7, color: "#61758a" }),
+    e(Text, { style: { fontSize: 7, color: "#61758a", width: 35, height: 12, textAlign: "right" }, render: ({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}` }));
+  return renderToBuffer(e(Document, { title: `MineralFlow volumetric study - ${s.reservoir.name}`, author: "MineralFlow AI" },
+    e(Page, { size: "LETTER", wrap: true, style: styles.page },
+      t("MINERALFLOW AI / RESERVOIR VOLUMETRIC STUDY", styles.brand),
+      t(s.reservoir.name, styles.title),
+      t(`${s.reservoir.county} County, Texas | ${s.reservoir.formation} | ${s.reservoir.interval}. ${s.reservoir.description}`),
+      t("Inputs are only measurements published for this reservoir at its own scope; regional averages are never substituted. Oil in place is not recoverable oil and not reserves.", styles.note),
+      ...studySection(s, true),
+      t("Source documents", styles.h2),
+      ...docs.flatMap((d) => [t(`${d.authors}, ${d.published ?? "n.d."}. ${d.title}. ${d.publisher}${d.reportNumber ? `, ${d.reportNumber}` : ""}.`), t(`File ${d.fileName}; SHA-256 ${d.sha256}; ${d.pdfPages} pages; ${d.textLayer ? "text layer re-checked by machine" : "scanned, values transcribed from page images"}. ${d.rights}`, small)]),
+      footer)) as never);
+}
 
 /** Published San Andres ROZ context for the lead's field; context only, never scored. */
 function rozSection(p: Prospect) {
@@ -172,6 +223,7 @@ export async function renderFinderReport(
             : "Decline fit unavailable or inappropriate; no restart forecast supplied.",
         ),
         ...rozSection(p),
+        ...reservoirsForField(p.well.county, p.well.association?.fieldName).flatMap((r) => studySection(buildReservoirStudy(r))),
         t("Offset comparisons", styles.h2),
         ...(p.offsets.length
           ? p.offsets.map((o) =>

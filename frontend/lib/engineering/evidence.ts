@@ -9,10 +9,10 @@
 
 export type Unit =
   | "fraction" | "percent"
-  | "ft" | "acres"
-  | "g/cm3" | "ohm-m" | "md"
+  | "ft" | "acres" | "mi2"
+  | "g/cm3" | "ohm-m" | "md" | "us/ft" | "pu"
   | "rb/stb"
-  | "rb" | "stb" | "bbl"
+  | "rb" | "stb" | "bbl" | "Mstb" | "MMstb"
   | "dimensionless";
 
 export type SourceKind = "published_study" | "core_analysis" | "well_log" | "fluid_study" | "production_record" | "reservoir_map" | "user_entry";

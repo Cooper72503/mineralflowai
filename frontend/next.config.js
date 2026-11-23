@@ -18,6 +18,7 @@ const nextConfig = {
     // serverless bundle and @react-pdf/renderer fails at render time.
     outputFileTracingIncludes: {
       "/api/mineral-finder/[runId]/report": ["./lib/trrc/gold/fonts/**/*"],
+      "/api/mineral-finder/reservoir/[id]/report": ["./lib/trrc/gold/fonts/**/*"],
       "/api/trrc/due-diligence/packages/[packageId]/report": ["./lib/trrc/gold/fonts/**/*"],
       "/api/trrc/due-diligence/[runId]/report": ["./lib/trrc/gold/fonts/**/*"],
       // Title-document text extraction loads three things by RUNTIME path,
