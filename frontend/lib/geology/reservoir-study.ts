@@ -17,8 +17,11 @@ import { GAINES_ROZ_PARTITIONS } from "./san-andres-roz";
 import type { ReservoirDef } from "./reservoirs";
 import type { Calc, Input, SourceRef } from "../engineering/evidence";
 import { hydrocarbonPoreVolume, oilInPlace, type Envelope } from "../engineering/volumetrics";
+import { materialBalanceOoip, remainingOilInPlace, type CumulativeProduction } from "../engineering/depletion";
+import { futureRecoverable, historicalRecovery, type RecoveryProcess } from "../engineering/recovery";
+import { co2Miscibility, co2Screening, displacementEfficiency, incrementalRecovery, volumetricSweep } from "../engineering/eor";
 
-export const ENGINE_VERSION = "volumetrics-1";
+export const ENGINE_VERSION = "reservoir-engine-1-8";
 
 export interface Candidate { measurement: Measurement; usable: boolean; reason: string }
 export interface Selection {
@@ -43,6 +46,14 @@ export interface ReservoirStudy {
   comparisons: Comparison[];
   calibrations: Calibration[];
   porosityNotes: { text: string; source: SourceLocation }[];
+  /** Group 6: the production record used, remaining oil, and material balance. */
+  depletion: { production: Measurement | null; remaining: Calc<Envelope & { asOf: string }>; materialBalance: ReturnType<typeof materialBalanceOoip> };
+  /** Group 7: recovery to date and future recovery under the reservoir's documented process. */
+  recovery: { process: RecoveryProcess; processBasis: string; historical: Calc<Envelope & { asOf: string }>; future: Calc<{ eur: Envelope; future: Envelope; asOf: string }> };
+  /** Group 8: CO2 screening, miscibility, displacement, sweep and incremental recovery. */
+  eor: { screening: ReturnType<typeof co2Screening>; miscibility: Calc<{ miscible: boolean; marginPsi: number }>; displacement: Calc<Envelope>; sweep: Calc<Envelope>; incremental: Calc<Envelope> };
+  /** Engineering interpretations: conditional readings, kept apart from measured facts and calculated results. */
+  interpretations: { text: string; basis: string[] }[];
   /** Deterministic fingerprint of the evidence version, engine version and inputs used. */
   fingerprint: string;
 }
@@ -141,15 +152,59 @@ export function buildReservoirStudy(r: ReservoirDef, measurements: readonly Meas
   });
   if (sat && !sat.saturationBasis) missing.push({ label: "Saturation basis", detail: "The saturation's source does not state whether it is initial or present-day.", needed: "the date or condition of the saturation measurement" });
 
-  const comparisons: Comparison[] = measurements.filter(m => m.quantity === "original_oil_in_place" && judge(r, m).usable).map(m => ({
-    label: "Published original oil in place", value: `${m.value.toLocaleString("en-US")} ${m.unit} as printed`, source: m.source, note: m.limitations.join(" "),
+  const publishedOoip = measurements.filter(m => m.quantity === "original_oil_in_place" && judge(r, m).usable);
+  const comparisons: Comparison[] = publishedOoip.map(m => ({
+    label: "Published original oil in place", value: `${m.value.toLocaleString("en-US")} ${m.unit} as printed`, source: m.source, note: [...m.limitations, ...(m.comparisonOnly ? [m.comparisonOnly] : [])].join(" "),
   }));
 
+  // ── Groups 6–8 on the same selected evidence ──────────────────────────────
+  const scope = scopeName(r);
+  const applicable = (q: Quantity) => measurements.filter(m => m.quantity === q && judge(r, m).usable);
+  const single = (q: Quantity) => { const xs = applicable(q); return xs.length === 1 ? xs[0] : null; };
+  const npM = single("cumulative_oil");
+  const production: CumulativeProduction | undefined = npM ? { oil: toInput(npM), asOf: npM.asOf!, coverage: npM.coverage!, attribution: { level: npM.applicability.level === "unit" ? "unit" : "field", name: scope } } : undefined;
+  // OOIP for depletion and recovery: this study's own volumetric result (initial saturation only), else a published value cleared for use as an input.
+  const usablePublished = publishedOoip.find(m => !m.comparisonOnly);
+  const ooip: Input | undefined = oip.status === "calculated" && engineInputs.saturationBasis === "initial"
+    ? { value: oip.value.central, ...(oip.value.low !== null ? { low: oip.value.low, high: oip.value.high! } : {}), unit: "stb", source: { kind: "calculated", citation: `MineralFlow volumetric calculation (groups 1–5), ${r.name}`, locator: `evidence ${EVIDENCE_VERSION}` } }
+    : usablePublished ? toInput(usablePublished) : undefined;
+  const ooipArgs = { ooip, ooipIsOriginal: ooip ? true : undefined, ooipScope: ooip ? scope : undefined, production, reservoirScope: scope };
+  const remaining = remainingOilInPlace(ooipArgs);
+  const materialBalance = materialBalanceOoip({}, []);
+  const process = r.recoveryProcess.process;
+  const historical = historicalRecovery(ooipArgs);
+  const future = futureRecoverable({ ...ooipArgs, process });
+
+  const satInput = sat ? toInput(sat) : undefined;
+  const api = single("oil_gravity"), depth = single("depth");
+  const screening = co2Screening({ apiGravity: api ? toInput(api) : undefined, depthFt: depth ? toInput(depth) : undefined, oilSaturation: sat?.quantity === "oil_saturation" && sat.saturationBasis === "present" ? satInput : undefined });
+  const miscibility = co2Miscibility({});
+  const displacement = displacementEfficiency({ soi: sat?.quantity === "oil_saturation" ? satInput : undefined, process });
+  const sweep = volumetricSweep({});
+  const incremental = incrementalRecovery({ targetOil: oip.status === "calculated" ? { value: oip.value.central, unit: "stb", source: { kind: "calculated", citation: `MineralFlow volumetric calculation, ${r.name}`, locator: EVIDENCE_VERSION } } : undefined, displacement, sweep, process, targetName: r.interval });
+
+  const interpretations: { text: string; basis: string[] }[] = [];
+  for (const m of publishedOoip.filter(x => x.comparisonOnly && x.alternativeReading)) {
+    const alt = m.alternativeReading!;
+    const reading: Input = { value: alt.value, unit: alt.unit, source: sourceRef(m.source), basis: alt.reason };
+    const h = historicalRecovery({ ...ooipArgs, ooip: reading, ooipIsOriginal: true, ooipScope: scope });
+    const rem = remainingOilInPlace({ ...ooipArgs, ooip: reading, ooipIsOriginal: true, ooipScope: scope });
+    if (h.status === "calculated" && rem.status === "calculated") interpretations.push({
+      text: `If the printed ${m.value.toLocaleString("en-US")} ${m.unit} is read as ${alt.value.toLocaleString("en-US")} ${alt.unit} (${alt.reason}), the field had recovered ${(h.value.central * 100).toFixed(1)}% of its original oil by ${h.value.asOf}, leaving about ${(rem.value.central / 1e6).toFixed(0)} million stock-tank barrels in place. This is a reading of an ambiguous value, not a calculation input.`,
+      basis: [citeLocation(m.source), ...(npM ? [citeLocation(npM.source)] : [])] });
+  }
+  if (r.interval.includes("ROZ")) {
+    const mainDepth = measurements.find(m => m.quantity === "depth" && m.applicability.field === r.field && m.applicability.interval === "main pay zone");
+    if (mainDepth) interpretations.push({ text: `The ${r.interval} lies beneath the main pay zone, whose oil was sampled at ${mainDepth.low?.toLocaleString("en-US")}–${mainDepth.high?.toLocaleString("en-US")} ft, so it is deeper than the 2,500-ft CO2 screening criterion. Its own depth is not documented in the registered sources, so the screen leaves depth undetermined.`, basis: [citeLocation(mainDepth.source)] });
+  }
+
   const calibrations = CALIBRATIONS.filter(c => c.applicability.field === r.field && (!r.unit || c.applicability.unit === r.unit || !c.applicability.unit));
-  const fingerprint = fingerprintOf(JSON.stringify([EVIDENCE_VERSION, ENGINE_VERSION, r.id, selections.map(s => s.chosen && [s.chosen.id, s.chosen.value, s.chosen.low ?? null, s.chosen.high ?? null, s.chosen.unit])]));
+  const fingerprint = fingerprintOf(JSON.stringify([EVIDENCE_VERSION, ENGINE_VERSION, r.id, selections.map(s => s.chosen && [s.chosen.id, s.chosen.value, s.chosen.low ?? null, s.chosen.high ?? null, s.chosen.unit]), [npM?.id, api?.id, depth?.id, usablePublished?.id ?? null]]));
   const status = oip.status === "calculated" ? "oil_in_place" : hcpv.status === "calculated" ? "reservoir_volume_only" : "insufficient";
   return { reservoir: r, evidenceVersion: EVIDENCE_VERSION, engineVersion: ENGINE_VERSION, status, selections, hcpv, oilInPlace: oip, missing, comparisons, calibrations,
-    porosityNotes: r.field === "Seminole" ? SEMINOLE_POROSITY_NOTES.map(n => ({ text: n.text, source: n.source })) : [], fingerprint };
+    porosityNotes: r.field === "Seminole" ? SEMINOLE_POROSITY_NOTES.map(n => ({ text: n.text, source: n.source })) : [],
+    depletion: { production: npM, remaining, materialBalance }, recovery: { process, processBasis: r.recoveryProcess.basis, historical, future },
+    eor: { screening, miscibility, displacement, sweep, incremental }, interpretations, fingerprint };
 }
 
 /** A source location as one readable citation line. */

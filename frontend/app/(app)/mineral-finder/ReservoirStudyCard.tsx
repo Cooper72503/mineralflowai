@@ -35,6 +35,12 @@ export default function ReservoirStudyCard({ study, compact = false }: { study: 
       {t.missing.map(m => <div key={m.label} className={styles.source}><strong>{m.label}</strong><p>{m.detail}</p><small>Needed: {m.needed}.</small></div>)}
     </>}
 
+    <h3>Depletion and recovery</h3>
+    <p>{t.production}</p>
+    <div className={styles.table}><table><tbody>{t.engineering.map(x => <tr key={x.label}><td style={cell}>{x.label}</td><td style={{ color: x.ok ? "var(--text)" : "var(--muted)" }}>{x.text}</td></tr>)}</tbody></table></div>
+    <small>Recovery process examined: {t.processBasis}</small>
+    {t.interpretations.length > 0 && <><h3>Engineering interpretation</h3>{t.interpretations.map((x, i) => <div key={i} className={styles.source}><p>{x.text}</p><small>{x.basis.join("; ")}</small></div>)}</>}
+
     {compact
       ? <div className={styles.actions}><Link className={styles.button} href={`/mineral-finder/reservoir/${id}`}>Open the full study</Link><a className={styles.button} href={`/api/mineral-finder/reservoir/${id}/report`}>Download study PDF</a></div>
       : <>

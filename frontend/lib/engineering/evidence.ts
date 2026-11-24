@@ -11,11 +11,23 @@ export type Unit =
   | "fraction" | "percent"
   | "ft" | "acres" | "mi2"
   | "g/cm3" | "ohm-m" | "md" | "us/ft" | "pu"
-  | "rb/stb"
-  | "rb" | "stb" | "bbl" | "Mstb" | "MMstb"
+  | "rb/stb" | "rb/scf" | "scf/stb"
+  | "rb" | "stb" | "bbl" | "Mstb" | "MMstb" | "MMbbl" | "scf"
+  | "psia" | "degF" | "cp" | "degAPI" | "SUS" | "1/psi"
+  | "Bcf" | "MMt" | "Mcf/bbl" | "t/bbl"
   | "dimensionless";
 
-export type SourceKind = "published_study" | "core_analysis" | "well_log" | "fluid_study" | "production_record" | "reservoir_map" | "user_entry";
+/** Oil volume in stock-tank barrels from any registered oil-volume unit; null for other units. */
+export function toStb(value: number, unit: Unit): number | null {
+  switch (unit) {
+    case "stb": case "bbl": return value;
+    case "Mstb": return value * 1e3;
+    case "MMstb": case "MMbbl": return value * 1e6;
+    default: return null;
+  }
+}
+
+export type SourceKind = "published_study" | "core_analysis" | "well_log" | "fluid_study" | "production_record" | "reservoir_map" | "user_entry" | "calculated";
 
 export interface SourceRef {
   kind: SourceKind;

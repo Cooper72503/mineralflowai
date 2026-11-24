@@ -85,6 +85,11 @@ export function studySection(s: ReservoirStudy, full = false): React.ReactElemen
     t("Measurements used", { ...bold, marginTop: 6 }),
     ...(x.inputs.length ? x.inputs.flatMap((i) => [t(`${i.label}: ${i.value}`), t(`${i.applies}. ${i.source}`, small), ...i.notes.map((n) => t(`- ${n}`, small))]) : [t("No measurement in the registered sources applies to this reservoir at its own scope.")]),
     ...(x.missing.length ? [t("Missing measurements", { ...bold, marginTop: 6, color: TONE.red }), ...x.missing.flatMap((m) => [t(m.label, bold), t(m.detail), t(`Needed: ${m.needed}.`, small)])] : []),
+    t("Depletion and recovery", { ...bold, marginTop: 6 }),
+    t(x.production, small),
+    ...x.engineering.map((l) => t(`${l.label}: ${l.text}`, l.ok ? {} : { color: "#61758a" })),
+    t(`Recovery process examined: ${x.processBasis}`, small),
+    ...(x.interpretations.length ? [t("Engineering interpretation", { ...bold, marginTop: 6 }), ...x.interpretations.flatMap((i) => [t(i.text), t(i.basis.join("; "), small)])] : []),
     ...(full ? [
       ...(x.notUsed.length ? [t("Found but not used", { ...bold, marginTop: 6 }), ...x.notUsed.flatMap((u) => [t(`${u.label}: ${u.value} — ${u.reason}`), t(`${u.applies}. ${u.source}`, small)])] : []),
       ...(x.comparisons.length ? [t("Published comparison", { ...bold, marginTop: 6 }), ...x.comparisons.flatMap((c) => [t(`${c.label}: ${c.value}. ${c.note}`), t(c.source, small)])] : []),

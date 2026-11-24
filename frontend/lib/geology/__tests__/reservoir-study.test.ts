@@ -58,11 +58,11 @@ describe("Seminole field upper ROZ: field-level published measurements", () => {
   });
 });
 
-describe("Seminole San Andres Unit main pay and ODC: what is missing, precisely", () => {
-  it("SAU main pay: area only; porosity, initial saturation, net pay and FVF are missing; the published OOIP is a comparison flagged for its unit", () => {
-    const s = study("seminole-sau-main-pay");
+describe("Seminole main pay and ODC: what is missing, precisely", () => {
+  it("Seminole main pay: the field area only; porosity, initial saturation, net pay and FVF are missing; the published OOIP is a comparison flagged for its unit", () => {
+    const s = study("seminole-main-pay");
     expect(s.status).toBe("insufficient");
-    expect(s.selections.find(x => x.key === "area")!.chosen!.id).toBe("lucia-ssau-area");
+    expect(s.selections.find(x => x.key === "area")!.chosen!.id).toBe("doe-seminole-field-area");
     expect(s.missing.map(m => m.label)).toEqual(["Net pay (h)", "Porosity (φ)", "Oil or water saturation (So / Sw)", "Oil formation volume factor (Bo)"]);
     expect(s.comparisons[0].value).toBe("1,100 Mstb as printed");
     expect(s.comparisons[0].note).toMatch(/probably MMSTB/);
@@ -78,9 +78,45 @@ describe("Seminole San Andres Unit main pay and ODC: what is missing, precisely"
   });
 });
 
+describe("groups 6–8 on the registered evidence", () => {
+  it("Seminole main pay: uses the dated field production, stops remaining oil and recovery for want of a usable OOIP, and keeps the conditional reading as interpretation", () => {
+    const s = study("seminole-main-pay");
+    expect(s.depletion.production!.id).toBe("ri116-seminole-cumulative-oil");
+    expect(s.depletion.remaining).toMatchObject({ status: "stopped", missing: ["original oil in place (stb) for this reservoir"] });
+    expect(s.recovery.historical.status).toBe("stopped");
+    expect(s.recovery.future.status === "stopped" && s.recovery.future.missing.join(" ")).toMatch(/never assumed/);
+    expect(s.depletion.materialBalance.status === "stopped" && s.depletion.materialBalance.missing).toContain("initial reservoir pressure (psia)");
+    expect(s.interpretations[0].text).toMatch(/recovered 24\.9% of its original oil by 1979-01-01, leaving about 826 million stock-tank barrels/);
+    expect(s.interpretations[0].text).toMatch(/not a calculation input/);
+    const sc = s.eor.screening; if (sc.status !== "calculated") throw Error("screen");
+    expect(sc.value.criteria.map(c => c.status)).toEqual(["meets", "undetermined", "undetermined", "meets"]);
+    expect(sc.value.overall).toBe("undetermined");
+    expect(s.eor.miscibility.status).toBe("stopped");
+  });
+  it("Seminole upper ROZ: no production attributed; the screen uses its own 32% oil saturation and not the main-pay oil; recovery stops for Sor and sweep", () => {
+    const s = study("seminole-upper-roz");
+    expect(s.depletion.production).toBeNull();
+    const sc = s.eor.screening; if (sc.status !== "calculated") throw Error("screen");
+    expect(sc.value.criteria.map(c => c.status)).toEqual(["undetermined", "undetermined", "meets", "undetermined"]);
+    expect(s.eor.displacement.status === "stopped" && s.eor.displacement.missing[0]).toMatch(/residual oil saturation to CO2 enhanced oil recovery/);
+    expect(s.eor.incremental.status === "stopped" && s.eor.incremental.missing.join(" ")).toMatch(/displacement efficiency.*volumetric sweep/);
+    expect(s.interpretations.map(x => x.text).join(" ")).toMatch(/deeper than the 2,500-ft CO2 screening criterion/);
+  });
+  it("ODC: every group stops and states what it needs; nothing is interpreted", () => {
+    const s = study("odc-san-andres");
+    for (const c of [s.depletion.remaining, s.depletion.materialBalance, s.recovery.historical, s.recovery.future, s.eor.miscibility, s.eor.displacement, s.eor.incremental]) expect(c.status).toBe("stopped");
+    expect(s.interpretations).toEqual([]);
+  });
+  it("each reservoir's result is reproducible and distinct", () => {
+    const prints = RESERVOIRS.map(r => buildReservoirStudy(r).fingerprint);
+    expect(new Set(prints).size).toBe(3);
+    expect(RESERVOIRS.map(r => buildReservoirStudy(r).fingerprint)).toEqual(prints);
+  });
+});
+
 describe("which reservoirs a lead's RRC field belongs to", () => {
   it("maps only the Seminole field itself and ODC; East Seminole is a separate buildup", () => {
-    expect(reservoirsForField("GAINES", "SEMINOLE (SAN ANDRES)").map(r => r.id)).toEqual(["seminole-upper-roz", "seminole-sau-main-pay"]);
+    expect(reservoirsForField("GAINES", "SEMINOLE (SAN ANDRES)").map(r => r.id)).toEqual(["seminole-upper-roz", "seminole-main-pay"]);
     expect(reservoirsForField("GAINES", "O D C (SAN ANDRES)").map(r => r.id)).toEqual(["odc-san-andres"]);
     expect(reservoirsForField("GAINES", "SEMINOLE  EAST (SAN ANDRES)")).toEqual([]);
     expect(reservoirsForField("GAINES", "SEMINOLE (DEVONIAN)")).toEqual([]);

@@ -22,6 +22,8 @@ export interface ReservoirDef {
   description: string;
   /** Facts about the reservoir's history that bear on which saturations are initial. */
   history: { text: string; source: SourceLocation }[];
+  /** The recovery process future-recovery questions are asked for, and the documented reason. */
+  recoveryProcess: { process: "primary" | "waterflood" | "co2_eor"; basis: string };
 }
 
 const LUCIA_P2: SourceLocation = { documentId: "beg-1995-lucia-seminole", reportPage: "2", pdfPage: 6, locator: "Seminole Field and Geologic Setting" };
@@ -30,18 +32,21 @@ export const RESERVOIRS: readonly ReservoirDef[] = [
   { id: "seminole-upper-roz", name: "Seminole field — San Andres upper residual oil zone", county: "GAINES", field: "Seminole", formation: "San Andres",
     interval: "upper ROZ below the main pay zone", regionalPartition: 3,
     description: "The residual oil zone beneath the Seminole field's main pay: oil left behind by a natural waterflood, the target of CO2 flooding.",
-    history: [{ text: "CO2 flooding of the Seminole San Andres Unit began in 1985.", source: LUCIA_P2 }] },
-  { id: "seminole-sau-main-pay", name: "Seminole San Andres Unit — main pay zone", county: "GAINES", field: "Seminole", unit: "Seminole San Andres Unit", formation: "San Andres",
+    history: [{ text: "CO2 flooding of the Seminole San Andres Unit began in 1985.", source: LUCIA_P2 }],
+    recoveryProcess: { process: "co2_eor", basis: "Residual oil in a ROZ does not flow under primary or water drive; the appraisal assesses it for CO2 flooding." } },
+  { id: "seminole-main-pay", name: "Seminole field — San Andres main pay zone", county: "GAINES", field: "Seminole", formation: "San Andres",
     interval: "main pay zone", regionalPartition: null,
-    description: "The producing San Andres reservoir of the Seminole San Andres Unit, discovered in 1936.",
+    description: "The Seminole field's producing San Andres reservoir, discovered in 1936; most of it is operated as the Seminole San Andres Unit.",
     history: [
       { text: "Discovered in 1936; a solution-gas reservoir with a small initial gas cap.", source: LUCIA_P2 },
       { text: "Waterflooding began in 1970, with infill drilling in 1976 and 1984–85, and CO2 flooding in 1985: saturations logged after 1970 are not initial.", source: LUCIA_P2 },
-    ] },
+    ],
+    recoveryProcess: { process: "co2_eor", basis: "The unit has been under CO2 flooding since 1985 (Lucia and others 1995, p. 2)." } },
   { id: "odc-san-andres", name: "ODC field — San Andres main pay zone", county: "GAINES", field: "ODC", formation: "San Andres",
     interval: "main pay zone", regionalPartition: 2,
     description: "The ODC field's producing San Andres reservoir (the ODC San Andres Unit).",
-    history: [] },
+    history: [],
+    recoveryProcess: { process: "primary", basis: "No secondary or tertiary process is documented for ODC in the registered sources." } },
 ];
 
 export const reservoirById = (id: string) => RESERVOIRS.find(r => r.id === id) ?? null;

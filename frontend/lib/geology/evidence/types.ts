@@ -68,7 +68,8 @@ export interface Extraction {
 
 export type Quantity =
   | "area" | "net_pay" | "gross_thickness" | "porosity" | "oil_saturation" | "water_saturation"
-  | "formation_volume_factor" | "original_oil_in_place";
+  | "formation_volume_factor" | "original_oil_in_place"
+  | "cumulative_oil" | "oil_gravity" | "depth";
 
 export interface Measurement {
   id: string;
@@ -82,6 +83,13 @@ export interface Measurement {
   saturationBasis?: "initial" | "present";
   /** When the measurement was made, if stated; otherwise the publication date applies. */
   measured?: string;
+  /** Production volumes: the date the cumulative is stated as of, and whether it runs from first production. */
+  asOf?: string;
+  coverage?: "since_first_production" | "partial";
+  /** Set when a published value may only be shown as a comparison, never used as a calculation input. */
+  comparisonOnly?: string;
+  /** A reading of an ambiguous printed value, used only for clearly labelled engineering interpretation. */
+  alternativeReading?: { value: number; unit: Unit; reason: string };
   method: string;
   limitations: string[];
   extraction: Extraction;

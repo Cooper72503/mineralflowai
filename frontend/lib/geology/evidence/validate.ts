@@ -10,6 +10,9 @@ const UNITS: Record<Measurement["quantity"], { units: string[]; range: Record<st
   water_saturation: { units: ["fraction", "percent"], range: { fraction: [0, 1], percent: [0, 100] } },
   formation_volume_factor: { units: ["rb/stb"], range: { "rb/stb": [1, 3] } },
   original_oil_in_place: { units: ["stb", "Mstb", "MMstb"], range: { stb: [1, 1e12], Mstb: [0.001, 1e9], MMstb: [0.000001, 1e6] } },
+  cumulative_oil: { units: ["stb", "Mstb", "MMstb", "MMbbl"], range: { stb: [0, 1e12], Mstb: [0, 1e9], MMstb: [0, 1e6], MMbbl: [0, 1e6] } },
+  oil_gravity: { units: ["degAPI"], range: { degAPI: [5, 70] } },
+  depth: { units: ["ft"], range: { ft: [100, 30_000] } },
 };
 
 function checkLocation(where: string, loc: SourceLocation, docs: readonly SourceDocument[], errors: string[]) {
@@ -37,6 +40,8 @@ export function validateEvidence(docs: readonly SourceDocument[], measurements: 
     if ((m.low !== undefined && m.low > m.value) || (m.high !== undefined && m.high < m.value)) errors.push(`${w}: range ${m.low}–${m.high} does not contain ${m.value}`);
     if (m.valueBasis === "range_midpoint" && (m.low === undefined || m.high === undefined || Math.abs((m.low + m.high) / 2 - m.value) > 1e-9)) errors.push(`${w}: a range midpoint needs low and high, and must equal their mean`);
     if ((m.quantity === "oil_saturation" || m.quantity === "water_saturation") && !m.saturationBasis) errors.push(`${w}: a saturation must state whether it is initial or present-day`);
+    if (m.quantity === "cumulative_oil" && (!m.asOf || !/^\d{4}-\d{2}-\d{2}$/.test(m.asOf) || !m.coverage)) errors.push(`${w}: cumulative production needs an as-of date (YYYY-MM-DD) and its coverage`);
+    if (m.alternativeReading && !m.comparisonOnly) errors.push(`${w}: an alternative reading is only allowed on a comparison-only value`);
     const a = m.applicability;
     if (a.level === "well" && !a.api10) errors.push(`${w}: a well-level value needs the well's API`);
     if (a.level === "regional" && !a.region) errors.push(`${w}: a regional value needs its region`);

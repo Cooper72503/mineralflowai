@@ -28,6 +28,29 @@ const applies = (m: Measurement) => {
 
 export interface StudyResultLine { label: string; unit: string; low: number | null; central: number; high: number | null }
 
+const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+const span = (e: { low: number | null; central: number; high: number | null }, f: (x: number) => string) => `${f(e.central)}${e.low !== null && e.high !== null ? ` (${f(e.low)}–${f(e.high)})` : ""}`;
+const stb = (x: number) => `${bigNumber(x)} stb`;
+
+/** Groups 6–8 as one line each: the result, or exactly why it stopped. */
+export function engineeringLines(s: ReservoirStudy): { group: string; label: string; ok: boolean; text: string }[] {
+  const line = <T,>(group: string, label: string, c: { status: "calculated"; value: T; flags: string[] } | { status: "stopped"; reason: string }, show: (v: T) => string) =>
+    ({ group, label, ok: c.status === "calculated", text: c.status === "calculated" ? show(c.value) : `Stopped: ${c.reason}` });
+  const { depletion: d, recovery: r, eor: e } = s;
+  const sc = e.screening;
+  return [
+    line("6", "Remaining oil in place", d.remaining, v => `${span(v, stb)} as of ${v.asOf}; inventory only, not a saturation distribution`),
+    line("6", "Material-balance OOIP", d.materialBalance, v => span(v, stb)),
+    line("7", "Historical recovery factor", r.historical, v => `${span(v, pct)} as of ${v.asOf}`),
+    line("7", `Future recoverable (${r.process === "co2_eor" ? "CO2 EOR" : r.process})`, r.future, v => `EUR ${span(v.eur, stb)}; future ${span(v.future, stb)} after production to ${v.asOf}; not reserves`),
+    { group: "8", label: "CO2 miscible-flood screen", ok: sc.status === "calculated", text: sc.status === "calculated" ? `${sc.value.overall}: ${sc.value.criteria.map(c => `${c.criterion} ${c.status}`).join("; ")}` : "Stopped" },
+    line("8", "CO2 miscibility", e.miscibility, v => `${v.miscible ? "miscible" : "immiscible"}, margin ${Math.round(v.marginPsi)} psi`),
+    line("8", "Displacement efficiency", e.displacement, v => span(v, pct)),
+    line("8", "Volumetric sweep", e.sweep, v => span(v, pct)),
+    line("8", "Incremental recoverable oil", e.incremental, v => `${span(v, stb)}; not reserves`),
+  ];
+}
+
 export function studyText(s: ReservoirStudy) {
   const results: StudyResultLine[] = [];
   if (s.hcpv.status === "calculated") results.push({ label: s.reservoir.interval.includes("ROZ") || s.hcpv.inputs.some(i => i.symbol === "So") ? "Oil in place at reservoir conditions (hydrocarbon pore volume)" : "Hydrocarbon pore volume", unit: "reservoir barrels", ...s.hcpv.value });
@@ -47,6 +70,10 @@ export function studyText(s: ReservoirStudy) {
     comparisons: s.comparisons.map(c => ({ ...c, source: citeLocation(c.source) })),
     calibrations: s.calibrations.map(c => ({ name: c.name, expression: c.expression, sources: c.sources.map(citeLocation).join("; "), limitations: c.limitations })),
     context: [...s.reservoir.history.map(h => ({ text: h.text, source: citeLocation(h.source) })), ...s.porosityNotes.map(n => ({ text: n.text, source: citeLocation(n.source) }))],
+    production: s.depletion.production ? `${s.depletion.production.value.toLocaleString("en-US")} ${s.depletion.production.unit} cumulative oil as of ${s.depletion.production.asOf} (${s.depletion.production.applicability.field} field, ${s.depletion.production.coverage === "since_first_production" ? "since first production" : "partial period"}) — ${citeLocation(s.depletion.production.source)}` : "No production record in the registered sources is attributed to this reservoir.",
+    engineering: engineeringLines(s),
+    processBasis: s.recovery.processBasis,
+    interpretations: s.interpretations,
     reproducibility: `Evidence ${s.evidenceVersion} · engine ${s.engineVersion} · fingerprint ${s.fingerprint}. Rebuild and re-verify against the source PDFs with scripts/verify-geology-sources.mts.`,
   };
 }
